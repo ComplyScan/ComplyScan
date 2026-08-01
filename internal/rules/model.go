@@ -2,7 +2,10 @@ package rules
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
@@ -21,6 +24,7 @@ const (
 
 // Finding is a single piece of technical evidence requiring review.
 type Finding struct {
+	Fingerprint string     `json:"fingerprint"`
 	RuleID      string     `json:"rule_id"`
 	Title       string     `json:"title"`
 	Severity    Severity   `json:"severity"`
@@ -34,6 +38,24 @@ type Finding struct {
 	Confidence  string     `json:"confidence"`
 	Occurrences int        `json:"occurrences,omitempty"`
 	Locations   []Location `json:"locations,omitempty"`
+}
+
+// ComputeFingerprint returns a stable identity for a finding. Line numbers are
+// deliberately excluded so a finding remains baselined when nearby code moves.
+func ComputeFingerprint(finding Finding) string {
+	path := filepath.ToSlash(filepath.Clean(filepath.FromSlash(finding.Path)))
+	if path == "." {
+		path = ""
+	}
+	path = strings.TrimPrefix(path, "./")
+	canonical := strings.Join([]string{
+		finding.RuleID,
+		path,
+		finding.Title,
+		strings.Join(strings.Fields(finding.Evidence), " "),
+	}, "\x00")
+	digest := sha256.Sum256([]byte(canonical))
+	return hex.EncodeToString(digest[:])
 }
 
 // Location is a representative source location for an aggregated finding.

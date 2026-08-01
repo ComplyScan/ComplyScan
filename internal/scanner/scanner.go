@@ -51,6 +51,14 @@ func (e *Engine) Scan(ctx context.Context, target string, options Options) (Resu
 	}
 
 	result := Result{Repository: discovered.Repository, Warnings: discovered.Warnings}
+	recordFinding := func(finding rules.Finding) error {
+		finding.Fingerprint = rules.ComputeFingerprint(finding)
+		result.Findings = append(result.Findings, finding)
+		if options.OnFinding != nil {
+			return options.OnFinding(finding)
+		}
+		return nil
+	}
 	ctx = rules.WithRepositoryAnalysis(ctx, discovered.Repository)
 	for _, rule := range e.rules {
 		if options.RuleEnabled != nil && !options.RuleEnabled(rule.ID()) {
@@ -58,8 +66,7 @@ func (e *Engine) Scan(ctx context.Context, target string, options Options) (Resu
 		}
 		if streamingRule, ok := rule.(rules.StreamingRule); ok && options.OnFinding != nil {
 			err := streamingRule.RunStreaming(ctx, discovered.Repository, func(finding rules.Finding) error {
-				result.Findings = append(result.Findings, finding)
-				return options.OnFinding(finding)
+				return recordFinding(finding)
 			})
 			if err != nil {
 				return Result{}, fmt.Errorf("run rule %s: %w", rule.ID(), err)
@@ -72,11 +79,8 @@ func (e *Engine) Scan(ctx context.Context, target string, options Options) (Resu
 			return Result{}, fmt.Errorf("run rule %s: %w", rule.ID(), err)
 		}
 		for _, finding := range findings {
-			result.Findings = append(result.Findings, finding)
-			if options.OnFinding != nil {
-				if err := options.OnFinding(finding); err != nil {
-					return Result{}, fmt.Errorf("report finding from rule %s: %w", rule.ID(), err)
-				}
+			if err := recordFinding(finding); err != nil {
+				return Result{}, fmt.Errorf("report finding from rule %s: %w", rule.ID(), err)
 			}
 		}
 	}

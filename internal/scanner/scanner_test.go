@@ -27,9 +27,25 @@ func TestScannerRunsOfflineRulePipeline(t *testing.T) {
 		t.Fatal("expected AI inventory finding")
 	}
 	for _, finding := range result.Findings {
+		if len(finding.Fingerprint) != 64 {
+			t.Fatalf("finding has invalid fingerprint: %#v", finding)
+		}
 		if finding.RuleID == "AI-DOC-001" || finding.RuleID == "AI-RISK-001" {
 			t.Fatalf("documented fixture produced missing-evidence finding: %#v", finding)
 		}
+	}
+}
+
+func TestFindingFingerprintSurvivesLineMovement(t *testing.T) {
+	first := rules.Finding{RuleID: "TEST-001", Title: "Test", Path: "src/app.go", StartLine: 4, Evidence: "logger.Info(prompt)"}
+	second := first
+	second.StartLine = 40
+	if rules.ComputeFingerprint(first) != rules.ComputeFingerprint(second) {
+		t.Fatal("line movement changed fingerprint")
+	}
+	second.Evidence = "logger.Info(response)"
+	if rules.ComputeFingerprint(first) == rules.ComputeFingerprint(second) {
+		t.Fatal("different evidence produced the same fingerprint")
 	}
 }
 
