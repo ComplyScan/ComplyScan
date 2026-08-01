@@ -17,11 +17,16 @@ var (
 
 func (PromptLoggingRule) ID() string { return "AI-LOG-001" }
 
-func (PromptLoggingRule) Run(ctx context.Context, repo discovery.Repository) ([]Finding, error) {
-	var findings []Finding
+func (rule PromptLoggingRule) Run(ctx context.Context, repo discovery.Repository) ([]Finding, error) {
+	return collectFindings(func(emit FindingEmitter) error {
+		return rule.RunStreaming(ctx, repo, emit)
+	})
+}
+
+func (PromptLoggingRule) RunStreaming(ctx context.Context, repo discovery.Repository, emit FindingEmitter) error {
 	for _, file := range repo.Files {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return err
 		}
 		if file.Kind != discovery.KindSource {
 			continue
@@ -40,7 +45,7 @@ func (PromptLoggingRule) Run(ctx context.Context, repo discovery.Repository) ([]
 			if normalized == "message" || normalized == "messages" || normalized == "response" {
 				confidence = "low"
 			}
-			findings = append(findings, Finding{
+			if err := emit(Finding{
 				RuleID: "AI-LOG-001", Title: "Prompt or model response may be logged",
 				Severity: SeverityHigh, Category: "data-handling",
 				Message:     "A value named " + match + " appears to be passed to a logging function. Prompts and model outputs may contain personal or sensitive information and require human review.",
@@ -50,10 +55,12 @@ func (PromptLoggingRule) Run(ctx context.Context, repo discovery.Repository) ([]
 				Evidence:    sanitizeEvidence(line, 160),
 				Remediation: "Remove the value from logs or apply documented minimisation, redaction, access controls, and retention limits.",
 				Confidence:  confidence,
-			})
+			}); err != nil {
+				return err
+			}
 		}
 	}
-	return findings, nil
+	return nil
 }
 
 func stripQuotedStrings(value string) string {

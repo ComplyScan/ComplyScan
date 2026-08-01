@@ -12,6 +12,7 @@ import (
 type Options struct {
 	Exclude     []string
 	RuleEnabled func(id string) bool
+	OnFinding   rules.FindingEmitter
 }
 
 type Result struct {
@@ -42,11 +43,29 @@ func (e *Engine) Scan(ctx context.Context, target string, options Options) (Resu
 		if options.RuleEnabled != nil && !options.RuleEnabled(rule.ID()) {
 			continue
 		}
+		if streamingRule, ok := rule.(rules.StreamingRule); ok && options.OnFinding != nil {
+			err := streamingRule.RunStreaming(ctx, discovered.Repository, func(finding rules.Finding) error {
+				result.Findings = append(result.Findings, finding)
+				return options.OnFinding(finding)
+			})
+			if err != nil {
+				return Result{}, fmt.Errorf("run rule %s: %w", rule.ID(), err)
+			}
+			continue
+		}
+
 		findings, err := rule.Run(ctx, discovered.Repository)
 		if err != nil {
 			return Result{}, fmt.Errorf("run rule %s: %w", rule.ID(), err)
 		}
-		result.Findings = append(result.Findings, findings...)
+		for _, finding := range findings {
+			result.Findings = append(result.Findings, finding)
+			if options.OnFinding != nil {
+				if err := options.OnFinding(finding); err != nil {
+					return Result{}, fmt.Errorf("report finding from rule %s: %w", rule.ID(), err)
+				}
+			}
+		}
 	}
 
 	sort.SliceStable(result.Findings, func(i, j int) bool {

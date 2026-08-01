@@ -28,6 +28,19 @@ func (MissingRiskClassificationRule) Run(ctx context.Context, repo discovery.Rep
 	}}, nil
 }
 
+func (rule MissingRiskClassificationRule) RunStreaming(ctx context.Context, repo discovery.Repository, emit FindingEmitter) error {
+	findings, err := rule.Run(ctx, repo)
+	if err != nil {
+		return err
+	}
+	for _, finding := range findings {
+		if err := emit(finding); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func hasRiskEvidence(repo discovery.Repository) bool {
 	accepted := map[string]struct{}{
 		"ai-risk.yml": {}, "ai-risk.yaml": {}, "ai-risk.md": {}, "risk-assessment.md": {},

@@ -47,6 +47,21 @@ func TestAIUsageRuleDoesNotTreatDocumentationAsRuntimeUsage(t *testing.T) {
 	}
 }
 
+func TestAIUsageRuleStreamsFindings(t *testing.T) {
+	repo := repositoryWithFile("requirements.txt", discovery.KindManifest, "openai\nanthropic\n")
+	var findings []Finding
+	err := (AIUsageRule{}).RunStreaming(context.Background(), repo, func(finding Finding) error {
+		findings = append(findings, finding)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 2 {
+		t.Fatalf("streamed %d findings, want 2", len(findings))
+	}
+}
+
 func repositoryWithFile(path string, kind discovery.FileKind, content string) discovery.Repository {
 	return discovery.Repository{Files: []discovery.File{{Path: path, Kind: kind, Content: []byte(content)}}}
 }

@@ -39,11 +39,16 @@ type secretMatch struct {
 
 func (HardcodedSecretRule) ID() string { return "AI-SEC-001" }
 
-func (HardcodedSecretRule) Run(ctx context.Context, repo discovery.Repository) ([]Finding, error) {
-	var findings []Finding
+func (rule HardcodedSecretRule) Run(ctx context.Context, repo discovery.Repository) ([]Finding, error) {
+	return collectFindings(func(emit FindingEmitter) error {
+		return rule.RunStreaming(ctx, repo, emit)
+	})
+}
+
+func (HardcodedSecretRule) RunStreaming(ctx context.Context, repo discovery.Repository, emit FindingEmitter) error {
 	for _, file := range repo.Files {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return err
 		}
 		for lineIndex, line := range lines(file.Content) {
 			if environmentReferencePattern.MatchString(line) {
@@ -51,7 +56,7 @@ func (HardcodedSecretRule) Run(ctx context.Context, repo discovery.Repository) (
 			}
 			matches := findSecrets(line)
 			for _, match := range matches {
-				findings = append(findings, Finding{
+				if err := emit(Finding{
 					RuleID: "AI-SEC-001", Title: "Potential hardcoded AI API credential",
 					Severity: SeverityHigh, Category: "secrets-management",
 					Message:     "A value matching a possible " + match.Provider + " credential pattern appears to be hardcoded. The value is redacted in this report.",
@@ -61,11 +66,13 @@ func (HardcodedSecretRule) Run(ctx context.Context, repo discovery.Repository) (
 					Evidence:    sanitizeEvidence(line, 160),
 					Remediation: "Revoke and rotate the credential if it is real, remove it from source and history, and load secrets from an approved secret store or environment variable.",
 					Confidence:  "high",
-				})
+				}); err != nil {
+					return err
+				}
 			}
 		}
 	}
-	return findings, nil
+	return nil
 }
 
 func findSecrets(value string) []secretMatch {

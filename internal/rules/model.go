@@ -40,6 +40,25 @@ type Rule interface {
 	Run(ctx context.Context, repo discovery.Repository) ([]Finding, error)
 }
 
+// FindingEmitter receives a finding as soon as a streaming rule discovers it.
+type FindingEmitter func(Finding) error
+
+// StreamingRule is an optional extension for rules that can emit findings
+// incrementally. Rule remains the stable extension interface for compatibility.
+type StreamingRule interface {
+	Rule
+	RunStreaming(ctx context.Context, repo discovery.Repository, emit FindingEmitter) error
+}
+
+func collectFindings(run func(FindingEmitter) error) ([]Finding, error) {
+	var findings []Finding
+	err := run(func(finding Finding) error {
+		findings = append(findings, finding)
+		return nil
+	})
+	return findings, err
+}
+
 // ParseSeverity validates and normalizes a severity name.
 func ParseSeverity(value string) (Severity, error) {
 	s := Severity(strings.ToLower(strings.TrimSpace(value)))

@@ -36,6 +36,14 @@ var aiPatterns = []aiPattern{
 
 func detectAIUsage(repo discovery.Repository) []aiMatch {
 	var matches []aiMatch
+	_ = visitAIUsage(repo, func(match aiMatch) error {
+		matches = append(matches, match)
+		return nil
+	})
+	return matches
+}
+
+func visitAIUsage(repo discovery.Repository, visit func(aiMatch) error) error {
 	seen := make(map[string]struct{})
 	for _, file := range repo.Files {
 		if !isTechnical(file.Kind) {
@@ -51,14 +59,16 @@ func detectAIUsage(repo discovery.Repository) []aiMatch {
 					continue
 				}
 				seen[key] = struct{}{}
-				matches = append(matches, aiMatch{
+				if err := visit(aiMatch{
 					Name: candidate.Name, Path: file.Path, Line: lineIndex + 1,
 					Evidence: sanitizeEvidence(line, 160),
-				})
+				}); err != nil {
+					return err
+				}
 			}
 		}
 	}
-	return matches
+	return nil
 }
 
 func isTechnical(kind discovery.FileKind) bool {

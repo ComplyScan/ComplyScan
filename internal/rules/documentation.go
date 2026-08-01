@@ -28,6 +28,19 @@ func (MissingDocumentationRule) Run(ctx context.Context, repo discovery.Reposito
 	}}, nil
 }
 
+func (rule MissingDocumentationRule) RunStreaming(ctx context.Context, repo discovery.Repository, emit FindingEmitter) error {
+	findings, err := rule.Run(ctx, repo)
+	if err != nil {
+		return err
+	}
+	for _, finding := range findings {
+		if err := emit(finding); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func hasAIDocumentation(repo discovery.Repository) bool {
 	for _, file := range repo.Files {
 		path := strings.ToLower(filepath.ToSlash(file.Path))
