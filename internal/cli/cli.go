@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/1eonardodawinki/ComplyScan/internal/config"
+	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
 	"github.com/1eonardodawinki/ComplyScan/internal/report"
 	"github.com/1eonardodawinki/ComplyScan/internal/rules"
 	"github.com/1eonardodawinki/ComplyScan/internal/scanner"
@@ -58,10 +59,15 @@ func newRootCommand(stdout, stderr io.Writer, build BuildInfo) *cobra.Command {
 
 func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	var (
-		format     string
-		minimum    string
-		configPath string
-		noColor    bool
+		format                    string
+		minimum                   string
+		configPath                string
+		noColor                   bool
+		additionalExcludes        []string
+		trackedOnly               bool
+		includeNestedRepositories bool
+		maxFiles                  int
+		maxTotalBytes             int64
 	)
 	command := &cobra.Command{
 		Use:   "scan [path]",
@@ -84,10 +90,29 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if cmd.Flags().Changed("max-files") && maxFiles <= 0 {
+				return errors.New("--max-files must be greater than zero")
+			}
+			if cmd.Flags().Changed("max-total-bytes") && maxTotalBytes <= 0 {
+				return errors.New("--max-total-bytes must be greater than zero")
+			}
 
 			terminalOptions := report.TerminalOptions{Color: !noColor && supportsColor(stdout)}
+			effectiveMaxFiles := cfg.Scan.MaxFiles
+			if cmd.Flags().Changed("max-files") {
+				effectiveMaxFiles = maxFiles
+			}
+			effectiveMaxTotalBytes := cfg.Scan.MaxTotalBytes
+			if cmd.Flags().Changed("max-total-bytes") {
+				effectiveMaxTotalBytes = maxTotalBytes
+			}
 			scanOptions := scanner.Options{
-				Exclude: cfg.Scan.Exclude, RuleEnabled: cfg.RuleEnabled,
+				Exclude:                   append(append([]string(nil), cfg.Scan.Exclude...), additionalExcludes...),
+				MaxFiles:                  effectiveMaxFiles,
+				MaxTotalBytes:             effectiveMaxTotalBytes,
+				IncludeNestedRepositories: cfg.Scan.IncludeNestedRepositories || includeNestedRepositories,
+				TrackedOnly:               cfg.Scan.TrackedOnly || trackedOnly,
+				RuleEnabled:               cfg.RuleEnabled,
 			}
 			if outputFormat == "terminal" {
 				if _, err := fmt.Fprintf(stdout, "ComplyScan scanning %s...\n\n", target); err != nil {
@@ -98,6 +123,14 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 						return nil
 					}
 					return report.WriteTerminalFinding(stdout, finding, terminalOptions)
+				}
+				scanOptions.OnProgress = func(progress discovery.Progress) error {
+					if progress.Done {
+						_, err := fmt.Fprintf(stdout, "Discovery complete: %d files, %s read\n\n", progress.Stats.FilesRead, formatByteCount(progress.Stats.BytesRead))
+						return err
+					}
+					_, err := fmt.Fprintf(stdout, "Discovery progress: %d files, %s read\n", progress.Stats.FilesRead, formatByteCount(progress.Stats.BytesRead))
+					return err
 				}
 			}
 
@@ -126,7 +159,20 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().StringVar(&minimum, "severity", "info", "minimum severity to include in output")
 	command.Flags().StringVar(&configPath, "config", "", "configuration file (defaults to <path>/.complyscan.yml)")
 	command.Flags().BoolVar(&noColor, "no-color", false, "disable ANSI colors")
+	command.Flags().StringArrayVar(&additionalExcludes, "exclude", nil, "exclude a path or directory name (repeatable)")
+	command.Flags().BoolVar(&trackedOnly, "tracked-only", false, "scan only files tracked by Git")
+	command.Flags().BoolVar(&includeNestedRepositories, "include-nested-repositories", false, "scan inside nested Git repositories")
+	command.Flags().IntVar(&maxFiles, "max-files", 0, "maximum number of text files to read")
+	command.Flags().Int64Var(&maxTotalBytes, "max-total-bytes", 0, "maximum total bytes of text content to read")
 	return command
+}
+
+func formatByteCount(value int64) string {
+	const mebibyte = 1 << 20
+	if value < mebibyte {
+		return fmt.Sprintf("%.1f KiB", float64(value)/(1<<10))
+	}
+	return fmt.Sprintf("%.1f MiB", float64(value)/mebibyte)
 }
 
 func newInitCommand(stdout io.Writer) *cobra.Command {

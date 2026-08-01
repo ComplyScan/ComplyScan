@@ -72,6 +72,27 @@ func TestTerminalScanStreamsFindingsBeforeCompletion(t *testing.T) {
 	}
 }
 
+func TestScanSupportsAdditionalExcludes(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	target := filepath.Join("..", "..", "testdata", "vulnerable-python-ai-app")
+	code := Execute([]string{"scan", "--no-color", "--exclude", "app.py", target}, &stdout, &stderr, testBuild)
+	if code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if strings.Contains(stdout.String(), "AI-LOG-001") || strings.Contains(stdout.String(), "AI-SEC-001") {
+		t.Fatalf("excluded file produced a finding:\n%s", stdout.String())
+	}
+}
+
+func TestScanRejectsInvalidBudgets(t *testing.T) {
+	for _, args := range [][]string{{"scan", "--max-files", "0"}, {"scan", "--max-total-bytes", "0"}} {
+		var stdout, stderr bytes.Buffer
+		if code := Execute(args, &stdout, &stderr, testBuild); code != 2 {
+			t.Fatalf("Execute(%v) code = %d, want 2", args, code)
+		}
+	}
+}
+
 func TestVersionCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := Execute([]string{"version"}, &stdout, &stderr, testBuild); code != 0 {

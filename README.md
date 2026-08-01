@@ -35,6 +35,8 @@ complyscan init
 complyscan scan .
 complyscan scan . --format json
 complyscan scan . --severity high --no-color
+complyscan scan . --tracked-only
+complyscan scan . --exclude fixtures --max-files 10000
 complyscan version
 ```
 
@@ -96,6 +98,10 @@ scan:
     - vendor
     - dist
     - build
+  max-files: 25000
+  max-total-bytes: 104857600
+  include-nested-repositories: false
+  tracked-only: false
 
 fail-on: high
 
@@ -115,7 +121,9 @@ ai:
   provider: none
 ```
 
-The scanner also respects `.gitignore` and always ignores source-control metadata, common dependency directories, virtual environments, caches, and build output. Binary files, symlinks, and files larger than 1 MiB are not read.
+The scanner also respects `.gitignore` and always ignores source-control metadata, common dependency directories, virtual environments, caches, and build output. Binary files, symlinks, and files larger than 1 MiB are not read. Nested Git repositories are skipped unless `--include-nested-repositories` is set.
+
+Discovery is bounded to 25,000 text files and 100 MiB of text by default. Terminal scans report discovery progress every 500 files. Use `--max-files` and `--max-total-bytes` to tune the limits, repeat `--exclude` for temporary exclusions, or use `--tracked-only` to restrict a scan to the Git index. Each option also has a matching key under `scan` in `.complyscan.yml`.
 
 ## Privacy and security guarantees
 
