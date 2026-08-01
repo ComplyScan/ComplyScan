@@ -39,3 +39,14 @@ func TestRedactSecret(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestHardcodedSecretRuleRequiresTokenBoundary(t *testing.T) {
+	repo := repositoryWithFile("risk.go", discovery.KindSource, `Category: "risk-classification-evidence"`)
+	findings, err := (HardcodedSecretRule{}).Run(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("ordinary hyphenated text produced secret findings: %#v", findings)
+	}
+}

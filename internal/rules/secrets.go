@@ -18,11 +18,11 @@ type secretPattern struct {
 }
 
 var secretPatterns = []secretPattern{
-	{Provider: "Anthropic", Pattern: regexp.MustCompile(`(?i)(sk-ant-(?:api[0-9]{2}-)?[A-Za-z0-9_-]{16,})`), SecretGroup: 1},
-	{Provider: "OpenRouter", Pattern: regexp.MustCompile(`(?i)(sk-or-v1-[A-Za-z0-9_-]{16,})`), SecretGroup: 1},
-	{Provider: "OpenAI", Pattern: regexp.MustCompile(`(?i)(sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{20,})`), SecretGroup: 1},
-	{Provider: "Google", Pattern: regexp.MustCompile(`(AIza[0-9A-Za-z_-]{20,})`), SecretGroup: 1},
-	{Provider: "Hugging Face", Pattern: regexp.MustCompile(`(?i)(hf_[A-Za-z0-9]{20,})`), SecretGroup: 1},
+	{Provider: "Anthropic", Pattern: regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])(sk-ant-(?:api[0-9]{2}-)?[A-Za-z0-9_-]{16,})`), SecretGroup: 1},
+	{Provider: "OpenRouter", Pattern: regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])(sk-or-v1-[A-Za-z0-9_-]{16,})`), SecretGroup: 1},
+	{Provider: "OpenAI", Pattern: regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])(sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{20,})`), SecretGroup: 1},
+	{Provider: "Google", Pattern: regexp.MustCompile(`(?:^|[^A-Za-z0-9])(AIza[0-9A-Za-z_-]{20,})`), SecretGroup: 1},
+	{Provider: "Hugging Face", Pattern: regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])(hf_[A-Za-z0-9]{20,})`), SecretGroup: 1},
 	{
 		Provider:    "AI provider",
 		Pattern:     regexp.MustCompile(`(?i)["']?((?:OPENAI|ANTHROPIC|GEMINI|GOOGLE|MISTRAL|COHERE|HUGGINGFACE|HF|OPENROUTER)(?:_API)?_(?:KEY|TOKEN))["']?\s*[:=]\s*["']([^"'\r\n]{16,})["']`),
