@@ -85,9 +85,23 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				return err
 			}
 
-			result, err := scanner.New().Scan(cmd.Context(), target, scanner.Options{
+			terminalOptions := report.TerminalOptions{Color: !noColor && supportsColor(stdout)}
+			scanOptions := scanner.Options{
 				Exclude: cfg.Scan.Exclude, RuleEnabled: cfg.RuleEnabled,
-			})
+			}
+			if outputFormat == "terminal" {
+				if _, err := fmt.Fprintf(stdout, "ComplyScan scanning %s...\n\n", target); err != nil {
+					return fmt.Errorf("write terminal report: %w", err)
+				}
+				scanOptions.OnFinding = func(finding rules.Finding) error {
+					if rules.SeverityRank(finding.Severity) < rules.SeverityRank(minimumSeverity) {
+						return nil
+					}
+					return report.WriteTerminalFinding(stdout, finding, terminalOptions)
+				}
+			}
+
+			result, err := scanner.New().Scan(cmd.Context(), target, scanOptions)
 			if err != nil {
 				return fmt.Errorf("scan %q: %w", target, err)
 			}
@@ -98,9 +112,7 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 					return err
 				}
 			} else {
-				if err := report.WriteTerminal(stdout, reportValue, report.TerminalOptions{
-					Color: !noColor && supportsColor(stdout),
-				}); err != nil {
+				if err := report.WriteTerminalCompletion(stdout, reportValue); err != nil {
 					return fmt.Errorf("write terminal report: %w", err)
 				}
 			}

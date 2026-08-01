@@ -50,6 +50,28 @@ func TestScanJSONOutputAndSeverityFilter(t *testing.T) {
 	}
 }
 
+func TestTerminalScanStreamsFindingsBeforeCompletion(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	target := filepath.Join("..", "..", "testdata", "vulnerable-python-ai-app")
+	code := Execute([]string{"scan", "--no-color", "--severity", "high", target}, &stdout, &stderr, testBuild)
+	if code != 1 {
+		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
+	}
+	output := stdout.String()
+	scanningAt := strings.Index(output, "ComplyScan scanning")
+	findingAt := strings.Index(output, "AI-LOG-001")
+	completeAt := strings.Index(output, "Scan complete:")
+	if scanningAt < 0 || findingAt < 0 || completeAt < 0 {
+		t.Fatalf("streaming output is incomplete:\n%s", output)
+	}
+	if !(scanningAt < findingAt && findingAt < completeAt) {
+		t.Fatalf("unexpected streaming output order:\n%s", output)
+	}
+	if strings.Contains(output, "AI-DISC-001") {
+		t.Fatalf("severity filter was not applied to streamed output:\n%s", output)
+	}
+}
+
 func TestVersionCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := Execute([]string{"version"}, &stdout, &stderr, testBuild); code != 0 {

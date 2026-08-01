@@ -95,43 +95,56 @@ func WriteJSON(w io.Writer, report Report) error {
 }
 
 func WriteTerminal(w io.Writer, report Report, options TerminalOptions) error {
-	issueWord := "issues"
-	if report.Summary.Total == 1 {
-		issueWord = "issue"
-	}
-	if _, err := fmt.Fprintf(w, "ComplyScan found %d potential %s\n\n", report.Summary.Total, issueWord); err != nil {
+	if _, err := fmt.Fprintf(w, "ComplyScan found %d potential %s\n\n", report.Summary.Total, issueWord(report.Summary.Total)); err != nil {
 		return err
 	}
 	for _, finding := range report.Findings {
-		label := severityLabel(finding.Severity)
-		if options.Color {
-			label = colorize(finding.Severity, label)
-		}
-		if _, err := fmt.Fprintf(w, "%-5s  %s  %s\n", label, finding.RuleID, finding.Title); err != nil {
-			return err
-		}
-		if finding.Path != "" {
-			location := finding.Path
-			if finding.StartLine > 0 {
-				location += ":" + strconv.Itoa(finding.StartLine)
-			}
-			if _, err := fmt.Fprintf(w, "       %s\n", location); err != nil {
-				return err
-			}
-		}
-		if _, err := fmt.Fprintf(w, "       %s\n", finding.Message); err != nil {
-			return err
-		}
-		if finding.Evidence != "" {
-			if _, err := fmt.Fprintf(w, "       Evidence: %s\n", finding.Evidence); err != nil {
-				return err
-			}
-		}
-		if _, err := fmt.Fprintln(w); err != nil {
+		if err := WriteTerminalFinding(w, finding, options); err != nil {
 			return err
 		}
 	}
+	return writeTerminalSummary(w, report)
+}
 
+// WriteTerminalFinding renders one finding immediately for streaming scans.
+func WriteTerminalFinding(w io.Writer, finding rules.Finding, options TerminalOptions) error {
+	label := severityLabel(finding.Severity)
+	if options.Color {
+		label = colorize(finding.Severity, label)
+	}
+	if _, err := fmt.Fprintf(w, "%-5s  %s  %s\n", label, finding.RuleID, finding.Title); err != nil {
+		return err
+	}
+	if finding.Path != "" {
+		location := finding.Path
+		if finding.StartLine > 0 {
+			location += ":" + strconv.Itoa(finding.StartLine)
+		}
+		if _, err := fmt.Fprintf(w, "       %s\n", location); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(w, "       %s\n", finding.Message); err != nil {
+		return err
+	}
+	if finding.Evidence != "" {
+		if _, err := fmt.Fprintf(w, "       Evidence: %s\n", finding.Evidence); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(w)
+	return err
+}
+
+// WriteTerminalCompletion closes a streaming report with final counts.
+func WriteTerminalCompletion(w io.Writer, report Report) error {
+	if _, err := fmt.Fprintf(w, "Scan complete: %d potential %s\n", report.Summary.Total, issueWord(report.Summary.Total)); err != nil {
+		return err
+	}
+	return writeTerminalSummary(w, report)
+}
+
+func writeTerminalSummary(w io.Writer, report Report) error {
 	if _, err := fmt.Fprintf(w, "Summary: %s\n", summaryText(report.Summary)); err != nil {
 		return err
 	}
@@ -141,6 +154,13 @@ func WriteTerminal(w io.Writer, report Report, options TerminalOptions) error {
 		}
 	}
 	return nil
+}
+
+func issueWord(count int) string {
+	if count == 1 {
+		return "issue"
+	}
+	return "issues"
 }
 
 func severityLabel(severity rules.Severity) string {

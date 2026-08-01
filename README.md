@@ -40,6 +40,8 @@ complyscan version
 
 `scan` defaults to the current directory, so `complyscan scan` and `complyscan scan .` are equivalent.
 
+Terminal scans print findings as rules discover them and finish with the final summary. JSON output remains buffered so it is valid and deterministically ordered.
+
 Example terminal report:
 
 ```text

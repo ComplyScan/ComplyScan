@@ -68,3 +68,16 @@ func TestWriteTerminalDoesNotAddColorWhenDisabled(t *testing.T) {
 		}
 	}
 }
+
+func TestWriteTerminalCompletion(t *testing.T) {
+	value := New(".", "0.1.0", []rules.Finding{{Severity: rules.SeverityMedium}}, nil)
+	var output bytes.Buffer
+	if err := WriteTerminalCompletion(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Scan complete: 1 potential issue", "Summary: 1 medium"} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("output missing %q: %s", want, output.String())
+		}
+	}
+}
