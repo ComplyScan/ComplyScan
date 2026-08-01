@@ -1,8 +1,10 @@
 package rules
 
 import (
+	"context"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
 )
@@ -17,6 +19,14 @@ type aiMatch struct {
 	Path     string
 	Line     int
 	Evidence string
+}
+
+type analysisContextKey struct{}
+
+type repositoryAnalysis struct {
+	repo    discovery.Repository
+	once    sync.Once
+	aiUsage []aiMatch
 }
 
 var aiPatterns = []aiPattern{
@@ -34,7 +44,23 @@ var aiPatterns = []aiPattern{
 	{Name: "OpenRouter", Pattern: regexp.MustCompile(`(?i)(\bopenrouter\b|openrouter\.ai/api|OPENROUTER_API_KEY)`)},
 }
 
-func detectAIUsage(repo discovery.Repository) []aiMatch {
+// WithRepositoryAnalysis installs a lazily computed, scan-wide analysis cache.
+// Rules outside this package remain compatible with an ordinary context.
+func WithRepositoryAnalysis(ctx context.Context, repo discovery.Repository) context.Context {
+	return context.WithValue(ctx, analysisContextKey{}, &repositoryAnalysis{repo: repo})
+}
+
+func detectAIUsage(ctx context.Context, repo discovery.Repository) []aiMatch {
+	if analysis, ok := ctx.Value(analysisContextKey{}).(*repositoryAnalysis); ok {
+		analysis.once.Do(func() {
+			analysis.aiUsage = collectAIUsage(analysis.repo)
+		})
+		return analysis.aiUsage
+	}
+	return collectAIUsage(repo)
+}
+
+func collectAIUsage(repo discovery.Repository) []aiMatch {
 	var matches []aiMatch
 	_ = visitAIUsage(repo, func(match aiMatch) error {
 		matches = append(matches, match)

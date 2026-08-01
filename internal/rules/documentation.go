@@ -16,7 +16,7 @@ func (MissingDocumentationRule) Run(ctx context.Context, repo discovery.Reposito
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if len(detectAIUsage(repo)) == 0 || hasAIDocumentation(repo) {
+	if len(detectAIUsage(ctx, repo)) == 0 || hasAIDocumentation(repo) {
 		return nil, nil
 	}
 	return []Finding{{

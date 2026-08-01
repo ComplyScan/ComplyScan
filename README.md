@@ -65,7 +65,7 @@ Summary: 1 high, 2 medium
 
 | Rule | Severity | Purpose |
 | --- | --- | --- |
-| `AI-DISC-001` | Info | Inventory likely AI providers and frameworks, including OpenAI, Anthropic, Gemini, Mistral, Cohere, Hugging Face, Ollama, LiteLLM, LangChain, LlamaIndex, Vercel AI SDK, and OpenRouter. |
+| `AI-DISC-001` | Info | Inventory likely AI providers and frameworks, including OpenAI, Anthropic, Gemini, Mistral, Cohere, Hugging Face, Ollama, LiteLLM, LangChain, LlamaIndex, Vercel AI SDK, and OpenRouter. Results are aggregated by provider with representative locations. |
 | `AI-LOG-001` | High | Flag conservative cases where prompt-like or response-like values appear in common Go, Python, JavaScript, or TypeScript logging calls. |
 | `AI-SEC-001` | High | Detect likely hardcoded AI API credentials and report only redacted evidence. |
 | `AI-DOC-001` | Medium | When AI usage is detected, check for a model card or AI-system documentation. |

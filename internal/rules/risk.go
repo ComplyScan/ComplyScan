@@ -16,7 +16,7 @@ func (MissingRiskClassificationRule) Run(ctx context.Context, repo discovery.Rep
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if len(detectAIUsage(repo)) == 0 || hasRiskEvidence(repo) {
+	if len(detectAIUsage(ctx, repo)) == 0 || hasRiskEvidence(repo) {
 		return nil, nil
 	}
 	return []Finding{{

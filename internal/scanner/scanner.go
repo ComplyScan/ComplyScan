@@ -39,6 +39,7 @@ func (e *Engine) Scan(ctx context.Context, target string, options Options) (Resu
 	}
 
 	result := Result{Repository: discovered.Repository, Warnings: discovered.Warnings}
+	ctx = rules.WithRepositoryAnalysis(ctx, discovered.Repository)
 	for _, rule := range e.rules {
 		if options.RuleEnabled != nil && !options.RuleEnabled(rule.ID()) {
 			continue

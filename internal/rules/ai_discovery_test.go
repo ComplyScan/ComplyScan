@@ -62,6 +62,23 @@ func TestAIUsageRuleStreamsFindings(t *testing.T) {
 	}
 }
 
+func TestAIUsageRuleAggregatesProviderLocations(t *testing.T) {
+	repo := discovery.Repository{Files: []discovery.File{
+		{Path: "first.py", Kind: discovery.KindSource, Content: []byte("import openai\n")},
+		{Path: "second.py", Kind: discovery.KindSource, Content: []byte("from openai import OpenAI\n")},
+	}}
+	findings, err := (AIUsageRule{}).Run(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want one aggregated finding: %#v", len(findings), findings)
+	}
+	if findings[0].Occurrences != 2 || len(findings[0].Locations) != 2 {
+		t.Fatalf("unexpected aggregation: %#v", findings[0])
+	}
+}
+
 func repositoryWithFile(path string, kind discovery.FileKind, content string) discovery.Repository {
 	return discovery.Repository{Files: []discovery.File{{Path: path, Kind: kind, Content: []byte(content)}}}
 }

@@ -21,17 +21,27 @@ const (
 
 // Finding is a single piece of technical evidence requiring review.
 type Finding struct {
-	RuleID      string   `json:"rule_id"`
-	Title       string   `json:"title"`
-	Severity    Severity `json:"severity"`
-	Category    string   `json:"category"`
-	Message     string   `json:"message"`
-	Path        string   `json:"path,omitempty"`
-	StartLine   int      `json:"start_line,omitempty"`
-	EndLine     int      `json:"end_line,omitempty"`
-	Evidence    string   `json:"evidence,omitempty"`
-	Remediation string   `json:"remediation"`
-	Confidence  string   `json:"confidence"`
+	RuleID      string     `json:"rule_id"`
+	Title       string     `json:"title"`
+	Severity    Severity   `json:"severity"`
+	Category    string     `json:"category"`
+	Message     string     `json:"message"`
+	Path        string     `json:"path,omitempty"`
+	StartLine   int        `json:"start_line,omitempty"`
+	EndLine     int        `json:"end_line,omitempty"`
+	Evidence    string     `json:"evidence,omitempty"`
+	Remediation string     `json:"remediation"`
+	Confidence  string     `json:"confidence"`
+	Occurrences int        `json:"occurrences,omitempty"`
+	Locations   []Location `json:"locations,omitempty"`
+}
+
+// Location is a representative source location for an aggregated finding.
+type Location struct {
+	Path      string `json:"path"`
+	StartLine int    `json:"start_line,omitempty"`
+	EndLine   int    `json:"end_line,omitempty"`
+	Evidence  string `json:"evidence,omitempty"`
 }
 
 // Rule is an independently executable deterministic repository check.
