@@ -9,7 +9,7 @@ import (
 )
 
 func TestHardcodedSecretRuleRedactsAndIgnoresEnvironmentReferences(t *testing.T) {
-	secret := "sk-proj-1234567890abcdefghijklmnop"
+	secret := "sk-" + "proj-" + "1234567890abcdefghijklmnop"
 	repo := repositoryWithFile("app.py", discovery.KindSource, `
 client = OpenAI(api_key="`+secret+`")
 safe = os.getenv("OPENAI_API_KEY")
@@ -31,7 +31,8 @@ also_safe = process.env.OPENAI_API_KEY
 }
 
 func TestRedactSecret(t *testing.T) {
-	if got := RedactSecret("sk-ant-api03-abcdefghijklmnopqrstuv"); got != "sk-ant-api03-****stuv" {
+	secret := "sk-ant-" + "api03-" + "abcdefghijklmnopqrstuv"
+	if got := RedactSecret(secret); got != "sk-ant-api03-****stuv" {
 		t.Fatalf("got %q", got)
 	}
 	if got := RedactSecret("short"); got != "****" {

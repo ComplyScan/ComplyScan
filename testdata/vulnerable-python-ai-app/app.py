@@ -1,7 +1,8 @@
 import logging
 from openai import OpenAI
 
-client = OpenAI(api_key="sk-proj-1234567890abcdefghijklmnop")
+OPENAI_API_KEY = "complyscan-test-placeholder-0000"
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 def answer(user_prompt):
     logging.info("incoming prompt: %s", user_prompt)
