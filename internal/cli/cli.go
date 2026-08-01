@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/complyscan/complyscan/internal/config"
-	"github.com/complyscan/complyscan/internal/report"
-	"github.com/complyscan/complyscan/internal/rules"
-	"github.com/complyscan/complyscan/internal/scanner"
+	"github.com/1eonardodawinki/ComplyScan/internal/config"
+	"github.com/1eonardodawinki/ComplyScan/internal/report"
+	"github.com/1eonardodawinki/ComplyScan/internal/rules"
+	"github.com/1eonardodawinki/ComplyScan/internal/scanner"
 	"github.com/spf13/cobra"
 )
 

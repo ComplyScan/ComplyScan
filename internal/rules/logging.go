@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/complyscan/complyscan/internal/discovery"
+	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
 )
 
 type PromptLoggingRule struct{}

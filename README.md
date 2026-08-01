@@ -11,13 +11,13 @@ ComplyScan does **not** interpret a complete system, determine an EU AI Act clas
 ComplyScan requires Go 1.22 or newer.
 
 ```bash
-go install github.com/complyscan/complyscan/cmd/complyscan@latest
+go install github.com/1eonardodawinki/ComplyScan/cmd/complyscan@latest
 ```
 
 To build from source:
 
 ```bash
-git clone https://github.com/complyscan/complyscan.git
+git clone https://github.com/1eonardodawinki/ComplyScan.git
 cd complyscan
 go build -o complyscan ./cmd/complyscan
 ```

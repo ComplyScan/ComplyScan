@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/complyscan/complyscan/internal/rules"
+	"github.com/1eonardodawinki/ComplyScan/internal/rules"
 	"gopkg.in/yaml.v3"
 )
 

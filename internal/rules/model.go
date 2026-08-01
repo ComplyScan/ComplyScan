@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/complyscan/complyscan/internal/discovery"
+	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
 )
 
 // Severity describes the potential engineering impact of a finding.

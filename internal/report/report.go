@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/complyscan/complyscan/internal/rules"
+	"github.com/1eonardodawinki/ComplyScan/internal/rules"
 )
 
 type Tool struct {

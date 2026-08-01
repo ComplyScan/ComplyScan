@@ -5,7 +5,7 @@ package providers
 import (
 	"context"
 
-	"github.com/complyscan/complyscan/internal/rules"
+	"github.com/1eonardodawinki/ComplyScan/internal/rules"
 )
 
 type Kind string

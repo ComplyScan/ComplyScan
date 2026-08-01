@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/complyscan/complyscan/internal/discovery"
+	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
 )
 
 type AIUsageRule struct{}

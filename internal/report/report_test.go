@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/complyscan/complyscan/internal/rules"
+	"github.com/1eonardodawinki/ComplyScan/internal/rules"
 )
 
 func TestSeverityFilteringAndThreshold(t *testing.T) {

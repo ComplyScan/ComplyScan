@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/complyscan/complyscan/internal/discovery"
-	"github.com/complyscan/complyscan/internal/rules"
+	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
+	"github.com/1eonardodawinki/ComplyScan/internal/rules"
 )
 
 type Options struct {

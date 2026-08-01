@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/complyscan/complyscan/internal/report"
+	"github.com/1eonardodawinki/ComplyScan/internal/report"
 )
 
 var testBuild = BuildInfo{Version: "0.1.0", Commit: "test", BuildDate: "today"}
