@@ -15,6 +15,12 @@ import (
 
 const DefaultMaxFileSize int64 = 1 << 20 // 1 MiB
 
+const (
+	DefaultMaxFiles      = 25_000
+	DefaultMaxTotalBytes = int64(100 << 20) // 100 MiB
+	progressInterval     = 500
+)
+
 type FileKind string
 
 const (
@@ -48,14 +54,35 @@ type Repository struct {
 }
 
 type Options struct {
-	Exclude     []string
-	MaxFileSize int64
+	Exclude                   []string
+	MaxFileSize               int64
+	MaxFiles                  int
+	MaxTotalBytes             int64
+	IncludeNestedRepositories bool
+	TrackedOnly               bool
+	OnProgress                ProgressHandler
 }
 
 type Result struct {
 	Repository Repository
 	Warnings   []string
+	Stats      Stats
+	Limited    bool
 }
+
+type Stats struct {
+	DirectoriesVisited int   `json:"directories_visited"`
+	FilesRead          int   `json:"files_read"`
+	BytesRead          int64 `json:"bytes_read"`
+}
+
+type Progress struct {
+	Stats Stats
+	Path  string
+	Done  bool
+}
+
+type ProgressHandler func(Progress) error
 
 type gitignoreContext struct {
 	base    string
@@ -93,18 +120,38 @@ func Discover(ctx context.Context, target string, options Options) (Result, erro
 	if options.MaxFileSize <= 0 {
 		options.MaxFileSize = DefaultMaxFileSize
 	}
+	if options.MaxFiles <= 0 {
+		options.MaxFiles = DefaultMaxFiles
+	}
+	if options.MaxTotalBytes <= 0 {
+		options.MaxTotalBytes = DefaultMaxTotalBytes
+	}
 
 	result := Result{Repository: Repository{Root: root}}
-	if err := walk(ctx, root, "", nil, options, &result); err != nil {
+	if options.TrackedOnly {
+		err = discoverTracked(ctx, root, options, &result)
+	} else {
+		err = walk(ctx, root, "", nil, options, &result)
+	}
+	if err != nil {
 		return Result{}, err
+	}
+	if options.OnProgress != nil {
+		if err := options.OnProgress(Progress{Stats: result.Stats, Done: true}); err != nil {
+			return Result{}, fmt.Errorf("report discovery progress: %w", err)
+		}
 	}
 	return result, nil
 }
 
 func walk(ctx context.Context, root, relDir string, parents []gitignoreContext, options Options, result *Result) error {
+	if result.Limited {
+		return nil
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	result.Stats.DirectoriesVisited++
 	absDir := filepath.Join(root, filepath.FromSlash(relDir))
 	contexts := parents
 	ignorePath := filepath.Join(absDir, ".gitignore")
@@ -127,6 +174,9 @@ func walk(ctx context.Context, root, relDir string, parents []gitignoreContext, 
 	}
 
 	for _, entry := range entries {
+		if result.Limited {
+			return nil
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -139,6 +189,10 @@ func walk(ctx context.Context, root, relDir string, parents []gitignoreContext, 
 			if shouldSkipDirectory(name, relPath, options.Exclude) || isIgnored(relPath, true, contexts) {
 				continue
 			}
+			if !options.IncludeNestedRepositories && isRepositoryRoot(filepath.Join(root, filepath.FromSlash(relPath))) {
+				result.Warnings = append(result.Warnings, "skipped nested repository: "+relPath)
+				continue
+			}
 			if err := walk(ctx, root, relPath, contexts, options, result); err != nil {
 				return err
 			}
@@ -147,31 +201,66 @@ func walk(ctx context.Context, root, relDir string, parents []gitignoreContext, 
 		if isIgnored(relPath, false, contexts) || isExcluded(relPath, name, options.Exclude) {
 			continue
 		}
-		if _, binary := binaryExtensions[strings.ToLower(filepath.Ext(name))]; binary {
-			continue
-		}
-
 		info, err := entry.Info()
 		if err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("could not inspect %s: %v", relPath, err))
 			continue
 		}
-		if !info.Mode().IsRegular() || info.Size() > options.MaxFileSize {
-			continue
+		if err := processFile(root, relPath, info, options, result); err != nil {
+			return err
 		}
-		content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relPath)))
-		if err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("could not read %s: %v", relPath, err))
-			continue
-		}
-		if isBinary(content) {
-			continue
-		}
-		result.Repository.Files = append(result.Repository.Files, File{
-			Path: relPath, Kind: Classify(relPath), Size: info.Size(), Content: content,
-		})
 	}
 	return nil
+}
+
+func processFile(root, relPath string, info fs.FileInfo, options Options, result *Result) error {
+	if !info.Mode().IsRegular() || info.Size() > options.MaxFileSize {
+		return nil
+	}
+	if _, binary := binaryExtensions[strings.ToLower(filepath.Ext(relPath))]; binary {
+		return nil
+	}
+	if result.Stats.FilesRead >= options.MaxFiles {
+		markLimited(result, fmt.Sprintf("file limit reached (%d); remaining files were not scanned", options.MaxFiles))
+		return nil
+	}
+	if result.Stats.BytesRead+info.Size() > options.MaxTotalBytes {
+		markLimited(result, fmt.Sprintf("content limit reached (%d bytes); remaining files were not scanned", options.MaxTotalBytes))
+		return nil
+	}
+
+	content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relPath)))
+	if err != nil {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("could not read %s: %v", relPath, err))
+		return nil
+	}
+	if isBinary(content) {
+		return nil
+	}
+	result.Repository.Files = append(result.Repository.Files, File{
+		Path: relPath, Kind: Classify(relPath), Size: info.Size(), Content: content,
+	})
+	result.Stats.FilesRead++
+	result.Stats.BytesRead += int64(len(content))
+	if options.OnProgress != nil && result.Stats.FilesRead%progressInterval == 0 {
+		if err := options.OnProgress(Progress{Stats: result.Stats, Path: relPath}); err != nil {
+			return fmt.Errorf("report discovery progress: %w", err)
+		}
+	}
+	return nil
+}
+
+func markLimited(result *Result, warning string) {
+	if result.Limited {
+		return
+	}
+	result.Limited = true
+	result.Warnings = append(result.Warnings, warning)
+}
+
+func isRepositoryRoot(path string) bool {
+	_, err := os.Lstat(filepath.Join(path, ".git"))
+	return err == nil
 }
 
 func isIgnored(relPath string, directory bool, contexts []gitignoreContext) bool {

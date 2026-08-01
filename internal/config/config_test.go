@@ -41,6 +41,9 @@ ai:
 	if len(cfg.Scan.Exclude) != 1 || cfg.Scan.Exclude[0] != "generated" {
 		t.Fatalf("exclude = %#v", cfg.Scan.Exclude)
 	}
+	if cfg.Scan.MaxFiles != 25_000 || cfg.Scan.MaxTotalBytes != 100<<20 {
+		t.Fatalf("scan budgets = %d files, %d bytes", cfg.Scan.MaxFiles, cfg.Scan.MaxTotalBytes)
+	}
 }
 
 func TestLoadRejectsInvalidSeverity(t *testing.T) {
@@ -66,6 +69,19 @@ func TestLoadRejectsUnknownFieldsRulesAndProviders(t *testing.T) {
 		}
 		if _, err := Load(path); err == nil {
 			t.Fatalf("expected invalid config error for:\n%s", content)
+		}
+	}
+}
+
+func TestLoadRejectsInvalidScanBudgets(t *testing.T) {
+	for _, field := range []string{"max-files: 0", "max-total-bytes: 0"} {
+		path := filepath.Join(t.TempDir(), FileName)
+		content := "version: 1\nscan:\n  " + field + "\nfail-on: high\nai:\n  provider: none\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "must be greater than zero") {
+			t.Fatalf("got error %v for %q", err, field)
 		}
 	}
 }

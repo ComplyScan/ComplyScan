@@ -3,8 +3,10 @@ package discovery
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -33,6 +35,81 @@ func TestDiscoverRespectsGitignoreAndBuiltInExclusions(t *testing.T) {
 		if !contains(paths, wanted) {
 			t.Fatalf("did not discover %q in %v", wanted, paths)
 		}
+	}
+}
+
+func TestDiscoverSkipsNestedRepositoriesByDefault(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "main.py", "print('root')\n")
+	writeTestFile(t, root, "nested/.git/HEAD", "ref: refs/heads/main\n")
+	writeTestFile(t, root, "nested/app.py", "print('nested')\n")
+
+	result, err := Discover(context.Background(), root, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(repositoryPaths(result.Repository), "nested/app.py") {
+		t.Fatal("nested repository should be skipped by default")
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "nested repository") {
+		t.Fatalf("unexpected warnings: %#v", result.Warnings)
+	}
+
+	result, err = Discover(context.Background(), root, Options{IncludeNestedRepositories: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(repositoryPaths(result.Repository), "nested/app.py") {
+		t.Fatal("nested repository should be included when requested")
+	}
+}
+
+func TestDiscoverEnforcesBudgetsAndReportsProgress(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "a.txt", "aaaa\n")
+	writeTestFile(t, root, "b.txt", "bbbb\n")
+	var finalProgress Progress
+	result, err := Discover(context.Background(), root, Options{
+		MaxFiles: 1,
+		OnProgress: func(progress Progress) error {
+			if progress.Done {
+				finalProgress = progress
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Limited || result.Stats.FilesRead != 1 || finalProgress.Stats.FilesRead != 1 {
+		t.Fatalf("unexpected budget result: %#v, progress=%#v", result, finalProgress)
+	}
+	if len(result.Warnings) == 0 || !strings.Contains(result.Warnings[0], "file limit") {
+		t.Fatalf("unexpected warnings: %#v", result.Warnings)
+	}
+}
+
+func TestDiscoverTrackedOnly(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	root := t.TempDir()
+	writeTestFile(t, root, "tracked.py", "print('tracked')\n")
+	writeTestFile(t, root, "untracked.py", "print('untracked')\n")
+	for _, args := range [][]string{{"init"}, {"add", "tracked.py"}} {
+		command := exec.Command("git", append([]string{"-C", root}, args...)...)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+
+	result, err := Discover(context.Background(), root, Options{TrackedOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := repositoryPaths(result.Repository)
+	if len(paths) != 1 || paths[0] != "tracked.py" {
+		t.Fatalf("tracked-only paths = %v", paths)
 	}
 }
 

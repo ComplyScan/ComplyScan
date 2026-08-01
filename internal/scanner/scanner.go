@@ -10,9 +10,14 @@ import (
 )
 
 type Options struct {
-	Exclude     []string
-	RuleEnabled func(id string) bool
-	OnFinding   rules.FindingEmitter
+	Exclude                   []string
+	MaxFiles                  int
+	MaxTotalBytes             int64
+	IncludeNestedRepositories bool
+	TrackedOnly               bool
+	RuleEnabled               func(id string) bool
+	OnFinding                 rules.FindingEmitter
+	OnProgress                discovery.ProgressHandler
 }
 
 type Result struct {
@@ -33,7 +38,14 @@ func New(ruleSet ...rules.Rule) *Engine {
 }
 
 func (e *Engine) Scan(ctx context.Context, target string, options Options) (Result, error) {
-	discovered, err := discovery.Discover(ctx, target, discovery.Options{Exclude: options.Exclude})
+	discovered, err := discovery.Discover(ctx, target, discovery.Options{
+		Exclude:                   options.Exclude,
+		MaxFiles:                  options.MaxFiles,
+		MaxTotalBytes:             options.MaxTotalBytes,
+		IncludeNestedRepositories: options.IncludeNestedRepositories,
+		TrackedOnly:               options.TrackedOnly,
+		OnProgress:                options.OnProgress,
+	})
 	if err != nil {
 		return Result{}, err
 	}

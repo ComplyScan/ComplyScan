@@ -30,7 +30,11 @@ type Config struct {
 }
 
 type ScanConfig struct {
-	Exclude []string `yaml:"exclude"`
+	Exclude                   []string `yaml:"exclude"`
+	MaxFiles                  int      `yaml:"max-files"`
+	MaxTotalBytes             int64    `yaml:"max-total-bytes"`
+	IncludeNestedRepositories bool     `yaml:"include-nested-repositories"`
+	TrackedOnly               bool     `yaml:"tracked-only"`
 }
 
 type RuleConfig struct {
@@ -48,9 +52,11 @@ func Default() Config {
 	}
 	return Config{
 		Version: 1,
-		Scan: ScanConfig{Exclude: []string{
-			"node_modules", "vendor", "dist", "build",
-		}},
+		Scan: ScanConfig{
+			Exclude:       []string{"node_modules", "vendor", "dist", "build"},
+			MaxFiles:      25_000,
+			MaxTotalBytes: 100 << 20,
+		},
 		FailOn: rules.SeverityHigh,
 		Rules:  ruleConfig,
 		AI:     AIConfig{Provider: "none"},
@@ -82,6 +88,12 @@ func (c Config) Validate() error {
 	}
 	if _, err := rules.ParseSeverity(string(c.FailOn)); err != nil {
 		return fmt.Errorf("fail-on: %w", err)
+	}
+	if c.Scan.MaxFiles <= 0 {
+		return errors.New("scan.max-files must be greater than zero")
+	}
+	if c.Scan.MaxTotalBytes <= 0 {
+		return errors.New("scan.max-total-bytes must be greater than zero")
 	}
 	if c.AI.Provider == "" {
 		return errors.New("ai.provider must not be empty")
