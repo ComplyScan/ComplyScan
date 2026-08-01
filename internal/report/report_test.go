@@ -65,7 +65,7 @@ func TestWriteTerminalDoesNotAddColorWhenDisabled(t *testing.T) {
 	if strings.Contains(output.String(), "\x1b[") {
 		t.Fatal("unexpected ANSI color sequence")
 	}
-	for _, want := range []string{"ComplyScan found 1 potential issue", "HIGH", "app.py:10", "Summary: 1 high", "Suppressed: 1 accepted issue"} {
+	for _, want := range []string{"ComplyScan found 1 potential issue", "HIGH", "app.py:10", "Summary: 1 high", "Suppressed: 1 accepted or baselined issue"} {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, output.String())
 		}

@@ -150,7 +150,7 @@ func writeTerminalSummary(w io.Writer, report Report) error {
 		return err
 	}
 	if report.Suppressed > 0 {
-		if _, err := fmt.Fprintf(w, "Suppressed: %d accepted %s\n", report.Suppressed, issueWord(report.Suppressed)); err != nil {
+		if _, err := fmt.Fprintf(w, "Suppressed: %d accepted or baselined %s\n", report.Suppressed, issueWord(report.Suppressed)); err != nil {
 			return err
 		}
 	}

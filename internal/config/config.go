@@ -29,6 +29,7 @@ type Config struct {
 	FailOn       rules.Severity        `yaml:"fail-on"`
 	Rules        map[string]RuleConfig `yaml:"rules"`
 	AI           AIConfig              `yaml:"ai"`
+	Baseline     string                `yaml:"baseline,omitempty"`
 	Suppressions []Suppression         `yaml:"suppressions,omitempty"`
 }
 
@@ -69,9 +70,10 @@ func Default() Config {
 			MaxFiles:      25_000,
 			MaxTotalBytes: 100 << 20,
 		},
-		FailOn: rules.SeverityHigh,
-		Rules:  ruleConfig,
-		AI:     AIConfig{Provider: "none"},
+		FailOn:   rules.SeverityHigh,
+		Rules:    ruleConfig,
+		AI:       AIConfig{Provider: "none"},
+		Baseline: ".complyscan-baseline.json",
 	}
 }
 

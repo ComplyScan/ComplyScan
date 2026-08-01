@@ -37,6 +37,7 @@ complyscan scan . --format json
 complyscan scan . --severity high --no-color
 complyscan scan . --tracked-only
 complyscan scan . --exclude fixtures --max-files 10000
+complyscan baseline .
 complyscan version
 ```
 
@@ -120,6 +121,8 @@ rules:
 ai:
   provider: none
 
+baseline: .complyscan-baseline.json
+
 suppressions:
   - rule: AI-LOG-001
     path: testdata/**
@@ -131,6 +134,8 @@ The scanner also respects `.gitignore` and always ignores source-control metadat
 Discovery is bounded to 25,000 text files and 100 MiB of text by default. Terminal scans report discovery progress every 500 files. Use `--max-files` and `--max-total-bytes` to tune the limits, repeat `--exclude` for temporary exclusions, or use `--tracked-only` to restrict a scan to the Git index. Each option also has a matching key under `scan` in `.complyscan.yml`.
 
 Every finding has a stable SHA-256 fingerprint in structured output. Reviewed findings can be suppressed by `rule`, a Git-style `path` pattern, an exact `fingerprint`, or a combination. Every suppression requires a `reason`; suppressed findings are excluded from output and exit-code evaluation, and their count remains visible in the report summary.
+
+For an existing repository, `complyscan baseline .` records the current findings in `.complyscan-baseline.json` without storing source evidence. Commit that deterministic file and future scans will report only findings whose fingerprints are new. Use `--baseline path/to/file` to select another baseline for a scan or `--no-baseline` to inspect every finding.
 
 ## Privacy and security guarantees
 

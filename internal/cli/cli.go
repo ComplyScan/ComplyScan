@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/1eonardodawinki/ComplyScan/internal/baseline"
 	"github.com/1eonardodawinki/ComplyScan/internal/config"
 	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
 	"github.com/1eonardodawinki/ComplyScan/internal/report"
@@ -52,6 +53,7 @@ func newRootCommand(stdout, stderr io.Writer, build BuildInfo) *cobra.Command {
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.AddCommand(newScanCommand(stdout, build))
+	root.AddCommand(newBaselineCommand(stdout))
 	root.AddCommand(newInitCommand(stdout))
 	root.AddCommand(newVersionCommand(stdout, build))
 	return root
@@ -68,6 +70,8 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 		includeNestedRepositories bool
 		maxFiles                  int
 		maxTotalBytes             int64
+		baselinePath              string
+		noBaseline                bool
 	)
 	command := &cobra.Command{
 		Use:   "scan [path]",
@@ -96,6 +100,26 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			if cmd.Flags().Changed("max-total-bytes") && maxTotalBytes <= 0 {
 				return errors.New("--max-total-bytes must be greater than zero")
 			}
+			if noBaseline && cmd.Flags().Changed("baseline") {
+				return errors.New("--baseline and --no-baseline cannot be used together")
+			}
+
+			configuredBaseline := cfg.Baseline
+			baselineRequired := cmd.Flags().Changed("baseline")
+			if baselineRequired {
+				configuredBaseline = baselinePath
+			}
+			var accepted baseline.File
+			baselineLoaded := false
+			if !noBaseline && configuredBaseline != "" {
+				resolvedBaseline := resolveTargetPath(target, configuredBaseline)
+				accepted, err = baseline.Load(resolvedBaseline)
+				if err == nil {
+					baselineLoaded = true
+				} else if baselineRequired || !errors.Is(err, os.ErrNotExist) {
+					return err
+				}
+			}
 
 			terminalOptions := report.TerminalOptions{Color: !noColor && supportsColor(stdout)}
 			effectiveMaxFiles := cfg.Scan.MaxFiles
@@ -106,14 +130,22 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			if cmd.Flags().Changed("max-total-bytes") {
 				effectiveMaxTotalBytes = maxTotalBytes
 			}
+			excludes := append(append([]string(nil), cfg.Scan.Exclude...), additionalExcludes...)
+			if !noBaseline && configuredBaseline != "" {
+				if exclusion := targetExclusion(target, configuredBaseline); exclusion != "" {
+					excludes = append(excludes, exclusion)
+				}
+			}
 			scanOptions := scanner.Options{
-				Exclude:                   append(append([]string(nil), cfg.Scan.Exclude...), additionalExcludes...),
+				Exclude:                   excludes,
 				MaxFiles:                  effectiveMaxFiles,
 				MaxTotalBytes:             effectiveMaxTotalBytes,
 				IncludeNestedRepositories: cfg.Scan.IncludeNestedRepositories || includeNestedRepositories,
 				TrackedOnly:               cfg.Scan.TrackedOnly || trackedOnly,
 				RuleEnabled:               cfg.RuleEnabled,
-				Suppress:                  cfg.FindingSuppressed,
+				Suppress: func(finding rules.Finding) bool {
+					return cfg.FindingSuppressed(finding) || baselineLoaded && accepted.Contains(finding.Fingerprint)
+				},
 			}
 			if outputFormat == "terminal" {
 				if _, err := fmt.Fprintf(stdout, "ComplyScan scanning %s...\n\n", target); err != nil {
@@ -125,14 +157,7 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 					}
 					return report.WriteTerminalFinding(stdout, finding, terminalOptions)
 				}
-				scanOptions.OnProgress = func(progress discovery.Progress) error {
-					if progress.Done {
-						_, err := fmt.Fprintf(stdout, "Discovery complete: %d files, %s read\n\n", progress.Stats.FilesRead, formatByteCount(progress.Stats.BytesRead))
-						return err
-					}
-					_, err := fmt.Fprintf(stdout, "Discovery progress: %d files, %s read\n", progress.Stats.FilesRead, formatByteCount(progress.Stats.BytesRead))
-					return err
-				}
+				scanOptions.OnProgress = terminalProgress(stdout)
 			}
 
 			result, err := scanner.New().Scan(cmd.Context(), target, scanOptions)
@@ -165,7 +190,95 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().BoolVar(&includeNestedRepositories, "include-nested-repositories", false, "scan inside nested Git repositories")
 	command.Flags().IntVar(&maxFiles, "max-files", 0, "maximum number of text files to read")
 	command.Flags().Int64Var(&maxTotalBytes, "max-total-bytes", 0, "maximum total bytes of text content to read")
+	command.Flags().StringVar(&baselinePath, "baseline", "", "baseline file (relative to the scan target)")
+	command.Flags().BoolVar(&noBaseline, "no-baseline", false, "do not apply a configured baseline")
 	return command
+}
+
+func newBaselineCommand(stdout io.Writer) *cobra.Command {
+	var configPath, outputPath string
+	command := &cobra.Command{
+		Use:   "baseline [path]",
+		Short: "Record the repository's current findings as a baseline",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target := "."
+			if len(args) == 1 {
+				target = args[0]
+			}
+			cfg, _, err := config.Resolve(target, configPath)
+			if err != nil {
+				return err
+			}
+			destination := outputPath
+			if destination == "" {
+				destination = cfg.Baseline
+			}
+			if destination == "" {
+				destination = baseline.FileName
+			}
+			resolvedDestination := resolveTargetPath(target, destination)
+			excludes := append([]string(nil), cfg.Scan.Exclude...)
+			if exclusion := targetExclusion(target, destination); exclusion != "" {
+				excludes = append(excludes, exclusion)
+			}
+			result, err := scanner.New().Scan(cmd.Context(), target, scanner.Options{
+				Exclude:                   excludes,
+				MaxFiles:                  cfg.Scan.MaxFiles,
+				MaxTotalBytes:             cfg.Scan.MaxTotalBytes,
+				IncludeNestedRepositories: cfg.Scan.IncludeNestedRepositories,
+				TrackedOnly:               cfg.Scan.TrackedOnly,
+				RuleEnabled:               cfg.RuleEnabled,
+				Suppress:                  cfg.FindingSuppressed,
+				OnProgress:                terminalProgress(stdout),
+			})
+			if err != nil {
+				return fmt.Errorf("scan %q: %w", target, err)
+			}
+			if err := baseline.Write(resolvedDestination, result.Findings); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(stdout, "Wrote %d current findings to %s\n", len(result.Findings), resolvedDestination)
+			return err
+		},
+	}
+	command.Flags().StringVar(&configPath, "config", "", "configuration file (defaults to <path>/.complyscan.yml)")
+	command.Flags().StringVarP(&outputPath, "output", "o", "", "baseline output file (relative to the scan target)")
+	return command
+}
+
+func terminalProgress(stdout io.Writer) discovery.ProgressHandler {
+	return func(progress discovery.Progress) error {
+		if progress.Done {
+			_, err := fmt.Fprintf(stdout, "Discovery complete: %d files, %s read\n\n", progress.Stats.FilesRead, formatByteCount(progress.Stats.BytesRead))
+			return err
+		}
+		_, err := fmt.Fprintf(stdout, "Discovery progress: %d files, %s read\n", progress.Stats.FilesRead, formatByteCount(progress.Stats.BytesRead))
+		return err
+	}
+}
+
+func resolveTargetPath(target, value string) string {
+	if filepath.IsAbs(value) {
+		return filepath.Clean(value)
+	}
+	return filepath.Clean(filepath.Join(target, filepath.FromSlash(value)))
+}
+
+func targetExclusion(target, value string) string {
+	targetPath, err := filepath.Abs(target)
+	if err != nil {
+		return ""
+	}
+	resolvedPath, err := filepath.Abs(resolveTargetPath(target, value))
+	if err != nil {
+		return ""
+	}
+	relative, err := filepath.Rel(targetPath, resolvedPath)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	return filepath.ToSlash(relative)
 }
 
 func formatByteCount(value int64) string {

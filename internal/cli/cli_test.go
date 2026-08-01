@@ -119,6 +119,44 @@ suppressions:
 	}
 }
 
+func TestBaselineAcceptsCurrentFindingsButNotNewOnes(t *testing.T) {
+	target := t.TempDir()
+	appPath := filepath.Join(target, "app.py")
+	if err := os.WriteFile(appPath, []byte("import openai\nimport logging\nlogging.info(prompt)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"baseline", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("baseline exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	baselinePath := filepath.Join(target, ".complyscan-baseline.json")
+	if _, err := os.Stat(baselinePath); err != nil {
+		t.Fatalf("baseline was not written: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Execute([]string{"scan", "--no-color", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("baselined scan exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Suppressed:") {
+		t.Fatalf("baseline was not applied:\n%s", stdout.String())
+	}
+
+	if err := os.WriteFile(appPath, []byte("import openai\nimport logging\nlogging.info(prompt)\nlogging.info(response)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := Execute([]string{"scan", "--no-color", target}, &stdout, &stderr, testBuild); code != 1 {
+		t.Fatalf("changed scan exit code = %d, want 1; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "response") {
+		t.Fatalf("new finding was not reported:\n%s", stdout.String())
+	}
+}
+
 func TestVersionCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := Execute([]string{"version"}, &stdout, &stderr, testBuild); code != 0 {
@@ -128,6 +166,17 @@ func TestVersionCommand(t *testing.T) {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("version output missing %q: %s", want, stdout.String())
 		}
+	}
+}
+
+func TestTargetExclusionHandlesAbsolutePaths(t *testing.T) {
+	target := t.TempDir()
+	inside := filepath.Join(target, "state", ".complyscan-baseline.json")
+	if got := targetExclusion(target, inside); got != "state/.complyscan-baseline.json" {
+		t.Fatalf("targetExclusion() = %q", got)
+	}
+	if got := targetExclusion(target, filepath.Join(t.TempDir(), "baseline.json")); got != "" {
+		t.Fatalf("outside exclusion = %q", got)
 	}
 }
 
