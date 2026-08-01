@@ -113,6 +113,7 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				IncludeNestedRepositories: cfg.Scan.IncludeNestedRepositories || includeNestedRepositories,
 				TrackedOnly:               cfg.Scan.TrackedOnly || trackedOnly,
 				RuleEnabled:               cfg.RuleEnabled,
+				Suppress:                  cfg.FindingSuppressed,
 			}
 			if outputFormat == "terminal" {
 				if _, err := fmt.Fprintf(stdout, "ComplyScan scanning %s...\n\n", target); err != nil {
@@ -139,7 +140,7 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				return fmt.Errorf("scan %q: %w", target, err)
 			}
 			visible := report.FilterByMinimum(result.Findings, minimumSeverity)
-			reportValue := report.New(target, build.Version, visible, result.Warnings)
+			reportValue := report.New(target, build.Version, visible, result.Warnings, result.Suppressed)
 			if outputFormat == "json" {
 				if err := report.WriteJSON(stdout, reportValue); err != nil {
 					return err

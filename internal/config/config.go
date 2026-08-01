@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/1eonardodawinki/ComplyScan/internal/rules"
+	ignore "github.com/sabhiram/go-gitignore"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,11 +24,12 @@ var supportedRules = []string{
 }
 
 type Config struct {
-	Version int                   `yaml:"version"`
-	Scan    ScanConfig            `yaml:"scan"`
-	FailOn  rules.Severity        `yaml:"fail-on"`
-	Rules   map[string]RuleConfig `yaml:"rules"`
-	AI      AIConfig              `yaml:"ai"`
+	Version      int                   `yaml:"version"`
+	Scan         ScanConfig            `yaml:"scan"`
+	FailOn       rules.Severity        `yaml:"fail-on"`
+	Rules        map[string]RuleConfig `yaml:"rules"`
+	AI           AIConfig              `yaml:"ai"`
+	Suppressions []Suppression         `yaml:"suppressions,omitempty"`
 }
 
 type ScanConfig struct {
@@ -43,6 +46,15 @@ type RuleConfig struct {
 
 type AIConfig struct {
 	Provider string `yaml:"provider"`
+}
+
+// Suppression accepts a finding as reviewed. A reason is mandatory so the
+// decision remains auditable in version control.
+type Suppression struct {
+	Rule        string `yaml:"rule,omitempty"`
+	Path        string `yaml:"path,omitempty"`
+	Fingerprint string `yaml:"fingerprint,omitempty"`
+	Reason      string `yaml:"reason"`
 }
 
 func Default() Config {
@@ -110,12 +122,60 @@ func (c Config) Validate() error {
 			return fmt.Errorf("unknown rule %q", id)
 		}
 	}
+	for index, suppression := range c.Suppressions {
+		if strings.TrimSpace(suppression.Reason) == "" {
+			return fmt.Errorf("suppressions[%d].reason must not be empty", index)
+		}
+		if suppression.Rule == "" && suppression.Fingerprint == "" {
+			return fmt.Errorf("suppressions[%d] must set rule or fingerprint", index)
+		}
+		if suppression.Rule != "" {
+			if _, ok := known[suppression.Rule]; !ok {
+				return fmt.Errorf("suppressions[%d] has unknown rule %q", index, suppression.Rule)
+			}
+		}
+		if suppression.Fingerprint != "" && !validFingerprint(suppression.Fingerprint) {
+			return fmt.Errorf("suppressions[%d].fingerprint must be a 64-character SHA-256 value", index)
+		}
+	}
 	return nil
 }
 
 func (c Config) RuleEnabled(id string) bool {
 	rule, ok := c.Rules[id]
 	return !ok || rule.Enabled
+}
+
+// FindingSuppressed reports whether a configured, reasoned suppression
+// accepts the finding.
+func (c Config) FindingSuppressed(finding rules.Finding) bool {
+	for _, suppression := range c.Suppressions {
+		if suppression.Rule != "" && suppression.Rule != finding.RuleID {
+			continue
+		}
+		if suppression.Fingerprint != "" && suppression.Fingerprint != finding.Fingerprint {
+			continue
+		}
+		if suppression.Path != "" {
+			if finding.Path == "" || !ignore.CompileIgnoreLines(suppression.Path).MatchesPath(filepath.ToSlash(finding.Path)) {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func validFingerprint(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, character := range value {
+		if !strings.ContainsRune("0123456789abcdef", character) {
+			return false
+		}
+	}
+	return true
 }
 
 // Resolve returns an explicit config or the target-local default when present.

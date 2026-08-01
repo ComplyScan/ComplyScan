@@ -25,24 +25,25 @@ type Summary struct {
 }
 
 type Report struct {
-	Tool     Tool            `json:"tool"`
-	Target   string          `json:"target"`
-	Summary  Summary         `json:"summary"`
-	Findings []rules.Finding `json:"findings"`
-	Warnings []string        `json:"warnings,omitempty"`
+	Tool       Tool            `json:"tool"`
+	Target     string          `json:"target"`
+	Summary    Summary         `json:"summary"`
+	Findings   []rules.Finding `json:"findings"`
+	Warnings   []string        `json:"warnings,omitempty"`
+	Suppressed int             `json:"suppressed"`
 }
 
 type TerminalOptions struct {
 	Color bool
 }
 
-func New(target, version string, findings []rules.Finding, warnings []string) Report {
+func New(target, version string, findings []rules.Finding, warnings []string, suppressed int) Report {
 	if findings == nil {
 		findings = []rules.Finding{}
 	}
 	return Report{
 		Tool: Tool{Name: "ComplyScan", Version: version}, Target: target,
-		Summary: Summarize(findings), Findings: findings, Warnings: warnings,
+		Summary: Summarize(findings), Findings: findings, Warnings: warnings, Suppressed: suppressed,
 	}
 }
 
@@ -147,6 +148,11 @@ func WriteTerminalCompletion(w io.Writer, report Report) error {
 func writeTerminalSummary(w io.Writer, report Report) error {
 	if _, err := fmt.Fprintf(w, "Summary: %s\n", summaryText(report.Summary)); err != nil {
 		return err
+	}
+	if report.Suppressed > 0 {
+		if _, err := fmt.Fprintf(w, "Suppressed: %d accepted %s\n", report.Suppressed, issueWord(report.Suppressed)); err != nil {
+			return err
+		}
 	}
 	for _, warning := range report.Warnings {
 		if _, err := fmt.Fprintf(w, "Warning: %s\n", warning); err != nil {

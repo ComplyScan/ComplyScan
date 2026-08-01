@@ -100,3 +100,29 @@ func TestScannerCanDisableRule(t *testing.T) {
 		}
 	}
 }
+
+func TestScannerSuppressesBeforeStreaming(t *testing.T) {
+	target := filepath.Join("..", "..", "testdata", "vulnerable-python-ai-app")
+	streamed := 0
+	result, err := New().Scan(context.Background(), target, Options{
+		Suppress: func(finding rules.Finding) bool { return finding.RuleID == "AI-LOG-001" },
+		OnFinding: func(rules.Finding) error {
+			streamed++
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Suppressed == 0 {
+		t.Fatal("expected a suppressed finding")
+	}
+	if streamed != len(result.Findings) {
+		t.Fatalf("streamed=%d findings=%d", streamed, len(result.Findings))
+	}
+	for _, finding := range result.Findings {
+		if finding.RuleID == "AI-LOG-001" {
+			t.Fatal("suppressed finding remained in result")
+		}
+	}
+}

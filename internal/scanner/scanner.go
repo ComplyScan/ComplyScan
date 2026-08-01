@@ -16,6 +16,7 @@ type Options struct {
 	IncludeNestedRepositories bool
 	TrackedOnly               bool
 	RuleEnabled               func(id string) bool
+	Suppress                  func(rules.Finding) bool
 	OnFinding                 rules.FindingEmitter
 	OnProgress                discovery.ProgressHandler
 }
@@ -24,6 +25,7 @@ type Result struct {
 	Repository discovery.Repository
 	Findings   []rules.Finding
 	Warnings   []string
+	Suppressed int
 }
 
 type Engine struct {
@@ -53,6 +55,10 @@ func (e *Engine) Scan(ctx context.Context, target string, options Options) (Resu
 	result := Result{Repository: discovered.Repository, Warnings: discovered.Warnings}
 	recordFinding := func(finding rules.Finding) error {
 		finding.Fingerprint = rules.ComputeFingerprint(finding)
+		if options.Suppress != nil && options.Suppress(finding) {
+			result.Suppressed++
+			return nil
+		}
 		result.Findings = append(result.Findings, finding)
 		if options.OnFinding != nil {
 			return options.OnFinding(finding)

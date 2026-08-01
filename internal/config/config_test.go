@@ -86,6 +86,34 @@ func TestLoadRejectsInvalidScanBudgets(t *testing.T) {
 	}
 }
 
+func TestFindingSuppressedMatchesRulePathAndFingerprint(t *testing.T) {
+	fingerprint := strings.Repeat("a", 64)
+	finding := rules.Finding{RuleID: "AI-LOG-001", Path: "testdata/nested/app.py", Fingerprint: fingerprint}
+	cfg := Default()
+	cfg.Suppressions = []Suppression{
+		{Rule: "AI-SEC-001", Reason: "different rule"},
+		{Rule: "AI-LOG-001", Path: "testdata/**", Fingerprint: fingerprint, Reason: "synthetic fixture"},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.FindingSuppressed(finding) {
+		t.Fatal("expected finding to be suppressed")
+	}
+	finding.Path = "internal/app.py"
+	if cfg.FindingSuppressed(finding) {
+		t.Fatal("path outside the pattern was suppressed")
+	}
+}
+
+func TestValidateRejectsUnreasonedSuppression(t *testing.T) {
+	cfg := Default()
+	cfg.Suppressions = []Suppression{{Rule: "AI-LOG-001"}}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "reason") {
+		t.Fatalf("got error %v", err)
+	}
+}
+
 func TestWriteDefaultDoesNotOverwriteWithoutForce(t *testing.T) {
 	path := filepath.Join(t.TempDir(), FileName)
 	if err := WriteDefault(path, false); err != nil {

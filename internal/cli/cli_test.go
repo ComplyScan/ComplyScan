@@ -93,6 +93,32 @@ func TestScanRejectsInvalidBudgets(t *testing.T) {
 	}
 }
 
+func TestScanAppliesReasonedSuppressions(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), ".complyscan.yml")
+	content := `version: 1
+fail-on: high
+ai:
+  provider: none
+suppressions:
+  - rule: AI-LOG-001
+    reason: covered by fixture controls
+  - rule: AI-SEC-001
+    reason: unmistakably synthetic test credential
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	target := filepath.Join("..", "..", "testdata", "vulnerable-python-ai-app")
+	code := Execute([]string{"scan", "--no-color", "--config", configPath, target}, &stdout, &stderr, testBuild)
+	if code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Suppressed:") || strings.Contains(stdout.String(), "AI-LOG-001") || strings.Contains(stdout.String(), "AI-SEC-001") {
+		t.Fatalf("unexpected suppression output:\n%s", stdout.String())
+	}
+}
+
 func TestVersionCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := Execute([]string{"version"}, &stdout, &stderr, testBuild); code != 0 {

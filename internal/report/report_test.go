@@ -30,7 +30,7 @@ func TestSeverityFilteringAndThreshold(t *testing.T) {
 func TestWriteJSON(t *testing.T) {
 	value := New(".", "0.1.0", []rules.Finding{{
 		RuleID: "AI-DOC-001", Title: "Missing docs", Severity: rules.SeverityMedium,
-	}}, nil)
+	}}, nil, 2)
 	var output bytes.Buffer
 	if err := WriteJSON(&output, value); err != nil {
 		t.Fatal(err)
@@ -48,13 +48,16 @@ func TestWriteJSON(t *testing.T) {
 	if decoded.Findings == nil || len(decoded.Findings) != 1 {
 		t.Fatalf("unexpected findings: %#v", decoded.Findings)
 	}
+	if decoded.Suppressed != 2 {
+		t.Fatalf("suppressed = %d", decoded.Suppressed)
+	}
 }
 
 func TestWriteTerminalDoesNotAddColorWhenDisabled(t *testing.T) {
 	value := New(".", "0.1.0", []rules.Finding{{
 		RuleID: "AI-LOG-001", Title: "Logged prompt", Severity: rules.SeverityHigh,
 		Path: "app.py", StartLine: 10, Message: "Review logging.",
-	}}, nil)
+	}}, nil, 1)
 	var output bytes.Buffer
 	if err := WriteTerminal(&output, value, TerminalOptions{Color: false}); err != nil {
 		t.Fatal(err)
@@ -62,7 +65,7 @@ func TestWriteTerminalDoesNotAddColorWhenDisabled(t *testing.T) {
 	if strings.Contains(output.String(), "\x1b[") {
 		t.Fatal("unexpected ANSI color sequence")
 	}
-	for _, want := range []string{"ComplyScan found 1 potential issue", "HIGH", "app.py:10", "Summary: 1 high"} {
+	for _, want := range []string{"ComplyScan found 1 potential issue", "HIGH", "app.py:10", "Summary: 1 high", "Suppressed: 1 accepted issue"} {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, output.String())
 		}
@@ -70,7 +73,7 @@ func TestWriteTerminalDoesNotAddColorWhenDisabled(t *testing.T) {
 }
 
 func TestWriteTerminalCompletion(t *testing.T) {
-	value := New(".", "0.1.0", []rules.Finding{{Severity: rules.SeverityMedium}}, nil)
+	value := New(".", "0.1.0", []rules.Finding{{Severity: rules.SeverityMedium}}, nil, 0)
 	var output bytes.Buffer
 	if err := WriteTerminalCompletion(&output, value); err != nil {
 		t.Fatal(err)
