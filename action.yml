@@ -1,0 +1,111 @@
+name: ComplyScan
+description: Scan a repository for potential AI compliance engineering risks and upload SARIF results.
+author: ComplyScan contributors
+
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  path:
+    description: Repository-relative path to scan.
+    required: false
+    default: .
+  config:
+    description: Optional repository-relative path to a ComplyScan configuration file.
+    required: false
+    default: ""
+  severity:
+    description: Minimum severity included in SARIF output.
+    required: false
+    default: info
+  sarif-file:
+    description: Repository-relative path for the generated SARIF file.
+    required: false
+    default: complyscan.sarif
+  category:
+    description: GitHub code-scanning category for this analysis.
+    required: false
+    default: complyscan
+  upload-results:
+    description: Upload the SARIF file to GitHub code scanning.
+    required: false
+    default: "true"
+  fail-on-findings:
+    description: Fail the action when a finding meets the configured fail-on threshold.
+    required: false
+    default: "true"
+
+outputs:
+  exit-code:
+    description: ComplyScan exit code (0 for clear, 1 for threshold findings).
+    value: ${{ steps.scan.outputs.exit-code }}
+  sarif-file:
+    description: Absolute path to the generated SARIF file.
+    value: ${{ steps.scan.outputs.sarif-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: ${{ github.action_path }}/go.mod
+        cache: false
+
+    - name: Run ComplyScan
+      id: scan
+      shell: bash
+      env:
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
+        INPUT_SEVERITY: ${{ inputs.severity }}
+      run: |
+        target="$INPUT_PATH"
+        if [[ "$target" != /* ]]; then
+          target="$GITHUB_WORKSPACE/$target"
+        fi
+
+        sarif_file="$INPUT_SARIF_FILE"
+        if [[ "$sarif_file" != /* ]]; then
+          sarif_file="$GITHUB_WORKSPACE/$sarif_file"
+        fi
+        mkdir -p "$(dirname "$sarif_file")"
+
+        binary="$RUNNER_TEMP/complyscan-action"
+        go -C "$GITHUB_ACTION_PATH" build -o "$binary" ./cmd/complyscan
+
+        arguments=(scan "$target" --format sarif --severity "$INPUT_SEVERITY")
+        if [[ -n "$INPUT_CONFIG" ]]; then
+          config="$INPUT_CONFIG"
+          if [[ "$config" != /* ]]; then
+            config="$GITHUB_WORKSPACE/$config"
+          fi
+          arguments+=(--config "$config")
+        fi
+
+        set +e
+        "$binary" "${arguments[@]}" > "$sarif_file"
+        status=$?
+        set -e
+
+        echo "exit-code=$status" >> "$GITHUB_OUTPUT"
+        echo "sarif-file=$sarif_file" >> "$GITHUB_OUTPUT"
+        if [[ $status -gt 1 ]]; then
+          echo "completed=false" >> "$GITHUB_OUTPUT"
+          exit "$status"
+        fi
+        echo "completed=true" >> "$GITHUB_OUTPUT"
+
+    - name: Upload SARIF
+      if: ${{ always() && inputs.upload-results == 'true' && steps.scan.outputs.completed == 'true' }}
+      uses: github/codeql-action/upload-sarif@v4
+      with:
+        sarif_file: ${{ steps.scan.outputs.sarif-file }}
+        category: ${{ inputs.category }}
+
+    - name: Enforce finding threshold
+      if: ${{ always() && inputs.fail-on-findings == 'true' && steps.scan.outputs.exit-code == '1' }}
+      shell: bash
+      run: exit 1

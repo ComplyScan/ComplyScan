@@ -1,0 +1,21 @@
+name: ComplyScan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    name: AI compliance engineering scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./
+        with:
+          severity: medium
+          fail-on-findings: false

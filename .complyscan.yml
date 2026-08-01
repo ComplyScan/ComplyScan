@@ -1,0 +1,40 @@
+version: 1
+
+scan:
+  exclude:
+    - node_modules
+    - vendor
+    - dist
+    - build
+    - testdata
+  max-files: 25000
+  max-total-bytes: 104857600
+  include-nested-repositories: false
+  tracked-only: false
+
+fail-on: high
+
+rules:
+  AI-DISC-001:
+    enabled: true
+  AI-LOG-001:
+    enabled: true
+  AI-SEC-001:
+    enabled: true
+  AI-DOC-001:
+    enabled: true
+  AI-RISK-001:
+    enabled: true
+
+ai:
+  provider: none
+
+baseline: .complyscan-baseline.json
+
+suppressions:
+  - rule: AI-LOG-001
+    path: internal/rules/logging_test.go
+    reason: Unit tests intentionally contain logging examples to verify detection.
+  - rule: AI-SEC-001
+    path: internal/rules/secrets_test.go
+    reason: Unit tests contain unmistakably synthetic credentials to verify redaction.

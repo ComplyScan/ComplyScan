@@ -138,6 +138,24 @@ Every finding has a stable SHA-256 fingerprint in structured output. Reviewed fi
 
 For an existing repository, `complyscan baseline .` records the current findings in `.complyscan-baseline.json` without storing source evidence. Commit that deterministic file and future scans will report only findings whose fingerprints are new. Use `--baseline path/to/file` to select another baseline for a scan or `--no-baseline` to inspect every finding.
 
+## GitHub Actions
+
+The repository includes a composite action that runs ComplyScan and uploads its SARIF output to GitHub code scanning. The job needs `security-events: write` permission:
+
+```yaml
+permissions:
+  contents: read
+  security-events: write
+
+steps:
+  - uses: actions/checkout@v6
+  - uses: 1eonardodawinki/ComplyScan@v0.2.0
+    with:
+      severity: medium
+```
+
+By default the action fails after uploading when findings meet `fail-on`. Set `fail-on-findings: false` to publish alerts without failing the job, or `upload-results: false` when code-scanning upload is not available.
+
 ## Privacy and security guarantees
 
 ComplyScan v0.1:
