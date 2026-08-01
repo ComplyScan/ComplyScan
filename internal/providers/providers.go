@@ -1,5 +1,5 @@
 // Package providers defines the extension boundary for optional AI-assisted review.
-// The v0.1 scanner does not instantiate providers and makes no network requests.
+// The v0.2 scanner does not instantiate providers and makes no network requests.
 package providers
 
 import (

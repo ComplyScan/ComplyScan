@@ -113,7 +113,7 @@ func (c Config) Validate() error {
 		return errors.New("ai.provider must not be empty")
 	}
 	if c.AI.Provider != "none" {
-		return fmt.Errorf("ai.provider %q is not available in v0.1; use none", c.AI.Provider)
+		return fmt.Errorf("ai.provider %q is not available in v0.2; use none", c.AI.Provider)
 	}
 	known := make(map[string]struct{}, len(supportedRules))
 	for _, id := range supportedRules {

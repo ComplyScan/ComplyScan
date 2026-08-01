@@ -10,6 +10,8 @@ ComplyScan does **not** interpret a complete system, determine an EU AI Act clas
 
 ComplyScan requires Go 1.22 or newer.
 
+Prebuilt archives for macOS, Linux, and Windows are attached to each [GitHub release](https://github.com/1eonardodawinki/ComplyScan/releases). To install with Go:
+
 ```bash
 go install github.com/1eonardodawinki/ComplyScan/cmd/complyscan@latest
 ```
@@ -25,7 +27,7 @@ go build -o complyscan ./cmd/complyscan
 Release builds can inject metadata with `-ldflags`:
 
 ```bash
-go build -ldflags "-X main.version=0.1.0 -X main.commit=$(git rev-parse --short HEAD) -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o complyscan ./cmd/complyscan
+go build -ldflags "-X main.version=0.2.0 -X main.commit=$(git rev-parse --short HEAD) -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o complyscan ./cmd/complyscan
 ```
 
 ## Quick start
@@ -158,7 +160,7 @@ By default the action fails after uploading when findings meet `fail-on`. Set `f
 
 ## Privacy and security guarantees
 
-ComplyScan v0.1:
+The ComplyScan v0.2 CLI:
 
 - runs entirely on the local machine;
 - makes no network requests;
@@ -168,6 +170,8 @@ ComplyScan v0.1:
 - never prints a complete detected secret.
 
 Permission errors are reported as warnings where scanning can safely continue. Source excerpts are short and pass through credential redaction before appearing as evidence.
+
+The optional GitHub Action uploads SARIF metadata to GitHub code scanning when `upload-results` is enabled. That SARIF contains finding messages, repository-relative paths, line numbers, and fingerprints, but not source excerpts or detected credentials.
 
 ## Development
 
@@ -184,14 +188,14 @@ The pipeline is `repository discovery → file classification → deterministic 
 
 Future releases may add:
 
-- local AI review through Ollama;
-- bring-your-own API keys for optional providers;
-- SARIF output and pull-request annotations;
-- more languages and AI frameworks;
-- additional regulatory mappings; and
+- higher-precision rules for more languages, frameworks, model gateways, and data flows;
+- model and AI dependency supply-chain inventory;
+- versioned evidence packs and traceable regulatory mappings;
+- optional, explicitly enabled local review through Ollama;
+- bring-your-own API keys for optional review providers; and
 - optional ComplyScan Cloud integrations.
 
-Provider names in v0.1 are placeholders behind an interface; no paid or network provider is implemented or selected automatically.
+Provider names in v0.2 are placeholders behind an interface; no paid or network provider is implemented or selected automatically.
 
 ## Disclaimer
 
