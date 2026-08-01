@@ -50,6 +50,22 @@ func TestScanJSONOutputAndSeverityFilter(t *testing.T) {
 	}
 }
 
+func TestScanSARIFOutput(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	target := filepath.Join("..", "..", "testdata", "vulnerable-python-ai-app")
+	code := Execute([]string{"scan", "--format", "sarif", "--severity", "high", target}, &stdout, &stderr, testBuild)
+	if code != 1 {
+		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("invalid SARIF JSON: %v\n%s", err, stdout.String())
+	}
+	if decoded["version"] != "2.1.0" || !strings.Contains(stdout.String(), "complyscanFingerprint/v1") {
+		t.Fatalf("unexpected SARIF output:\n%s", stdout.String())
+	}
+}
+
 func TestTerminalScanStreamsFindingsBeforeCompletion(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	target := filepath.Join("..", "..", "testdata", "vulnerable-python-ai-app")

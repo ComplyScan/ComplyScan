@@ -83,8 +83,8 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				target = args[0]
 			}
 			outputFormat := strings.ToLower(strings.TrimSpace(format))
-			if outputFormat != "terminal" && outputFormat != "json" {
-				return fmt.Errorf("invalid format %q (want terminal or json)", format)
+			if outputFormat != "terminal" && outputFormat != "json" && outputFormat != "sarif" {
+				return fmt.Errorf("invalid format %q (want terminal, json, or sarif)", format)
 			}
 			minimumSeverity, err := rules.ParseSeverity(minimum)
 			if err != nil {
@@ -170,6 +170,10 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				if err := report.WriteJSON(stdout, reportValue); err != nil {
 					return err
 				}
+			} else if outputFormat == "sarif" {
+				if err := report.WriteSARIF(stdout, reportValue); err != nil {
+					return err
+				}
 			} else {
 				if err := report.WriteTerminalCompletion(stdout, reportValue); err != nil {
 					return fmt.Errorf("write terminal report: %w", err)
@@ -181,7 +185,7 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			return nil
 		},
 	}
-	command.Flags().StringVarP(&format, "format", "f", "terminal", "output format: terminal or json")
+	command.Flags().StringVarP(&format, "format", "f", "terminal", "output format: terminal, json, or sarif")
 	command.Flags().StringVar(&minimum, "severity", "info", "minimum severity to include in output")
 	command.Flags().StringVar(&configPath, "config", "", "configuration file (defaults to <path>/.complyscan.yml)")
 	command.Flags().BoolVar(&noColor, "no-color", false, "disable ANSI colors")

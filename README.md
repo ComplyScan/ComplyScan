@@ -34,6 +34,7 @@ go build -ldflags "-X main.version=0.1.0 -X main.commit=$(git rev-parse --short 
 complyscan init
 complyscan scan .
 complyscan scan . --format json
+complyscan scan . --format sarif > complyscan.sarif
 complyscan scan . --severity high --no-color
 complyscan scan . --tracked-only
 complyscan scan . --exclude fixtures --max-files 10000
@@ -43,7 +44,7 @@ complyscan version
 
 `scan` defaults to the current directory, so `complyscan scan` and `complyscan scan .` are equivalent.
 
-Terminal scans print findings as rules discover them and finish with the final summary. JSON output remains buffered so it is valid and deterministically ordered.
+Terminal scans print findings as rules discover them and finish with the final summary. JSON and SARIF 2.1.0 output remain buffered so they are valid and deterministically ordered. SARIF includes source locations and stable partial fingerprints for code-scanning integrations.
 
 Example terminal report:
 
