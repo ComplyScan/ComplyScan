@@ -37,6 +37,9 @@ Likelihood and impact are qualitative: low, medium, or high. Residual risk refle
 | R-16 | An incomplete, inaccurate, self-serving, or stale system profile produces misleading applicability screening. | Medium | High | Explicit `unknown` values, controlled enums, visible missing-context output, named/date-stamped confirmation, separate automated and human decisions, and no automated exemption or compliance verdict. Periodic staleness enforcement remains future work. | Medium |
 | R-17 | Users put secrets, personal records, or confidential business details into the version-controlled system profile. | Low | High | Setup asks only for categories and short factual labels, warns against secrets and personal records, and documents the public/version-controlled boundary. Automated profile-content redaction is not yet implemented. | Medium |
 | R-18 | A human-recorded applicability decision is mistaken for independent legal validation by ComplyScan. | Medium | High | Decisions require status, rationale, reviewer, and date; automated screening remains separate; terminal and JSON notes deny legal-determination and certification status. | Medium |
+| R-19 | An incomplete, outdated, or incorrect control-pack mapping omits an applicable obligation or points users to the wrong evidence. | Medium | High | Pack ID, semantic version, release date, official source edition, SHA-256 content digest, explicit provision coverage, visible exclusions, strict schema validation, and primary-source review. The v0.1.0 pack is explicitly limited to Articles 9–15 for candidate high-risk providers. | Medium |
+| R-20 | Keyword matching treats irrelevant documentation as evidence, misses differently worded evidence, or encourages checklist compliance. | High | High | Matches are labelled candidates; grouped terms and eligible file kinds reduce noise; no excerpts are retained; statuses stop at `evidence-found`; verification modes and missing objectives remain visible; framework gaps do not gate CI. Labelled control-evidence evaluation is still required. | Medium |
+| R-21 | Framework JSON discloses sensitive repository structure through evidence paths and system-profile metadata. | Low | High | No source excerpts are included, paths are repository-relative, profile fields are bounded and reject line breaks, and local output is the default. Users are warned not to place secrets, personal records, or confidential case details in committed profiles. | Low |
 
 ## Accepted limitations
 
@@ -54,6 +57,7 @@ The maintained verification baseline includes:
 - secret-redaction and false-positive regression tests;
 - fake-transport Ollama tests covering structured requests, redaction, API errors, identifier binding, remote-endpoint rejection, and zero-finding behavior;
 - profile validation and guided-setup tests covering explicit unknowns, attribution, duplicate IDs, conservative scope screening, existing-config updates, and report separation;
+- embedded pack parsing, source/version/digest validation, role and applicability activation tests, bounded deterministic evidence matching, gap-report tests, and complete-repository checks for changed scans;
 - deterministic GoReleaser archives for macOS, Linux, and Windows on amd64 and arm64; and
 - release checksums and attestations.
 

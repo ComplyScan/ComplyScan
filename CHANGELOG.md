@@ -22,6 +22,10 @@ Target: 0.2.0
 - Guided multi-system profiles covering intended purpose, regions, roles, use-case domains, people, data, deployment, oversight, and attributable human applicability decisions.
 - Conservative EU AI Act scope and possible high-risk screening in `profile show`, terminal scans, and JSON reports.
 - `profile setup` for adding or replacing system context in an existing configuration.
+- A content-addressed `eu-ai-act-high-risk-provider` v0.1.0 pack covering Articles 9–15 with 21 traceable evidence objectives.
+- `framework list` and `framework assess` commands with terminal and versioned JSON reports.
+- Conservative `missing`, `partial`, and `evidence-found` control statuses that never claim satisfaction or compliance.
+- Framework assessment in ordinary terminal and JSON scans without affecting findings, SARIF, or exit status.
 
 ### Changed
 
@@ -30,6 +34,7 @@ Target: 0.2.0
 - AI discovery now requires technical evidence instead of matching plain provider names.
 - Changed-since scans keep documentation and risk-evidence checks repository-wide while scoping code rules to changed files.
 - Forced configuration updates are validated and written atomically while preserving file permissions.
+- Changed-since scans retain the complete repository snapshot for framework and governance evidence assessment.
 
 ### Fixed
 
