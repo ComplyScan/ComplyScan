@@ -39,6 +39,18 @@ inputs:
     description: Optional Git reference used to limit code findings to changed files; requires the reference to be available in the checkout.
     required: false
     default: ""
+  review:
+    description: Optional advisory review provider. Set to ollama only after starting Ollama in the job; leave empty to use repository configuration.
+    required: false
+    default: ""
+  ollama-model:
+    description: Optional Ollama model override.
+    required: false
+    default: ""
+  ollama-endpoint:
+    description: Optional loopback Ollama base URL override.
+    required: false
+    default: ""
 
 outputs:
   exit-code:
@@ -63,7 +75,10 @@ runs:
       env:
         INPUT_CHANGED_SINCE: ${{ inputs.changed-since }}
         INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_OLLAMA_ENDPOINT: ${{ inputs.ollama-endpoint }}
+        INPUT_OLLAMA_MODEL: ${{ inputs.ollama-model }}
         INPUT_PATH: ${{ inputs.path }}
+        INPUT_REVIEW: ${{ inputs.review }}
         INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
         INPUT_SEVERITY: ${{ inputs.severity }}
       run: |
@@ -84,6 +99,15 @@ runs:
         arguments=(scan "$target" --format sarif --severity "$INPUT_SEVERITY")
         if [[ -n "$INPUT_CHANGED_SINCE" ]]; then
           arguments+=(--changed-since "$INPUT_CHANGED_SINCE")
+        fi
+        if [[ -n "$INPUT_REVIEW" ]]; then
+          arguments+=(--review "$INPUT_REVIEW")
+        fi
+        if [[ -n "$INPUT_OLLAMA_MODEL" ]]; then
+          arguments+=(--ollama-model "$INPUT_OLLAMA_MODEL")
+        fi
+        if [[ -n "$INPUT_OLLAMA_ENDPOINT" ]]; then
+          arguments+=(--ollama-endpoint "$INPUT_OLLAMA_ENDPOINT")
         fi
         if [[ -n "$INPUT_CONFIG" ]]; then
           config="$INPUT_CONFIG"
