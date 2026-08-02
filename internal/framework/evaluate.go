@@ -29,10 +29,12 @@ const (
 
 type AssessmentReport struct {
 	SchemaVersion int                `json:"schema_version"`
+	Target        string             `json:"target,omitempty"`
 	Pack          PackReference      `json:"pack"`
 	Source        Source             `json:"source"`
 	Coverage      Coverage           `json:"coverage"`
 	Systems       []SystemAssessment `json:"systems"`
+	Warnings      []string           `json:"warnings,omitempty"`
 	Notes         []string           `json:"notes"`
 }
 
@@ -41,6 +43,7 @@ type PackReference struct {
 	Name     string `json:"name"`
 	Version  string `json:"version"`
 	Released string `json:"released"`
+	Digest   string `json:"digest"`
 }
 
 type SystemAssessment struct {
@@ -94,9 +97,9 @@ func Evaluate(pack Pack, systems []profile.System, repository discovery.Reposito
 	controlCandidates := evaluateControls(pack, repository)
 	report := AssessmentReport{
 		SchemaVersion: 1,
-		Pack:          PackReference{ID: pack.ID, Name: pack.Name, Version: pack.Version, Released: pack.Released},
+		Pack:          PackReference{ID: pack.ID, Name: pack.Name, Version: pack.Version, Released: pack.Released, Digest: pack.Digest},
 		Source:        pack.Source, Coverage: pack.Coverage,
-		Systems: make([]SystemAssessment, 0, len(systems)),
+		Systems: make([]SystemAssessment, 0, len(systems)), Warnings: []string{},
 		Notes: []string{
 			"Statuses describe repository evidence candidates, not legal compliance or operational effectiveness.",
 			"The strongest automated status is evidence-found; every match still requires the pack's stated semantic, technical, and human verification.",

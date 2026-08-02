@@ -119,16 +119,13 @@ func newFrameworkAssessCommand(stdout io.Writer) *cobra.Command {
 				return fmt.Errorf("discover framework evidence in %q: %w", target, err)
 			}
 			report := framework.Evaluate(pack, cfg.Systems, discovered.Repository)
+			report.Target = target
+			report.Warnings = append([]string(nil), discovered.Warnings...)
 			if outputFormat == "json" {
 				return framework.WriteJSON(stdout, report)
 			}
 			if err := framework.WriteAssessmentTerminal(stdout, report); err != nil {
 				return err
-			}
-			for _, warning := range discovered.Warnings {
-				if _, err := fmt.Fprintf(stdout, "Warning: %s\n", warning); err != nil {
-					return err
-				}
 			}
 			return nil
 		},

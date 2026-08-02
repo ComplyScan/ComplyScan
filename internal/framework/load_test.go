@@ -13,6 +13,9 @@ func TestBuiltinEUAIActPackIsVersionedAndCoversArticlesNineToFifteen(t *testing.
 	if pack.Version != "0.1.0" || pack.Source.Reference != "Regulation (EU) 2024/1689" {
 		t.Fatalf("unexpected pack metadata: %#v", pack)
 	}
+	if len(pack.Digest) != 64 {
+		t.Fatalf("pack digest = %q", pack.Digest)
+	}
 	if len(pack.Controls) != 7 {
 		t.Fatalf("controls = %d", len(pack.Controls))
 	}

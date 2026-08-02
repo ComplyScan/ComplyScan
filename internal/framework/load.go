@@ -2,7 +2,9 @@ package framework
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
@@ -68,6 +70,8 @@ func Parse(data []byte) (Pack, error) {
 	if err := pack.Validate(); err != nil {
 		return Pack{}, fmt.Errorf("validate framework pack: %w", err)
 	}
+	digest := sha256.Sum256(data)
+	pack.Digest = hex.EncodeToString(digest[:])
 	return pack, nil
 }
 

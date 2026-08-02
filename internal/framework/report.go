@@ -22,7 +22,7 @@ func ListBuiltins() ([]PackListing, error) {
 	listings := make([]PackListing, 0, len(packs))
 	for _, pack := range packs {
 		listings = append(listings, PackListing{
-			Pack:   PackReference{ID: pack.ID, Name: pack.Name, Version: pack.Version, Released: pack.Released},
+			Pack:   PackReference{ID: pack.ID, Name: pack.Name, Version: pack.Version, Released: pack.Released, Digest: pack.Digest},
 			Source: pack.Source, Coverage: pack.Coverage, Controls: len(pack.Controls),
 		})
 	}
@@ -64,6 +64,14 @@ func WritePackListTerminal(writer io.Writer, listings []PackListing) error {
 
 func WriteAssessmentTerminal(writer io.Writer, report AssessmentReport) error {
 	if _, err := fmt.Fprintf(writer, "Framework assessment: %s @ %s\n", report.Pack.Name, report.Pack.Version); err != nil {
+		return err
+	}
+	if report.Target != "" {
+		if _, err := fmt.Fprintf(writer, "Target: %s\n", report.Target); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(writer, "Pack digest: %s\n", report.Pack.Digest); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(writer, "Source: %s — %s\n\n", report.Source.Reference, report.Source.URL); err != nil {
@@ -119,6 +127,11 @@ func WriteAssessmentTerminal(writer io.Writer, report AssessmentReport) error {
 	}
 	for _, limitation := range report.Coverage.Limitations {
 		if _, err := fmt.Fprintf(writer, "Coverage limitation: %s\n", limitation); err != nil {
+			return err
+		}
+	}
+	for _, warning := range report.Warnings {
+		if _, err := fmt.Fprintf(writer, "Framework warning: %s\n", warning); err != nil {
 			return err
 		}
 	}

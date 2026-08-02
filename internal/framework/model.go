@@ -6,6 +6,7 @@ type Pack struct {
 	Name          string    `yaml:"name" json:"name"`
 	Version       string    `yaml:"version" json:"version"`
 	Released      string    `yaml:"released" json:"released"`
+	Digest        string    `yaml:"-" json:"digest"`
 	Source        Source    `yaml:"source" json:"source"`
 	Coverage      Coverage  `yaml:"coverage" json:"coverage"`
 	Controls      []Control `yaml:"controls" json:"controls"`

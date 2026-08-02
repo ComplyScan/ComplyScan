@@ -354,6 +354,8 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 					return err
 				}
 				frameworkAssessment := framework.Evaluate(pack, cfg.Systems, result.FullRepository)
+				frameworkAssessment.Target = target
+				frameworkAssessment.Warnings = append([]string(nil), result.Warnings...)
 				reportValue.FrameworkAssessment = &frameworkAssessment
 			}
 			if cfg.AI.Provider == "ollama" {
