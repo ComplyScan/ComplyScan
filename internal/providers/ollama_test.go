@@ -107,6 +107,16 @@ func TestNewOllamaRejectsRemoteEndpoint(t *testing.T) {
 	}
 }
 
+func TestOllamaChatURLCanonicalizesLocalhostToLoopbackIP(t *testing.T) {
+	value, err := ollamaChatURL("http://localhost:11434/api/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != "http://127.0.0.1:11434/api/chat" {
+		t.Fatalf("chat URL = %q", value)
+	}
+}
+
 func TestOllamaReviewSkipsHTTPWhenThereAreNoFindings(t *testing.T) {
 	provider, err := NewOllama(OllamaOptions{
 		Endpoint: "http://127.0.0.1:1", Model: "test", Timeout: time.Millisecond, MaxFindings: 1,

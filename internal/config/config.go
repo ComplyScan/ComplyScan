@@ -176,8 +176,8 @@ func (c OllamaConfig) Validate() error {
 	if err != nil || endpoint.Scheme == "" || endpoint.Host == "" {
 		return fmt.Errorf("endpoint %q is not a valid URL", c.Endpoint)
 	}
-	if endpoint.Scheme != "http" && endpoint.Scheme != "https" {
-		return errors.New("endpoint scheme must be http or https")
+	if endpoint.Scheme != "http" {
+		return errors.New("endpoint scheme must be http for the local loopback API")
 	}
 	if endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
 		return errors.New("endpoint must not contain credentials, query parameters, or a fragment")

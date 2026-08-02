@@ -268,8 +268,8 @@ func ollamaChatURL(endpoint string) (string, error) {
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return "", fmt.Errorf("create Ollama provider: invalid endpoint %q", endpoint)
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", errors.New("create Ollama provider: endpoint scheme must be http or https")
+	if parsed.Scheme != "http" {
+		return "", errors.New("create Ollama provider: endpoint scheme must be http for the local loopback API")
 	}
 	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return "", errors.New("create Ollama provider: endpoint must not contain credentials, query parameters, or a fragment")
@@ -279,15 +279,18 @@ func ollamaChatURL(endpoint string) (string, error) {
 	if !strings.EqualFold(hostname, "localhost") && (address == nil || !address.IsLoopback()) {
 		return "", errors.New("create Ollama provider: endpoint must use localhost or a loopback IP address")
 	}
+	if strings.EqualFold(hostname, "localhost") {
+		if port := parsed.Port(); port != "" {
+			parsed.Host = net.JoinHostPort("127.0.0.1", port)
+		} else {
+			parsed.Host = "127.0.0.1"
+		}
+	}
 	path := strings.TrimSuffix(parsed.Path, "/")
 	if path != "" && path != "/api" {
 		return "", errors.New("create Ollama provider: endpoint path must be empty or /api")
 	}
-	if path == "/api" {
-		parsed.Path = "/api/chat"
-	} else {
-		parsed.Path = "/api/chat"
-	}
+	parsed.Path = "/api/chat"
 	return parsed.String(), nil
 }
 

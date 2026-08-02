@@ -103,6 +103,7 @@ func TestValidateRejectsUnsafeOllamaConfiguration(t *testing.T) {
 		change func(*Config)
 	}{
 		{name: "remote endpoint", change: func(cfg *Config) { cfg.AI.Ollama.Endpoint = "https://example.com" }},
+		{name: "TLS endpoint", change: func(cfg *Config) { cfg.AI.Ollama.Endpoint = "https://localhost:11434" }},
 		{name: "credentials", change: func(cfg *Config) { cfg.AI.Ollama.Endpoint = "http://user:pass@localhost:11434" }},
 		{name: "missing model", change: func(cfg *Config) { cfg.AI.Ollama.Model = "" }},
 		{name: "invalid timeout", change: func(cfg *Config) { cfg.AI.Ollama.TimeoutSeconds = 0 }},
