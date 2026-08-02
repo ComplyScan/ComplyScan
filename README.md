@@ -184,6 +184,8 @@ go build ./cmd/complyscan
 
 The pipeline is `repository discovery → file classification → deterministic rules → findings → report`. Add rules by implementing the small `rules.Rule` interface and registering the rule in `rules.DefaultRules`; the scanner itself does not need rule-specific logic. See [the architecture notes](docs/architecture.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
+ComplyScan applies the same evidence discipline to itself. Its maintained [AI applicability assessment](docs/AI_SYSTEM.md) explains why v0.2.0 is currently treated as deterministic software and lists mandatory reassessment triggers. The companion [technical risk assessment](docs/risk-assessment.md) records foreseeable harms, controls, residual risks, and review expectations. These documents support governance; they are not self-certification.
+
 ## Roadmap
 
 Future releases may add:

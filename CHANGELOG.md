@@ -9,6 +9,7 @@
 - Stable finding fingerprints, reasoned suppressions, and source-free baselines.
 - SARIF 2.1.0 output and a reusable GitHub code-scanning action.
 - Cross-platform release archives, SHA-256 checksums, and build attestations.
+- Maintained AI applicability and technical risk assessments for ComplyScan itself.
 
 ### Changed
 
