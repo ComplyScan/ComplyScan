@@ -15,6 +15,7 @@ import (
 	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
 	"github.com/1eonardodawinki/ComplyScan/internal/governance"
 	"github.com/1eonardodawinki/ComplyScan/internal/inventory"
+	"github.com/1eonardodawinki/ComplyScan/internal/profile"
 	"github.com/1eonardodawinki/ComplyScan/internal/providers"
 	"github.com/1eonardodawinki/ComplyScan/internal/report"
 	"github.com/1eonardodawinki/ComplyScan/internal/rules"
@@ -67,6 +68,7 @@ func newRootCommand(stdout, stderr io.Writer, build BuildInfo) *cobra.Command {
 	root.AddCommand(newGenerateCommand(stdout, build))
 	root.AddCommand(newBaselineCommand(stdout))
 	root.AddCommand(newInitCommand(stdout))
+	root.AddCommand(newProfileCommand(stdout))
 	root.AddCommand(newVersionCommand(stdout, build))
 	return root
 }
@@ -342,6 +344,10 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			}
 			visible := report.FilterByMinimum(result.Findings, minimumSeverity)
 			reportValue := report.New(target, build.Version, visible, result.Warnings, result.Suppressed)
+			if len(cfg.Systems) > 0 {
+				assessment := profile.AssessEUAIAct(cfg.Systems)
+				reportValue.Applicability = &assessment
+			}
 			if cfg.AI.Provider == "ollama" {
 				if outputFormat == "terminal" {
 					if _, err := fmt.Fprintf(stdout, "Ollama advisory review requested for %d finding(s) with %s...\n\n", len(visible), cfg.AI.Ollama.Model); err != nil {

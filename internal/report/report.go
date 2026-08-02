@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/1eonardodawinki/ComplyScan/internal/profile"
 	"github.com/1eonardodawinki/ComplyScan/internal/providers"
 	"github.com/1eonardodawinki/ComplyScan/internal/rules"
 )
@@ -26,13 +27,14 @@ type Summary struct {
 }
 
 type Report struct {
-	Tool       Tool                    `json:"tool"`
-	Target     string                  `json:"target"`
-	Summary    Summary                 `json:"summary"`
-	Findings   []rules.Finding         `json:"findings"`
-	Warnings   []string                `json:"warnings,omitempty"`
-	Suppressed int                     `json:"suppressed"`
-	Review     *providers.ReviewResult `json:"review,omitempty"`
+	Tool          Tool                      `json:"tool"`
+	Target        string                    `json:"target"`
+	Summary       Summary                   `json:"summary"`
+	Findings      []rules.Finding           `json:"findings"`
+	Warnings      []string                  `json:"warnings,omitempty"`
+	Suppressed    int                       `json:"suppressed"`
+	Applicability *profile.AssessmentReport `json:"applicability,omitempty"`
+	Review        *providers.ReviewResult   `json:"review,omitempty"`
 }
 
 type TerminalOptions struct {
@@ -106,6 +108,11 @@ func WriteTerminal(w io.Writer, report Report, options TerminalOptions) error {
 			return err
 		}
 	}
+	if report.Applicability != nil {
+		if err := profile.WriteTerminal(w, *report.Applicability); err != nil {
+			return err
+		}
+	}
 	if report.Review != nil {
 		if err := WriteTerminalReview(w, *report.Review); err != nil {
 			return err
@@ -146,6 +153,11 @@ func WriteTerminalFinding(w io.Writer, finding rules.Finding, options TerminalOp
 
 // WriteTerminalCompletion closes a streaming report with final counts.
 func WriteTerminalCompletion(w io.Writer, report Report) error {
+	if report.Applicability != nil {
+		if err := profile.WriteTerminal(w, *report.Applicability); err != nil {
+			return err
+		}
+	}
 	if report.Review != nil {
 		if err := WriteTerminalReview(w, *report.Review); err != nil {
 			return err

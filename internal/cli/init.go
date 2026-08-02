@@ -161,6 +161,12 @@ func collectSystemProfile(input io.Reader, output io.Writer, target string, now 
 	if !strings.EqualFold(reviewer, "unknown") {
 		value.ProfileReview = profile.ProfileReview{Status: profile.ReviewConfirmed, ReviewedBy: reviewer, ReviewedAt: now.Format(time.DateOnly)}
 	}
+	if _, err := fmt.Fprintln(output, "\nProvisional screening from the declared facts:"); err != nil {
+		return profile.System{}, err
+	}
+	if err := profile.WriteTerminal(output, profile.AssessEUAIAct([]profile.System{value})); err != nil {
+		return profile.System{}, err
+	}
 	decisionStatus, err := promptChoice(prompt, "Human EU AI Act applicability decision", profile.ApplicabilityNeedsReview,
 		profile.ApplicabilityNeedsReview, profile.ApplicabilityApplicable, profile.ApplicabilityNotApplicable, profile.ApplicabilityUncertain)
 	if err != nil {

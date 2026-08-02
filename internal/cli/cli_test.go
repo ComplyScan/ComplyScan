@@ -404,3 +404,78 @@ func TestInitRejectsConflictingInteractionFlags(t *testing.T) {
 		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
 	}
 }
+
+func TestProfileSetupAddsContextToExistingConfig(t *testing.T) {
+	target := t.TempDir()
+	if err := config.Write(filepath.Join(target, config.FileName), config.Default(), false); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	input := strings.NewReader(strings.Repeat("\n", 17))
+	code := executeWithInput([]string{"profile", "setup", "--interactive", target}, input, &stdout, &stderr, testBuild)
+	if code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	cfg, err := config.Load(filepath.Join(target, config.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Systems) != 1 || cfg.Systems[0].ProfileReview.Status != profile.ReviewDraft {
+		t.Fatalf("unexpected systems: %#v", cfg.Systems)
+	}
+	if !strings.Contains(stdout.String(), "Provisional screening") || !strings.Contains(stdout.String(), "Added system profile") {
+		t.Fatalf("unexpected output:\n%s", stdout.String())
+	}
+}
+
+func TestProfileShowWritesStructuredApplicabilityJSON(t *testing.T) {
+	target := t.TempDir()
+	cfg := config.Default()
+	cfg.Systems = []profile.System{profile.NewDraftSystem("example", "Example")}
+	for id := range cfg.Rules {
+		cfg.Rules[id] = config.RuleConfig{Enabled: false}
+	}
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"profile", "show", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
+	}
+	var decoded profile.AssessmentReport
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Systems) != 1 || decoded.Systems[0].AutomatedScope != profile.ScopeNeedsContext {
+		t.Fatalf("unexpected assessment: %#v", decoded)
+	}
+}
+
+func TestScanJSONIncludesApplicabilityWithoutChangingFindings(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Systems = []profile.System{profile.NewDraftSystem("example", "Example")}
+	for id := range cfg.Rules {
+		cfg.Rules[id] = config.RuleConfig{Enabled: false}
+	}
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
+	}
+	var decoded report.Report
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Applicability == nil || len(decoded.Applicability.Systems) != 1 {
+		t.Fatalf("missing applicability: %#v", decoded.Applicability)
+	}
+	if decoded.Summary.Total != 0 {
+		t.Fatalf("applicability changed findings: %#v", decoded.Summary)
+	}
+}
