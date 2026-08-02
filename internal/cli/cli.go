@@ -13,6 +13,7 @@ import (
 	"github.com/1eonardodawinki/ComplyScan/internal/baseline"
 	"github.com/1eonardodawinki/ComplyScan/internal/config"
 	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
+	"github.com/1eonardodawinki/ComplyScan/internal/framework"
 	"github.com/1eonardodawinki/ComplyScan/internal/governance"
 	"github.com/1eonardodawinki/ComplyScan/internal/inventory"
 	"github.com/1eonardodawinki/ComplyScan/internal/profile"
@@ -69,6 +70,7 @@ func newRootCommand(stdout, stderr io.Writer, build BuildInfo) *cobra.Command {
 	root.AddCommand(newBaselineCommand(stdout))
 	root.AddCommand(newInitCommand(stdout))
 	root.AddCommand(newProfileCommand(stdout))
+	root.AddCommand(newFrameworkCommand(stdout))
 	root.AddCommand(newVersionCommand(stdout, build))
 	return root
 }
@@ -347,6 +349,12 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			if len(cfg.Systems) > 0 {
 				assessment := profile.AssessEUAIAct(cfg.Systems)
 				reportValue.Applicability = &assessment
+				pack, err := framework.LoadBuiltin(framework.EUAIActHighRiskProviderPackID)
+				if err != nil {
+					return err
+				}
+				frameworkAssessment := framework.Evaluate(pack, cfg.Systems, result.FullRepository)
+				reportValue.FrameworkAssessment = &frameworkAssessment
 			}
 			if cfg.AI.Provider == "ollama" {
 				if outputFormat == "terminal" {

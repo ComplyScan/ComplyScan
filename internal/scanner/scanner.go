@@ -23,10 +23,11 @@ type Options struct {
 }
 
 type Result struct {
-	Repository discovery.Repository
-	Findings   []rules.Finding
-	Warnings   []string
-	Suppressed int
+	Repository     discovery.Repository
+	FullRepository discovery.Repository
+	Findings       []rules.Finding
+	Warnings       []string
+	Suppressed     int
 }
 
 type Engine struct {
@@ -62,7 +63,7 @@ func (e *Engine) Scan(ctx context.Context, target string, options Options) (Resu
 		}
 		scopedRepository = filterRepository(fullRepository, changed)
 	}
-	result := Result{Repository: scopedRepository, Warnings: discovered.Warnings}
+	result := Result{Repository: scopedRepository, FullRepository: fullRepository, Warnings: discovered.Warnings}
 	recordFinding := func(finding rules.Finding) error {
 		finding.Fingerprint = rules.ComputeFingerprint(finding)
 		if options.Suppress != nil && options.Suppress(finding) {

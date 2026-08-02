@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
+	"github.com/1eonardodawinki/ComplyScan/internal/framework"
 	"github.com/1eonardodawinki/ComplyScan/internal/profile"
 	"github.com/1eonardodawinki/ComplyScan/internal/providers"
 	"github.com/1eonardodawinki/ComplyScan/internal/rules"
@@ -116,6 +118,29 @@ func TestTerminalCompletionShowsApplicabilitySeparatelyFromFindings(t *testing.T
 		t.Fatal(err)
 	}
 	for _, expected := range []string{"EU AI Act applicability profile", "Automated scope: needs-context", "Scan complete: 0 potential issues"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("terminal output missing %q:\n%s", expected, output.String())
+		}
+	}
+}
+
+func TestTerminalCompletionShowsFrameworkGapsSeparatelyFromFindings(t *testing.T) {
+	pack, err := framework.LoadBuiltin(framework.EUAIActHighRiskProviderPackID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	system := profile.NewDraftSystem("candidate", "Candidate")
+	system.OrganizationRoles = []profile.OrganizationRole{profile.RoleProvider}
+	system.OperatingRegions = []profile.OperatingRegion{profile.RegionEU}
+	system.UseCaseDomains = []profile.UseCaseDomain{profile.DomainEmployment}
+	assessment := framework.Evaluate(pack, []profile.System{system}, discovery.Repository{})
+	value := New(".", "0.2.0-dev", nil, nil, 0)
+	value.FrameworkAssessment = &assessment
+	var output bytes.Buffer
+	if err := WriteTerminalCompletion(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"Framework assessment", "MISSING", "Control summary: 7 missing", "Scan complete: 0 potential issues"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("terminal output missing %q:\n%s", expected, output.String())
 		}

@@ -162,6 +162,9 @@ func TestChangedSinceScopesCodeRulesButKeepsGovernanceRepositoryWide(t *testing.
 	if len(result.Repository.Files) != 1 || result.Repository.Files[0].Path != "new.py" {
 		t.Fatalf("scoped repository = %#v", result.Repository.Files)
 	}
+	if len(result.FullRepository.Files) != 3 {
+		t.Fatalf("full repository lost governance evidence: %#v", result.FullRepository.Files)
+	}
 }
 
 func writeScannerFile(t *testing.T, root, path, content string) {
