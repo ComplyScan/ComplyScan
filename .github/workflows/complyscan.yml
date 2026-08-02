@@ -1,4 +1,4 @@
-name: ComplyScan
+name: ComplyScan self-scan
 
 on:
   push:
@@ -10,12 +10,15 @@ permissions:
   security-events: write
 
 jobs:
-  scan:
-    name: AI compliance engineering scan
+  self-scan:
+    # Dogfood the CLI and SARIF integration on every change. This is a
+    # regression check and evidence input, not a compliance certification.
+    name: Scan ComplyScan with itself
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: ./
+      - name: Check out ComplyScan
+        uses: actions/checkout@v6
+      - name: Run the repository's ComplyScan action
+        uses: ./
         with:
           severity: medium
-          fail-on-findings: false
