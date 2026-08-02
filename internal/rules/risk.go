@@ -16,13 +16,19 @@ func (MissingRiskClassificationRule) Run(ctx context.Context, repo discovery.Rep
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if len(detectAIUsage(ctx, repo)) == 0 || hasRiskEvidence(repo) {
+	matches := detectAIUsage(ctx, repo)
+	if len(matches) == 0 || hasRiskEvidence(repo) {
 		return nil, nil
 	}
+	representative := matches[0]
 	return []Finding{{
 		RuleID: "AI-RISK-001", Title: "AI risk classification not found",
 		Severity: SeverityMedium, Category: "risk-classification-evidence",
 		Message:     "AI-related technical usage was detected, but no repository-level AI risk-classification evidence was found. This does not establish legal non-compliance.",
+		Path:        representative.Path,
+		StartLine:   representative.Line,
+		EndLine:     representative.Line,
+		Locations:   representativeLocations(matches, 3),
 		Remediation: "Add a reviewed AI risk assessment describing the system context, intended purpose, affected people, preliminary risk classification, and responsible owner.",
 		Confidence:  "medium",
 	}}, nil

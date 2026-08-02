@@ -16,13 +16,19 @@ func (MissingDocumentationRule) Run(ctx context.Context, repo discovery.Reposito
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if len(detectAIUsage(ctx, repo)) == 0 || hasAIDocumentation(repo) {
+	matches := detectAIUsage(ctx, repo)
+	if len(matches) == 0 || hasAIDocumentation(repo) {
 		return nil, nil
 	}
+	representative := matches[0]
 	return []Finding{{
 		RuleID: "AI-DOC-001", Title: "AI-system documentation not found",
 		Severity: SeverityMedium, Category: "governance-evidence",
 		Message:     "AI-related technical usage was detected, but no model card or AI-system documentation was found in the repository.",
+		Path:        representative.Path,
+		StartLine:   representative.Line,
+		EndLine:     representative.Line,
+		Locations:   representativeLocations(matches, 3),
 		Remediation: "Add a model card or AI-system document covering purpose, capabilities, limitations, data, ownership, evaluation, and operational controls.",
 		Confidence:  "medium",
 	}}, nil

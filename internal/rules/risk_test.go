@@ -18,6 +18,9 @@ func TestMissingRiskClassificationRule(t *testing.T) {
 	if len(findings) != 1 || findings[0].Severity != SeverityMedium {
 		t.Fatalf("unexpected findings: %#v", findings)
 	}
+	if findings[0].Path != "package.json" || findings[0].StartLine != 1 || len(findings[0].Locations) != 1 {
+		t.Fatalf("missing representative location: %#v", findings[0])
+	}
 
 	documented := discovery.Repository{Files: []discovery.File{
 		aiFile,

@@ -84,6 +84,10 @@ type sarifProperties struct {
 
 // WriteSARIF writes a SARIF 2.1.0 log suitable for GitHub code scanning.
 func WriteSARIF(writer io.Writer, report Report) error {
+	results, err := sarifResults(report.Findings)
+	if err != nil {
+		return err
+	}
 	log := sarifLog{
 		Schema:  sarifSchema,
 		Version: "2.1.0",
@@ -94,7 +98,7 @@ func WriteSARIF(writer io.Writer, report Report) error {
 				InformationURI: "https://github.com/1eonardodawinki/ComplyScan",
 				Rules:          sarifRules(report.Findings),
 			}},
-			Results: sarifResults(report.Findings),
+			Results: results,
 		}},
 	}
 	encoder := json.NewEncoder(writer)
@@ -133,14 +137,18 @@ func sarifRules(findings []rules.Finding) []sarifRule {
 	return values
 }
 
-func sarifResults(findings []rules.Finding) []sarifResult {
+func sarifResults(findings []rules.Finding) ([]sarifResult, error) {
 	values := make([]sarifResult, 0, len(findings))
 	for _, finding := range findings {
+		locations := sarifLocations(finding)
+		if len(locations) == 0 {
+			return nil, fmt.Errorf("encode SARIF report: finding %s has no source location", finding.RuleID)
+		}
 		values = append(values, sarifResult{
 			RuleID:    finding.RuleID,
 			Level:     sarifLevel(finding.Severity),
 			Message:   sarifMessage{Text: finding.Title + ": " + finding.Message},
-			Locations: sarifLocations(finding),
+			Locations: locations,
 			PartialFingerprints: map[string]string{
 				"complyscanFingerprint/v1": finding.Fingerprint,
 			},
@@ -150,16 +158,21 @@ func sarifResults(findings []rules.Finding) []sarifResult {
 			},
 		})
 	}
-	return values
+	return values, nil
 }
 
 func sarifLocations(finding rules.Finding) []sarifLocation {
 	if len(finding.Locations) > 0 {
 		locations := make([]sarifLocation, 0, len(finding.Locations))
 		for _, location := range finding.Locations {
+			if location.Path == "" {
+				continue
+			}
 			locations = append(locations, newSARIFLocation(location.Path, location.StartLine, location.EndLine))
 		}
-		return locations
+		if len(locations) > 0 {
+			return locations
+		}
 	}
 	if finding.Path == "" {
 		return nil

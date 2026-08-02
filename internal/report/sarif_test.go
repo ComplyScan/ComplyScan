@@ -39,3 +39,21 @@ func TestWriteSARIFIncludesRulesLocationsAndFingerprints(t *testing.T) {
 		}
 	}
 }
+
+func TestWriteSARIFRejectsLocationlessFindings(t *testing.T) {
+	value := New(".", "0.2.0", []rules.Finding{{
+		Fingerprint: strings.Repeat("a", 64),
+		RuleID:      "TEST-001",
+		Title:       "Repository finding",
+		Severity:    rules.SeverityMedium,
+		Message:     "No source location.",
+	}}, nil, 0)
+	var output bytes.Buffer
+	err := WriteSARIF(&output, value)
+	if err == nil || !strings.Contains(err.Error(), "TEST-001 has no source location") {
+		t.Fatalf("got error %v", err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("invalid SARIF was written: %s", output.String())
+	}
+}
