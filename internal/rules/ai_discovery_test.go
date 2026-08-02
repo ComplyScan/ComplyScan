@@ -8,20 +8,22 @@ import (
 )
 
 func TestAIUsageRuleDetectsSupportedProvidersAndFrameworks(t *testing.T) {
-	repo := repositoryWithFile("package.json", discovery.KindManifest, `
-openai
-anthropic
-@google/generative-ai
-mistralai
-cohere
-huggingface_hub
-ollama
-litellm
-langchain-openai
-llama_index
-@ai-sdk/openai
-openrouter
-`)
+	repo := repositoryWithFile("package.json", discovery.KindManifest, `{
+  "dependencies": {
+    "openai": "1.0.0",
+    "@anthropic-ai/sdk": "1.0.0",
+    "@google/generative-ai": "1.0.0",
+    "@mistralai/mistralai": "1.0.0",
+    "cohere-ai": "1.0.0",
+    "@huggingface/inference": "1.0.0",
+    "ollama": "1.0.0",
+    "litellm": "1.0.0",
+    "langchain": "1.0.0",
+    "llamaindex": "1.0.0",
+    "@ai-sdk/openai": "1.0.0",
+    "@openrouter/ai-sdk-provider": "1.0.0"
+  }
+}`)
 	findings, err := (AIUsageRule{}).Run(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)

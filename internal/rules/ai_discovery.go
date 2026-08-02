@@ -20,7 +20,7 @@ func (rule AIUsageRule) Run(ctx context.Context, repo discovery.Repository) ([]F
 
 func (AIUsageRule) RunStreaming(ctx context.Context, repo discovery.Repository, emit FindingEmitter) error {
 	groups := make(map[string][]aiMatch)
-	order := make([]string, 0, len(aiPatterns))
+	var order []string
 	for _, match := range detectAIUsage(ctx, repo) {
 		if _, ok := groups[match.Name]; !ok {
 			order = append(order, match.Name)
@@ -35,7 +35,7 @@ func (AIUsageRule) RunStreaming(ctx context.Context, repo discovery.Repository, 
 		matches := groups[name]
 		representative := matches[0]
 		locations := representativeLocations(matches, 3)
-		message := fmt.Sprintf("ComplyScan detected likely references to %s in %d file(s). Confirm how this component is used and include it in the system inventory.", name, len(matches))
+		message := fmt.Sprintf("ComplyScan detected %d technical signal(s) for %s across %d file(s). Confirm how this component is used and include it in the system inventory.", len(matches), name, distinctFileCount(matches))
 		if examples := locationSummary(locations); examples != "" {
 			message += " Representative locations: " + examples + "."
 		}
@@ -48,7 +48,7 @@ func (AIUsageRule) RunStreaming(ctx context.Context, repo discovery.Repository, 
 			EndLine:     representative.Line,
 			Evidence:    representative.Evidence,
 			Remediation: "Review the detected component and document its purpose, data flows, model ownership, and operational controls.",
-			Confidence:  "high",
+			Confidence:  representative.Confidence,
 			Occurrences: len(matches),
 			Locations:   locations,
 		}); err != nil {
@@ -56,6 +56,14 @@ func (AIUsageRule) RunStreaming(ctx context.Context, repo discovery.Repository, 
 		}
 	}
 	return nil
+}
+
+func distinctFileCount(matches []aiMatch) int {
+	paths := make(map[string]struct{}, len(matches))
+	for _, match := range matches {
+		paths[match.Path] = struct{}{}
+	}
+	return len(paths)
 }
 
 func representativeLocations(matches []aiMatch, limit int) []Location {

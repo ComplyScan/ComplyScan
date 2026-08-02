@@ -8,7 +8,7 @@ import (
 )
 
 func TestMissingRiskClassificationRule(t *testing.T) {
-	aiFile := discovery.File{Path: "package.json", Kind: discovery.KindManifest, Content: []byte(`{"openai":"1.0"}`)}
+	aiFile := discovery.File{Path: "package.json", Kind: discovery.KindManifest, Content: []byte(`{"dependencies":{"openai":"1.0"}}`)}
 	rule := MissingRiskClassificationRule{}
 
 	findings, err := rule.Run(context.Background(), discovery.Repository{Files: []discovery.File{aiFile}})
