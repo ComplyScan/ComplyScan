@@ -84,3 +84,14 @@ func TestValidateSystemsRejectsDuplicateIDs(t *testing.T) {
 		t.Fatalf("got error %v", err)
 	}
 }
+
+func TestSlugIDCreatesValidDraftIdentifier(t *testing.T) {
+	id := SlugID("MSc Individual Project!")
+	if id != "msc-individual-project" {
+		t.Fatalf("SlugID() = %q", id)
+	}
+	value := NewDraftSystem(id, "MSc Individual Project")
+	if err := value.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}

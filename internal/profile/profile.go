@@ -93,6 +93,40 @@ const FrameworkEUAIAct = "eu-ai-act"
 
 var systemIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
+// NewDraftSystem returns an explicit-unknown profile suitable for guided setup.
+func NewDraftSystem(id, name string) System {
+	return System{
+		ID: id, Name: name, IntendedPurpose: "unknown", LifecycleStage: LifecycleUnknown,
+		OrganizationRoles: []OrganizationRole{RoleUnknown}, OperatingRegions: []OperatingRegion{RegionUnknown},
+		UseCaseDomains: []UseCaseDomain{DomainUnknown}, Users: []string{"unknown"}, AffectedGroups: []string{"unknown"},
+		DecisionImpact: ImpactUnknown, HumanOversight: OversightUnknown,
+		Data:             DataProfile{PersonalData: TriUnknown, SpecialCategoryData: TriUnknown, ChildrenData: TriUnknown},
+		DeploymentModels: []DeploymentModel{DeploymentUnknown}, ProfileReview: ProfileReview{Status: ReviewDraft},
+		Applicability: []ApplicabilityDecision{{Framework: FrameworkEUAIAct, Status: ApplicabilityNeedsReview}},
+	}
+}
+
+// SlugID produces a stable, valid default ID from a directory or system name.
+func SlugID(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var result strings.Builder
+	lastSeparator := false
+	for _, character := range value {
+		valid := character >= 'a' && character <= 'z' || character >= '0' && character <= '9' || character == '.' || character == '_'
+		if valid {
+			result.WriteRune(character)
+			lastSeparator = false
+		} else if !lastSeparator && result.Len() > 0 {
+			result.WriteByte('-')
+			lastSeparator = true
+		}
+		if result.Len() >= 64 {
+			break
+		}
+	}
+	return strings.Trim(result.String(), "-._")
+}
+
 type System struct {
 	ID                string                  `yaml:"id" json:"id"`
 	Name              string                  `yaml:"name" json:"name"`

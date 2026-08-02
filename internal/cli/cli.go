@@ -35,7 +35,12 @@ type exitError struct {
 func (e *exitError) Error() string { return fmt.Sprintf("exit status %d", e.code) }
 
 func Execute(args []string, stdout, stderr io.Writer, build BuildInfo) int {
+	return executeWithInput(args, os.Stdin, stdout, stderr, build)
+}
+
+func executeWithInput(args []string, stdin io.Reader, stdout, stderr io.Writer, build BuildInfo) int {
 	command := newRootCommand(stdout, stderr, build)
+	command.SetIn(stdin)
 	command.SetArgs(args)
 	if err := command.Execute(); err != nil {
 		var status *exitError
@@ -497,25 +502,6 @@ func formatByteCount(value int64) string {
 		return fmt.Sprintf("%.1f KiB", float64(value)/(1<<10))
 	}
 	return fmt.Sprintf("%.1f MiB", float64(value)/mebibyte)
-}
-
-func newInitCommand(stdout io.Writer) *cobra.Command {
-	var force bool
-	command := &cobra.Command{
-		Use:   "init",
-		Short: "Create a default .complyscan.yml configuration",
-		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			path := config.FileName
-			if err := config.WriteDefault(path, force); err != nil {
-				return err
-			}
-			_, err := fmt.Fprintf(stdout, "Created %s\n", path)
-			return err
-		},
-	}
-	command.Flags().BoolVar(&force, "force", false, "overwrite an existing configuration")
-	return command
 }
 
 func newVersionCommand(stdout io.Writer, build BuildInfo) *cobra.Command {

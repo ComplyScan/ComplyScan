@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/1eonardodawinki/ComplyScan/internal/config"
 	"github.com/1eonardodawinki/ComplyScan/internal/inventory"
+	"github.com/1eonardodawinki/ComplyScan/internal/profile"
 	"github.com/1eonardodawinki/ComplyScan/internal/providers"
 	"github.com/1eonardodawinki/ComplyScan/internal/report"
 )
@@ -341,5 +343,64 @@ func TestInitCommandProtectsExistingConfig(t *testing.T) {
 	stderr.Reset()
 	if code := Execute([]string{"init", "--force"}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("forced init exit code = %d: %s", code, stderr.String())
+	}
+}
+
+func TestInteractiveInitCollectsAttributedSystemContext(t *testing.T) {
+	target := t.TempDir()
+	input := strings.Join([]string{
+		"", "Candidate ranking", "Rank job applications for recruiter review.", "development", "provider", "eu,uk", "employment",
+		"recruiters", "job applicants", "advisory", "required", "yes", "unknown", "no", "private-customer,api",
+		"A. Reviewer", "applicable", "The system is offered to EU customers by its provider.", "",
+	}, "\n") + "\n"
+	var stdout, stderr bytes.Buffer
+	code := executeWithInput([]string{"init", "--interactive", target}, strings.NewReader(input), &stdout, &stderr, testBuild)
+	if code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	cfg, err := config.Load(filepath.Join(target, config.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Systems) != 1 {
+		t.Fatalf("systems = %#v", cfg.Systems)
+	}
+	system := cfg.Systems[0]
+	if system.Name != "Candidate ranking" || system.UseCaseDomains[0] != profile.DomainEmployment || system.Data.PersonalData != profile.TriYes {
+		t.Fatalf("unexpected system profile: %#v", system)
+	}
+	if system.ProfileReview.Status != profile.ReviewConfirmed || system.ProfileReview.ReviewedBy != "A. Reviewer" {
+		t.Fatalf("unexpected profile review: %#v", system.ProfileReview)
+	}
+	if len(system.Applicability) != 1 || system.Applicability[0].Status != profile.ApplicabilityApplicable || system.Applicability[0].Rationale == "" {
+		t.Fatalf("unexpected applicability: %#v", system.Applicability)
+	}
+	for _, expected := range []string{"System applicability setup", "Human EU AI Act applicability decision", "1 system profile"} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("output missing %q:\n%s", expected, stdout.String())
+		}
+	}
+}
+
+func TestNonInteractiveInitCreatesConfigWithoutInventingContext(t *testing.T) {
+	target := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	code := executeWithInput([]string{"init", "--non-interactive", target}, strings.NewReader("ignored"), &stdout, &stderr, testBuild)
+	if code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
+	}
+	cfg, err := config.Load(filepath.Join(target, config.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Systems) != 0 || !strings.Contains(stdout.String(), "no system profile was collected") {
+		t.Fatalf("systems=%#v output=%q", cfg.Systems, stdout.String())
+	}
+}
+
+func TestInitRejectsConflictingInteractionFlags(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := executeWithInput([]string{"init", "--interactive", "--non-interactive"}, strings.NewReader(""), &stdout, &stderr, testBuild); code != 2 {
+		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
 	}
 }
