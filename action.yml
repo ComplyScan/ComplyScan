@@ -35,6 +35,10 @@ inputs:
     description: Fail the action when a finding meets the configured fail-on threshold.
     required: false
     default: "true"
+  changed-since:
+    description: Optional Git reference used to limit code findings to changed files; requires the reference to be available in the checkout.
+    required: false
+    default: ""
 
 outputs:
   exit-code:
@@ -57,6 +61,7 @@ runs:
       id: scan
       shell: bash
       env:
+        INPUT_CHANGED_SINCE: ${{ inputs.changed-since }}
         INPUT_CONFIG: ${{ inputs.config }}
         INPUT_PATH: ${{ inputs.path }}
         INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
@@ -77,6 +82,9 @@ runs:
         go -C "$GITHUB_ACTION_PATH" build -o "$binary" ./cmd/complyscan
 
         arguments=(scan "$target" --format sarif --severity "$INPUT_SEVERITY")
+        if [[ -n "$INPUT_CHANGED_SINCE" ]]; then
+          arguments+=(--changed-since "$INPUT_CHANGED_SINCE")
+        fi
         if [[ -n "$INPUT_CONFIG" ]]; then
           config="$INPUT_CONFIG"
           if [[ "$config" != /* ]]; then

@@ -12,6 +12,8 @@ type MissingDocumentationRule struct{}
 
 func (MissingDocumentationRule) ID() string { return "AI-DOC-001" }
 
+func (MissingDocumentationRule) RepositoryWide() bool { return true }
+
 func (MissingDocumentationRule) Run(ctx context.Context, repo discovery.Repository) ([]Finding, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

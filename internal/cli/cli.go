@@ -217,6 +217,7 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 		maxTotalBytes             int64
 		baselinePath              string
 		noBaseline                bool
+		changedSince              string
 	)
 	command := &cobra.Command{
 		Use:   "scan [path]",
@@ -287,13 +288,18 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				MaxTotalBytes:             effectiveMaxTotalBytes,
 				IncludeNestedRepositories: cfg.Scan.IncludeNestedRepositories || includeNestedRepositories,
 				TrackedOnly:               cfg.Scan.TrackedOnly || trackedOnly,
+				ChangedSince:              changedSince,
 				RuleEnabled:               cfg.RuleEnabled,
 				Suppress: func(finding rules.Finding) bool {
 					return cfg.FindingSuppressed(finding) || baselineLoaded && accepted.Contains(finding.Fingerprint)
 				},
 			}
 			if outputFormat == "terminal" {
-				if _, err := fmt.Fprintf(stdout, "ComplyScan scanning %s...\n\n", target); err != nil {
+				scope := ""
+				if changedSince != "" {
+					scope = fmt.Sprintf(" (files changed since %s; governance remains repository-wide)", changedSince)
+				}
+				if _, err := fmt.Fprintf(stdout, "ComplyScan scanning %s%s...\n\n", target, scope); err != nil {
 					return fmt.Errorf("write terminal report: %w", err)
 				}
 				scanOptions.OnFinding = func(finding rules.Finding) error {
@@ -341,6 +347,7 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().Int64Var(&maxTotalBytes, "max-total-bytes", 0, "maximum total bytes of text content to read")
 	command.Flags().StringVar(&baselinePath, "baseline", "", "baseline file (relative to the scan target)")
 	command.Flags().BoolVar(&noBaseline, "no-baseline", false, "do not apply a configured baseline")
+	command.Flags().StringVar(&changedSince, "changed-since", "", "scan code files changed since a Git reference; governance checks remain repository-wide")
 	return command
 }
 

@@ -15,6 +15,7 @@ type Options struct {
 	MaxTotalBytes             int64
 	IncludeNestedRepositories bool
 	TrackedOnly               bool
+	ChangedSince              string
 	RuleEnabled               func(id string) bool
 	Suppress                  func(rules.Finding) bool
 	OnFinding                 rules.FindingEmitter
@@ -52,7 +53,16 @@ func (e *Engine) Scan(ctx context.Context, target string, options Options) (Resu
 		return Result{}, err
 	}
 
-	result := Result{Repository: discovered.Repository, Warnings: discovered.Warnings}
+	fullRepository := discovered.Repository
+	scopedRepository := fullRepository
+	if options.ChangedSince != "" {
+		changed, err := discovery.ChangedPaths(ctx, target, options.ChangedSince)
+		if err != nil {
+			return Result{}, err
+		}
+		scopedRepository = filterRepository(fullRepository, changed)
+	}
+	result := Result{Repository: scopedRepository, Warnings: discovered.Warnings}
 	recordFinding := func(finding rules.Finding) error {
 		finding.Fingerprint = rules.ComputeFingerprint(finding)
 		if options.Suppress != nil && options.Suppress(finding) {
@@ -65,13 +75,23 @@ func (e *Engine) Scan(ctx context.Context, target string, options Options) (Resu
 		}
 		return nil
 	}
-	ctx = rules.WithRepositoryAnalysis(ctx, discovered.Repository)
+	scopedContext := rules.WithRepositoryAnalysis(ctx, scopedRepository)
+	fullContext := scopedContext
+	if options.ChangedSince != "" {
+		fullContext = rules.WithRepositoryAnalysis(ctx, fullRepository)
+	}
 	for _, rule := range e.rules {
 		if options.RuleEnabled != nil && !options.RuleEnabled(rule.ID()) {
 			continue
 		}
+		ruleRepository := scopedRepository
+		ruleContext := scopedContext
+		if repositoryWide, ok := rule.(rules.RepositoryWideRule); ok && repositoryWide.RepositoryWide() {
+			ruleRepository = fullRepository
+			ruleContext = fullContext
+		}
 		if streamingRule, ok := rule.(rules.StreamingRule); ok && options.OnFinding != nil {
-			err := streamingRule.RunStreaming(ctx, discovered.Repository, func(finding rules.Finding) error {
+			err := streamingRule.RunStreaming(ruleContext, ruleRepository, func(finding rules.Finding) error {
 				return recordFinding(finding)
 			})
 			if err != nil {
@@ -80,7 +100,7 @@ func (e *Engine) Scan(ctx context.Context, target string, options Options) (Resu
 			continue
 		}
 
-		findings, err := rule.Run(ctx, discovered.Repository)
+		findings, err := rule.Run(ruleContext, ruleRepository)
 		if err != nil {
 			return Result{}, fmt.Errorf("run rule %s: %w", rule.ID(), err)
 		}
@@ -105,4 +125,14 @@ func (e *Engine) Scan(ctx context.Context, target string, options Options) (Resu
 		return left.StartLine < right.StartLine
 	})
 	return result, nil
+}
+
+func filterRepository(repo discovery.Repository, paths map[string]struct{}) discovery.Repository {
+	filtered := discovery.Repository{Root: repo.Root, Files: make([]discovery.File, 0, len(paths))}
+	for _, file := range repo.Files {
+		if _, ok := paths[file.Path]; ok {
+			filtered.Files = append(filtered.Files, file)
+		}
+	}
+	return filtered
 }

@@ -110,6 +110,17 @@ func TestScanRejectsInvalidBudgets(t *testing.T) {
 	}
 }
 
+func TestScanChangedSinceRequiresGitRepository(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Execute([]string{"scan", "--changed-since", "main", t.TempDir()}, &stdout, &stderr, testBuild)
+	if code != 2 || !strings.Contains(stderr.String(), "locate Git repository") {
+		t.Fatalf("exit code = %d; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "governance remains repository-wide") {
+		t.Fatalf("changed-scan scope was not explained:\n%s", stdout.String())
+	}
+}
+
 func TestScanAppliesReasonedSuppressions(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), ".complyscan.yml")
 	content := `version: 1

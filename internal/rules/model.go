@@ -82,6 +82,13 @@ type StreamingRule interface {
 	RunStreaming(ctx context.Context, repo discovery.Repository, emit FindingEmitter) error
 }
 
+// RepositoryWideRule marks governance checks that must retain full-repository
+// context even when a scan is limited to files changed since a Git reference.
+type RepositoryWideRule interface {
+	Rule
+	RepositoryWide() bool
+}
+
 func collectFindings(run func(FindingEmitter) error) ([]Finding, error) {
 	var findings []Finding
 	err := run(func(finding Finding) error {

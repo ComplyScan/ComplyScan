@@ -2,7 +2,10 @@ package scanner
 
 import (
 	"context"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
@@ -125,4 +128,55 @@ func TestScannerSuppressesBeforeStreaming(t *testing.T) {
 			t.Fatal("suppressed finding remained in result")
 		}
 	}
+}
+
+func TestChangedSinceScopesCodeRulesButKeepsGovernanceRepositoryWide(t *testing.T) {
+	target := t.TempDir()
+	runScannerGit(t, target, "init", "-q")
+	runScannerGit(t, target, "config", "user.name", "ComplyScan tests")
+	runScannerGit(t, target, "config", "user.email", "tests@example.invalid")
+	writeScannerFile(t, target, "requirements.txt", "openai==1.2.3\n")
+	writeScannerFile(t, target, "old.py", "import logging\nlogging.info(prompt)\n")
+	runScannerGit(t, target, "add", ".")
+	runScannerGit(t, target, "commit", "-m", "initial")
+	base := strings.TrimSpace(runScannerGit(t, target, "rev-parse", "HEAD"))
+
+	syntheticCredential := "sk-proj-" + strings.Repeat("a", 24)
+	writeScannerFile(t, target, "new.py", `credential = "`+syntheticCredential+`"`+"\n")
+	result, err := New().Scan(context.Background(), target, Options{ChangedSince: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[string]bool)
+	for _, finding := range result.Findings {
+		seen[finding.RuleID] = true
+		if finding.RuleID == "AI-LOG-001" {
+			t.Fatalf("unchanged code finding was reported: %#v", finding)
+		}
+	}
+	for _, want := range []string{"AI-SEC-001", "AI-DOC-001", "AI-RISK-001"} {
+		if !seen[want] {
+			t.Errorf("repository-wide changed scan missing %s: %#v", want, result.Findings)
+		}
+	}
+	if len(result.Repository.Files) != 1 || result.Repository.Files[0].Path != "new.py" {
+		t.Fatalf("scoped repository = %#v", result.Repository.Files)
+	}
+}
+
+func writeScannerFile(t *testing.T, root, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(path)), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runScannerGit(t *testing.T, root string, arguments ...string) string {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", root}, arguments...)...)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", arguments, err, output)
+	}
+	return string(output)
 }

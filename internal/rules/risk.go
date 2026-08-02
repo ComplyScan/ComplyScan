@@ -12,6 +12,8 @@ type MissingRiskClassificationRule struct{}
 
 func (MissingRiskClassificationRule) ID() string { return "AI-RISK-001" }
 
+func (MissingRiskClassificationRule) RepositoryWide() bool { return true }
+
 func (MissingRiskClassificationRule) Run(ctx context.Context, repo discovery.Repository) ([]Finding, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
