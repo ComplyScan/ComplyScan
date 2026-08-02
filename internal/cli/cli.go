@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
 	"github.com/1eonardodawinki/ComplyScan/internal/governance"
 	"github.com/1eonardodawinki/ComplyScan/internal/inventory"
+	"github.com/1eonardodawinki/ComplyScan/internal/providers"
 	"github.com/1eonardodawinki/ComplyScan/internal/report"
 	"github.com/1eonardodawinki/ComplyScan/internal/rules"
 	"github.com/1eonardodawinki/ComplyScan/internal/scanner"
@@ -218,6 +220,9 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 		baselinePath              string
 		noBaseline                bool
 		changedSince              string
+		reviewProvider            string
+		ollamaModel               string
+		ollamaEndpoint            string
 	)
 	command := &cobra.Command{
 		Use:   "scan [path]",
@@ -239,6 +244,21 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			cfg, _, err := config.Resolve(target, configPath)
 			if err != nil {
 				return err
+			}
+			if cmd.Flags().Changed("review") {
+				cfg.AI.Provider = strings.ToLower(strings.TrimSpace(reviewProvider))
+			}
+			if cmd.Flags().Changed("ollama-model") {
+				cfg.AI.Ollama.Model = strings.TrimSpace(ollamaModel)
+			}
+			if cmd.Flags().Changed("ollama-endpoint") {
+				cfg.AI.Ollama.Endpoint = strings.TrimSpace(ollamaEndpoint)
+			}
+			if (cmd.Flags().Changed("ollama-model") || cmd.Flags().Changed("ollama-endpoint")) && cfg.AI.Provider != "ollama" {
+				return errors.New("--ollama-model and --ollama-endpoint require --review ollama or ai.provider: ollama")
+			}
+			if err := cfg.Validate(); err != nil {
+				return fmt.Errorf("validate review configuration: %w", err)
 			}
 			if cmd.Flags().Changed("max-files") && maxFiles <= 0 {
 				return errors.New("--max-files must be greater than zero")
@@ -317,6 +337,18 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			}
 			visible := report.FilterByMinimum(result.Findings, minimumSeverity)
 			reportValue := report.New(target, build.Version, visible, result.Warnings, result.Suppressed)
+			if cfg.AI.Provider == "ollama" {
+				if outputFormat == "terminal" {
+					if _, err := fmt.Fprintf(stdout, "Ollama advisory review requested for %d finding(s) with %s...\n\n", len(visible), cfg.AI.Ollama.Model); err != nil {
+						return fmt.Errorf("write terminal report: %w", err)
+					}
+				}
+				review, err := reviewWithOllama(cmd.Context(), cfg.AI.Ollama, target, visible)
+				if err != nil {
+					return err
+				}
+				reportValue.Review = &review
+			}
 			if outputFormat == "json" {
 				if err := report.WriteJSON(stdout, reportValue); err != nil {
 					return err
@@ -348,7 +380,29 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().StringVar(&baselinePath, "baseline", "", "baseline file (relative to the scan target)")
 	command.Flags().BoolVar(&noBaseline, "no-baseline", false, "do not apply a configured baseline")
 	command.Flags().StringVar(&changedSince, "changed-since", "", "scan code files changed since a Git reference; governance checks remain repository-wide")
+	command.Flags().StringVar(&reviewProvider, "review", "", "advisory review provider: none or ollama (defaults to configuration)")
+	command.Flags().StringVar(&ollamaModel, "ollama-model", "", "Ollama model name (overrides ai.ollama.model)")
+	command.Flags().StringVar(&ollamaEndpoint, "ollama-endpoint", "", "local Ollama base URL (overrides ai.ollama.endpoint)")
 	return command
+}
+
+func reviewWithOllama(ctx context.Context, settings config.OllamaConfig, target string, findings []rules.Finding) (providers.ReviewResult, error) {
+	reviewer, err := providers.NewOllama(providers.OllamaOptions{
+		Endpoint: settings.Endpoint, Model: settings.Model,
+		Timeout: time.Duration(settings.TimeoutSeconds) * time.Second, MaxFindings: settings.MaxFindings,
+	})
+	if err != nil {
+		return providers.ReviewResult{}, err
+	}
+	reviewContext, cancel := context.WithTimeout(ctx, time.Duration(settings.TimeoutSeconds)*time.Second)
+	defer cancel()
+	result, err := reviewer.Review(reviewContext, providers.ReviewRequest{
+		RepositoryRoot: target, Findings: findings,
+	})
+	if err != nil {
+		return providers.ReviewResult{}, fmt.Errorf("Ollama advisory review: %w", err)
+	}
+	return result, nil
 }
 
 func newBaselineCommand(stdout io.Writer) *cobra.Command {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/1eonardodawinki/ComplyScan/internal/inventory"
+	"github.com/1eonardodawinki/ComplyScan/internal/providers"
 	"github.com/1eonardodawinki/ComplyScan/internal/report"
 )
 
@@ -118,6 +119,38 @@ func TestScanChangedSinceRequiresGitRepository(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "governance remains repository-wide") {
 		t.Fatalf("changed-scan scope was not explained:\n%s", stdout.String())
+	}
+}
+
+func TestScanCanEnableOllamaWithoutCallingItForClearRepository(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	target := filepath.Join("..", "..", "testdata", "non-ai-repository")
+	code := Execute([]string{"scan", "--format", "json", "--review", "ollama", "--ollama-model", "test-model", target}, &stdout, &stderr, testBuild)
+	if code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
+	}
+	var decoded report.Report
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, stdout.String())
+	}
+	if decoded.Review == nil || decoded.Review.Provider != providers.Ollama || decoded.Review.Model != "test-model" || decoded.Review.InputFindings != 0 {
+		t.Fatalf("unexpected advisory review: %#v", decoded.Review)
+	}
+	if decoded.Summary.Total != 0 {
+		t.Fatalf("model review changed deterministic summary: %#v", decoded.Summary)
+	}
+}
+
+func TestScanRejectsUnsafeOrInactiveOllamaOverrides(t *testing.T) {
+	for _, arguments := range [][]string{
+		{"scan", "--review", "openai"},
+		{"scan", "--ollama-model", "gemma3"},
+		{"scan", "--review", "ollama", "--ollama-endpoint", "https://example.com"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := Execute(arguments, &stdout, &stderr, testBuild); code != 2 {
+			t.Fatalf("Execute(%v) code = %d, want 2; stderr=%q", arguments, code, stderr.String())
+		}
 	}
 }
 
