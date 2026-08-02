@@ -3,19 +3,19 @@
 | Field | Value |
 | --- | --- |
 | Product | ComplyScan |
-| Version assessed | 0.2.0 |
+| Version assessed | Unreleased 0.2.0 development branch |
 | Assessment date | 2026-08-02 |
 | Owner | ComplyScan maintainers |
-| Status | Maintained technical assessment; not legal advice |
-| Next review | Before any reassessment trigger below, or by 2027-02-02 |
+| Status | Reassessment in progress following optional Ollama integration; not legal advice |
+| Next review | Required before release, then before any reassessment trigger below |
 
 ## Intended purpose
 
-ComplyScan is an offline developer CLI that identifies technical signals and missing repository evidence relevant to AI compliance engineering. It helps developers find items that require human review; it does not determine legal compliance, assign a legally binding risk classification, or replace qualified legal and compliance review.
+ComplyScan is an offline-by-default developer CLI that identifies technical signals and missing repository evidence relevant to AI compliance engineering. It helps developers find items that require human review; it does not determine legal compliance, assign a legally binding risk classification, or replace qualified legal and compliance review. Users may explicitly enable an advisory Ollama review layer for already-sanitised deterministic findings.
 
 ## Current system boundary
 
-Version 0.2.0 consists of:
+The unreleased 0.2 development branch consists of:
 
 - bounded local repository discovery and file classification;
 - typed dependency, import, endpoint, and environment signal extraction;
@@ -23,14 +23,19 @@ Version 0.2.0 consists of:
 - stable finding fingerprints, reasoned suppressions, and baselines;
 - terminal, JSON, SARIF, and structured component-inventory reporting;
 - reviewable AI-system and risk-assessment document generators;
-- optional Git changed-file scope that preserves repository-wide governance checks; and
+- optional Git changed-file scope that preserves repository-wide governance checks;
+- an optional Ollama provider that generates advisory observations for existing findings through a loopback-only local API; and
 - an optional GitHub Action that builds the CLI and can upload SARIF metadata to GitHub code scanning.
 
-The provider names and interfaces in the source tree are reserved extension points and detection signatures. Version 0.2.0 does not instantiate an AI provider, call a model, train or adapt a model, or make a network request from the CLI.
+Ollama review is disabled by default. The default scan remains deterministic and makes no model call. When explicitly enabled, ComplyScan calls a configured model through Ollama's loopback API. OpenAI, Anthropic, Gemini, and ComplyScan Cloud remain inactive extension types.
 
 ## AI Act applicability assessment
 
-The working technical assessment is that ComplyScan 0.2.0 is traditional deterministic software rather than an AI system under Article 3(1) of Regulation (EU) 2024/1689. Its outputs are produced by rules defined by natural persons; it does not derive a model or algorithm from input data or use model inference to decide how to generate findings.
+Two operating configurations must now be distinguished.
+
+In default deterministic mode, the working technical assessment remains that ComplyScan automatically executes human-defined rules and does not use model inference to generate findings. The earlier rationale for treating that configuration as traditional deterministic software therefore remains relevant.
+
+In Ollama-enabled mode, a model infers advisory verdicts, rationales, confidence, and suggested actions from deterministic finding records. The earlier project-wide conclusion cannot be extended to this configuration without further analysis. Before release, maintainers must record a qualified assessment of whether the configured system meets the Article 3(1) definition, the relevant value-chain roles, the effect of free and open-source distribution, and any resulting obligations. Keeping model observations advisory and separate from deterministic findings is a control, not by itself an exemption or classification decision.
 
 This assessment follows the distinction in Recital 12 and the European Commission's non-binding guidance between AI systems with an inference capability and simpler software that automatically executes human-defined rules. The project's free and open-source distribution may also be relevant to Article 2(12), but it is not the primary basis for this assessment and its exceptions must be considered if the product changes.
 
@@ -45,7 +50,11 @@ The assessment is not a conformity assessment or final legal determination. Appl
 
 The CLI reads eligible repository files into process memory and evaluates them locally. It does not collect telemetry or upload source code. Terminal and JSON reports may contain short, sanitised evidence excerpts. Structured inventory evidence describes the detected technical signal rather than copying source lines. Secret-shaped evidence is redacted. Baseline files contain finding identity metadata but no source evidence. Generated governance documents are written only to the user-selected local path and are protected from accidental overwrite by default.
 
-When explicitly enabled, the GitHub Action uploads SARIF containing finding messages, repository-relative paths, line numbers, remediation text, and fingerprints. ComplyScan SARIF intentionally omits source excerpts and detected credentials. GitHub and the repository owner govern that separate processing environment.
+When Ollama review is explicitly enabled, ComplyScan selects visible and unsuppressed deterministic findings up to the configured maximum. It sends bounded, re-redacted records containing the fingerprint, rule ID, title, severity, category, message, relative path, line, short evidence, remediation, and confidence. It does not send complete repository files. Requests go directly to a validated loopback endpoint without HTTP proxies or redirects. Responses must conform to a JSON schema and preserve submitted fingerprints and rule IDs; returned text is re-redacted and length-limited.
+
+ComplyScan does not install, pull, or select an Ollama model automatically. Ollama's own model downloads and any user-selected cloud-model routing are outside ComplyScan's process boundary and must be assessed by the operator. If Ollama review is used in CI, the service runs in that job environment rather than on a developer workstation.
+
+When explicitly enabled, the GitHub Action uploads SARIF containing finding messages, repository-relative paths, line numbers, remediation text, and fingerprints. ComplyScan SARIF intentionally omits source excerpts and detected credentials. When Ollama is enabled, SARIF additionally carries advisory provider/model metadata, verdicts, confidence, rationales, and suggested actions. GitHub and the repository owner govern that separate processing environment.
 
 ## Human oversight and expected use
 
@@ -53,6 +62,7 @@ Every finding is a review prompt. Users are expected to:
 
 - inspect the complete system and deployment context;
 - confirm or reject technical signals;
+- treat Ollama observations as untrusted advisory input rather than findings or legal conclusions;
 - complete and approve generated governance scaffolds rather than treating them as finished assessments;
 - document suppression decisions with reasons;
 - avoid treating a clear scan as proof of compliance; and
@@ -60,11 +70,11 @@ Every finding is a review prompt. Users are expected to:
 
 ## Reassessment triggers
 
-This assessment must be reviewed before release if ComplyScan adds any of the following:
+This assessment must be reviewed before release and again if ComplyScan adds any of the following:
 
-- local or remote model inference, including Ollama;
-- an OpenAI, Anthropic, Gemini, or other model-backed review provider;
-- learned, adaptive, probabilistic, or model-derived detection logic;
+- any remote model-backed provider or permission for non-loopback review endpoints;
+- learned, adaptive, probabilistic, or model-derived logic that creates, removes, re-severities, suppresses, or gates deterministic findings;
+- automatic source-file or repository-content disclosure to a review provider;
 - hosted scanning, source-code upload, telemetry, or persistent scan storage;
 - automated legal conclusions or risk classifications presented without meaningful human review;
 - decisions or recommendations used in employment, education, credit, essential services, law enforcement, migration, biometrics, safety components, or other regulated contexts; or

@@ -1,6 +1,6 @@
 # Architecture
 
-ComplyScan v0.2 has a deliberately small offline pipeline:
+ComplyScan v0.2 development has an offline-by-default pipeline:
 
 ```text
 target directory
@@ -11,6 +11,7 @@ target directory
   → optional Git changed-file scope
   → independently registered deterministic rules
   → fingerprinting, reasoned suppressions, and baseline filtering
+  → optional advisory Ollama review of bounded finding records
   → terminal, JSON, or SARIF reporter
 ```
 
@@ -24,9 +25,9 @@ target directory
 
 `internal/baseline` stores deterministic finding identities without source evidence. Configured suppressions require a review reason; both mechanisms are applied before streaming, reporting, and exit-code evaluation.
 
-`internal/report` constructs a format-neutral finding report. Terminal output streams findings live, while JSON and SARIF 2.1.0 remain buffered for valid deterministic output. SARIF carries source locations and partial fingerprints for code-scanning deduplication. Structured component inventory has its own versioned JSON model in `internal/inventory` because components and compliance-engineering findings are different records.
+`internal/report` constructs a format-neutral finding report. Terminal output streams deterministic findings live, while JSON and SARIF 2.1.0 remain buffered for valid deterministic output. SARIF carries source locations and partial fingerprints for code-scanning deduplication. Optional advisory observations are attached by existing finding fingerprint and remain separate from rule results and summaries. Structured component inventory has its own versioned JSON model in `internal/inventory` because components and compliance-engineering findings are different records.
 
-`internal/providers` defines the future review boundary:
+`internal/providers` defines the optional review boundary:
 
 ```go
 type Provider interface {
@@ -34,4 +35,6 @@ type Provider interface {
 }
 ```
 
-Reserved provider kinds are Ollama, OpenAI, Anthropic, Gemini, and ComplyScan Cloud. They are types only: v0.2.0 instantiates none of them, never makes network calls, and always uses deterministic rules. Model-assisted review is deferred to v0.2.1 or later. A future provider layer must be explicit opt-in, preserve secret redaction, minimise source disclosure, and keep enriched observations separate from legal conclusions.
+Ollama is implemented as an explicit opt-in provider. It receives only visible, unsuppressed, bounded deterministic finding records—not repository files—and calls a validated loopback `/api/chat` endpoint with non-streaming JSON-schema output. Proxies and redirects are disabled, requests and responses are redacted and bounded, response fingerprints and rule IDs must match submitted findings, and a timeout limits review. Model observations cannot alter deterministic results or exit status.
+
+OpenAI, Anthropic, Gemini, and ComplyScan Cloud remain reserved types only. Any future remote provider must add an explicit disclosure and consent boundary, preserve secret redaction, minimise source disclosure, and keep model observations separate from legal conclusions.

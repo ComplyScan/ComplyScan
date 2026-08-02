@@ -28,6 +28,11 @@ rules:
 
 ai:
   provider: none
+  ollama:
+    endpoint: http://127.0.0.1:11434
+    model: gemma3
+    timeout-seconds: 120
+    max-findings: 20
 
 baseline: .complyscan-baseline.json
 

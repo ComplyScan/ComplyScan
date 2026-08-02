@@ -3,15 +3,15 @@
 | Field | Value |
 | --- | --- |
 | Product | ComplyScan |
-| Version assessed | 0.2.0 |
+| Version assessed | Unreleased 0.2.0 development branch |
 | Assessment date | 2026-08-02 |
 | Owner | ComplyScan maintainers |
-| Status | Initial maintained assessment |
-| Next review | Before any material product change, or by 2027-02-02 |
+| Status | Updated for optional Ollama integration; live-model validation and applicability review remain open before release |
+| Next review | Before release, any material product change, or by 2027-02-02 |
 
 ## Scope and method
 
-This assessment covers the deterministic offline CLI, its reports, baseline and suppression workflow, release artifacts, and optional GitHub Action. It considers foreseeable technical misuse and harm to developers, repository owners, people represented in source data, and downstream compliance decision-makers.
+This assessment covers the deterministic offline-by-default CLI, optional Ollama advisory review, reports, baseline and suppression workflow, release artifacts, and optional GitHub Action. It considers foreseeable technical misuse and harm to developers, repository owners, people represented in source data, and downstream compliance decision-makers.
 
 Likelihood and impact are qualitative: low, medium, or high. Residual risk reflects the current controls and does not imply that every deployment is safe or compliant.
 
@@ -30,11 +30,14 @@ Likelihood and impact are qualitative: low, medium, or high. Residual risk refle
 | R-09 | A malicious contribution or compromised dependency alters scan behavior or release artifacts. | Low | High | Code review, CI tests and vetting, minimal dependencies, locked module checksums, cross-platform release automation, SHA-256 checksums, and GitHub build attestations. | Medium |
 | R-10 | SARIF is rejected or produces unstable/duplicated code-scanning alerts. | Low | Medium | SARIF 2.1.0 output, stable partial fingerprints, relative paths, required source-location validation, and self-scan integration testing. | Low |
 | R-11 | Findings change unexpectedly between platforms or runs. | Low | Medium | Repository-relative slash-separated paths, deterministic sorting, stable fingerprints, bounded discovery, reproducible release settings, and multi-platform CI/release builds. | Low |
-| R-12 | A future model-backed provider introduces source disclosure, prompt injection, non-determinism, or incorrect generated conclusions. | Not active | High | Provider interfaces are inactive in 0.2.0; any activation is a mandatory applicability and risk reassessment trigger. | Not accepted until reassessed |
+| R-12 | Ollama produces incorrect, inconsistent, overconfident, or legally framed observations that users mistake for authoritative findings. | Medium | High | Explicit opt-in, advisory-only data model, separate report section, fixed non-certification prompt, schema-constrained output, temperature zero, strict enums, no effect on deterministic findings or exit status, and human-review language. | Medium |
+| R-13 | Repository-controlled finding text performs prompt injection or causes an observation to be attached to the wrong finding. | Medium | High | Only bounded finding records are sent; system and user prompts label every field untrusted; complete source files are excluded; fingerprints and rule IDs must exactly match submitted records; unknown, duplicate, or malformed observations fail review. | Medium |
+| R-14 | Sensitive evidence is disclosed through Ollama, a proxy, redirect, remote endpoint, cloud-routed model, or generated rationale. | Low | High | Input and output re-redaction, length bounds, loopback-only endpoint validation, proxies and redirects disabled, no authentication fields, no complete files, and explicit operator warning that Ollama model acquisition or cloud routing is a separate boundary. | Low for ComplyScan transport; deployment-dependent overall |
+| R-15 | Local inference hangs, consumes excessive resources, or blocks CI. | Medium | Medium | Configurable timeout, cancellation, maximum 100 and default 20 reviewed findings, non-streaming bounded responses, no model call when no findings exist, and explicit failure instead of silent partial review. | Low |
 
 ## Accepted limitations
 
-ComplyScan 0.2.0 deliberately analyses repository evidence rather than a complete deployed system. It cannot observe runtime configuration, actual data subjects, model behaviour, organisational controls, intended use outside the repository, or downstream decisions. Its language and provider coverage is incomplete. These limitations are communicated to users and are not treated as defects that can be eliminated solely through more pattern rules.
+ComplyScan 0.2 development deliberately analyses repository evidence rather than a complete deployed system. It cannot observe runtime configuration, actual data subjects, organisational controls, intended use outside the repository, or downstream decisions. Ollama sees only finding records and therefore cannot resolve most missing system context. Its language, provider, and model-evaluation coverage is incomplete. These limitations are communicated to users and are not treated as defects that can be eliminated solely through more rules or model prompts.
 
 ## Verification evidence
 
@@ -46,8 +49,11 @@ The maintained verification baseline includes:
 - race-enabled tests and `go vet` before release;
 - a self-scan that exercises the published composite action and GitHub SARIF upload;
 - secret-redaction and false-positive regression tests;
+- fake-transport Ollama tests covering structured requests, redaction, API errors, identifier binding, remote-endpoint rejection, and zero-finding behavior;
 - deterministic GoReleaser archives for macOS, Linux, and Windows on amd64 and arm64; and
 - release checksums and attestations.
+
+Before release, verification must also include a smoke test against a supported locally installed Ollama model, review-output inspection using prompt-injection fixtures, and resource measurements on a representative repository. Automated tests do not currently download or execute an Ollama model.
 
 ## Review and escalation
 
