@@ -1,0 +1,54 @@
+[
+  {
+    "path": "python-openai-import.py",
+    "labels": [{"name": "OpenAI", "evidence_type": "import", "scope": "runtime"}]
+  },
+  {
+    "path": "node-anthropic/package.json",
+    "labels": [{"name": "Anthropic", "evidence_type": "dependency", "scope": "configuration"}]
+  },
+  {
+    "path": "go-gemini/go.mod",
+    "labels": [{"name": "Google Gemini", "evidence_type": "dependency", "scope": "configuration"}]
+  },
+  {
+    "path": "typescript-mistral.ts",
+    "labels": [{"name": "Mistral", "evidence_type": "endpoint", "scope": "runtime"}]
+  },
+  {
+    "path": ".env.example",
+    "labels": [{"name": "Cohere", "evidence_type": "environment", "scope": "configuration"}]
+  },
+  {
+    "path": "tests/huggingface_test.py",
+    "labels": [{"name": "Hugging Face", "evidence_type": "import", "scope": "test"}]
+  },
+  {
+    "path": "ollama-side-effect.js",
+    "labels": [{"name": "Ollama", "evidence_type": "import", "scope": "runtime"}]
+  },
+  {
+    "path": "vercel/package.json",
+    "labels": [{"name": "Vercel AI SDK", "evidence_type": "dependency", "scope": "configuration"}]
+  },
+  {
+    "path": "plain-provider-names.go",
+    "labels": []
+  },
+  {
+    "path": "docs/provider-notes.md",
+    "labels": []
+  },
+  {
+    "path": "generic-google-key.py",
+    "labels": []
+  },
+  {
+    "path": "requirements-negative.txt",
+    "labels": []
+  },
+  {
+    "path": "signatures.go",
+    "labels": []
+  }
+]
