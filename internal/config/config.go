@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,7 +48,15 @@ type RuleConfig struct {
 }
 
 type AIConfig struct {
-	Provider string `yaml:"provider"`
+	Provider string       `yaml:"provider"`
+	Ollama   OllamaConfig `yaml:"ollama"`
+}
+
+type OllamaConfig struct {
+	Endpoint       string `yaml:"endpoint"`
+	Model          string `yaml:"model"`
+	TimeoutSeconds int    `yaml:"timeout-seconds"`
+	MaxFindings    int    `yaml:"max-findings"`
 }
 
 // Suppression accepts a finding as reviewed. A reason is mandatory so the
@@ -70,9 +80,15 @@ func Default() Config {
 			MaxFiles:      25_000,
 			MaxTotalBytes: 100 << 20,
 		},
-		FailOn:   rules.SeverityHigh,
-		Rules:    ruleConfig,
-		AI:       AIConfig{Provider: "none"},
+		FailOn: rules.SeverityHigh,
+		Rules:  ruleConfig,
+		AI: AIConfig{
+			Provider: "none",
+			Ollama: OllamaConfig{
+				Endpoint: "http://127.0.0.1:11434", Model: "gemma3",
+				TimeoutSeconds: 120, MaxFindings: 20,
+			},
+		},
 		Baseline: ".complyscan-baseline.json",
 	}
 }
@@ -112,8 +128,11 @@ func (c Config) Validate() error {
 	if c.AI.Provider == "" {
 		return errors.New("ai.provider must not be empty")
 	}
-	if c.AI.Provider != "none" {
-		return fmt.Errorf("ai.provider %q is not available in v0.2; use none", c.AI.Provider)
+	if c.AI.Provider != "none" && c.AI.Provider != "ollama" {
+		return fmt.Errorf("ai.provider %q is not available; use none or ollama", c.AI.Provider)
+	}
+	if err := c.AI.Ollama.Validate(); err != nil {
+		return fmt.Errorf("ai.ollama: %w", err)
 	}
 	known := make(map[string]struct{}, len(supportedRules))
 	for _, id := range supportedRules {
@@ -139,6 +158,38 @@ func (c Config) Validate() error {
 		if suppression.Fingerprint != "" && !validFingerprint(suppression.Fingerprint) {
 			return fmt.Errorf("suppressions[%d].fingerprint must be a 64-character SHA-256 value", index)
 		}
+	}
+	return nil
+}
+
+func (c OllamaConfig) Validate() error {
+	if strings.TrimSpace(c.Model) == "" {
+		return errors.New("model must not be empty")
+	}
+	if c.TimeoutSeconds <= 0 || c.TimeoutSeconds > 3600 {
+		return errors.New("timeout-seconds must be between 1 and 3600")
+	}
+	if c.MaxFindings <= 0 || c.MaxFindings > 100 {
+		return errors.New("max-findings must be between 1 and 100")
+	}
+	endpoint, err := url.Parse(c.Endpoint)
+	if err != nil || endpoint.Scheme == "" || endpoint.Host == "" {
+		return fmt.Errorf("endpoint %q is not a valid URL", c.Endpoint)
+	}
+	if endpoint.Scheme != "http" && endpoint.Scheme != "https" {
+		return errors.New("endpoint scheme must be http or https")
+	}
+	if endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+		return errors.New("endpoint must not contain credentials, query parameters, or a fragment")
+	}
+	path := strings.TrimSuffix(endpoint.EscapedPath(), "/")
+	if path != "" && path != "/api" {
+		return errors.New("endpoint path must be empty or /api")
+	}
+	hostname := endpoint.Hostname()
+	address := net.ParseIP(hostname)
+	if !strings.EqualFold(hostname, "localhost") && (address == nil || !address.IsLoopback()) {
+		return errors.New("endpoint must use localhost or a loopback IP address")
 	}
 	return nil
 }

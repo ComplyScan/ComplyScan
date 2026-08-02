@@ -73,6 +73,53 @@ func TestLoadRejectsUnknownFieldsRulesAndProviders(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsLocalOllamaProvider(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	content := `version: 1
+fail-on: high
+ai:
+  provider: ollama
+  ollama:
+    endpoint: http://localhost:11434
+    model: qwen2.5-coder:7b
+    timeout-seconds: 90
+    max-findings: 12
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AI.Provider != "ollama" || cfg.AI.Ollama.Model != "qwen2.5-coder:7b" || cfg.AI.Ollama.MaxFindings != 12 {
+		t.Fatalf("unexpected Ollama config: %#v", cfg.AI)
+	}
+}
+
+func TestValidateRejectsUnsafeOllamaConfiguration(t *testing.T) {
+	tests := []struct {
+		name   string
+		change func(*Config)
+	}{
+		{name: "remote endpoint", change: func(cfg *Config) { cfg.AI.Ollama.Endpoint = "https://example.com" }},
+		{name: "credentials", change: func(cfg *Config) { cfg.AI.Ollama.Endpoint = "http://user:pass@localhost:11434" }},
+		{name: "missing model", change: func(cfg *Config) { cfg.AI.Ollama.Model = "" }},
+		{name: "invalid timeout", change: func(cfg *Config) { cfg.AI.Ollama.TimeoutSeconds = 0 }},
+		{name: "too many findings", change: func(cfg *Config) { cfg.AI.Ollama.MaxFindings = 101 }},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.AI.Provider = "ollama"
+			testCase.change(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatalf("expected invalid configuration: %#v", cfg.AI.Ollama)
+			}
+		})
+	}
+}
+
 func TestLoadRejectsInvalidScanBudgets(t *testing.T) {
 	for _, field := range []string{"max-files: 0", "max-total-bytes: 0"} {
 		path := filepath.Join(t.TempDir(), FileName)
