@@ -224,6 +224,41 @@ func TestInventoryCommandWritesTerminalOutput(t *testing.T) {
 	}
 }
 
+func TestGenerateCommandsCreateReviewableDocuments(t *testing.T) {
+	for _, testCase := range []struct {
+		command string
+		path    string
+		heading string
+	}{
+		{command: "ai-system", path: filepath.Join("docs", "AI_SYSTEM.md"), heading: "# AI system record"},
+		{command: "risk-assessment", path: filepath.Join("docs", "risk-assessment.md"), heading: "# AI risk assessment"},
+	} {
+		t.Run(testCase.command, func(t *testing.T) {
+			target := t.TempDir()
+			if err := os.WriteFile(filepath.Join(target, "requirements.txt"), []byte("openai==1.2.3\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			args := []string{"generate", testCase.command, target}
+			if code := Execute(args, &stdout, &stderr, testBuild); code != 0 {
+				t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
+			}
+			data, err := os.ReadFile(filepath.Join(target, testCase.path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(data), testCase.heading) || !strings.Contains(string(data), "OpenAI") || !strings.Contains(string(data), "human review required") {
+				t.Fatalf("unexpected generated document:\n%s", data)
+			}
+			stdout.Reset()
+			stderr.Reset()
+			if code := Execute(args, &stdout, &stderr, testBuild); code != 2 || !strings.Contains(stderr.String(), "--force") {
+				t.Fatalf("overwrite exit code = %d; stderr=%q", code, stderr.String())
+			}
+		})
+	}
+}
+
 func TestTargetExclusionHandlesAbsolutePaths(t *testing.T) {
 	target := t.TempDir()
 	inside := filepath.Join(target, "state", ".complyscan-baseline.json")

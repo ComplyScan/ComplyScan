@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/1eonardodawinki/ComplyScan/internal/baseline"
 	"github.com/1eonardodawinki/ComplyScan/internal/config"
 	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
+	"github.com/1eonardodawinki/ComplyScan/internal/governance"
 	"github.com/1eonardodawinki/ComplyScan/internal/inventory"
 	"github.com/1eonardodawinki/ComplyScan/internal/report"
 	"github.com/1eonardodawinki/ComplyScan/internal/rules"
@@ -55,10 +57,73 @@ func newRootCommand(stdout, stderr io.Writer, build BuildInfo) *cobra.Command {
 	root.SetErr(stderr)
 	root.AddCommand(newScanCommand(stdout, build))
 	root.AddCommand(newInventoryCommand(stdout, build))
+	root.AddCommand(newGenerateCommand(stdout, build))
 	root.AddCommand(newBaselineCommand(stdout))
 	root.AddCommand(newInitCommand(stdout))
 	root.AddCommand(newVersionCommand(stdout, build))
 	return root
+}
+
+func newGenerateCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
+	command := &cobra.Command{
+		Use:   "generate",
+		Short: "Generate reviewable AI governance document scaffolds",
+		Args:  cobra.NoArgs,
+	}
+	command.AddCommand(newGenerateDocumentCommand(stdout, build, "ai-system", governance.DefaultAISystemPath, governance.AISystem))
+	command.AddCommand(newGenerateDocumentCommand(stdout, build, "risk-assessment", governance.DefaultRiskAssessmentPath, governance.RiskAssessment))
+	return command
+}
+
+type documentGenerator func(inventory.Report, time.Time) string
+
+func newGenerateDocumentCommand(stdout io.Writer, build BuildInfo, name, defaultOutput string, generate documentGenerator) *cobra.Command {
+	var (
+		outputPath         string
+		configPath         string
+		force              bool
+		additionalExcludes []string
+		trackedOnly        bool
+	)
+	command := &cobra.Command{
+		Use:   name + " [path]",
+		Short: "Generate " + strings.ReplaceAll(name, "-", " ") + " documentation",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target := "."
+			if len(args) == 1 {
+				target = args[0]
+			}
+			cfg, _, err := config.Resolve(target, configPath)
+			if err != nil {
+				return err
+			}
+			destination := resolveTargetPath(target, outputPath)
+			discovered, err := discovery.Discover(cmd.Context(), target, discovery.Options{
+				Exclude:                   append(append([]string(nil), cfg.Scan.Exclude...), additionalExcludes...),
+				MaxFiles:                  cfg.Scan.MaxFiles,
+				MaxTotalBytes:             cfg.Scan.MaxTotalBytes,
+				IncludeNestedRepositories: cfg.Scan.IncludeNestedRepositories,
+				TrackedOnly:               cfg.Scan.TrackedOnly || trackedOnly,
+				OnProgress:                terminalProgress(stdout),
+			})
+			if err != nil {
+				return fmt.Errorf("inventory %q: %w", target, err)
+			}
+			reportValue := inventory.NewReport(target, build.Version, inventory.Analyze(discovered.Repository), discovered.Warnings)
+			if err := governance.Write(destination, generate(reportValue, time.Now()), force); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(stdout, "Created %s from %d detected component(s); human review is required.\n", destination, reportValue.Summary.Components)
+			return err
+		},
+	}
+	command.Flags().StringVarP(&outputPath, "output", "o", defaultOutput, "output file (relative to the target)")
+	command.Flags().StringVar(&configPath, "config", "", "configuration file (defaults to <path>/.complyscan.yml)")
+	command.Flags().BoolVar(&force, "force", false, "overwrite an existing document")
+	command.Flags().StringArrayVar(&additionalExcludes, "exclude", nil, "exclude a path or directory name (repeatable)")
+	command.Flags().BoolVar(&trackedOnly, "tracked-only", false, "inspect only files tracked by Git")
+	return command
 }
 
 func newInventoryCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
