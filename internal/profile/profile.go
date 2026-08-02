@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type LifecycleStage string
@@ -183,11 +184,11 @@ func (system System) Validate() error {
 	if !systemIDPattern.MatchString(system.ID) {
 		return errors.New("id must be 1-64 lowercase letters, numbers, dots, underscores, or hyphens and start with a letter or number")
 	}
-	if strings.TrimSpace(system.Name) == "" {
-		return errors.New("name must not be empty")
+	if err := validatePlainText("name", system.Name, 200); err != nil {
+		return err
 	}
-	if strings.TrimSpace(system.IntendedPurpose) == "" {
-		return errors.New("intended-purpose must not be empty; use unknown when it has not been established")
+	if err := validatePlainText("intended-purpose", system.IntendedPurpose, 2000); err != nil {
+		return fmt.Errorf("%w; use unknown when it has not been established", err)
 	}
 	if !oneOf(system.LifecycleStage, LifecycleDevelopment, LifecycleTesting, LifecycleProduction, LifecycleRetired, LifecycleUnknown) {
 		return fmt.Errorf("lifecycle-stage %q is not supported", system.LifecycleStage)
@@ -244,8 +245,8 @@ func (review ProfileReview) Validate() error {
 		return fmt.Errorf("status %q is not supported", review.Status)
 	}
 	if review.Status == ReviewConfirmed {
-		if strings.TrimSpace(review.ReviewedBy) == "" {
-			return errors.New("reviewed-by is required when status is confirmed")
+		if err := validatePlainText("reviewed-by", review.ReviewedBy, 200); err != nil {
+			return fmt.Errorf("%w when status is confirmed", err)
 		}
 		if err := validDate(review.ReviewedAt); err != nil {
 			return fmt.Errorf("reviewed-at: %w", err)
@@ -268,8 +269,11 @@ func (decision ApplicabilityDecision) Validate() error {
 	if decision.Status == ApplicabilityNeedsReview {
 		return nil
 	}
-	if strings.TrimSpace(decision.Rationale) == "" || strings.TrimSpace(decision.ReviewedBy) == "" {
-		return errors.New("rationale and reviewed-by are required for a recorded human decision")
+	if err := validatePlainText("rationale", decision.Rationale, 2000); err != nil {
+		return fmt.Errorf("%w for a recorded human decision", err)
+	}
+	if err := validatePlainText("reviewed-by", decision.ReviewedBy, 200); err != nil {
+		return fmt.Errorf("%w for a recorded human decision", err)
 	}
 	if err := validDate(decision.ReviewedAt); err != nil {
 		return fmt.Errorf("reviewed-at: %w", err)
@@ -294,17 +298,30 @@ func validateTextList(name string, values []string) error {
 	seen := make(map[string]struct{}, len(values))
 	for index, value := range values {
 		value = strings.TrimSpace(value)
-		if value == "" {
-			return fmt.Errorf("%s[%d] must not be empty", name, index)
-		}
-		if len(value) > 200 {
-			return fmt.Errorf("%s[%d] must not exceed 200 characters", name, index)
+		if err := validatePlainText(fmt.Sprintf("%s[%d]", name, index), value, 200); err != nil {
+			return err
 		}
 		key := strings.ToLower(value)
 		if _, exists := seen[key]; exists {
 			return fmt.Errorf("%s[%d] %q is duplicated", name, index, value)
 		}
 		seen[key] = struct{}{}
+	}
+	return nil
+}
+
+func validatePlainText(name, value string, maximum int) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("%s must not be empty", name)
+	}
+	if len([]rune(value)) > maximum {
+		return fmt.Errorf("%s must not exceed %d characters", name, maximum)
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return fmt.Errorf("%s must not contain control characters or line breaks", name)
+		}
 	}
 	return nil
 }
