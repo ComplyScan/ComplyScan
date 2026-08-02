@@ -40,11 +40,20 @@ complyscan scan . --format sarif > complyscan.sarif
 complyscan scan . --severity high --no-color
 complyscan scan . --tracked-only
 complyscan scan . --exclude fixtures --max-files 10000
+complyscan scan . --changed-since main
+complyscan inventory .
+complyscan inventory . --format json
+complyscan generate ai-system .
+complyscan generate risk-assessment .
 complyscan baseline .
 complyscan version
 ```
 
 `scan` defaults to the current directory, so `complyscan scan` and `complyscan scan .` are equivalent.
+
+`inventory` produces a component-focused view rather than compliance findings. It aggregates detected providers and frameworks with their technical evidence, runtime/test/configuration scope, package versions, confidence, and source locations. Its JSON output has a versioned schema for downstream tooling.
+
+The two `generate` commands use that inventory to create `docs/AI_SYSTEM.md` and `docs/risk-assessment.md`. The generated files are deliberately marked as drafts, preserve discovery warnings, and contain explicit human-review fields. Existing documents are protected unless `--force` is supplied.
 
 Terminal scans print findings as rules discover them and finish with the final summary. JSON and SARIF 2.1.0 output remain buffered so they are valid and deterministically ordered. SARIF includes source locations and stable partial fingerprints for code-scanning integrations.
 
@@ -71,11 +80,13 @@ Summary: 1 high, 2 medium
 
 | Rule | Severity | Purpose |
 | --- | --- | --- |
-| `AI-DISC-001` | Info | Inventory likely AI providers and frameworks, including OpenAI, Anthropic, Gemini, Mistral, Cohere, Hugging Face, Ollama, LiteLLM, LangChain, LlamaIndex, Vercel AI SDK, and OpenRouter. Results are aggregated by provider with representative locations. |
+| `AI-DISC-001` | Info | Inventory technically evidenced AI providers and frameworks, including OpenAI, Anthropic, Gemini, Mistral, Cohere, Hugging Face, Ollama, LiteLLM, LangChain, LlamaIndex, Vercel AI SDK, and OpenRouter. Results are aggregated by component with representative locations. |
 | `AI-LOG-001` | High | Flag conservative cases where prompt-like or response-like values appear in common Go, Python, JavaScript, or TypeScript logging calls. |
 | `AI-SEC-001` | High | Detect likely hardcoded AI API credentials and report only redacted evidence. |
 | `AI-DOC-001` | Medium | When AI usage is detected, check for a model card or AI-system documentation. |
 | `AI-RISK-001` | Medium | When AI usage is detected, check for repository-level AI risk-classification evidence. |
+
+Provider detection requires typed evidence: a recognised dependency declaration, source import, service endpoint, or environment-variable access. Plain provider names and documentation prose are not treated as runtime usage. The maintained labelled corpus measures precision and recall across positive and hard-negative examples.
 
 The deterministic rule layer is deliberately technical. Legal or regulatory mappings can be added separately without changing the core scanner.
 
@@ -136,6 +147,8 @@ The scanner also respects `.gitignore` and always ignores source-control metadat
 
 Discovery is bounded to 25,000 text files and 100 MiB of text by default. Terminal scans report discovery progress every 500 files. Use `--max-files` and `--max-total-bytes` to tune the limits, repeat `--exclude` for temporary exclusions, or use `--tracked-only` to restrict a scan to the Git index. Each option also has a matching key under `scan` in `.complyscan.yml`.
 
+`--changed-since <git-ref>` limits code-level inventory, logging, and secret findings to files changed since that commit or branch. It includes committed changes, staged and unstaged changes, and untracked files. Repository-wide documentation and risk-evidence checks still use the complete discovered repository. This is intentionally a CLI flag rather than persistent configuration because the comparison reference belongs to a particular local or CI run.
+
 Every finding has a stable SHA-256 fingerprint in structured output. Reviewed findings can be suppressed by `rule`, a Git-style `path` pattern, an exact `fingerprint`, or a combination. Every suppression requires a `reason`; suppressed findings are excluded from output and exit-code evaluation, and their count remains visible in the report summary.
 
 For an existing repository, `complyscan baseline .` records the current findings in `.complyscan-baseline.json` without storing source evidence. Commit that deterministic file and future scans will report only findings whose fingerprints are new. Use `--baseline path/to/file` to select another baseline for a scan or `--no-baseline` to inspect every finding.
@@ -151,10 +164,15 @@ permissions:
 
 steps:
   - uses: actions/checkout@v6
+    with:
+      fetch-depth: 0
   - uses: 1eonardodawinki/ComplyScan@v0.2.0
     with:
       severity: medium
+      changed-since: ${{ github.event.pull_request.base.sha }}
 ```
+
+The `changed-since` input is optional. For pull requests, pass the base commit as shown above and use `fetch-depth: 0` so Git can resolve the comparison and merge base. Omit it for a full scan, such as on a scheduled run or push to the default branch.
 
 By default the action fails after uploading when findings meet `fail-on`. Set `fail-on-findings: false` to publish alerts without failing the job, or `upload-results: false` when code-scanning upload is not available.
 
@@ -182,7 +200,9 @@ go vet ./...
 go build ./cmd/complyscan
 ```
 
-The pipeline is `repository discovery → file classification → deterministic rules → findings → report`. Add rules by implementing the small `rules.Rule` interface and registering the rule in `rules.DefaultRules`; the scanner itself does not need rule-specific logic. See [the architecture notes](docs/architecture.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+The pipeline is `repository discovery → file classification → typed AI inventory → deterministic rules → findings → report`. Add rules by implementing the small `rules.Rule` interface and registering the rule in `rules.DefaultRules`. Repository-wide rules can implement `rules.RepositoryWideRule` to retain full context during changed-since scans. See [the architecture notes](docs/architecture.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+
+The labelled detector corpus lives under `testdata/evaluation`. Its test reports precision, recall, true positives, false positives, false negatives, and negative cases; the build fails if precision drops below 95% or recall below 90%.
 
 ComplyScan applies the same evidence discipline to itself. Its maintained [AI applicability assessment](docs/AI_SYSTEM.md) explains why v0.2.0 is currently treated as deterministic software and lists mandatory reassessment triggers. The companion [technical risk assessment](docs/risk-assessment.md) records foreseeable harms, controls, residual risks, and review expectations. These documents support governance; they are not self-certification.
 
@@ -190,14 +210,14 @@ ComplyScan applies the same evidence discipline to itself. Its maintained [AI ap
 
 Future releases may add:
 
-- higher-precision rules for more languages, frameworks, model gateways, and data flows;
+- broader labelled coverage for more languages, frameworks, model gateways, and data flows;
 - model and AI dependency supply-chain inventory;
 - versioned evidence packs and traceable regulatory mappings;
-- optional, explicitly enabled local review through Ollama;
+- optional, explicitly enabled local review through Ollama, planned as the v0.2.1 line;
 - bring-your-own API keys for optional review providers; and
 - optional ComplyScan Cloud integrations.
 
-Provider names in v0.2 are placeholders behind an interface; no paid or network provider is implemented or selected automatically.
+Provider names in v0.2 are placeholders behind an interface; no model-assisted, paid, or network provider is implemented or selected automatically.
 
 ## Disclaimer
 

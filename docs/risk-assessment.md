@@ -19,13 +19,13 @@ Likelihood and impact are qualitative: low, medium, or high. Residual risk refle
 
 | ID | Risk | Likelihood | Impact | Current controls | Residual risk |
 | --- | --- | --- | --- | --- | --- |
-| R-01 | A false negative gives unjustified confidence that relevant AI usage or risky code is absent. | Medium | High | Explicit non-certification language, deterministic rule tests, representative fixtures, visible rule inventory, and human-review remediation. | Medium |
-| R-02 | A false positive wastes review effort or incorrectly implies a compliance concern. | Medium | Medium | Conservative messages, confidence labels, technical—not legal—claims, stable fingerprints, reasoned suppressions, and regression fixtures. | Medium |
-| R-03 | Users treat a clear scan or generated report as legal advice, certification, or a complete EU AI Act assessment. | Medium | High | README and finding disclaimers, narrowly stated intended purpose, and repository-evidence prompts rather than legal conclusions. | Medium |
+| R-01 | A false negative gives unjustified confidence that relevant AI usage or risky code is absent. | Medium | High | Explicit non-certification language, typed technical signals, a labelled evaluation corpus with recall thresholds, visible rule inventory, and human-review remediation. | Medium |
+| R-02 | A false positive wastes review effort or incorrectly implies a compliance concern. | Medium | Medium | Plain-name rejection, typed evidence, confidence labels, technical—not legal—claims, a labelled hard-negative corpus with precision thresholds, stable fingerprints, and reasoned suppressions. | Low |
+| R-03 | Users treat a clear scan or generated report as legal advice, certification, or a complete EU AI Act assessment. | Medium | High | README and finding disclaimers, narrowly stated intended purpose, generated-document draft labels and TODOs, and repository-evidence prompts rather than legal conclusions. | Medium |
 | R-04 | A real credential is exposed while scanning or reporting. | Low | High | Offline processing, no telemetry, redaction before evidence output, environment-reference exclusions, synthetic test credentials, and secret-rule regression tests. | Low |
 | R-05 | Source content or sensitive metadata is disclosed through structured output or GitHub code scanning. | Low | High | Local CLI by default, short sanitised JSON evidence, source-free baselines, SARIF without evidence excerpts, explicit GitHub upload opt-out, and documented metadata fields. | Low |
 | R-06 | A very large or adversarial repository exhausts memory, CPU, or scan time. | Medium | Medium | File-size, file-count, and total-byte budgets; binary and symlink exclusion; ignore processing; nested-repository boundaries; cancellation; and progress reporting. | Low |
-| R-07 | Nested repositories, ignored files, untracked files, or configured exclusions create an incomplete scan boundary. | Medium | Medium | Warnings for skipped nested repositories and limits, documented defaults, `--include-nested-repositories`, `--tracked-only`, and repeatable exclusions. | Medium |
+| R-07 | Nested repositories, ignored files, untracked files, configured exclusions, or a changed-since reference create an incomplete scan boundary. | Medium | Medium | Warnings for skipped nested repositories and limits, documented defaults, `--include-nested-repositories`, `--tracked-only`, repeatable exclusions, full local-change inclusion, and repository-wide governance checks during changed-since scans. | Medium |
 | R-08 | A broad suppression or stale baseline hides a finding that should be reviewed again. | Medium | Medium | Mandatory suppression reasons, exact stable fingerprints, source-free versioned baselines, visible suppressed counts, and `--no-baseline` review mode. | Medium |
 | R-09 | A malicious contribution or compromised dependency alters scan behavior or release artifacts. | Low | High | Code review, CI tests and vetting, minimal dependencies, locked module checksums, cross-platform release automation, SHA-256 checksums, and GitHub build attestations. | Medium |
 | R-10 | SARIF is rejected or produces unstable/duplicated code-scanning alerts. | Low | Medium | SARIF 2.1.0 output, stable partial fingerprints, relative paths, required source-location validation, and self-scan integration testing. | Low |
@@ -41,6 +41,8 @@ ComplyScan 0.2.0 deliberately analyses repository evidence rather than a complet
 The maintained verification baseline includes:
 
 - unit and integration tests for discovery, rules, fingerprints, suppressions, baselines, reports, and CLI exit codes;
+- labelled detector-corpus metrics with enforced precision and recall thresholds;
+- changed-since tests covering committed, staged, unstaged, untracked, subdirectory, and repository-wide governance behavior;
 - race-enabled tests and `go vet` before release;
 - a self-scan that exercises the published composite action and GitHub SARIF upload;
 - secret-redaction and false-positive regression tests;

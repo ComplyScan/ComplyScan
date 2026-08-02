@@ -18,9 +18,12 @@ ComplyScan is an offline developer CLI that identifies technical signals and mis
 Version 0.2.0 consists of:
 
 - bounded local repository discovery and file classification;
-- deterministic, human-authored pattern and evidence rules;
+- typed dependency, import, endpoint, and environment signal extraction;
+- deterministic, human-authored pattern and evidence rules backed by a labelled evaluation corpus;
 - stable finding fingerprints, reasoned suppressions, and baselines;
-- terminal, JSON, and SARIF reporting; and
+- terminal, JSON, SARIF, and structured component-inventory reporting;
+- reviewable AI-system and risk-assessment document generators;
+- optional Git changed-file scope that preserves repository-wide governance checks; and
 - an optional GitHub Action that builds the CLI and can upload SARIF metadata to GitHub code scanning.
 
 The provider names and interfaces in the source tree are reserved extension points and detection signatures. Version 0.2.0 does not instantiate an AI provider, call a model, train or adapt a model, or make a network request from the CLI.
@@ -40,7 +43,7 @@ The assessment is not a conformity assessment or final legal determination. Appl
 
 ## Data flows
 
-The CLI reads eligible repository files into process memory and evaluates them locally. It does not collect telemetry or upload source code. Terminal and JSON reports may contain short, sanitised evidence excerpts. Secret-shaped evidence is redacted. Baseline files contain finding identity metadata but no source evidence.
+The CLI reads eligible repository files into process memory and evaluates them locally. It does not collect telemetry or upload source code. Terminal and JSON reports may contain short, sanitised evidence excerpts. Structured inventory evidence describes the detected technical signal rather than copying source lines. Secret-shaped evidence is redacted. Baseline files contain finding identity metadata but no source evidence. Generated governance documents are written only to the user-selected local path and are protected from accidental overwrite by default.
 
 When explicitly enabled, the GitHub Action uploads SARIF containing finding messages, repository-relative paths, line numbers, remediation text, and fingerprints. ComplyScan SARIF intentionally omits source excerpts and detected credentials. GitHub and the repository owner govern that separate processing environment.
 
@@ -50,6 +53,7 @@ Every finding is a review prompt. Users are expected to:
 
 - inspect the complete system and deployment context;
 - confirm or reject technical signals;
+- complete and approve generated governance scaffolds rather than treating them as finished assessments;
 - document suppression decisions with reasons;
 - avoid treating a clear scan as proof of compliance; and
 - obtain qualified review for legal classifications and obligations.
