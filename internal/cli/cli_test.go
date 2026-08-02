@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/1eonardodawinki/ComplyScan/internal/inventory"
 	"github.com/1eonardodawinki/ComplyScan/internal/report"
 )
 
@@ -182,6 +183,44 @@ func TestVersionCommand(t *testing.T) {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("version output missing %q: %s", want, stdout.String())
 		}
+	}
+}
+
+func TestInventoryCommandWritesStructuredJSON(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "requirements.txt"), []byte("openai==1.2.3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"inventory", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
+	}
+	var decoded inventory.Report
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("invalid inventory JSON: %v\n%s", err, stdout.String())
+	}
+	if decoded.SchemaVersion != 1 || decoded.Summary.Components != 1 || decoded.Summary.Signals != 2 {
+		t.Fatalf("unexpected inventory: %#v", decoded)
+	}
+	if decoded.Components[0].Name != "OpenAI" || len(decoded.Components[0].Locations) != 2 {
+		t.Fatalf("unexpected component: %#v", decoded.Components)
+	}
+}
+
+func TestInventoryCommandWritesTerminalOutput(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "app.js"), []byte("import Anthropic from '@anthropic-ai/sdk';\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"inventory", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Inventory complete: 1 component") || !strings.Contains(stdout.String(), "Anthropic") {
+		t.Fatalf("unexpected inventory output:\n%s", stdout.String())
 	}
 }
 

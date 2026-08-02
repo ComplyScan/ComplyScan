@@ -1,3 +1,4 @@
+// complyscan:ignore-ai-signals -- this file contains synthetic detector fixtures.
 package rules
 
 import (

@@ -11,6 +11,7 @@ import (
 	"github.com/1eonardodawinki/ComplyScan/internal/baseline"
 	"github.com/1eonardodawinki/ComplyScan/internal/config"
 	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
+	"github.com/1eonardodawinki/ComplyScan/internal/inventory"
 	"github.com/1eonardodawinki/ComplyScan/internal/report"
 	"github.com/1eonardodawinki/ComplyScan/internal/rules"
 	"github.com/1eonardodawinki/ComplyScan/internal/scanner"
@@ -53,10 +54,89 @@ func newRootCommand(stdout, stderr io.Writer, build BuildInfo) *cobra.Command {
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.AddCommand(newScanCommand(stdout, build))
+	root.AddCommand(newInventoryCommand(stdout, build))
 	root.AddCommand(newBaselineCommand(stdout))
 	root.AddCommand(newInitCommand(stdout))
 	root.AddCommand(newVersionCommand(stdout, build))
 	return root
+}
+
+func newInventoryCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
+	var (
+		format                    string
+		configPath                string
+		additionalExcludes        []string
+		trackedOnly               bool
+		includeNestedRepositories bool
+		maxFiles                  int
+		maxTotalBytes             int64
+	)
+	command := &cobra.Command{
+		Use:   "inventory [path]",
+		Short: "Inventory detected AI providers and frameworks",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target := "."
+			if len(args) == 1 {
+				target = args[0]
+			}
+			outputFormat := strings.ToLower(strings.TrimSpace(format))
+			if outputFormat != "terminal" && outputFormat != "json" {
+				return fmt.Errorf("invalid format %q (want terminal or json)", format)
+			}
+			cfg, _, err := config.Resolve(target, configPath)
+			if err != nil {
+				return err
+			}
+			if cmd.Flags().Changed("max-files") && maxFiles <= 0 {
+				return errors.New("--max-files must be greater than zero")
+			}
+			if cmd.Flags().Changed("max-total-bytes") && maxTotalBytes <= 0 {
+				return errors.New("--max-total-bytes must be greater than zero")
+			}
+			effectiveMaxFiles := cfg.Scan.MaxFiles
+			if cmd.Flags().Changed("max-files") {
+				effectiveMaxFiles = maxFiles
+			}
+			effectiveMaxTotalBytes := cfg.Scan.MaxTotalBytes
+			if cmd.Flags().Changed("max-total-bytes") {
+				effectiveMaxTotalBytes = maxTotalBytes
+			}
+			discoveryOptions := discovery.Options{
+				Exclude:                   append(append([]string(nil), cfg.Scan.Exclude...), additionalExcludes...),
+				MaxFiles:                  effectiveMaxFiles,
+				MaxTotalBytes:             effectiveMaxTotalBytes,
+				IncludeNestedRepositories: cfg.Scan.IncludeNestedRepositories || includeNestedRepositories,
+				TrackedOnly:               cfg.Scan.TrackedOnly || trackedOnly,
+			}
+			if outputFormat == "terminal" {
+				if _, err := fmt.Fprintf(stdout, "ComplyScan inventorying %s...\n\n", target); err != nil {
+					return fmt.Errorf("write terminal inventory: %w", err)
+				}
+				discoveryOptions.OnProgress = terminalProgress(stdout)
+			}
+			discovered, err := discovery.Discover(cmd.Context(), target, discoveryOptions)
+			if err != nil {
+				return fmt.Errorf("inventory %q: %w", target, err)
+			}
+			reportValue := inventory.NewReport(target, build.Version, inventory.Analyze(discovered.Repository), discovered.Warnings)
+			if outputFormat == "json" {
+				return inventory.WriteJSON(stdout, reportValue)
+			}
+			if err := inventory.WriteTerminal(stdout, reportValue); err != nil {
+				return fmt.Errorf("write terminal inventory: %w", err)
+			}
+			return nil
+		},
+	}
+	command.Flags().StringVarP(&format, "format", "f", "terminal", "output format: terminal or json")
+	command.Flags().StringVar(&configPath, "config", "", "configuration file (defaults to <path>/.complyscan.yml)")
+	command.Flags().StringArrayVar(&additionalExcludes, "exclude", nil, "exclude a path or directory name (repeatable)")
+	command.Flags().BoolVar(&trackedOnly, "tracked-only", false, "inventory only files tracked by Git")
+	command.Flags().BoolVar(&includeNestedRepositories, "include-nested-repositories", false, "inventory inside nested Git repositories")
+	command.Flags().IntVar(&maxFiles, "max-files", 0, "maximum number of text files to read")
+	command.Flags().Int64Var(&maxTotalBytes, "max-total-bytes", 0, "maximum total bytes of text content to read")
+	return command
 }
 
 func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
