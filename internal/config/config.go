@@ -262,29 +262,72 @@ func Write(path string, cfg Config, force bool) error {
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("validate config: %w", err)
 	}
-	flags := os.O_WRONLY | os.O_CREATE
+	var encoded bytes.Buffer
+	encoder := yaml.NewEncoder(&encoded)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(cfg); err != nil {
+		return fmt.Errorf("encode config %q: %w", path, err)
+	}
+	if err := encoder.Close(); err != nil {
+		return fmt.Errorf("finish config %q: %w", path, err)
+	}
 	if force {
-		flags |= os.O_TRUNC
-	} else {
-		flags |= os.O_EXCL
+		return writeAtomic(path, encoded.Bytes())
 	}
 
-	file, err := os.OpenFile(path, flags, 0o644)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return fmt.Errorf("%s already exists (use --force to overwrite)", path)
 		}
 		return fmt.Errorf("create config %q: %w", path, err)
 	}
-	defer file.Close()
-
-	encoder := yaml.NewEncoder(file)
-	encoder.SetIndent(2)
-	if err := encoder.Encode(cfg); err != nil {
+	if _, err := file.Write(encoded.Bytes()); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
 		return fmt.Errorf("write config %q: %w", path, err)
 	}
-	if err := encoder.Close(); err != nil {
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
 		return fmt.Errorf("close config %q: %w", path, err)
+	}
+	return nil
+}
+
+func writeAtomic(path string, data []byte) error {
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect config %q: %w", path, err)
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-")
+	if err != nil {
+		return fmt.Errorf("create temporary config for %q: %w", path, err)
+	}
+	temporaryPath := temporary.Name()
+	closed := false
+	defer func() {
+		if !closed {
+			_ = temporary.Close()
+		}
+		_ = os.Remove(temporaryPath)
+	}()
+	if err := temporary.Chmod(mode); err != nil {
+		return fmt.Errorf("set temporary config permissions for %q: %w", path, err)
+	}
+	if _, err := temporary.Write(data); err != nil {
+		return fmt.Errorf("write temporary config for %q: %w", path, err)
+	}
+	if err := temporary.Sync(); err != nil {
+		return fmt.Errorf("sync temporary config for %q: %w", path, err)
+	}
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("close temporary config for %q: %w", path, err)
+	}
+	closed = true
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return fmt.Errorf("replace config %q: %w", path, err)
 	}
 	return nil
 }

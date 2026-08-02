@@ -219,3 +219,33 @@ func TestWriteDefaultDoesNotOverwriteWithoutForce(t *testing.T) {
 		t.Fatalf("generated config does not parse: %v", err)
 	}
 }
+
+func TestForcedWriteAtomicallyPreservesPermissionsAndUpdatesContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	if err := os.WriteFile(path, []byte("original\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	cfg.FailOn = rules.SeverityMedium
+	if err := Write(path, cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.FailOn != rules.SeverityMedium {
+		t.Fatalf("fail-on = %q", loaded.FailOn)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %o", info.Mode().Perm())
+	}
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*"))
+	if err != nil || len(matches) != 0 {
+		t.Fatalf("temporary files=%v error=%v", matches, err)
+	}
+}
