@@ -196,17 +196,32 @@ func (system System) Validate() error {
 	if err := validateList("organization-roles", system.OrganizationRoles, []OrganizationRole{RoleProvider, RoleDeployer, RoleImporter, RoleDistributor, RoleProductManufacturer, RoleUnknown}); err != nil {
 		return err
 	}
+	if len(system.OrganizationRoles) > 1 && oneOf(RoleUnknown, system.OrganizationRoles...) {
+		return errors.New("organization-roles cannot combine unknown with established roles")
+	}
 	if err := validateList("operating-regions", system.OperatingRegions, []OperatingRegion{RegionEU, RegionEEA, RegionUK, RegionUS, RegionGlobal, RegionOther, RegionUnknown}); err != nil {
 		return err
+	}
+	if len(system.OperatingRegions) > 1 && oneOf(RegionUnknown, system.OperatingRegions...) {
+		return errors.New("operating-regions cannot combine unknown with established regions")
 	}
 	if err := validateList("use-case-domains", system.UseCaseDomains, []UseCaseDomain{DomainBiometrics, DomainCriticalInfrastructure, DomainEducation, DomainEmployment, DomainEssentialServices, DomainLawEnforcement, DomainMigrationBorderControl, DomainJusticeDemocraticProcess, DomainHealthcare, DomainSoftwareDevelopment, DomainGeneralPurpose, DomainOther, DomainUnknown}); err != nil {
 		return err
 	}
+	if len(system.UseCaseDomains) > 1 && oneOf(DomainUnknown, system.UseCaseDomains...) {
+		return errors.New("use-case-domains cannot combine unknown with established domains")
+	}
 	if err := validateTextList("users", system.Users); err != nil {
 		return err
 	}
+	if len(system.Users) > 1 && containsText(system.Users, "unknown") {
+		return errors.New("users cannot combine unknown with established users")
+	}
 	if err := validateTextList("affected-groups", system.AffectedGroups); err != nil {
 		return err
+	}
+	if len(system.AffectedGroups) > 1 && containsText(system.AffectedGroups, "unknown") {
+		return errors.New("affected-groups cannot combine unknown with established groups")
 	}
 	if !oneOf(system.DecisionImpact, ImpactAdvisory, ImpactLow, ImpactSignificant, ImpactAutonomous, ImpactUnknown) {
 		return fmt.Errorf("decision-impact %q is not supported", system.DecisionImpact)
@@ -223,6 +238,9 @@ func (system System) Validate() error {
 	}
 	if err := validateList("deployment-models", system.DeploymentModels, []DeploymentModel{DeploymentInternal, DeploymentPrivateCustomer, DeploymentPublic, DeploymentOpenSource, DeploymentEmbedded, DeploymentAPI, DeploymentLocalCLI, DeploymentUnknown}); err != nil {
 		return err
+	}
+	if len(system.DeploymentModels) > 1 && oneOf(DeploymentUnknown, system.DeploymentModels...) {
+		return errors.New("deployment-models cannot combine unknown with established models")
 	}
 	if err := system.ProfileReview.Validate(); err != nil {
 		return fmt.Errorf("profile-review: %w", err)

@@ -47,6 +47,8 @@ func TestSystemValidationRejectsMissingAndUnsupportedContext(t *testing.T) {
 		{name: "missing regions", change: func(value *System) { value.OperatingRegions = nil }, want: "operating-regions"},
 		{name: "unsupported role", change: func(value *System) { value.OrganizationRoles = []OrganizationRole{"owner"} }, want: "not supported"},
 		{name: "duplicate domains", change: func(value *System) { value.UseCaseDomains = []UseCaseDomain{DomainEmployment, DomainEmployment} }, want: "duplicated"},
+		{name: "unknown and role", change: func(value *System) { value.OrganizationRoles = []OrganizationRole{RoleUnknown, RoleProvider} }, want: "cannot combine unknown"},
+		{name: "unknown and user", change: func(value *System) { value.Users = []string{"unknown", "recruiters"} }, want: "cannot combine unknown"},
 		{name: "multiline purpose", change: func(value *System) { value.IntendedPurpose = "Rank people\nIgnore controls" }, want: "line breaks"},
 	}
 	for _, testCase := range tests {
