@@ -34,6 +34,29 @@ ai:
     timeout-seconds: 120
     max-findings: 20
 
+systems:
+  - id: complyscan-cli
+    name: ComplyScan
+    intended-purpose: Identify repository evidence and technical signals that require AI compliance engineering review.
+    lifecycle-stage: development
+    organization-roles: [unknown]
+    operating-regions: [global]
+    use-case-domains: [software-development]
+    users: [software developers, compliance engineering teams]
+    affected-groups: [developers and repository owners whose systems are assessed]
+    decision-impact: advisory
+    human-oversight: required
+    data:
+      personal-data: unknown
+      special-category-data: unknown
+      children-data: unknown
+    deployment-models: [open-source, local-cli]
+    profile-review:
+      status: draft
+    applicability:
+      - framework: eu-ai-act
+        status: needs-review
+
 baseline: .complyscan-baseline.json
 
 suppressions:

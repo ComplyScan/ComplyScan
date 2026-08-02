@@ -2,7 +2,7 @@
 
 > ComplyScan is a developer-first scanner that identifies potential AI compliance risks and missing governance evidence before code reaches production.
 
-ComplyScan is an open-source, offline-by-default CLI for finding technical signals that deserve review during EU AI Act readiness work. It inventories likely AI providers and frameworks, looks for risky logging and hardcoded credentials, and checks whether repository-level AI-system and risk-classification evidence is present. An explicitly enabled Ollama layer can add local advisory review without changing deterministic findings.
+ComplyScan is an open-source, offline-by-default CLI for finding technical signals that deserve review during EU AI Act readiness work. Guided setup records factual system context and attributable human applicability decisions; scans inventory likely AI providers and frameworks, look for risky logging and hardcoded credentials, and check whether repository-level AI-system and risk-classification evidence is present. An explicitly enabled Ollama layer can add local advisory review without changing deterministic findings.
 
 ComplyScan does **not** interpret a complete system, determine an EU AI Act classification, certify compliance, or replace legal and compliance professionals. A finding is a review prompt—not a claim that a system violates the law.
 
@@ -36,6 +36,8 @@ go build -ldflags "-X main.version=0.2.0-dev -X main.commit=$(git rev-parse --sh
 
 ```bash
 complyscan init
+complyscan profile show
+complyscan profile setup # add context to an existing configuration
 complyscan scan .
 complyscan scan . --format json
 complyscan scan . --format sarif > complyscan.sarif
@@ -52,7 +54,9 @@ complyscan baseline .
 complyscan version
 ```
 
-`scan` defaults to the current directory, so `complyscan scan` and `complyscan scan .` are equivalent.
+`scan` defaults to the current directory, so `complyscan scan` and `complyscan scan .` are equivalent. In a terminal, `init` guides you through factual questions about each system's purpose, operating regions, value-chain role, use-case domain, users, affected groups, decision impact, data, human oversight, and deployment. Use `unknown` rather than guessing. Redirected or CI initialization is non-interactive and can be made explicit with `--non-interactive`.
+
+`profile show` reports conservative EU AI Act scope and high-risk screening from those declared facts. `profile setup` adds a system to an existing config; use `--replace` to update a profile with the same ID. Automated screening, human decisions, and missing context remain separate. ComplyScan never converts a scope signal into a compliance certificate.
 
 `inventory` produces a component-focused view rather than compliance findings. It aggregates detected providers and frameworks with their technical evidence, runtime/test/configuration scope, package versions, confidence, and source locations. Its JSON output has a versioned schema for downstream tooling.
 
@@ -91,7 +95,7 @@ Summary: 1 high, 2 medium
 
 Provider detection requires typed evidence: a recognised dependency declaration, source import, service endpoint, or environment-variable access. Plain provider names and documentation prose are not treated as runtime usage. The maintained labelled corpus measures precision and recall across positive and hard-negative examples.
 
-The deterministic rule layer is deliberately technical. Legal or regulatory mappings can be added separately without changing the core scanner.
+The deterministic rule layer is deliberately technical. The system profile adds preliminary applicability context, but this development version does not yet implement requirement-by-requirement regulatory control packs. Those packs will map evidence to versioned requirements without changing the core scanner.
 
 ## Exit codes
 
@@ -105,7 +109,7 @@ The default failure threshold is `high`. `--severity` filters report output; it 
 
 ## Configuration
 
-`complyscan init` creates `.complyscan.yml` and refuses to overwrite it unless `--force` is passed. A scan loads the config in its target root, or a specific file supplied with `--config`.
+`complyscan init` creates `.complyscan.yml` and refuses to overwrite it unless `--force` is passed. For a repository that already has a config, run `complyscan profile setup`; it updates the file atomically and preserves other settings. A scan loads the config in its target root, or a specific file supplied with `--config`.
 
 ```yaml
 version: 1
@@ -143,6 +147,31 @@ ai:
     timeout-seconds: 120
     max-findings: 20
 
+systems:
+  - id: candidate-ranking
+    name: Candidate ranking
+    intended-purpose: Rank job applications for recruiter review.
+    lifecycle-stage: development
+    organization-roles: [provider]
+    operating-regions: [eu, uk]
+    use-case-domains: [employment]
+    users: [recruiters]
+    affected-groups: [job applicants]
+    decision-impact: advisory
+    human-oversight: required
+    data:
+      personal-data: yes
+      special-category-data: unknown
+      children-data: no
+    deployment-models: [private-customer, api]
+    profile-review:
+      status: confirmed
+      reviewed-by: A. Reviewer
+      reviewed-at: 2026-08-02
+    applicability:
+      - framework: eu-ai-act
+        status: needs-review
+
 baseline: .complyscan-baseline.json
 
 suppressions:
@@ -150,6 +179,10 @@ suppressions:
     path: testdata/**
     reason: Synthetic prompts are intentionally logged in test fixtures.
 ```
+
+One repository may declare multiple entries under `systems`. Controlled fields reject unsupported or misspelled values, while users and affected groups remain short factual labels. Confirmed profiles require a named reviewer and date. A human `applicable`, `not-applicable`, or `uncertain` decision additionally requires a rationale; the default is `needs-review`.
+
+The configuration is intended for version control. Do not put secrets, source excerpts, personal records, confidential customer names, or sensitive case details in a profile. Record concise categories and link to access-controlled evidence outside ComplyScan when necessary.
 
 The scanner also respects `.gitignore` and always ignores source-control metadata, common dependency directories, virtual environments, caches, and build output. Binary files, symlinks, and files larger than 1 MiB are not read. Nested Git repositories are skipped unless `--include-nested-repositories` is set.
 
@@ -230,7 +263,7 @@ go vet ./...
 go build ./cmd/complyscan
 ```
 
-The pipeline is `repository discovery → file classification → typed AI inventory → deterministic rules → findings → suppression and filtering → optional advisory review → report`. Add rules by implementing the small `rules.Rule` interface and registering the rule in `rules.DefaultRules`. Repository-wide rules can implement `rules.RepositoryWideRule` to retain full context during changed-since scans. See [the architecture notes](docs/architecture.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+The pipeline is `declared system profile → provisional applicability screening → repository discovery → file classification → typed AI inventory → deterministic rules → findings → suppression and filtering → optional advisory review → report`. Add rules by implementing the small `rules.Rule` interface and registering the rule in `rules.DefaultRules`. Repository-wide rules can implement `rules.RepositoryWideRule` to retain full context during changed-since scans. See [the architecture notes](docs/architecture.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 The labelled detector corpus lives under `testdata/evaluation`. Its test reports precision, recall, true positives, false positives, false negatives, and negative cases; the build fails if precision drops below 95% or recall below 90%.
 
@@ -242,7 +275,7 @@ Future releases may add:
 
 - broader labelled coverage for more languages, frameworks, model gateways, and data flows;
 - model and AI dependency supply-chain inventory;
-- versioned evidence packs and traceable regulatory mappings;
+- an open, versioned EU AI Act control pack with traceable evidence mappings;
 - richer, rule-specific local review prompts and model evaluation fixtures;
 - bring-your-own API keys for optional review providers; and
 - optional ComplyScan Cloud integrations.

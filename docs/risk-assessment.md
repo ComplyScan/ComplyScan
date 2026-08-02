@@ -34,10 +34,13 @@ Likelihood and impact are qualitative: low, medium, or high. Residual risk refle
 | R-13 | Repository-controlled finding text performs prompt injection or causes an observation to be attached to the wrong finding. | Medium | High | Only bounded finding records are sent; system and user prompts label every field untrusted; complete source files are excluded; fingerprints and rule IDs must exactly match submitted records; unknown, duplicate, or malformed observations fail review. | Medium |
 | R-14 | Sensitive evidence is disclosed through Ollama, a proxy, redirect, remote endpoint, cloud-routed model, or generated rationale. | Low | High | Input and output re-redaction, length bounds, loopback-only endpoint validation, proxies and redirects disabled, no authentication fields, no complete files, and explicit operator warning that Ollama model acquisition or cloud routing is a separate boundary. | Low for ComplyScan transport; deployment-dependent overall |
 | R-15 | Local inference hangs, consumes excessive resources, or blocks CI. | Medium | Medium | Configurable timeout, cancellation, maximum 100 and default 20 reviewed findings, non-streaming bounded responses, no model call when no findings exist, and explicit failure instead of silent partial review. | Low |
+| R-16 | An incomplete, inaccurate, self-serving, or stale system profile produces misleading applicability screening. | Medium | High | Explicit `unknown` values, controlled enums, visible missing-context output, named/date-stamped confirmation, separate automated and human decisions, and no automated exemption or compliance verdict. Periodic staleness enforcement remains future work. | Medium |
+| R-17 | Users put secrets, personal records, or confidential business details into the version-controlled system profile. | Low | High | Setup asks only for categories and short factual labels, warns against secrets and personal records, and documents the public/version-controlled boundary. Automated profile-content redaction is not yet implemented. | Medium |
+| R-18 | A human-recorded applicability decision is mistaken for independent legal validation by ComplyScan. | Medium | High | Decisions require status, rationale, reviewer, and date; automated screening remains separate; terminal and JSON notes deny legal-determination and certification status. | Medium |
 
 ## Accepted limitations
 
-ComplyScan 0.2 development deliberately analyses repository evidence rather than a complete deployed system. It cannot observe runtime configuration, actual data subjects, organisational controls, intended use outside the repository, or downstream decisions. Ollama sees only finding records and therefore cannot resolve most missing system context. Its language, provider, and model-evaluation coverage is incomplete. These limitations are communicated to users and are not treated as defects that can be eliminated solely through more rules or model prompts.
+ComplyScan 0.2 development combines self-declared profile facts with repository evidence rather than observing a complete deployed system. It cannot verify that profile answers match real operations, runtime configuration, actual data subjects, organisational controls, intended use outside the repository, or downstream decisions. Ollama sees only finding records and therefore cannot resolve most missing system context. Its language, provider, and model-evaluation coverage is incomplete. These limitations are communicated to users and are not treated as defects that can be eliminated solely through more rules or model prompts.
 
 ## Verification evidence
 
@@ -50,6 +53,7 @@ The maintained verification baseline includes:
 - a self-scan that exercises the published composite action and GitHub SARIF upload;
 - secret-redaction and false-positive regression tests;
 - fake-transport Ollama tests covering structured requests, redaction, API errors, identifier binding, remote-endpoint rejection, and zero-finding behavior;
+- profile validation and guided-setup tests covering explicit unknowns, attribution, duplicate IDs, conservative scope screening, existing-config updates, and report separation;
 - deterministic GoReleaser archives for macOS, Linux, and Windows on amd64 and arm64; and
 - release checksums and attestations.
 

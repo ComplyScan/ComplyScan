@@ -19,6 +19,9 @@ Target: 0.2.0
 - `scan --changed-since <git-ref>` and a matching GitHub Action input for pull-request scope, including local staged, unstaged, and untracked files.
 - Explicitly enabled, loopback-only Ollama review of sanitised deterministic findings using schema-constrained output.
 - Advisory observations in terminal, JSON, and SARIF without changing deterministic findings or exit status.
+- Guided multi-system profiles covering intended purpose, regions, roles, use-case domains, people, data, deployment, oversight, and attributable human applicability decisions.
+- Conservative EU AI Act scope and possible high-risk screening in `profile show`, terminal scans, and JSON reports.
+- `profile setup` for adding or replacing system context in an existing configuration.
 
 ### Changed
 
@@ -26,6 +29,7 @@ Target: 0.2.0
 - Scan-wide AI analysis is shared across rules to avoid repeated repository work.
 - AI discovery now requires technical evidence instead of matching plain provider names.
 - Changed-since scans keep documentation and risk-evidence checks repository-wide while scoping code rules to changed files.
+- Forced configuration updates are validated and written atomically while preserving file permissions.
 
 ### Fixed
 

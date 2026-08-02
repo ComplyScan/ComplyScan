@@ -25,6 +25,7 @@ The unreleased 0.2 development branch consists of:
 - reviewable AI-system and risk-assessment document generators;
 - optional Git changed-file scope that preserves repository-wide governance checks;
 - an optional Ollama provider that generates advisory observations for existing findings through a loopback-only local API; and
+- validated, version-controlled multi-system profiles with provisional EU AI Act scope screening and attributable human applicability decisions;
 - an optional GitHub Action that builds the CLI and can upload SARIF metadata to GitHub code scanning.
 
 Ollama review is disabled by default. The default scan remains deterministic and makes no model call. When explicitly enabled, ComplyScan calls a configured model through Ollama's loopback API. OpenAI, Anthropic, Gemini, and ComplyScan Cloud remain inactive extension types.
@@ -67,6 +68,8 @@ Every finding is a review prompt. Users are expected to:
 - document suppression decisions with reasons;
 - avoid treating a clear scan as proof of compliance; and
 - obtain qualified review for legal classifications and obligations.
+
+Guided setup records declared facts and optional human decisions; it does not verify the truth or legal sufficiency of either. The repository profile must therefore preserve `unknown` values where evidence is missing, identify the human reviewer when confirmed, and be reassessed when the system's purpose, markets, actors, users, affected groups, data, deployment, or decision impact changes.
 
 ## Reassessment triggers
 
