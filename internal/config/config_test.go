@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/1eonardodawinki/ComplyScan/internal/profile"
 	"github.com/1eonardodawinki/ComplyScan/internal/rules"
 )
 
@@ -94,6 +95,47 @@ ai:
 	}
 	if cfg.AI.Provider != "ollama" || cfg.AI.Ollama.Model != "qwen2.5-coder:7b" || cfg.AI.Ollama.MaxFindings != 12 {
 		t.Fatalf("unexpected Ollama config: %#v", cfg.AI)
+	}
+}
+
+func TestLoadParsesValidatedSystemProfiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	content := `version: 1
+fail-on: high
+ai:
+  provider: none
+systems:
+  - id: candidate-ranking
+    name: Candidate ranking
+    intended-purpose: Rank job applications for recruiter review.
+    lifecycle-stage: development
+    organization-roles: [provider]
+    operating-regions: [eu]
+    use-case-domains: [employment]
+    users: [recruiters]
+    affected-groups: [job applicants]
+    decision-impact: advisory
+    human-oversight: required
+    data:
+      personal-data: yes
+      special-category-data: unknown
+      children-data: no
+    deployment-models: [private-customer]
+    profile-review:
+      status: draft
+    applicability:
+      - framework: eu-ai-act
+        status: needs-review
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Systems) != 1 || cfg.Systems[0].UseCaseDomains[0] != profile.DomainEmployment {
+		t.Fatalf("unexpected systems: %#v", cfg.Systems)
 	}
 }
 

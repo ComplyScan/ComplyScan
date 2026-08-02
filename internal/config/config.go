@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/1eonardodawinki/ComplyScan/internal/profile"
 	"github.com/1eonardodawinki/ComplyScan/internal/rules"
 	ignore "github.com/sabhiram/go-gitignore"
 	"gopkg.in/yaml.v3"
@@ -31,6 +32,7 @@ type Config struct {
 	FailOn       rules.Severity        `yaml:"fail-on"`
 	Rules        map[string]RuleConfig `yaml:"rules"`
 	AI           AIConfig              `yaml:"ai"`
+	Systems      []profile.System      `yaml:"systems,omitempty"`
 	Baseline     string                `yaml:"baseline,omitempty"`
 	Suppressions []Suppression         `yaml:"suppressions,omitempty"`
 }
@@ -133,6 +135,9 @@ func (c Config) Validate() error {
 	}
 	if err := c.AI.Ollama.Validate(); err != nil {
 		return fmt.Errorf("ai.ollama: %w", err)
+	}
+	if err := profile.ValidateSystems(c.Systems); err != nil {
+		return err
 	}
 	known := make(map[string]struct{}, len(supportedRules))
 	for _, id := range supportedRules {
@@ -249,6 +254,14 @@ func Resolve(target, explicit string) (Config, string, error) {
 
 // WriteDefault creates the starter configuration.
 func WriteDefault(path string, force bool) error {
+	return Write(path, Default(), force)
+}
+
+// Write creates a configuration after validating it.
+func Write(path string, cfg Config, force bool) error {
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("validate config: %w", err)
+	}
 	flags := os.O_WRONLY | os.O_CREATE
 	if force {
 		flags |= os.O_TRUNC
@@ -267,7 +280,7 @@ func WriteDefault(path string, force bool) error {
 
 	encoder := yaml.NewEncoder(file)
 	encoder.SetIndent(2)
-	if err := encoder.Encode(Default()); err != nil {
+	if err := encoder.Encode(cfg); err != nil {
 		return fmt.Errorf("write config %q: %w", path, err)
 	}
 	if err := encoder.Close(); err != nil {
