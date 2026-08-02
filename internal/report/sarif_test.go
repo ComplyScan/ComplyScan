@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/1eonardodawinki/ComplyScan/internal/providers"
 	"github.com/1eonardodawinki/ComplyScan/internal/rules"
 )
 
@@ -55,5 +56,30 @@ func TestWriteSARIFRejectsLocationlessFindings(t *testing.T) {
 	}
 	if output.Len() != 0 {
 		t.Fatalf("invalid SARIF was written: %s", output.String())
+	}
+}
+
+func TestWriteSARIFAttachesAdvisoryReviewToExistingResult(t *testing.T) {
+	fingerprint := strings.Repeat("c", 64)
+	value := New(".", "0.2.0", []rules.Finding{{
+		Fingerprint: fingerprint, RuleID: "AI-LOG-001", Title: "Logged prompt",
+		Severity: rules.SeverityHigh, Path: "app.py", StartLine: 4,
+		Message: "Review logging.", Remediation: "Remove it.", Confidence: "medium",
+	}}, nil, 0)
+	value.Review = &providers.ReviewResult{
+		Provider: providers.Ollama, Model: "gemma3", Reviewed: 1, InputFindings: 1,
+		Observations: []providers.Observation{{
+			Fingerprint: fingerprint, RuleID: "AI-LOG-001", Verdict: providers.VerdictConfirmed,
+			Confidence: "medium", Rationale: "The evidence directly logs a prompt.",
+		}},
+	}
+	var output bytes.Buffer
+	if err := WriteSARIF(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`"ollamaReview"`, `"model": "gemma3"`, `"verdict": "confirmed"`} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("SARIF missing %s:\n%s", expected, output.String())
+		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/1eonardodawinki/ComplyScan/internal/providers"
 	"github.com/1eonardodawinki/ComplyScan/internal/rules"
 )
 
@@ -81,6 +82,26 @@ func TestWriteTerminalCompletion(t *testing.T) {
 	for _, want := range []string{"Scan complete: 1 potential issue", "Summary: 1 medium"} {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("output missing %q: %s", want, output.String())
+		}
+	}
+}
+
+func TestTerminalCompletionSeparatesAdvisoryReview(t *testing.T) {
+	value := New(".", "0.2.0", nil, nil, 0)
+	value.Review = &providers.ReviewResult{
+		Provider: providers.Ollama, Model: "gemma3", InputFindings: 1, Reviewed: 1,
+		Observations: []providers.Observation{{
+			RuleID: "AI-LOG-001", Verdict: providers.VerdictUncertain,
+			Confidence: "low", Rationale: "More context is required.", SuggestedAction: "Review manually.",
+		}},
+	}
+	var output bytes.Buffer
+	if err := WriteTerminalCompletion(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"Ollama advisory review (gemma3)", "REVIEW", "More context is required", "Scan complete"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("terminal output missing %q:\n%s", expected, output.String())
 		}
 	}
 }

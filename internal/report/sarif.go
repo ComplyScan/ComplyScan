@@ -6,6 +6,7 @@ import (
 	"io"
 	"sort"
 
+	"github.com/1eonardodawinki/ComplyScan/internal/providers"
 	"github.com/1eonardodawinki/ComplyScan/internal/rules"
 )
 
@@ -76,15 +77,25 @@ type sarifRegion struct {
 }
 
 type sarifProperties struct {
-	Category    string `json:"category,omitempty"`
-	Confidence  string `json:"confidence,omitempty"`
-	Remediation string `json:"remediation,omitempty"`
-	Occurrences int    `json:"occurrences,omitempty"`
+	Category    string       `json:"category,omitempty"`
+	Confidence  string       `json:"confidence,omitempty"`
+	Remediation string       `json:"remediation,omitempty"`
+	Occurrences int          `json:"occurrences,omitempty"`
+	Review      *sarifReview `json:"ollamaReview,omitempty"`
+}
+
+type sarifReview struct {
+	Provider        providers.Kind    `json:"provider"`
+	Model           string            `json:"model"`
+	Verdict         providers.Verdict `json:"verdict"`
+	Confidence      string            `json:"confidence"`
+	Rationale       string            `json:"rationale"`
+	SuggestedAction string            `json:"suggestedAction,omitempty"`
 }
 
 // WriteSARIF writes a SARIF 2.1.0 log suitable for GitHub code scanning.
 func WriteSARIF(writer io.Writer, report Report) error {
-	results, err := sarifResults(report.Findings)
+	results, err := sarifResults(report.Findings, report.Review)
 	if err != nil {
 		return err
 	}
@@ -137,12 +148,29 @@ func sarifRules(findings []rules.Finding) []sarifRule {
 	return values
 }
 
-func sarifResults(findings []rules.Finding) ([]sarifResult, error) {
+func sarifResults(findings []rules.Finding, review *providers.ReviewResult) ([]sarifResult, error) {
+	reviews := make(map[string]providers.Observation)
+	if review != nil {
+		for _, observation := range review.Observations {
+			reviews[observation.Fingerprint] = observation
+		}
+	}
 	values := make([]sarifResult, 0, len(findings))
 	for _, finding := range findings {
 		locations := sarifLocations(finding)
 		if len(locations) == 0 {
 			return nil, fmt.Errorf("encode SARIF report: finding %s has no source location", finding.RuleID)
+		}
+		properties := sarifProperties{
+			Category: finding.Category, Confidence: finding.Confidence,
+			Remediation: finding.Remediation, Occurrences: finding.Occurrences,
+		}
+		if observation, ok := reviews[finding.Fingerprint]; ok && review != nil {
+			properties.Review = &sarifReview{
+				Provider: review.Provider, Model: review.Model, Verdict: observation.Verdict,
+				Confidence: observation.Confidence, Rationale: observation.Rationale,
+				SuggestedAction: observation.SuggestedAction,
+			}
 		}
 		values = append(values, sarifResult{
 			RuleID:    finding.RuleID,
@@ -152,10 +180,7 @@ func sarifResults(findings []rules.Finding) ([]sarifResult, error) {
 			PartialFingerprints: map[string]string{
 				"complyscanFingerprint/v1": finding.Fingerprint,
 			},
-			Properties: sarifProperties{
-				Category: finding.Category, Confidence: finding.Confidence,
-				Remediation: finding.Remediation, Occurrences: finding.Occurrences,
-			},
+			Properties: properties,
 		})
 	}
 	return values, nil

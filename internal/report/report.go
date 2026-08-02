@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/1eonardodawinki/ComplyScan/internal/providers"
 	"github.com/1eonardodawinki/ComplyScan/internal/rules"
 )
 
@@ -25,12 +26,13 @@ type Summary struct {
 }
 
 type Report struct {
-	Tool       Tool            `json:"tool"`
-	Target     string          `json:"target"`
-	Summary    Summary         `json:"summary"`
-	Findings   []rules.Finding `json:"findings"`
-	Warnings   []string        `json:"warnings,omitempty"`
-	Suppressed int             `json:"suppressed"`
+	Tool       Tool                    `json:"tool"`
+	Target     string                  `json:"target"`
+	Summary    Summary                 `json:"summary"`
+	Findings   []rules.Finding         `json:"findings"`
+	Warnings   []string                `json:"warnings,omitempty"`
+	Suppressed int                     `json:"suppressed"`
+	Review     *providers.ReviewResult `json:"review,omitempty"`
 }
 
 type TerminalOptions struct {
@@ -104,6 +106,11 @@ func WriteTerminal(w io.Writer, report Report, options TerminalOptions) error {
 			return err
 		}
 	}
+	if report.Review != nil {
+		if err := WriteTerminalReview(w, *report.Review); err != nil {
+			return err
+		}
+	}
 	return writeTerminalSummary(w, report)
 }
 
@@ -139,10 +146,42 @@ func WriteTerminalFinding(w io.Writer, finding rules.Finding, options TerminalOp
 
 // WriteTerminalCompletion closes a streaming report with final counts.
 func WriteTerminalCompletion(w io.Writer, report Report) error {
+	if report.Review != nil {
+		if err := WriteTerminalReview(w, *report.Review); err != nil {
+			return err
+		}
+	}
 	if _, err := fmt.Fprintf(w, "Scan complete: %d potential %s\n", report.Summary.Total, issueWord(report.Summary.Total)); err != nil {
 		return err
 	}
 	return writeTerminalSummary(w, report)
+}
+
+// WriteTerminalReview renders advisory observations separately from findings.
+func WriteTerminalReview(w io.Writer, review providers.ReviewResult) error {
+	if _, err := fmt.Fprintf(w, "Ollama advisory review (%s): %d of %d finding(s) reviewed\n", review.Model, review.Reviewed, review.InputFindings); err != nil {
+		return err
+	}
+	for _, observation := range review.Observations {
+		if _, err := fmt.Fprintf(w, "REVIEW  %-13s %-6s %s\n", observation.Verdict, strings.ToUpper(observation.Confidence), observation.RuleID); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "        %s\n", observation.Rationale); err != nil {
+			return err
+		}
+		if observation.SuggestedAction != "" {
+			if _, err := fmt.Fprintf(w, "        Suggested: %s\n", observation.SuggestedAction); err != nil {
+				return err
+			}
+		}
+	}
+	for _, note := range review.Notes {
+		if _, err := fmt.Fprintf(w, "Review note: %s\n", note); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(w)
+	return err
 }
 
 func writeTerminalSummary(w io.Writer, report Report) error {
