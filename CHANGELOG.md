@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.2.0 - 2026-08-02
+## Unreleased
+
+Target: 0.2.0
 
 ### Added
 
@@ -15,6 +17,8 @@
 - A structured `inventory` command with terminal and versioned JSON reports.
 - `generate ai-system` and `generate risk-assessment` commands that create reviewable, inventory-prefilled governance scaffolds.
 - `scan --changed-since <git-ref>` and a matching GitHub Action input for pull-request scope, including local staged, unstaged, and untracked files.
+- Explicitly enabled, loopback-only Ollama review of sanitised deterministic findings using schema-constrained output.
+- Advisory observations in terminal, JSON, and SARIF without changing deterministic findings or exit status.
 
 ### Changed
 
