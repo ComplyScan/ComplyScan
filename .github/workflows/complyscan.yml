@@ -18,7 +18,10 @@ jobs:
     steps:
       - name: Check out ComplyScan
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - name: Run the repository's ComplyScan action
         uses: ./
         with:
           severity: medium
+          changed-since: ${{ github.event.pull_request.base.sha }}
