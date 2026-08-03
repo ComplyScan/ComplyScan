@@ -87,7 +87,7 @@ func Default() Config {
 		AI: AIConfig{
 			Provider: "none",
 			Ollama: OllamaConfig{
-				Endpoint: "http://127.0.0.1:11434", Model: "gemma3",
+				Endpoint: "http://127.0.0.1:11434", Model: "qwen3:8b",
 				TimeoutSeconds: 120, MaxFindings: 20,
 			},
 		},

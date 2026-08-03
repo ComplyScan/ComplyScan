@@ -66,7 +66,7 @@ The maintained verification baseline includes:
 - deterministic GoReleaser archives for macOS, Linux, and Windows on amd64 and arm64; and
 - release checksums and attestations.
 
-Before release, verification must also include a smoke test against a supported locally installed Ollama model, review-output inspection using prompt-injection fixtures, and resource measurements on a representative repository. Automated tests do not currently download or execute an Ollama model.
+Before release, verification must also include a successful `qwen3:8b` smoke test, review-output inspection using the live/test-only/prompt-injection fixtures, and time and memory measurements on a representative repository. The expected fixture outcome is `partial` or `strong` for the production-routed candidate and `weak` or `not_supported` for both test-only candidates. Automated tests do not download or execute an Ollama model, so they cannot close this quality gate.
 
 ## Review and escalation
 

@@ -45,6 +45,9 @@ ai:
 	if cfg.Scan.MaxFiles != 25_000 || cfg.Scan.MaxTotalBytes != 100<<20 {
 		t.Fatalf("scan budgets = %d files, %d bytes", cfg.Scan.MaxFiles, cfg.Scan.MaxTotalBytes)
 	}
+	if cfg.AI.Ollama.Model != "qwen3:8b" {
+		t.Fatalf("default Ollama model = %q", cfg.AI.Ollama.Model)
+	}
 }
 
 func TestLoadRejectsInvalidSeverity(t *testing.T) {

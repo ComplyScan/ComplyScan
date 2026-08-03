@@ -31,7 +31,7 @@ ai:
   provider: none
   ollama:
     endpoint: http://127.0.0.1:11434
-    model: gemma3
+    model: qwen3:8b
     timeout-seconds: 120
     max-findings: 20
 

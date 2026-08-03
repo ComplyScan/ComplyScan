@@ -31,7 +31,7 @@ The unreleased 0.2 development branch consists of:
 - automatic local Markdown reports and versioned JSON evidence bundles; and
 - an optional GitHub Action that builds the CLI and can upload SARIF metadata to GitHub code scanning.
 
-Ollama review is disabled by default. The default scan remains deterministic and makes no model call. When explicitly enabled, ComplyScan calls a configured model through Ollama's loopback API. OpenAI, Anthropic, Gemini, and ComplyScan Cloud remain inactive extension types.
+Ollama review is disabled by default. The default scan remains deterministic and makes no model call. When explicitly enabled, ComplyScan calls a configured model through Ollama's loopback API. The development configuration selects `qwen3:8b`, but ComplyScan does not install it and a live quality/resource gate remains open before release. OpenAI, Anthropic, Gemini, and ComplyScan Cloud remain inactive extension types.
 
 The technical pack, keyword-group evidence matcher, repository graph, and context selection remain deterministic in both configurations. With Ollama disabled, no technical-objective context leaves the CLI process. With Ollama enabled, existing technical candidates are reviewed in a second request using bounded graph metadata and connected excerpts; profiles are not sent. The pack's `technical-semantic-and-human` verification labels still require human review and never mean that a model established compliance. Generated Markdown and JSON reports remain local unless a future dashboard connection is explicitly enabled.
 

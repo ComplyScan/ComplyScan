@@ -48,7 +48,7 @@ complyscan scan . --severity high --no-color
 complyscan scan . --tracked-only
 complyscan scan . --exclude fixtures --max-files 10000
 complyscan scan . --changed-since main
-complyscan scan . --review ollama --ollama-model gemma3
+complyscan scan . --review ollama --ollama-model qwen3:8b
 complyscan scan . --report-dir .complyscan/reports
 complyscan scan . --no-report
 complyscan inventory .
@@ -179,7 +179,7 @@ ai:
   provider: none
   ollama:
     endpoint: http://127.0.0.1:11434
-    model: gemma3
+    model: qwen3:8b
     timeout-seconds: 120
     max-findings: 20
 
@@ -236,11 +236,13 @@ Ollama review is disabled by default. Install Ollama, start its local service, a
 
 ```bash
 ollama serve
-ollama pull gemma3
-complyscan scan . --review ollama --ollama-model gemma3
+ollama pull qwen3:8b
+complyscan scan . --review ollama --ollama-model qwen3:8b
 ```
 
 You can instead set `ai.provider: ollama` in `.complyscan.yml`. `--review none` disables a configured reviewer for one scan. If explicitly enabled review cannot connect, times out, cannot find the model, or returns invalid structured output, the scan exits with code `2` rather than silently omitting the requested review.
+
+The development default is the official Ollama `qwen3:8b` model. Ollama does not currently publish a `qwen3-coder:8b` tag; its official Qwen3-Coder family starts at `30b`, which has a substantially larger installation footprint. The model remains configurable and is never installed automatically by ComplyScan. Fake-transport tests enforce the structured-output, redaction, injection, and identifier-binding contract; a successful live `qwen3:8b` quality and resource run remains required before release.
 
 ComplyScan uses two separate Ollama requests, both bounded by `max-findings`. The first sends visible, unsuppressed deterministic finding records with re-redacted metadata such as the rule ID, fingerprint, title, message, relative path, line, short evidence, remediation, severity, and confidence. The second sends existing technical candidates with their objective ID, evidence fingerprint, reachability, imports, graph relationships, unresolved questions, and up to six connected source-symbol excerpts. A non-source technical match may include a small excerpt around the matched line. ComplyScan never sends a complete repository or an unbounded file. Input excerpts are re-redacted and are not copied into the saved report.
 
