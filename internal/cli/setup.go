@@ -140,14 +140,14 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	}
 
 	if !interactive || options.skipScan {
-		_, err := fmt.Fprintf(stdout, "Next: complyscan scan %s\n", shellDisplayPath(target))
+		_, err := fmt.Fprintf(stdout, "Next: complyscan scan %s\n", shellQuote(target))
 		return err
 	}
 	if cfg.AI.Provider == "ollama" && !modelReady {
 		if _, err := fmt.Fprintf(stdout, "First scan not started because Ollama model %q is not ready.\n", cfg.AI.Ollama.Model); err != nil {
 			return err
 		}
-		_, err := fmt.Fprintf(stdout, "After Ollama is ready, run: ollama pull %s && complyscan scan %s\n", cfg.AI.Ollama.Model, shellDisplayPath(target))
+		_, err := fmt.Fprintf(stdout, "After Ollama is ready, run: ollama pull %s && complyscan scan %s\n", shellQuote(cfg.AI.Ollama.Model), shellQuote(target))
 		return err
 	}
 	runFirst, err := prompt.confirm("Run the first scan now", true)
@@ -155,7 +155,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		return err
 	}
 	if !runFirst {
-		_, err := fmt.Fprintf(stdout, "Next: complyscan scan %s\n", shellDisplayPath(target))
+		_, err := fmt.Fprintf(stdout, "Next: complyscan scan %s\n", shellQuote(target))
 		return err
 	}
 	return runFirstScan(cmd, stdout, build, target)
@@ -256,7 +256,7 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 		}
 	}
 	if !shouldPull {
-		if _, err := fmt.Fprintf(stdout, "Model not downloaded. When ready, run: ollama pull %s\n", model); err != nil {
+		if _, err := fmt.Fprintf(stdout, "Model not downloaded. When ready, run: ollama pull %s\n", shellQuote(model)); err != nil {
 			return false, err
 		}
 		return false, nil
@@ -268,7 +268,7 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 	command.Stdout = stdout
 	command.Stderr = stdout
 	if err := command.Run(); err != nil {
-		if _, writeErr := fmt.Fprintf(stdout, "Model download did not complete: %v\nStart Ollama with `ollama serve`, then run: ollama pull %s\n", err, model); writeErr != nil {
+		if _, writeErr := fmt.Fprintf(stdout, "Model download did not complete: %v\nStart Ollama with `ollama serve`, then run: ollama pull %s\n", err, shellQuote(model)); writeErr != nil {
 			return false, writeErr
 		}
 		return false, nil
@@ -388,9 +388,14 @@ func runFirstScan(parent *cobra.Command, stdout io.Writer, build BuildInfo, targ
 	return err
 }
 
-func shellDisplayPath(path string) string {
-	if path == "." {
-		return "."
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
 	}
-	return fmt.Sprintf("%q", path)
+	for _, character := range value {
+		if !strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./:@%+=,-", character) {
+			return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+		}
+	}
+	return value
 }

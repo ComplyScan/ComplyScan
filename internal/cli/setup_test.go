@@ -81,3 +81,18 @@ func TestSetupRejectsUnsafeOrConflictingAutomationFlags(t *testing.T) {
 		}
 	}
 }
+
+func TestShellQuoteProtectsCopyableRecoveryCommands(t *testing.T) {
+	tests := map[string]string{
+		".":                   ".",
+		"qwen3:8b":            "qwen3:8b",
+		"repo with spaces":    "'repo with spaces'",
+		"$(touch unexpected)": "'$(touch unexpected)'",
+		"model'with'quotes":   "'model'\"'\"'with'\"'\"'quotes'",
+	}
+	for input, expected := range tests {
+		if actual := shellQuote(input); actual != expected {
+			t.Errorf("shellQuote(%q) = %q, want %q", input, actual, expected)
+		}
+	}
+}
