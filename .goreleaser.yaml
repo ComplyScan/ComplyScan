@@ -50,6 +50,8 @@ changelog:
 
 release:
   name_template: "ComplyScan {{ .Tag }}"
+  extra_files:
+    - glob: ./install.sh
 
 metadata:
   mod_timestamp: "{{ .CommitTimestamp }}"
