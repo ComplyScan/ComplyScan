@@ -19,6 +19,8 @@ target directory
   → terminal output plus atomic Markdown and JSON reports, or SARIF
 ```
 
+Installation and onboarding are a separate pre-scan path: the POSIX installer selects a release archive for the host platform, verifies it against `checksums.txt`, atomically places the binary in the selected user directory, and invokes `complyscan setup` only when a terminal is present. The setup command reuses `internal/profile` for factual and attributable applicability collection, preserves existing repository configuration, and keeps external provisioning behind individual confirmations. It may invoke Homebrew or Ollama's official Linux installer, start a Homebrew Ollama service, and run `ollama pull`; none of these operations occur during a normal scan.
+
 `internal/discovery` owns filesystem traversal and file classification. It returns repository-relative slash-separated paths so findings are stable across macOS, Linux, and Windows. It skips nested repositories by default and supports Git-tracked-only scans, progress callbacks, and explicit scan budgets.
 
 `internal/profile` owns declared system context, human review attribution, and conservative applicability screening. A repository may contain multiple systems. Controlled values make unknown context and spelling errors visible, while factual free-text labels are bounded. Automated EU AI Act scope and possible high-risk signals are reported separately from human decisions and never produce a compliance verdict. The profile is available to CI through `.complyscan.yml`; interactive questions occur only during setup.

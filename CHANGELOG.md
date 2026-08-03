@@ -28,6 +28,8 @@ Target: 0.2.0
 - Versioned scan identity, timestamp, build identity, and explicit finding/evidence scope in JSON bundles.
 - Automatic atomic `.complyscan/reports/latest.md` and `latest.json` output, with `--no-report` and safe target-relative `--report-dir` overrides.
 - Git-ignore initialization and built-in discovery exclusion for generated scan reports.
+- A unified `setup` wizard for system context, human applicability decisions, local model selection, consent-based Ollama provisioning, and an optional first scan.
+- A one-command macOS/Linux installer with platform detection, mandatory release checksum verification, user-local installation, pinned versions, and automatic guided-setup handoff.
 
 ### Changed
 

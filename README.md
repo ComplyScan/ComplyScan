@@ -8,20 +8,30 @@ ComplyScan does **not** interpret a complete system, determine an EU AI Act clas
 
 ## Install
 
-ComplyScan requires Go 1.22 or newer.
-
 > Development status: the v0.2 functionality documented below is currently unreleased. `v0.1.1` remains the latest tagged release; build `main` to evaluate the development version.
 
-Prebuilt archives for macOS, Linux, and Windows are attached to each [GitHub release](https://github.com/1eonardodawinki/ComplyScan/releases). To install with Go:
+Starting with v0.2.0, macOS and Linux users can install ComplyScan and immediately start guided setup with one command:
+
+```bash
+curl -fsSL https://github.com/ComplyScan/ComplyScan/releases/latest/download/install.sh | sh
+```
+
+The installer detects the operating system and CPU architecture, downloads the matching release archive, verifies its published SHA-256 checksum, installs `complyscan` into `~/.local/bin`, and launches `complyscan setup` through the terminal. It does not use `sudo`. Pass `--no-setup` for automation or pin both the installer and binary version:
+
+```bash
+curl -fsSL https://github.com/ComplyScan/ComplyScan/releases/download/v0.2.0/install.sh | sh -s -- --version v0.2.0 --no-setup
+```
+
+This installer becomes available when v0.2.0 is tagged; it is not attached to the current v0.1.1 release. Prebuilt archives for macOS, Linux, and Windows remain available on [GitHub Releases](https://github.com/ComplyScan/ComplyScan/releases). The current stable release can still be installed with Go 1.22 or newer:
 
 ```bash
 go install github.com/1eonardodawinki/ComplyScan/cmd/complyscan@latest
 ```
 
-To build from source:
+Building the development version from source requires Go 1.22 or newer:
 
 ```bash
-git clone https://github.com/1eonardodawinki/ComplyScan.git
+git clone https://github.com/ComplyScan/ComplyScan.git
 cd complyscan
 go build -o complyscan ./cmd/complyscan
 ```
@@ -35,6 +45,7 @@ go build -ldflags "-X main.version=0.2.0-dev -X main.commit=$(git rev-parse --sh
 ## Quick start
 
 ```bash
+complyscan setup
 complyscan init
 complyscan profile show
 complyscan profile setup # add context to an existing configuration
@@ -58,6 +69,10 @@ complyscan generate risk-assessment .
 complyscan baseline .
 complyscan version
 ```
+
+`setup` is the recommended first command. It creates or updates `.complyscan.yml`, runs the factual system and human-applicability questionnaire, recommends local Ollama review, lets the user choose any Ollama model, offers to install and start Ollama when it is missing, offers to pull the selected model, and can run the first scan. Each software installation and model download requires a separate confirmation. If setup cannot finish an external installation or download, it still saves the collected repository configuration and prints the exact recovery command.
+
+Interactive setup selects `qwen3:8b` by default, but the user can enter another local model or decline Ollama and keep deterministic scanning. Automation never installs software or downloads a model unless `--install-ollama` or `--pull-model` is explicitly passed. Use `--non-interactive --review none` for a network-free starter configuration, or `--skip-ollama-install`, `--skip-model-pull`, and `--skip-scan` to control individual interactive steps.
 
 `scan` defaults to the current directory, so `complyscan scan` and `complyscan scan .` are equivalent. In a terminal, `init` guides you through factual questions about each system's purpose, operating regions, value-chain role, use-case domain, users, affected groups, decision impact, data, human oversight, and deployment. Use `unknown` rather than guessing. Redirected or CI initialization is non-interactive and can be made explicit with `--non-interactive`.
 
@@ -144,7 +159,7 @@ Technical-objective results do not change the process exit code. `framework asse
 
 ## Configuration
 
-`complyscan init` creates `.complyscan.yml` and refuses to overwrite it unless `--force` is passed. For a repository that already has a config, run `complyscan profile setup`; it updates the file atomically and preserves other settings. A scan loads the config in its target root, or a specific file supplied with `--config`.
+`complyscan setup` is safe to use with an existing `.complyscan.yml`: it updates the matching system profile and AI settings while preserving unrelated scan, rule, baseline, and suppression settings. The lower-level `complyscan init` command creates a new config and refuses to overwrite it unless `--force` is passed; `complyscan profile setup` only manages system profiles. A scan loads the config in its target root, or a specific file supplied with `--config`.
 
 ```yaml
 version: 1
@@ -232,7 +247,7 @@ For an existing repository, `complyscan baseline .` records the current findings
 
 ## Optional Ollama review
 
-Ollama review is disabled by default. Install Ollama, start its local service, and pull a model before enabling it:
+The built-in scan default remains deterministic, but interactive `complyscan setup` recommends local Ollama review and performs each installation step only after confirmation. Manual setup remains available:
 
 ```bash
 ollama serve
@@ -242,7 +257,7 @@ complyscan scan . --review ollama --ollama-model qwen3:8b
 
 You can instead set `ai.provider: ollama` in `.complyscan.yml`. `--review none` disables a configured reviewer for one scan. If explicitly enabled review cannot connect, times out, cannot find the model, or returns invalid structured output, the scan exits with code `2` rather than silently omitting the requested review.
 
-The development default is the official Ollama `qwen3:8b` model. Ollama does not currently publish a `qwen3-coder:8b` tag; its official Qwen3-Coder family starts at `30b`, which has a substantially larger installation footprint. The model remains configurable and is never installed automatically by ComplyScan. Fake-transport tests enforce the structured-output, redaction, injection, and identifier-binding contract; a successful live `qwen3:8b` quality and resource run remains required before release.
+The development default is the official Ollama `qwen3:8b` model. Ollama does not currently publish a `qwen3-coder:8b` tag; its official Qwen3-Coder family starts at `30b`, which has a substantially larger installation footprint. The model remains configurable. Setup may install Ollama, start its Homebrew service, or pull the selected model only after explicit confirmation; normal scans never install software or models. Fake-transport tests enforce the structured-output, redaction, injection, and identifier-binding contract; a successful live `qwen3:8b` quality and resource run remains required before release.
 
 ComplyScan uses two separate Ollama requests, both bounded by `max-findings`. The first sends visible, unsuppressed deterministic finding records with re-redacted metadata such as the rule ID, fingerprint, title, message, relative path, line, short evidence, remediation, severity, and confidence. The second sends existing technical candidates with their objective ID, evidence fingerprint, reachability, imports, graph relationships, unresolved questions, and up to six connected source-symbol excerpts. A non-source technical match may include a small excerpt around the matched line. ComplyScan never sends a complete repository or an unbounded file. Input excerpts are re-redacted and are not copied into the saved report.
 
@@ -288,6 +303,8 @@ In the default deterministic mode, the ComplyScan v0.2 development CLI:
 - does not require an API key; and
 - never prints a complete detected secret.
 
+`complyscan setup` is a separate provisioning boundary. After explicit confirmations it may invoke Homebrew, download and run Ollama's official Linux installer, start the Homebrew Ollama service, and use `ollama pull` to download the selected model. The setup questionnaire itself makes no network request, profiles are not sent to these installers, and non-interactive setup performs none of those actions unless the corresponding install or pull flag is supplied.
+
 Permission errors are reported as warnings where scanning can safely continue. Source excerpts are short and pass through credential redaction before appearing as evidence.
 
 When Ollama review is explicitly enabled, ComplyScan makes HTTP requests only to the validated loopback endpoint and sends the bounded finding and technical-context records described above. Technical source excerpts exist only in the local request; saved technical evidence contains structural metadata but no source. Model rationales, questions, and suggested actions are re-redacted and length-limited before reporting. Profiles are not sent to Ollama. The generated Markdown and JSON reports remain local unless a future dashboard connection is explicitly enabled.
@@ -323,7 +340,7 @@ Future releases may add:
 - bring-your-own API keys for optional review providers; and
 - optional ComplyScan Cloud integrations.
 
-Ollama is the only implemented review provider and is never selected automatically by the built-in defaults. Paid and remote providers remain placeholders behind the provider interface.
+Ollama is the only implemented review provider. The built-in scan default remains `none`; interactive setup recommends Ollama but requires user confirmation before selecting or provisioning it. Paid and remote providers remain placeholders behind the provider interface.
 
 ## Disclaimer
 

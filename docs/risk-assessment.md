@@ -11,7 +11,7 @@
 
 ## Scope and method
 
-This assessment covers the deterministic offline-by-default CLI, optional Ollama advisory review, reports, baseline and suppression workflow, release artifacts, and optional GitHub Action. It considers foreseeable technical misuse and harm to developers, repository owners, people represented in source data, and downstream compliance decision-makers.
+This assessment covers the deterministic offline-by-default CLI, guided setup and external runtime provisioning, optional Ollama advisory review, reports, baseline and suppression workflow, release artifacts and installer, and optional GitHub Action. It considers foreseeable technical misuse and harm to developers, repository owners, people represented in source data, and downstream compliance decision-makers.
 
 Likelihood and impact are qualitative: low, medium, or high. Residual risk reflects the current controls and does not imply that every deployment is safe or compliant.
 
@@ -43,6 +43,8 @@ Likelihood and impact are qualitative: low, medium, or high. Residual risk refle
 | R-22 | Automatic report output escapes the target, follows a malicious symlink, scans itself, or leaves an unsafe destination. | Low | High | Report directories must be target-relative, traversal and absolute paths are rejected, existing symlink artifacts are refused, writes use same-directory temporary files and atomic replacement, and generated reports are always excluded from discovery. | Low |
 | R-23 | Automatic report generation surprises a user or changes a repository that should remain read-only. | Medium | Low | Output is confined to one documented directory, only `latest.md` and `latest.json` are retained, terminal output names both files, `--no-report` disables persistence, and `--report-dir` provides a safe override. | Low |
 | R-24 | The static graph resolves a call, route, authorization check, or reachability path incorrectly and gives misleading technical context. | Medium | Medium | Relationships are labelled candidate context, resolution status is retained, unresolved questions stay visible, traversal is bounded, test-only and unreached anchors are distinguished, unsupported languages are explicit, and adversarial fixtures cover live, dead, gated, and missing-authorization paths. The graph cannot establish runtime behavior. | Medium |
+| R-25 | A compromised installer, release archive, checksum, package manager, Ollama installer, or model introduces malicious code. | Low | High | The ComplyScan installer uses HTTPS release URLs, host-specific archives, mandatory SHA-256 verification before extraction, a user-local destination without `sudo`, pinned-version support, CI negative tests, GitHub artifact attestations, and no fallback to an unverified binary. Ollama provisioning is separately confirmed and restricted to Homebrew or the documented official Linux installer, but these remain external trust boundaries. | Medium |
+| R-26 | Guided setup unexpectedly changes a machine, starts a persistent service, performs a large model download, or blocks automation. | Medium | Medium | Runtime installation and model pull have separate confirmations and visible commands; non-interactive mode requires explicit `--install-ollama` or `--pull-model`; skip flags are available; normal scans never provision dependencies; configuration is retained when external provisioning is incomplete; and the shell installer launches setup only with a terminal. | Low |
 
 ## Accepted limitations
 
@@ -60,11 +62,13 @@ The maintained verification baseline includes:
 - secret-redaction and false-positive regression tests;
 - fake-transport Ollama tests covering separate finding and technical schemas, bounded source redaction, prompt-injection containment, exact identifier binding, API errors, remote-endpoint rejection, and empty-input behavior;
 - profile validation and guided-setup tests covering explicit unknowns, attribution, duplicate IDs, conservative scope screening, existing-config updates, and report separation;
+- setup tests covering explicit runtime/model consent, automation flag conflicts, and preservation of deterministic operation;
 - embedded code-only pack parsing, source/version/digest validation, bounded deterministic evidence matching, self-definition exclusion, stable fingerprints and line locations, and complete-repository checks for changed scans;
 - Go graph and adversarial repository fixtures covering imports, calls, routes, feature configuration, authorization, persistence, audit logging, live reachability, test-only dead code, unsupported source, and source-comment prompt injection;
 - Markdown escaping, JSON schema metadata, atomic report replacement, symlink and traversal rejection, report-directory discovery exclusion, and Git-ignore initialization tests;
-- deterministic GoReleaser archives for macOS, Linux, and Windows on amd64 and arm64; and
-- release checksums and attestations.
+- deterministic GoReleaser archives for macOS, Linux, and Windows on amd64 and arm64;
+- release checksums and attestations; and
+- POSIX installer integration tests covering platform archive selection, successful checksum verification, executable installation, and hard failure on a checksum mismatch.
 
 Before release, verification must also include a successful `qwen3:8b` smoke test, review-output inspection using the live/test-only/prompt-injection fixtures, and time and memory measurements on a representative repository. The expected fixture outcome is `partial` or `strong` for the production-routed candidate and `weak` or `not_supported` for both test-only candidates. Automated tests do not download or execute an Ollama model, so they cannot close this quality gate.
 
