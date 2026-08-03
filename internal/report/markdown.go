@@ -108,6 +108,27 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 			}
 		}
 	}
+	if report.TechnicalReview != nil {
+		if _, err := fmt.Fprintf(writer, "\n## Ollama technical-objective review\n\n- Model: %s\n- Candidates reviewed: %d of %d\n", inlineCode(report.TechnicalReview.Model), report.TechnicalReview.Reviewed, report.TechnicalReview.InputCandidates); err != nil {
+			return err
+		}
+		for _, observation := range report.TechnicalReview.Observations {
+			if _, err := fmt.Fprintf(writer, "\n### %s\n\n- Evidence fingerprint: %s\n- Strength: %s\n- Confidence: %s\n\n%s\n",
+				inlineCode(observation.ObjectiveID), inlineCode(observation.EvidenceFingerprint), markdownText(string(observation.Strength)), markdownText(observation.Confidence), markdownText(observation.Rationale)); err != nil {
+				return err
+			}
+			for _, question := range observation.UnresolvedQuestions {
+				if _, err := fmt.Fprintf(writer, "\n- Unresolved: %s", markdownText(question)); err != nil {
+					return err
+				}
+			}
+			if observation.SuggestedReview != "" {
+				if _, err := fmt.Fprintf(writer, "\n\nSuggested review: %s\n", markdownText(observation.SuggestedReview)); err != nil {
+					return err
+				}
+			}
+		}
+	}
 
 	if len(report.Warnings) > 0 {
 		if _, err := fmt.Fprintln(writer, "\n## Scan warnings"); err != nil {

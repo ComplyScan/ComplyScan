@@ -115,6 +115,28 @@ func TestTerminalCompletionSeparatesAdvisoryReview(t *testing.T) {
 	}
 }
 
+func TestTerminalCompletionSeparatesTechnicalObjectiveReview(t *testing.T) {
+	value := New(".", "0.2.0-dev", nil, nil, 0)
+	value.TechnicalReview = &providers.TechnicalReviewResult{
+		Provider: providers.Ollama, Model: "gemma3", InputCandidates: 1, Reviewed: 1,
+		Observations: []providers.TechnicalObservation{{
+			ObjectiveID: "eu-aia-14-override-intervention", EvidenceFingerprint: strings.Repeat("a", 64),
+			Strength: providers.StrengthPartial, Confidence: "medium",
+			Rationale:           "The handler is live but its authorization is unresolved.",
+			UnresolvedQuestions: []string{"Which role can invoke it?"}, SuggestedReview: "Trace middleware.",
+		}},
+	}
+	var output bytes.Buffer
+	if err := WriteTerminalCompletion(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"Ollama technical-objective review", "TECH", "eu-aia-14-override-intervention", "Which role can invoke it?", "Scan complete"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("terminal output missing %q:\n%s", expected, output.String())
+		}
+	}
+}
+
 func TestTerminalCompletionShowsApplicabilitySeparatelyFromFindings(t *testing.T) {
 	value := New(".", "0.2.0-dev", nil, nil, 0)
 	assessment := profile.AssessEUAIAct([]profile.System{profile.NewDraftSystem("example", "Example")})

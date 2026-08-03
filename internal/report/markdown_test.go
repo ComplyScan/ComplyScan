@@ -9,6 +9,7 @@ import (
 
 	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
 	"github.com/1eonardodawinki/ComplyScan/internal/framework"
+	"github.com/1eonardodawinki/ComplyScan/internal/providers"
 	"github.com/1eonardodawinki/ComplyScan/internal/rules"
 )
 
@@ -33,6 +34,13 @@ func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
 		}}, nil, 0,
 	)
 	value.TechnicalEvidence = &evidence
+	value.TechnicalReview = &providers.TechnicalReviewResult{
+		Provider: providers.Ollama, Model: "gemma3", InputCandidates: 1, Reviewed: 1,
+		Observations: []providers.TechnicalObservation{{
+			ObjectiveID: "eu-aia-14-override-intervention", EvidenceFingerprint: strings.Repeat("b", 64),
+			Strength: providers.StrengthWeak, Confidence: "high", Rationale: "Only an exported candidate was found.",
+		}},
+	}
 	var output bytes.Buffer
 	if err := WriteMarkdown(&output, value); err != nil {
 		t.Fatal(err)
@@ -52,6 +60,8 @@ func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
 		"`review/override.go:2`",
 		"No evidence detected",
 		"## Coverage boundary",
+		"## Ollama technical-objective review",
+		"Only an exported candidate was found.",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("Markdown missing %q:\n%s", expected, output.String())

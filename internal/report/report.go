@@ -57,6 +57,7 @@ type Report struct {
 	Applicability     *profile.AssessmentReport          `json:"applicability,omitempty"`
 	TechnicalEvidence *framework.TechnicalEvidenceReport `json:"technical_evidence,omitempty"`
 	Review            *providers.ReviewResult            `json:"review,omitempty"`
+	TechnicalReview   *providers.TechnicalReviewResult   `json:"technical_review,omitempty"`
 }
 
 type TerminalOptions struct {
@@ -164,6 +165,11 @@ func WriteTerminal(w io.Writer, report Report, options TerminalOptions) error {
 			return err
 		}
 	}
+	if report.TechnicalReview != nil {
+		if err := WriteTerminalTechnicalReview(w, *report.TechnicalReview); err != nil {
+			return err
+		}
+	}
 	return writeTerminalSummary(w, report)
 }
 
@@ -214,6 +220,11 @@ func WriteTerminalCompletion(w io.Writer, report Report) error {
 			return err
 		}
 	}
+	if report.TechnicalReview != nil {
+		if err := WriteTerminalTechnicalReview(w, *report.TechnicalReview); err != nil {
+			return err
+		}
+	}
 	if _, err := fmt.Fprintf(w, "Scan complete: %d potential %s\n", report.Summary.Total, issueWord(report.Summary.Total)); err != nil {
 		return err
 	}
@@ -240,6 +251,39 @@ func WriteTerminalReview(w io.Writer, review providers.ReviewResult) error {
 	}
 	for _, note := range review.Notes {
 		if _, err := fmt.Fprintf(w, "Review note: %s\n", note); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(w)
+	return err
+}
+
+// WriteTerminalTechnicalReview renders semantic objective observations without
+// merging them into deterministic evidence status.
+func WriteTerminalTechnicalReview(w io.Writer, review providers.TechnicalReviewResult) error {
+	if _, err := fmt.Fprintf(w, "Ollama technical-objective review (%s): %d of %d candidate(s) reviewed\n", review.Model, review.Reviewed, review.InputCandidates); err != nil {
+		return err
+	}
+	for _, observation := range review.Observations {
+		if _, err := fmt.Fprintf(w, "TECH    %-13s %-6s %s\n", observation.Strength, strings.ToUpper(observation.Confidence), observation.ObjectiveID); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "        Evidence: %s\n        %s\n", observation.EvidenceFingerprint, observation.Rationale); err != nil {
+			return err
+		}
+		for _, question := range observation.UnresolvedQuestions {
+			if _, err := fmt.Fprintf(w, "        Unresolved: %s\n", question); err != nil {
+				return err
+			}
+		}
+		if observation.SuggestedReview != "" {
+			if _, err := fmt.Fprintf(w, "        Suggested: %s\n", observation.SuggestedReview); err != nil {
+				return err
+			}
+		}
+	}
+	for _, note := range review.Notes {
+		if _, err := fmt.Fprintf(w, "Technical review note: %s\n", note); err != nil {
 			return err
 		}
 	}

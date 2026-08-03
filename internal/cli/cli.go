@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/1eonardodawinki/ComplyScan/internal/baseline"
+	"github.com/1eonardodawinki/ComplyScan/internal/codegraph"
 	"github.com/1eonardodawinki/ComplyScan/internal/config"
 	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
 	"github.com/1eonardodawinki/ComplyScan/internal/framework"
@@ -392,16 +393,18 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			technicalEvidence.Warnings = append([]string(nil), result.Warnings...)
 			reportValue.TechnicalEvidence = &technicalEvidence
 			if cfg.AI.Provider == "ollama" {
+				candidateCount := technicalCandidateCount(technicalEvidence)
 				if outputFormat == "terminal" {
-					if _, err := fmt.Fprintf(stdout, "Ollama advisory review requested for %d finding(s) with %s...\n\n", len(visible), cfg.AI.Ollama.Model); err != nil {
+					if _, err := fmt.Fprintf(stdout, "Ollama advisory review requested for %d finding(s) and %d technical candidate(s) with %s...\n\n", len(visible), candidateCount, cfg.AI.Ollama.Model); err != nil {
 						return fmt.Errorf("write terminal report: %w", err)
 					}
 				}
-				review, err := reviewWithOllama(cmd.Context(), cfg.AI.Ollama, target, visible)
+				review, technicalReview, err := reviewWithOllama(cmd.Context(), cfg.AI.Ollama, target, visible, technicalEvidence, result.FullRepository)
 				if err != nil {
 					return err
 				}
 				reportValue.Review = &review
+				reportValue.TechnicalReview = &technicalReview
 			}
 			var artifacts report.Artifacts
 			if resolvedReportDirectory != "" {
@@ -454,23 +457,145 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	return command
 }
 
-func reviewWithOllama(ctx context.Context, settings config.OllamaConfig, target string, findings []rules.Finding) (providers.ReviewResult, error) {
+func reviewWithOllama(ctx context.Context, settings config.OllamaConfig, target string, findings []rules.Finding, evidence framework.TechnicalEvidenceReport, repository discovery.Repository) (providers.ReviewResult, providers.TechnicalReviewResult, error) {
 	reviewer, err := providers.NewOllama(providers.OllamaOptions{
 		Endpoint: settings.Endpoint, Model: settings.Model,
 		Timeout: time.Duration(settings.TimeoutSeconds) * time.Second, MaxFindings: settings.MaxFindings,
 	})
 	if err != nil {
-		return providers.ReviewResult{}, err
+		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, err
 	}
-	reviewContext, cancel := context.WithTimeout(ctx, time.Duration(settings.TimeoutSeconds)*time.Second)
-	defer cancel()
-	result, err := reviewer.Review(reviewContext, providers.ReviewRequest{
+	findingContext, cancelFindings := context.WithTimeout(ctx, time.Duration(settings.TimeoutSeconds)*time.Second)
+	findingResult, err := reviewer.Review(findingContext, providers.ReviewRequest{
 		RepositoryRoot: target, Findings: findings,
 	})
+	cancelFindings()
 	if err != nil {
-		return providers.ReviewResult{}, fmt.Errorf("Ollama advisory review: %w", err)
+		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, fmt.Errorf("Ollama advisory review: %w", err)
 	}
-	return result, nil
+	technicalContext, cancelTechnical := context.WithTimeout(ctx, time.Duration(settings.TimeoutSeconds)*time.Second)
+	technicalResult, err := reviewer.ReviewTechnical(technicalContext, buildTechnicalReviewRequest(evidence, repository))
+	cancelTechnical()
+	if err != nil {
+		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, fmt.Errorf("Ollama technical-objective review: %w", err)
+	}
+	return findingResult, technicalResult, nil
+}
+
+func technicalCandidateCount(evidence framework.TechnicalEvidenceReport) int {
+	count := 0
+	for _, objective := range evidence.Objectives {
+		count += len(objective.Matches)
+	}
+	return count
+}
+
+func buildTechnicalReviewRequest(evidence framework.TechnicalEvidenceReport, repository discovery.Repository) providers.TechnicalReviewRequest {
+	graph := codegraph.Build(repository)
+	request := providers.TechnicalReviewRequest{Candidates: []providers.TechnicalCandidate{}}
+	for _, objective := range evidence.Objectives {
+		for _, match := range objective.Matches {
+			candidate := providers.TechnicalCandidate{
+				ObjectiveID: objective.ID, Title: objective.Title, SourceReference: objective.SourceReference,
+				Description: objective.Description, EvidenceFingerprint: match.Fingerprint,
+				Path: match.Path, StartLine: match.StartLine,
+				Imports: []string{}, Relationships: []providers.TechnicalRelationship{},
+				UnresolvedQuestions: append([]string(nil), objective.UnresolvedQuestions...),
+				SourceContexts:      []providers.TechnicalSourceContext{},
+			}
+			for _, repositoryImport := range match.Context.Imports {
+				value := repositoryImport.ImportedPath
+				if repositoryImport.Alias != "" {
+					value = repositoryImport.Alias + "=" + value
+				}
+				candidate.Imports = append(candidate.Imports, value)
+			}
+			for _, relationship := range match.Context.Relationships {
+				candidate.Relationships = append(candidate.Relationships, providers.TechnicalRelationship{
+					Kind: string(relationship.Kind), From: relationship.From, To: relationship.To,
+					Label: relationship.Label, Resolved: relationship.Resolved,
+				})
+			}
+			candidate.UnresolvedQuestions = append(candidate.UnresolvedQuestions, match.Context.UnresolvedQuestions...)
+
+			remainingSource := 12_000
+			if match.Context.Anchor != nil {
+				candidate.Anchor = match.Context.Anchor.QualifiedName
+				candidate.Reachability = string(match.Context.Anchor.Reachability)
+				remainingSource = appendTechnicalSource(&candidate, graph, *match.Context.Anchor, "anchor", remainingSource)
+				for _, related := range match.Context.RelatedSymbols {
+					if remainingSource <= 0 || len(candidate.SourceContexts) >= 6 {
+						break
+					}
+					remainingSource = appendTechnicalSource(&candidate, graph, related, "related", remainingSource)
+				}
+			} else if content, ok := repositoryFileContent(repository, match.Path); ok {
+				candidate.SourceContexts = append(candidate.SourceContexts, providers.TechnicalSourceContext{
+					Role: "matched-file", Symbol: "file:" + match.Path, Path: match.Path,
+					StartLine: match.StartLine, EndLine: match.StartLine,
+					Source: boundedRepositoryExcerpt(content, match.StartLine, remainingSource),
+				})
+			}
+			request.Candidates = append(request.Candidates, candidate)
+		}
+	}
+	return request
+}
+
+func appendTechnicalSource(candidate *providers.TechnicalCandidate, graph codegraph.Graph, reference codegraph.SymbolReference, role string, remaining int) int {
+	if remaining <= 0 {
+		return 0
+	}
+	limit := 4_000
+	if role == "anchor" {
+		limit = 6_000
+	}
+	if remaining < limit {
+		limit = remaining
+	}
+	source := graph.SourceForSymbol(reference.ID, limit)
+	if source == "" {
+		return remaining
+	}
+	candidate.SourceContexts = append(candidate.SourceContexts, providers.TechnicalSourceContext{
+		Role: role, Symbol: reference.QualifiedName, Path: reference.Path,
+		StartLine: reference.StartLine, EndLine: reference.EndLine,
+		Reachability: string(reference.Reachability), Source: source,
+	})
+	return remaining - len([]rune(source))
+}
+
+func repositoryFileContent(repository discovery.Repository, path string) ([]byte, bool) {
+	for _, file := range repository.Files {
+		if file.Path == path {
+			return file.Content, true
+		}
+	}
+	return nil, false
+}
+
+func boundedRepositoryExcerpt(content []byte, line, maxChars int) string {
+	if maxChars <= 0 {
+		return ""
+	}
+	lines := strings.Split(string(content), "\n")
+	start := line - 20
+	if start < 0 {
+		start = 0
+	}
+	end := line + 20
+	if line <= 0 {
+		start, end = 0, len(lines)
+	}
+	if end > len(lines) {
+		end = len(lines)
+	}
+	value := strings.Join(lines[start:end], "\n")
+	runes := []rune(value)
+	if len(runes) > maxChars {
+		return string(runes[:maxChars])
+	}
+	return value
 }
 
 func newBaselineCommand(stdout io.Writer) *cobra.Command {

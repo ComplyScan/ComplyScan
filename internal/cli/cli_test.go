@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/1eonardodawinki/ComplyScan/internal/config"
+	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
 	"github.com/1eonardodawinki/ComplyScan/internal/framework"
 	"github.com/1eonardodawinki/ComplyScan/internal/inventory"
 	"github.com/1eonardodawinki/ComplyScan/internal/profile"
@@ -215,8 +216,46 @@ func TestScanCanEnableOllamaWithoutCallingItForClearRepository(t *testing.T) {
 	if decoded.Review == nil || decoded.Review.Provider != providers.Ollama || decoded.Review.Model != "test-model" || decoded.Review.InputFindings != 0 {
 		t.Fatalf("unexpected advisory review: %#v", decoded.Review)
 	}
+	if decoded.TechnicalReview == nil || decoded.TechnicalReview.Provider != providers.Ollama || decoded.TechnicalReview.InputCandidates != 0 {
+		t.Fatalf("unexpected technical review: %#v", decoded.TechnicalReview)
+	}
 	if decoded.Summary.Total != 0 {
 		t.Fatalf("model review changed deterministic summary: %#v", decoded.Summary)
+	}
+}
+
+func TestBuildTechnicalReviewRequestIncludesConnectedSourceWithoutChangingEvidence(t *testing.T) {
+	pack := framework.Pack{Objectives: []framework.TechnicalObjective{{
+		ID: "eu-aia-14-override-intervention", Title: "Override", SourceReference: "Article 14",
+		Description: "An authorised person can override a decision.", FileKinds: []string{"source"},
+		PathKeywords: []string{"override"}, KeywordGroups: [][]string{{"override"}, {"decision"}},
+	}}}
+	repository := discovery.Repository{Files: []discovery.File{{
+		Path: "override/main.go", Kind: discovery.KindSource,
+		Content: []byte(`package main
+func main() { overrideDecision() }
+func overrideDecision() { authorizeReviewer() }
+func authorizeReviewer() {}
+`),
+	}}}
+	evidence := framework.Evaluate(pack, nil, repository)
+	request := buildTechnicalReviewRequest(evidence, repository)
+	if len(request.Candidates) != 1 {
+		t.Fatalf("unexpected candidates: %#v", request)
+	}
+	candidate := request.Candidates[0]
+	if candidate.EvidenceFingerprint != evidence.Objectives[0].Matches[0].Fingerprint || candidate.Anchor != "main.overrideDecision" || candidate.Reachability != "production-reachable" {
+		t.Fatalf("candidate lost evidence binding: %#v", candidate)
+	}
+	if len(candidate.SourceContexts) < 2 {
+		t.Fatalf("connected source context missing: %#v", candidate.SourceContexts)
+	}
+	joined := ""
+	for _, source := range candidate.SourceContexts {
+		joined += source.Source
+	}
+	if !strings.Contains(joined, "overrideDecision") || !strings.Contains(joined, "authorizeReviewer") {
+		t.Fatalf("connected functions missing from source context: %s", joined)
 	}
 }
 
