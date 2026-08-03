@@ -53,6 +53,9 @@ func TestScanJSONOutputAndSeverityFilter(t *testing.T) {
 	if decoded.Summary.High == 0 || decoded.Summary.Medium != 0 || decoded.Summary.Info != 0 {
 		t.Fatalf("severity filter not reflected in summary: %#v", decoded.Summary)
 	}
+	if decoded.SchemaVersion != 1 || decoded.Tool.Commit != "test" || decoded.Scan.ID == "" || decoded.Scan.Scope.Findings != "full-repository" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
+		t.Fatalf("missing evidence-bundle metadata: %#v", decoded)
+	}
 }
 
 func TestScanSARIFOutput(t *testing.T) {

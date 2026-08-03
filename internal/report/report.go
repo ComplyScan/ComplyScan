@@ -1,11 +1,13 @@
 package report
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/1eonardodawinki/ComplyScan/internal/framework"
 	"github.com/1eonardodawinki/ComplyScan/internal/profile"
@@ -16,6 +18,22 @@ import (
 type Tool struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
+	Commit  string `json:"commit,omitempty"`
+	BuiltAt string `json:"built_at,omitempty"`
+}
+
+type ScanMetadata struct {
+	ID        string    `json:"id"`
+	CreatedAt string    `json:"created_at"`
+	Scope     ScanScope `json:"scope"`
+}
+
+type ScanScope struct {
+	Findings                  string `json:"findings"`
+	TechnicalEvidence         string `json:"technical_evidence"`
+	ChangedSince              string `json:"changed_since,omitempty"`
+	TrackedOnly               bool   `json:"tracked_only"`
+	IncludeNestedRepositories bool   `json:"include_nested_repositories"`
 }
 
 type Summary struct {
@@ -28,7 +46,9 @@ type Summary struct {
 }
 
 type Report struct {
+	SchemaVersion     int                                `json:"schema_version"`
 	Tool              Tool                               `json:"tool"`
+	Scan              ScanMetadata                       `json:"scan"`
 	Target            string                             `json:"target"`
 	Summary           Summary                            `json:"summary"`
 	Findings          []rules.Finding                    `json:"findings"`
@@ -44,11 +64,30 @@ type TerminalOptions struct {
 }
 
 func New(target, version string, findings []rules.Finding, warnings []string, suppressed int) Report {
+	return NewWithMetadata(
+		target,
+		Tool{Name: "ComplyScan", Version: version},
+		ScanScope{Findings: "full-repository", TechnicalEvidence: "full-repository"},
+		time.Now(),
+		findings,
+		warnings,
+		suppressed,
+	)
+}
+
+func NewWithMetadata(target string, tool Tool, scope ScanScope, createdAt time.Time, findings []rules.Finding, warnings []string, suppressed int) Report {
 	if findings == nil {
 		findings = []rules.Finding{}
 	}
+	created := createdAt.UTC().Format(time.RFC3339Nano)
+	identifier := sha256.Sum256([]byte(strings.Join([]string{target, tool.Version, tool.Commit, created}, "\x00")))
 	return Report{
-		Tool: Tool{Name: "ComplyScan", Version: version}, Target: target,
+		SchemaVersion: 1,
+		Tool:          tool,
+		Scan: ScanMetadata{
+			ID: "scan-" + fmt.Sprintf("%x", identifier[:12]), CreatedAt: created, Scope: scope,
+		},
+		Target:  target,
 		Summary: Summarize(findings), Findings: findings, Warnings: warnings, Suppressed: suppressed,
 	}
 }

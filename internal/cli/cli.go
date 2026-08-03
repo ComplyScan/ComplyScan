@@ -345,7 +345,23 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				return fmt.Errorf("scan %q: %w", target, err)
 			}
 			visible := report.FilterByMinimum(result.Findings, minimumSeverity)
-			reportValue := report.New(target, build.Version, visible, result.Warnings, result.Suppressed)
+			findingsScope := "full-repository"
+			if changedSince != "" {
+				findingsScope = "changed-files"
+			}
+			reportValue := report.NewWithMetadata(
+				target,
+				report.Tool{Name: "ComplyScan", Version: build.Version, Commit: build.Commit, BuiltAt: build.BuildDate},
+				report.ScanScope{
+					Findings: findingsScope, TechnicalEvidence: "full-repository", ChangedSince: changedSince,
+					TrackedOnly:               cfg.Scan.TrackedOnly || trackedOnly,
+					IncludeNestedRepositories: cfg.Scan.IncludeNestedRepositories || includeNestedRepositories,
+				},
+				time.Now(),
+				visible,
+				result.Warnings,
+				result.Suppressed,
+			)
 			if len(cfg.Systems) > 0 {
 				assessment := profile.AssessEUAIAct(cfg.Systems)
 				reportValue.Applicability = &assessment

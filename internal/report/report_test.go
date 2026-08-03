@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
 	"github.com/1eonardodawinki/ComplyScan/internal/framework"
@@ -32,7 +33,9 @@ func TestSeverityFilteringAndThreshold(t *testing.T) {
 }
 
 func TestWriteJSON(t *testing.T) {
-	value := New(".", "0.1.0", []rules.Finding{{
+	value := NewWithMetadata(".", Tool{Name: "ComplyScan", Version: "0.1.0", Commit: "abc123", BuiltAt: "today"}, ScanScope{
+		Findings: "changed-files", TechnicalEvidence: "full-repository", ChangedSince: "main", TrackedOnly: true,
+	}, time.Date(2026, 8, 3, 10, 30, 0, 0, time.FixedZone("test", 2*60*60)), []rules.Finding{{
 		RuleID: "AI-DOC-001", Title: "Missing docs", Severity: rules.SeverityMedium,
 	}}, nil, 2)
 	var output bytes.Buffer
@@ -43,8 +46,11 @@ func TestWriteJSON(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" {
+	if decoded.SchemaVersion != 1 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
 		t.Fatalf("unexpected tool: %#v", decoded.Tool)
+	}
+	if !strings.HasPrefix(decoded.Scan.ID, "scan-") || decoded.Scan.CreatedAt != "2026-08-03T08:30:00Z" || decoded.Scan.Scope.Findings != "changed-files" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
+		t.Fatalf("unexpected scan metadata: %#v", decoded.Scan)
 	}
 	if decoded.Summary.Total != 1 || decoded.Summary.Medium != 1 {
 		t.Fatalf("unexpected summary: %#v", decoded.Summary)
