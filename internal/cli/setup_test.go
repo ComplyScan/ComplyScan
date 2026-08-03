@@ -14,7 +14,7 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 	target := t.TempDir()
 	input := strings.NewReader(strings.Repeat("\n", 19))
 	var stdout, stderr bytes.Buffer
-	code := executeWithInput([]string{"setup", "--interactive", "--skip-model-pull", "--skip-scan", target}, input, &stdout, &stderr, testBuild)
+	code := executeWithInput([]string{"setup", "--interactive", "--skip-ollama-install", "--skip-model-pull", "--skip-scan", target}, input, &stdout, &stderr, testBuild)
 	if code != 0 {
 		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
@@ -69,7 +69,9 @@ func TestSetupRejectsUnsafeOrConflictingAutomationFlags(t *testing.T) {
 	tests := [][]string{
 		{"setup", "--interactive", "--non-interactive", target},
 		{"setup", "--non-interactive", "--pull-model", "--skip-model-pull", target},
+		{"setup", "--non-interactive", "--install-ollama", "--skip-ollama-install", target},
 		{"setup", "--non-interactive", "--pull-model", "--review", "none", target},
+		{"setup", "--non-interactive", "--install-ollama", "--review", "none", target},
 		{"setup", "--non-interactive", "--ollama-model", "model", "--review", "none", target},
 	}
 	for _, args := range tests {

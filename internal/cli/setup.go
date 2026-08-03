@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -20,14 +21,16 @@ import (
 const defaultSetupModel = "qwen3:8b"
 
 type setupOptions struct {
-	configPath       string
-	forceInteractive bool
-	nonInteractive   bool
-	reviewProvider   string
-	ollamaModel      string
-	pullModel        bool
-	skipModelPull    bool
-	skipScan         bool
+	configPath        string
+	forceInteractive  bool
+	nonInteractive    bool
+	reviewProvider    string
+	ollamaModel       string
+	pullModel         bool
+	skipModelPull     bool
+	installOllama     bool
+	skipOllamaInstall bool
+	skipScan          bool
 }
 
 func newSetupCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
@@ -42,6 +45,9 @@ func newSetupCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			}
 			if options.pullModel && options.skipModelPull {
 				return errors.New("--pull-model and --skip-model-pull cannot be used together")
+			}
+			if options.installOllama && options.skipOllamaInstall {
+				return errors.New("--install-ollama and --skip-ollama-install cannot be used together")
 			}
 			target := "."
 			if len(args) == 1 {
@@ -68,6 +74,8 @@ func newSetupCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().StringVar(&options.ollamaModel, "ollama-model", "", "Ollama model name")
 	command.Flags().BoolVar(&options.pullModel, "pull-model", false, "download the configured Ollama model (requires --review ollama in non-interactive mode)")
 	command.Flags().BoolVar(&options.skipModelPull, "skip-model-pull", false, "configure Ollama without offering to download the model")
+	command.Flags().BoolVar(&options.installOllama, "install-ollama", false, "install Ollama when it is missing (requires explicit use in non-interactive mode)")
+	command.Flags().BoolVar(&options.skipOllamaInstall, "skip-ollama-install", false, "do not offer to install Ollama when it is missing")
 	command.Flags().BoolVar(&options.skipScan, "skip-scan", false, "do not offer to run the first scan")
 	return command
 }
@@ -178,6 +186,9 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 	if options.pullModel && provider != "ollama" {
 		return false, errors.New("--pull-model requires --review ollama")
 	}
+	if options.installOllama && provider != "ollama" {
+		return false, errors.New("--install-ollama requires --review ollama")
+	}
 	cfg.AI.Provider = provider
 	if provider == "none" {
 		if _, err := fmt.Fprintln(stdout, "Local AI review disabled. Deterministic scanning remains available."); err != nil {
@@ -204,10 +215,30 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 
 	ollamaPath, err := exec.LookPath("ollama")
 	if err != nil {
-		if _, writeErr := fmt.Fprintln(stdout, "Ollama was not found on PATH. Install it from https://ollama.com/download, then rerun `complyscan setup` or pull the selected model manually."); writeErr != nil {
-			return false, writeErr
+		shouldInstall := options.installOllama
+		if interactive && !options.skipOllamaInstall && !options.installOllama {
+			if _, writeErr := fmt.Fprintln(stdout, "Ollama was not found on PATH. Installation may download software, change system packages, and request system privileges."); writeErr != nil {
+				return false, writeErr
+			}
+			shouldInstall, err = prompt.confirm("Install and start Ollama now", true)
+			if err != nil {
+				return false, err
+			}
 		}
-		return false, nil
+		if shouldInstall {
+			ollamaPath, err = installOllama(ctx, stdout)
+			if err != nil {
+				if _, writeErr := fmt.Fprintf(stdout, "Automatic Ollama installation did not complete: %v\n", err); writeErr != nil {
+					return false, writeErr
+				}
+			}
+		}
+		if ollamaPath == "" {
+			if _, writeErr := fmt.Fprintln(stdout, "Install Ollama from https://ollama.com/download, then rerun `complyscan setup` or pull the selected model manually."); writeErr != nil {
+				return false, writeErr
+			}
+			return false, nil
+		}
 	}
 	ready := ollamaModelInstalled(ctx, ollamaPath, model)
 	if ready {
@@ -237,9 +268,72 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 	command.Stdout = stdout
 	command.Stderr = stdout
 	if err := command.Run(); err != nil {
-		return false, fmt.Errorf("download Ollama model %q: %w", model, err)
+		if _, writeErr := fmt.Fprintf(stdout, "Model download did not complete: %v\nStart Ollama with `ollama serve`, then run: ollama pull %s\n", err, model); writeErr != nil {
+			return false, writeErr
+		}
+		return false, nil
 	}
 	return true, nil
+}
+
+func installOllama(ctx context.Context, stdout io.Writer) (string, error) {
+	if brewPath, err := exec.LookPath("brew"); err == nil {
+		if _, err := fmt.Fprintln(stdout, "Installing Ollama with Homebrew..."); err != nil {
+			return "", err
+		}
+		if err := runSetupCommand(ctx, stdout, brewPath, "install", "ollama"); err != nil {
+			return "", fmt.Errorf("brew install ollama: %w", err)
+		}
+		ollamaPath, err := exec.LookPath("ollama")
+		if err != nil {
+			return "", errors.New("Homebrew completed but ollama is not available on PATH")
+		}
+		if err := runSetupCommand(ctx, stdout, brewPath, "services", "start", "ollama"); err != nil {
+			if _, writeErr := fmt.Fprintf(stdout, "Ollama was installed, but its Homebrew service did not start: %v\nStart it manually with `ollama serve`.\n", err); writeErr != nil {
+				return "", writeErr
+			}
+		}
+		return ollamaPath, nil
+	}
+	if runtime.GOOS != "linux" {
+		return "", fmt.Errorf("automatic installation without Homebrew is not supported on %s", runtime.GOOS)
+	}
+	curlPath, err := exec.LookPath("curl")
+	if err != nil {
+		return "", errors.New("curl is required to run Ollama's official Linux installer")
+	}
+	installer, err := os.CreateTemp("", "complyscan-ollama-install-*.sh")
+	if err != nil {
+		return "", fmt.Errorf("create temporary Ollama installer: %w", err)
+	}
+	installerPath := installer.Name()
+	if closeErr := installer.Close(); closeErr != nil {
+		_ = os.Remove(installerPath)
+		return "", fmt.Errorf("close temporary Ollama installer: %w", closeErr)
+	}
+	defer os.Remove(installerPath)
+	if _, err := fmt.Fprintln(stdout, "Downloading Ollama's official Linux installer from https://ollama.com/install.sh..."); err != nil {
+		return "", err
+	}
+	if err := runSetupCommand(ctx, stdout, curlPath, "-fsSL", "-o", installerPath, "https://ollama.com/install.sh"); err != nil {
+		return "", fmt.Errorf("download official Ollama installer: %w", err)
+	}
+	if err := runSetupCommand(ctx, stdout, "/bin/sh", installerPath); err != nil {
+		return "", fmt.Errorf("run official Ollama installer: %w", err)
+	}
+	ollamaPath, err := exec.LookPath("ollama")
+	if err != nil {
+		return "", errors.New("official installer completed but ollama is not available on PATH")
+	}
+	return ollamaPath, nil
+}
+
+func runSetupCommand(ctx context.Context, output io.Writer, executable string, args ...string) error {
+	command := exec.CommandContext(ctx, executable, args...)
+	command.Stdout = output
+	command.Stderr = output
+	command.Stdin = os.Stdin
+	return command.Run()
 }
 
 func ollamaModelInstalled(ctx context.Context, executable, model string) bool {
