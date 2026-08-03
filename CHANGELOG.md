@@ -30,6 +30,7 @@ Target: 0.2.0
 - Git-ignore initialization and built-in discovery exclusion for generated scan reports.
 - A unified `setup` wizard for system context, human applicability decisions, local model selection, consent-based Ollama provisioning, and an optional first scan.
 - A one-command macOS/Linux installer with platform detection, mandatory release checksum verification, user-local installation, pinned versions, and automatic guided-setup handoff.
+- A minimal GitHub Pages deployment that publishes the installer at `complyscan.github.io/ComplyScan/install.sh` without exposing the repository as site content.
 
 ### Changed
 

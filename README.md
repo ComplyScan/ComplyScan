@@ -13,16 +13,16 @@ ComplyScan does **not** interpret a complete system, determine an EU AI Act clas
 Starting with v0.2.0, macOS and Linux users can install ComplyScan and immediately start guided setup with one command:
 
 ```bash
-curl -fsSL https://github.com/ComplyScan/ComplyScan/releases/latest/download/install.sh | sh
+curl -fsSL https://complyscan.github.io/ComplyScan/install.sh | sh
 ```
 
-The installer detects the operating system and CPU architecture, downloads the matching release archive, verifies its published SHA-256 checksum, installs `complyscan` into `~/.local/bin`, and launches `complyscan setup` through the terminal. It does not use `sudo`. Pass `--no-setup` for automation or pin both the installer and binary version:
+The installer is published from this repository through GitHub Pages. It detects the operating system and CPU architecture, downloads the matching release archive, verifies its published SHA-256 checksum, installs `complyscan` into `~/.local/bin`, and launches `complyscan setup` through the terminal. It does not use `sudo`. Pass `--no-setup` for automation or pin both the installer and binary version:
 
 ```bash
 curl -fsSL https://github.com/ComplyScan/ComplyScan/releases/download/v0.2.0/install.sh | sh -s -- --version v0.2.0 --no-setup
 ```
 
-This installer becomes available when v0.2.0 is tagged; it is not attached to the current v0.1.1 release. Prebuilt archives for macOS, Linux, and Windows remain available on [GitHub Releases](https://github.com/ComplyScan/ComplyScan/releases). The current stable release can still be installed with Go 1.22 or newer:
+The Pages installer can install the current v0.1.1 release but will direct users to the older `init` flow because guided setup starts in v0.2.0. Prebuilt archives for macOS, Linux, and Windows remain available on [GitHub Releases](https://github.com/ComplyScan/ComplyScan/releases). The current stable release can also be installed with Go 1.22 or newer:
 
 ```bash
 go install github.com/1eonardodawinki/ComplyScan/cmd/complyscan@latest
