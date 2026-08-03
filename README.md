@@ -2,7 +2,7 @@
 
 > ComplyScan is a developer-first scanner that identifies potential AI compliance risks and missing governance evidence before code reaches production.
 
-ComplyScan is an open-source, offline-by-default CLI for finding technical signals that deserve review during EU AI Act readiness work. Guided setup records factual system context and attributable human applicability decisions; a versioned control pack maps repository evidence candidates to EU AI Act requirements; and scans inventory likely AI providers and frameworks, look for risky logging and hardcoded credentials, and check whether repository-level AI-system and risk-classification evidence is present. An explicitly enabled Ollama layer can add local advisory review without changing deterministic findings.
+ComplyScan is an open-source, offline-by-default CLI for finding technical signals that deserve review during EU AI Act readiness work. Guided setup records factual system context and attributable human applicability decisions; a versioned technical pack maps code and configuration signals to EU AI Act technical objectives; and scans inventory likely AI providers and frameworks, look for risky logging and hardcoded credentials, and check whether repository-level AI-system and risk-classification evidence is present. An explicitly enabled Ollama layer can add local advisory review without changing deterministic findings.
 
 ComplyScan does **not** interpret a complete system, determine an EU AI Act classification, certify compliance, or replace legal and compliance professionals. A finding is a review prompt—not a claim that a system violates the law.
 
@@ -49,6 +49,8 @@ complyscan scan . --tracked-only
 complyscan scan . --exclude fixtures --max-files 10000
 complyscan scan . --changed-since main
 complyscan scan . --review ollama --ollama-model gemma3
+complyscan scan . --report-dir .complyscan/reports
+complyscan scan . --no-report
 complyscan inventory .
 complyscan inventory . --format json
 complyscan generate ai-system .
@@ -65,7 +67,9 @@ complyscan version
 
 The two `generate` commands use that inventory to create `docs/AI_SYSTEM.md` and `docs/risk-assessment.md`. The generated files are deliberately marked as drafts, preserve discovery warnings, and contain explicit human-review fields. Existing documents are protected unless `--force` is supplied.
 
-Terminal scans print findings as rules discover them and finish with applicability and framework context plus the final summary. JSON and SARIF 2.1.0 output remain buffered so they are valid and deterministically ordered. JSON includes the versioned framework assessment when profiles exist. SARIF includes source locations and stable partial fingerprints for code-scanning integrations, but omits framework controls because they are not source-located code-scanning results.
+Terminal scans print findings as rules discover them and finish with applicability context, code-only technical evidence, and the final summary. Every successful scan also atomically writes `.complyscan/reports/latest.md` for people and `.complyscan/reports/latest.json` as the versioned machine-readable evidence bundle. `complyscan init` adds that generated directory to `.gitignore`; scans always exclude it from subsequent discovery. Use `--no-report` to disable persistence or `--report-dir` to select another directory inside the target.
+
+JSON and SARIF 2.1.0 output remain buffered so they are valid and deterministically ordered. JSON stdout and `latest.json` include the technical evidence bundle. SARIF includes source locations and stable partial fingerprints for code-scanning integrations, but omits technical-objective summaries that have no single code-scanning location.
 
 Example terminal report:
 
@@ -84,6 +88,10 @@ MED    AI-RISK-001  AI risk classification not found
        No repository-level AI risk-classification evidence was found.
 
 Summary: 1 high, 2 medium
+
+Reports saved:
+  Human-readable: .complyscan/reports/latest.md
+  Evidence bundle: .complyscan/reports/latest.json
 ```
 
 ## Rules
@@ -98,37 +106,27 @@ Summary: 1 high, 2 medium
 
 Provider detection requires typed evidence: a recognised dependency declaration, source import, service endpoint, or environment-variable access. Plain provider names and documentation prose are not treated as runtime usage. The maintained labelled corpus measures precision and recall across positive and hard-negative examples.
 
-The deterministic rule layer remains deliberately technical. Framework assessment is a separate evidence-mapping layer: neither a rule finding nor a keyword match is treated as a legal conclusion.
+The deterministic rule layer remains deliberately technical. Technical-objective matching is a separate evidence layer: neither a rule finding nor a keyword match is treated as a legal conclusion.
 
-## Versioned framework assessment
+## Versioned technical evidence
 
-The first built-in pack is `eu-ai-act-high-risk-provider` version `0.1.0`. It summarises and maps the high-risk AI system requirements in Articles 9–15 of Regulation (EU) 2024/1689:
+The built-in `eu-ai-act-technical-evidence` pack version `0.1.0` contains 13 code objectives associated with Articles 9, 10, 12, 14, 15, and 50 of Regulation (EU) 2024/1689. They cover technical signals for risk-control tests, dataset validation, bias evaluation, automatic logging, retention configuration, human review, override and stop mechanisms, performance thresholds, robustness, AI-specific security, interaction disclosure, and synthetic-content marking.
 
-| Control | Provision |
-| --- | --- |
-| Lifecycle risk management | Article 9 |
-| Data and data governance | Article 10 |
-| Technical documentation | Article 11 and Annex IV |
-| Automatic record-keeping | Article 12 |
-| Transparency and information for deployers | Article 13 |
-| Human oversight | Article 14 |
-| Accuracy, robustness, and cybersecurity | Article 15 |
+The pack accepts only source, configuration, dependency, test, CI, container, and infrastructure file kinds. It does not contain objectives for policies, risk assessments, training records, conformity documents, attestations, or other evidence intended for a future dashboard. The CLI runs technical checks even when no system profile exists; declared context remains a separate, provisional report section rather than an activation gate.
 
-The pack is activated only as a **candidate** when the declared profile indicates EU scope, a provider role, and a possible high-risk domain. A human `not-applicable` decision prevents evaluation but remains explicitly unverified by ComplyScan. Unknown roles, scope, or high-risk classification produce `needs-review` rather than an exemption.
-
-For an activated system, every control receives one of these evidence statuses:
+Every technical objective receives one of these statuses:
 
 | Status | Meaning |
 | --- | --- |
-| `missing` | No repository file matched any evidence objective. This does not prove that evidence is absent outside the repository. |
-| `partial` | Candidate repository evidence matched some, but not all, evidence objectives. |
-| `evidence-found` | Candidate evidence matched every objective. This is not `satisfied` or `compliant`. |
+| `candidate-evidence` | One or more eligible files matched all configured signal groups. The code still requires technical and human verification. |
+| `not-detected` | The bounded scan did not locate the configured technical signal. This does not prove the implementation is absent. |
+| `not-evaluated` | The technical check could not be evaluated. This status is reserved for explicit limitations rather than treated as a failure. |
 
-Evidence matching requires the configured keyword groups to appear in an eligible file kind. Reports store only repository-relative paths, file kinds, and matched terms—not document excerpts. Every objective declares whether semantic, technical, and human verification is still required. Pack version, SHA-256 content digest, source edition, target, and discovery warnings are included so assessments remain reproducible and incomplete scan boundaries stay visible.
+Evidence matching requires every configured keyword group to appear in one eligible file. Results include a stable fingerprint, repository-relative path, line number, file kind, and matched terms—not a source excerpt. Pack version, SHA-256 content digest, source edition, scan identity, target, and discovery scope remain visible for reproducibility.
 
-This initial pack is deliberately incomplete. It does not yet cover all provider duties after Article 15, deployer/importer/distributor/product-manufacturer obligations, prohibited practices, transparency duties, GPAI, conformity assessment, registration, post-market monitoring, enforcement, national law, or subsequent guidance and amendments. Its authoritative source is the [official EUR-Lex text](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32024R1689).
+This technical pack is deliberately not a complete regulatory catalog. The future dashboard will own documentary, organisational, operational, and attestation objectives and combine them with the same stable CLI objective IDs. Its authoritative source is the [official EUR-Lex text](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32024R1689).
 
-The current Ollama integration still reviews deterministic findings only. It does not read or approve framework evidence. Control-specific semantic review will require a separate bounded-data and consent design; until then, `semantic-and-human` means the candidate must be reviewed outside the automated matcher.
+The current Ollama integration still reviews deterministic findings only. It does not yet receive connected technical-objective context. That next layer requires a bounded repository graph, read-only context retrieval, prompt-injection controls, and explicit local-model limits.
 
 ## Exit codes
 
@@ -140,7 +138,7 @@ The current Ollama integration still reviews deterministic findings only. It doe
 
 The default failure threshold is `high`. `--severity` filters report output; it does not change `fail-on`.
 
-Framework gaps do not currently change the process exit code. `framework assess` exits `0` after a valid assessment, even when controls are missing, and exits `2` for invalid configuration, pack, or discovery failures. A future policy gate must remain separate from evidence matching so candidate evidence cannot silently become a compliance decision.
+Technical-objective results do not change the process exit code. `framework assess` exits `0` after a valid technical scan even when evidence is not detected, and exits `2` for invalid configuration, pack, or discovery failures. A future dashboard policy gate must remain separate from evidence matching.
 
 ## Configuration
 
@@ -155,6 +153,7 @@ scan:
     - vendor
     - dist
     - build
+    - .complyscan/reports
   max-files: 25000
   max-total-bytes: 104857600
   include-nested-repositories: false
@@ -285,7 +284,7 @@ In the default deterministic mode, the ComplyScan v0.2 development CLI:
 
 Permission errors are reported as warnings where scanning can safely continue. Source excerpts are short and pass through credential redaction before appearing as evidence.
 
-When Ollama review is explicitly enabled, ComplyScan makes HTTP requests only to the validated loopback endpoint and sends the bounded finding records described above. Model rationales and suggested actions are also re-redacted and length-limited before reporting. Framework assessment does not send profile or repository evidence to Ollama.
+When Ollama review is explicitly enabled, ComplyScan makes HTTP requests only to the validated loopback endpoint and sends the bounded finding records described above. Model rationales and suggested actions are also re-redacted and length-limited before reporting. Technical-objective matches, profiles, and repository files are not currently sent to Ollama. The generated Markdown and JSON reports remain local unless a future dashboard connection is explicitly enabled.
 
 The optional GitHub Action uploads SARIF metadata to GitHub code scanning when `upload-results` is enabled. That SARIF contains finding messages, repository-relative paths, line numbers, and fingerprints, but not source excerpts or detected credentials. When a job explicitly enables Ollama, SARIF also contains the advisory verdict, confidence, rationale, suggested action, provider, and model for reviewed findings.
 
@@ -298,7 +297,7 @@ go vet ./...
 go build ./cmd/complyscan
 ```
 
-The pipeline is `declared system profile → provisional applicability screening → versioned control-pack activation → repository discovery and file classification → candidate framework evidence mapping → typed AI inventory → deterministic rules → findings → suppression and filtering → optional advisory review → report`. Add rules by implementing the small `rules.Rule` interface and registering the rule in `rules.DefaultRules`. Repository-wide rules can implement `rules.RepositoryWideRule` to retain full context during changed-since scans. See [the architecture notes](docs/architecture.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+The pipeline is `repository discovery and file classification → code-only technical-objective matching → typed AI inventory → deterministic rules → findings → suppression and filtering → declared applicability context → optional advisory review → terminal output plus atomic Markdown and JSON reports`. Add rules by implementing the small `rules.Rule` interface and registering the rule in `rules.DefaultRules`. Repository-wide rules can implement `rules.RepositoryWideRule` to retain full context during changed-since scans. See [the architecture notes](docs/architecture.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 The labelled detector corpus lives under `testdata/evaluation`. Its test reports precision, recall, true positives, false positives, false negatives, and negative cases; the build fails if precision drops below 95% or recall below 90%.
 
@@ -310,8 +309,9 @@ Future releases may add:
 
 - broader labelled coverage for more languages, frameworks, model gateways, and data flows;
 - model and AI dependency supply-chain inventory;
-- expanded EU AI Act packs for provider and deployer obligations beyond Articles 9–15;
-- bounded, explicitly consented Ollama semantic review for control evidence;
+- a dashboard catalog that combines CLI code evidence with uploaded documents, declarations, attestations, and operational evidence;
+- automatic opt-in synchronization of the exact local JSON evidence bundle;
+- deterministic repository graphs and bounded, explicitly consented Ollama review of connected technical context;
 - richer, rule-specific local review prompts and model evaluation fixtures;
 - bring-your-own API keys for optional review providers; and
 - optional ComplyScan Cloud integrations.

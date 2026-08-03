@@ -4,9 +4,9 @@
 | --- | --- |
 | Product | ComplyScan |
 | Version assessed | Unreleased 0.2.0 development branch |
-| Assessment date | 2026-08-02 |
+| Assessment date | 2026-08-03 |
 | Owner | ComplyScan maintainers |
-| Status | Reassessment in progress following optional Ollama integration; not legal advice |
+| Status | Reassessment in progress following optional Ollama and local evidence-report integration; not legal advice |
 | Next review | Required before release, then before any reassessment trigger below |
 
 ## Intended purpose
@@ -26,12 +26,13 @@ The unreleased 0.2 development branch consists of:
 - optional Git changed-file scope that preserves repository-wide governance checks;
 - an optional Ollama provider that generates advisory observations for existing findings through a loopback-only local API;
 - validated, version-controlled multi-system profiles with provisional EU AI Act scope screening and attributable human applicability decisions;
-- a deterministic, versioned EU AI Act Articles 9–15 control pack that locates candidate repository evidence without model inference or compliance conclusions; and
+- a deterministic, versioned EU AI Act technical pack with code-only objectives and no documentary or control-level compliance assessment;
+- automatic local Markdown reports and versioned JSON evidence bundles; and
 - an optional GitHub Action that builds the CLI and can upload SARIF metadata to GitHub code scanning.
 
 Ollama review is disabled by default. The default scan remains deterministic and makes no model call. When explicitly enabled, ComplyScan calls a configured model through Ollama's loopback API. OpenAI, Anthropic, Gemini, and ComplyScan Cloud remain inactive extension types.
 
-The framework pack and its keyword-group evidence matcher remain deterministic in both configurations. Framework profiles, documents, and evidence are not sent to Ollama. The pack's `semantic-and-human` verification labels describe work still required; they do not indicate that a model has reviewed the evidence.
+The technical pack and its keyword-group evidence matcher remain deterministic in both configurations. Technical-objective matches, profiles, and repository files are not sent to Ollama. The pack's `technical-semantic-and-human` verification labels describe work still required; they do not indicate that a model has reviewed the code. Generated Markdown and JSON reports remain local unless a future dashboard connection is explicitly enabled.
 
 ## AI Act applicability assessment
 
@@ -52,7 +53,7 @@ The assessment is not a conformity assessment or final legal determination. Appl
 
 ## Data flows
 
-The CLI reads eligible repository files into process memory and evaluates them locally. It does not collect telemetry or upload source code. Terminal and JSON reports may contain short, sanitised evidence excerpts. Structured inventory evidence describes the detected technical signal rather than copying source lines. Secret-shaped evidence is redacted. Baseline files contain finding identity metadata but no source evidence. Generated governance documents are written only to the user-selected local path and are protected from accidental overwrite by default.
+The CLI reads eligible repository files into process memory and evaluates them locally. It does not collect telemetry or upload source code. Terminal and JSON findings may contain short, sanitised evidence excerpts. Technical-objective results store fingerprints, repository-relative paths, line numbers, file kinds, and matched terms rather than source excerpts. Structured inventory evidence describes the detected technical signal rather than copying source lines. Secret-shaped evidence is redacted. Baseline files contain finding identity metadata but no source evidence. Every successful scan atomically writes `.complyscan/reports/latest.md` and `latest.json`; the directory is excluded from scanning and added to `.gitignore` during initialization. Generated governance documents are written only to the user-selected local path and are protected from accidental overwrite by default.
 
 When Ollama review is explicitly enabled, ComplyScan selects visible and unsuppressed deterministic findings up to the configured maximum. It sends bounded, re-redacted records containing the fingerprint, rule ID, title, severity, category, message, relative path, line, short evidence, remediation, and confidence. It does not send complete repository files. Requests go directly to a validated loopback endpoint without HTTP proxies or redirects. Responses must conform to a JSON schema and preserve submitted fingerprints and rule IDs; returned text is re-redacted and length-limited.
 
