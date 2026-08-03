@@ -2,7 +2,7 @@
 
 > ComplyScan is a developer-first scanner that identifies potential AI compliance risks and missing governance evidence before code reaches production.
 
-ComplyScan is an open-source, offline-by-default CLI for finding technical signals that deserve review during EU AI Act readiness work. Guided setup records factual system context and attributable human applicability decisions; a versioned technical pack maps code and configuration signals to EU AI Act technical objectives; and scans inventory likely AI providers and frameworks, look for risky logging and hardcoded credentials, and check whether repository-level AI-system and risk-classification evidence is present. An explicitly enabled Ollama layer can add local advisory review without changing deterministic findings.
+ComplyScan is an open-source, offline-by-default CLI for finding technical signals that deserve review during EU AI Act readiness work. Guided setup records factual system context and attributable human applicability decisions; a versioned technical pack maps code and configuration signals to EU AI Act technical objectives; and scans inventory likely AI providers and frameworks, look for risky logging and hardcoded credentials, and check whether repository-level AI-system and risk-classification evidence is present. An explicitly enabled Ollama layer can add local advisory review of both deterministic findings and bounded technical-objective context without changing either evidence layer.
 
 ComplyScan does **not** interpret a complete system, determine an EU AI Act classification, certify compliance, or replace legal and compliance professionals. A finding is a review prompt—not a claim that a system violates the law.
 
@@ -122,11 +122,13 @@ Every technical objective receives one of these statuses:
 | `not-detected` | The bounded scan did not locate the configured technical signal. This does not prove the implementation is absent. |
 | `not-evaluated` | The technical check could not be evaluated. This status is reserved for explicit limitations rather than treated as a failure. |
 
-Evidence matching requires every configured keyword group and path signal to match one eligible file. This deliberately conservative first-version anchor may miss generically named implementations; the planned repository graph will expand connected context without weakening the evidence label. Results include a stable fingerprint, repository-relative path, line number, file kind, and matched terms—not a source excerpt. Pack version, SHA-256 content digest, source edition, scan identity, target, and discovery scope remain visible for reproducibility.
+Evidence matching requires every configured keyword group and path signal to match one eligible file. A language-neutral repository graph then attaches bounded structural context to each candidate. The current indexer supports Go and records functions, methods, types, imports, calls, routes, configuration access, authorization-like checks, persistence calls, audit/logging calls, and tests. It classifies anchors as production-reachable, exported entry candidates, test-only, or not reached, and reports unresolved questions such as a missing connected authorization check. Unsupported source is visible as coverage debt and prevents an unmatched source objective from being presented as fully evaluated.
+
+Saved results include a stable fingerprint, repository-relative path, line number, file kind, matched terms, report-safe symbol metadata, imports, relationships, reachability, and unresolved questions—not source excerpts. The technical-evidence schema is versioned independently, and the pack version, SHA-256 content digest, source edition, scan identity, target, and discovery scope remain visible for reproducibility. Go is the only graph-indexed language in this development version; deterministic rules continue to have their separately documented multi-language coverage.
 
 This technical pack is deliberately not a complete regulatory catalog. The future dashboard will own documentary, organisational, operational, and attestation objectives and combine them with the same stable CLI objective IDs. Its authoritative source is the [official EUR-Lex text](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32024R1689).
 
-The current Ollama integration still reviews deterministic findings only. It does not yet receive connected technical-objective context. That next layer requires a bounded repository graph, read-only context retrieval, prompt-injection controls, and explicit local-model limits.
+When Ollama is explicitly enabled, ComplyScan makes a second, separate technical-objective review request. It sends only candidates already created by deterministic matching, their bounded graph relationships, and small connected symbol excerpts. Returned strengths (`strong`, `partial`, `weak`, `uncertain`, or `not_supported`) remain bound to the supplied objective ID and evidence fingerprint. They cannot create an objective, change its status, decide legal applicability, or affect the exit code.
 
 ## Exit codes
 
@@ -240,9 +242,11 @@ complyscan scan . --review ollama --ollama-model gemma3
 
 You can instead set `ai.provider: ollama` in `.complyscan.yml`. `--review none` disables a configured reviewer for one scan. If explicitly enabled review cannot connect, times out, cannot find the model, or returns invalid structured output, the scan exits with code `2` rather than silently omitting the requested review.
 
-ComplyScan sends only visible, unsuppressed deterministic finding records to Ollama, up to `max-findings`. Each record contains bounded and re-redacted metadata such as the rule ID, fingerprint, title, message, relative path, line, short evidence, remediation, severity, and confidence. It does not send complete repository files. The endpoint must be `localhost` or a loopback IP; ComplyScan bypasses HTTP proxies and refuses redirects.
+ComplyScan uses two separate Ollama requests, both bounded by `max-findings`. The first sends visible, unsuppressed deterministic finding records with re-redacted metadata such as the rule ID, fingerprint, title, message, relative path, line, short evidence, remediation, severity, and confidence. The second sends existing technical candidates with their objective ID, evidence fingerprint, reachability, imports, graph relationships, unresolved questions, and up to six connected source-symbol excerpts. A non-source technical match may include a small excerpt around the matched line. ComplyScan never sends a complete repository or an unbounded file. Input excerpts are re-redacted and are not copied into the saved report.
 
-Ollama observations are attached to existing fingerprints as `confirmed`, `uncertain`, or `not_supported`. They are advisory: they cannot create or remove findings, change severity, update baselines or suppressions, or affect the failure threshold. Terminal, JSON, and SARIF keep them separate from deterministic results. ComplyScan requests non-streaming schema-constrained output with temperature zero, but model output can still vary. See Ollama's [local API](https://docs.ollama.com/api/introduction) and [structured-output documentation](https://docs.ollama.com/capabilities/structured-outputs).
+The endpoint must be `localhost` or a loopback IP; ComplyScan bypasses HTTP proxies and refuses redirects. Repository strings, code, and comments are explicitly labelled untrusted in the fixed prompts. Structured output must preserve submitted finding or objective identifiers; unknown, changed, duplicate, or malformed bindings fail the requested review.
+
+Finding observations are attached to existing fingerprints as `confirmed`, `uncertain`, or `not_supported`. Technical observations use the separate strength vocabulary above and remain attached to the exact objective/evidence pair. Both are advisory: they cannot create or remove findings, change objective status or severity, update baselines or suppressions, or affect the failure threshold. Terminal, Markdown, and JSON keep both review types separate from deterministic results; SARIF carries finding review only. ComplyScan requests non-streaming schema-constrained output with temperature zero, but model output can still vary. See Ollama's [local API](https://docs.ollama.com/api/introduction) and [structured-output documentation](https://docs.ollama.com/capabilities/structured-outputs).
 
 The loopback restriction controls where ComplyScan sends review records. Ollama itself may download models or route specially configured cloud models; select and operate a genuinely local model when a no-cloud boundary is required.
 
@@ -284,7 +288,7 @@ In the default deterministic mode, the ComplyScan v0.2 development CLI:
 
 Permission errors are reported as warnings where scanning can safely continue. Source excerpts are short and pass through credential redaction before appearing as evidence.
 
-When Ollama review is explicitly enabled, ComplyScan makes HTTP requests only to the validated loopback endpoint and sends the bounded finding records described above. Model rationales and suggested actions are also re-redacted and length-limited before reporting. Technical-objective matches, profiles, and repository files are not currently sent to Ollama. The generated Markdown and JSON reports remain local unless a future dashboard connection is explicitly enabled.
+When Ollama review is explicitly enabled, ComplyScan makes HTTP requests only to the validated loopback endpoint and sends the bounded finding and technical-context records described above. Technical source excerpts exist only in the local request; saved technical evidence contains structural metadata but no source. Model rationales, questions, and suggested actions are re-redacted and length-limited before reporting. Profiles are not sent to Ollama. The generated Markdown and JSON reports remain local unless a future dashboard connection is explicitly enabled.
 
 The optional GitHub Action uploads SARIF metadata to GitHub code scanning when `upload-results` is enabled. That SARIF contains finding messages, repository-relative paths, line numbers, and fingerprints, but not source excerpts or detected credentials. When a job explicitly enables Ollama, SARIF also contains the advisory verdict, confidence, rationale, suggested action, provider, and model for reviewed findings.
 
@@ -297,7 +301,7 @@ go vet ./...
 go build ./cmd/complyscan
 ```
 
-The pipeline is `repository discovery and file classification → code-only technical-objective matching → typed AI inventory → deterministic rules → findings → suppression and filtering → declared applicability context → optional advisory review → terminal output plus atomic Markdown and JSON reports`. Add rules by implementing the small `rules.Rule` interface and registering the rule in `rules.DefaultRules`. Repository-wide rules can implement `rules.RepositoryWideRule` to retain full context during changed-since scans. See [the architecture notes](docs/architecture.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+The pipeline is `repository discovery and file classification → language-neutral graph with Go indexing → code-only technical-objective matching and bounded context → typed AI inventory → deterministic rules → findings → suppression and filtering → declared applicability context → optional finding and technical-objective Ollama reviews → terminal output plus atomic Markdown and JSON reports`. Add rules by implementing the small `rules.Rule` interface and registering the rule in `rules.DefaultRules`. Repository-wide rules can implement `rules.RepositoryWideRule` to retain full context during changed-since scans. See [the architecture notes](docs/architecture.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 The labelled detector corpus lives under `testdata/evaluation`. Its test reports precision, recall, true positives, false positives, false negatives, and negative cases; the build fails if precision drops below 95% or recall below 90%.
 
@@ -311,8 +315,9 @@ Future releases may add:
 - model and AI dependency supply-chain inventory;
 - a dashboard catalog that combines CLI code evidence with uploaded documents, declarations, attestations, and operational evidence;
 - automatic opt-in synchronization of the exact local JSON evidence bundle;
-- deterministic repository graphs and bounded, explicitly consented Ollama review of connected technical context;
-- richer, rule-specific local review prompts and model evaluation fixtures;
+- graph indexers for additional source languages and framework-specific route/call resolution;
+- iterative, still-bounded local context retrieval for unresolved technical questions;
+- richer, rule-specific local review prompts and measured live-model evaluation corpora;
 - bring-your-own API keys for optional review providers; and
 - optional ComplyScan Cloud integrations.
 

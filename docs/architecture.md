@@ -9,12 +9,13 @@ target directory
   → bounded discovery, repository boundaries, and ignore evaluation
   → text/binary, file-count, and byte safeguards
   → file classification
-  → repository-wide code-only technical-objective matching
+  → language-neutral relationship graph with Go symbol indexing
+  → repository-wide code-only technical-objective matching and bounded structural context
   → typed provider and framework signal extraction
   → optional Git changed-file scope
   → independently registered deterministic rules
   → fingerprinting, reasoned suppressions, and baseline filtering
-  → optional advisory Ollama review of bounded finding records
+  → optional, separate advisory Ollama reviews of findings and technical candidates
   → terminal output plus atomic Markdown and JSON reports, or SARIF
 ```
 
@@ -24,6 +25,8 @@ target directory
 
 `internal/framework` owns the embedded technical-pack schema, strict parsing, content digest, code-evidence matcher, and objective-specific reports. The CLI pack contains only objectives that inspect source, configuration, tests, CI, containers, dependency declarations, or infrastructure. It records Article references for traceability but does not activate legal controls, inspect uploaded documents, or roll objectives into a compliance status. The first-version matcher requires an eligible file kind, a configured path signal, and every grouped content signal. Matches are `candidate-evidence`; an unmatched check is `not-detected`, never proof that an implementation is missing. Definition files can carry the narrow `complyscan:ignore-technical-evidence` marker to avoid self-identification. Pack content changes require a new version and digest.
 
+`internal/codegraph` owns a language-neutral symbol, import, edge, and reachability model. The first indexer parses Go with the standard library and extracts functions, methods, types, imports, calls, routes, configuration access, tests, and conservative authorization, persistence, and logging relationships. Production entry points and test entry points are traversed separately so test-only or unreached candidates remain visible. Each technical match receives a maximum two-hop context package with report-safe symbol metadata, imports, relationships, and unresolved questions. Source excerpts remain in unexported graph state and cannot enter graph JSON. Unsupported or unparseable source remains visible as incomplete coverage and causes unmatched source objectives to be `not-evaluated`.
+
 `internal/inventory` extracts typed signals from dependency declarations, source imports, recognised endpoints, and actual environment-variable access. It aggregates those signals into a versioned component report with scope, evidence type, package version, confidence, and location fields. Detection-signature files can carry the narrow `complyscan:ignore-ai-signals` marker so synthetic definitions do not self-identify as runtime components.
 
 `internal/rules` owns the severity and finding models plus the deterministic rule interface. Rules receive a read-only repository snapshot. During ordinary scans every rule sees the full snapshot. During `--changed-since` scans, file-local rules receive only committed, staged, unstaged, and untracked changed files; rules implementing `RepositoryWideRule` retain the full snapshot. The documentation and risk-evidence checks use that interface so a small pull request cannot bypass repository-level governance.
@@ -32,7 +35,7 @@ target directory
 
 `internal/baseline` stores deterministic finding identities without source evidence. Configured suppressions require a review reason; both mechanisms are applied before streaming, reporting, and exit-code evaluation.
 
-`internal/report` constructs a versioned evidence bundle with scan identity, UTC timestamp, tool build, and explicit scope. Terminal output streams deterministic findings live. Every successful scan atomically replaces `.complyscan/reports/latest.md` and `latest.json`; generated reports are excluded from discovery, target-relative output cannot escape the repository, and symlink artifact destinations are refused. Markdown is the human report and JSON is the future dashboard contract. SARIF 2.1.0 remains a separate source-location integration. Optional advisory observations are attached by existing finding fingerprint and remain separate from rule results and summaries. Structured component inventory has its own versioned JSON model because components and compliance-engineering findings are different records.
+`internal/report` constructs a versioned evidence bundle with scan identity, UTC timestamp, tool build, and explicit scope. Terminal output streams deterministic findings live. Every successful scan atomically replaces `.complyscan/reports/latest.md` and `latest.json`; generated reports are excluded from discovery, target-relative output cannot escape the repository, and symlink artifact destinations are refused. Markdown is the human report and JSON is the future dashboard contract. SARIF 2.1.0 remains a separate source-location integration. Finding observations are attached by finding fingerprint; technical observations are attached by objective ID and evidence fingerprint. Both remain separate from deterministic results and summaries. Structured component inventory has its own versioned JSON model because components and compliance-engineering findings are different records.
 
 `internal/providers` defines the optional review boundary:
 
@@ -42,8 +45,8 @@ type Provider interface {
 }
 ```
 
-Ollama is implemented as an explicit opt-in provider. It receives only visible, unsuppressed, bounded deterministic finding records—not repository files—and calls a validated loopback `/api/chat` endpoint with non-streaming JSON-schema output. Proxies and redirects are disabled, requests and responses are redacted and bounded, response fingerprints and rule IDs must match submitted findings, and a timeout limits review. Model observations cannot alter deterministic results or exit status.
+Ollama is implemented as an explicit opt-in provider with two calls. Finding review receives visible, unsuppressed, bounded deterministic records. Technical review receives existing objective candidates plus bounded graph metadata and up to six connected symbol excerpts or one bounded non-source file excerpt. Both call a validated loopback `/api/chat` endpoint with non-streaming JSON-schema output. Proxies and redirects are disabled; input and output are redacted and bounded; code and comments are labelled untrusted; identifiers must exactly match submitted records; and each call has a timeout. Model observations cannot alter deterministic results, objective status, legal applicability, or exit status.
 
-Technical-objective evidence is not sent across the provider boundary. Future semantic technical review must build a deterministic repository relationship graph and define an explicitly consented, read-only context-retrieval contract with bounded complete symbols, prompt-injection controls, secret redaction, identifier binding, and no authority to confirm legal compliance. A future dashboard will receive the same local JSON evidence bundle by explicit connection; raw code is not part of that default contract.
+Raw technical excerpts exist only in the local Ollama request and are never copied into the Markdown or JSON evidence bundle. A future dashboard will receive that source-free local JSON bundle by explicit connection. Additional language indexers and iterative context retrieval remain future work; any retrieval loop must stay read-only and bounded.
 
 OpenAI, Anthropic, Gemini, and ComplyScan Cloud remain reserved types only. Any future remote provider must add an explicit disclosure and consent boundary, preserve secret redaction, minimise source disclosure, and keep model observations separate from legal conclusions.
