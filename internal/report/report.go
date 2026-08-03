@@ -28,15 +28,15 @@ type Summary struct {
 }
 
 type Report struct {
-	Tool                Tool                        `json:"tool"`
-	Target              string                      `json:"target"`
-	Summary             Summary                     `json:"summary"`
-	Findings            []rules.Finding             `json:"findings"`
-	Warnings            []string                    `json:"warnings,omitempty"`
-	Suppressed          int                         `json:"suppressed"`
-	Applicability       *profile.AssessmentReport   `json:"applicability,omitempty"`
-	FrameworkAssessment *framework.AssessmentReport `json:"framework_assessment,omitempty"`
-	Review              *providers.ReviewResult     `json:"review,omitempty"`
+	Tool              Tool                               `json:"tool"`
+	Target            string                             `json:"target"`
+	Summary           Summary                            `json:"summary"`
+	Findings          []rules.Finding                    `json:"findings"`
+	Warnings          []string                           `json:"warnings,omitempty"`
+	Suppressed        int                                `json:"suppressed"`
+	Applicability     *profile.AssessmentReport          `json:"applicability,omitempty"`
+	TechnicalEvidence *framework.TechnicalEvidenceReport `json:"technical_evidence,omitempty"`
+	Review            *providers.ReviewResult            `json:"review,omitempty"`
 }
 
 type TerminalOptions struct {
@@ -115,8 +115,8 @@ func WriteTerminal(w io.Writer, report Report, options TerminalOptions) error {
 			return err
 		}
 	}
-	if report.FrameworkAssessment != nil {
-		if err := framework.WriteAssessmentTerminal(w, *report.FrameworkAssessment); err != nil {
+	if report.TechnicalEvidence != nil {
+		if err := framework.WriteTechnicalEvidenceTerminal(w, *report.TechnicalEvidence); err != nil {
 			return err
 		}
 	}
@@ -165,8 +165,8 @@ func WriteTerminalCompletion(w io.Writer, report Report) error {
 			return err
 		}
 	}
-	if report.FrameworkAssessment != nil {
-		if err := framework.WriteAssessmentTerminal(w, *report.FrameworkAssessment); err != nil {
+	if report.TechnicalEvidence != nil {
+		if err := framework.WriteTechnicalEvidenceTerminal(w, *report.TechnicalEvidence); err != nil {
 			return err
 		}
 	}

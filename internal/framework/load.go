@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const EUAIActHighRiskProviderPackID = "eu-ai-act-high-risk-provider"
+const EUAIActTechnicalEvidencePackID = "eu-ai-act-technical-evidence"
 
 //go:embed packs/*.yml
 var builtins embed.FS
@@ -25,15 +25,13 @@ var identifierPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 var semanticVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 
 var builtinPaths = map[string]string{
-	EUAIActHighRiskProviderPackID: "packs/eu-ai-act-high-risk-provider-v0.1.0.yml",
+	EUAIActTechnicalEvidencePackID: "packs/eu-ai-act-technical-evidence-v0.1.0.yml",
 }
 
 var supportedFileKinds = map[string]struct{}{
 	string(discovery.KindSource): {}, string(discovery.KindManifest): {}, string(discovery.KindDockerfile): {},
 	string(discovery.KindGitHubAction): {}, string(discovery.KindCI): {}, string(discovery.KindTerraform): {},
-	string(discovery.KindEnvTemplate): {}, string(discovery.KindReadme): {}, string(discovery.KindDocumentation): {},
-	string(discovery.KindModelCard): {}, string(discovery.KindPrivacy): {}, string(discovery.KindRisk): {},
-	string(discovery.KindAIGovernance): {}, string(discovery.KindConfig): {}, string(discovery.KindOtherText): {},
+	string(discovery.KindEnvTemplate): {}, string(discovery.KindConfig): {},
 }
 
 func LoadBuiltin(id string) (Pack, error) {
@@ -50,7 +48,7 @@ func LoadBuiltin(id string) (Pack, error) {
 
 func BuiltinPacks() ([]Pack, error) {
 	packs := make([]Pack, 0, len(builtinPaths))
-	for _, id := range []string{EUAIActHighRiskProviderPackID} {
+	for _, id := range []string{EUAIActTechnicalEvidencePackID} {
 		pack, err := LoadBuiltin(id)
 		if err != nil {
 			return nil, err
@@ -98,63 +96,50 @@ func (pack Pack) Validate() error {
 	if err != nil || parsedURL.Scheme != "https" || parsedURL.Host == "" {
 		return errors.New("source URL must be an absolute HTTPS URL")
 	}
-	if strings.TrimSpace(pack.Coverage.Framework) == "" || len(pack.Coverage.Roles) == 0 || strings.TrimSpace(pack.Coverage.RiskClassification) == "" || len(pack.Coverage.Provisions) == 0 || len(pack.Coverage.Limitations) == 0 {
-		return errors.New("coverage must declare framework, roles, risk classification, provisions, and limitations")
+	if strings.TrimSpace(pack.Coverage.Framework) == "" || pack.Coverage.EvidenceType != "code" || len(pack.Coverage.Provisions) == 0 || len(pack.Coverage.Limitations) == 0 {
+		return errors.New("coverage must declare framework, code evidence type, provisions, and limitations")
 	}
-	if len(pack.Controls) == 0 {
-		return errors.New("controls must not be empty")
+	if len(pack.Objectives) == 0 {
+		return errors.New("objectives must not be empty")
 	}
-	seenControls := make(map[string]struct{}, len(pack.Controls))
-	for index, control := range pack.Controls {
-		if !identifierPattern.MatchString(control.ID) {
-			return fmt.Errorf("controls[%d].id must be a lowercase identifier", index)
+	seenObjectives := make(map[string]struct{}, len(pack.Objectives))
+	for index, objective := range pack.Objectives {
+		if !identifierPattern.MatchString(objective.ID) {
+			return fmt.Errorf("objectives[%d].id must be a lowercase identifier", index)
 		}
-		if _, exists := seenControls[control.ID]; exists {
-			return fmt.Errorf("controls[%d].id %q is duplicated", index, control.ID)
+		if _, exists := seenObjectives[objective.ID]; exists {
+			return fmt.Errorf("objectives[%d].id %q is duplicated", index, objective.ID)
 		}
-		seenControls[control.ID] = struct{}{}
-		if strings.TrimSpace(control.Title) == "" || strings.TrimSpace(control.SourceReference) == "" || strings.TrimSpace(control.Objective) == "" {
-			return fmt.Errorf("controls[%d] must declare title, source-reference, and objective", index)
+		seenObjectives[objective.ID] = struct{}{}
+		if strings.TrimSpace(objective.Title) == "" || strings.TrimSpace(objective.SourceReference) == "" || strings.TrimSpace(objective.Description) == "" {
+			return fmt.Errorf("objectives[%d] must declare title, source-reference, and description", index)
 		}
-		if len(control.EvidenceRequirements) == 0 {
-			return fmt.Errorf("controls[%d].evidence must not be empty", index)
+		if len(objective.FileKinds) == 0 || strings.TrimSpace(objective.Verification) == "" {
+			return fmt.Errorf("objectives[%d] must declare file-kinds and verification", index)
 		}
-		seenEvidence := make(map[string]struct{}, len(control.EvidenceRequirements))
-		for evidenceIndex, evidence := range control.EvidenceRequirements {
-			if !identifierPattern.MatchString(evidence.ID) {
-				return fmt.Errorf("controls[%d].evidence[%d].id must be a lowercase identifier", index, evidenceIndex)
+		for kindIndex, kind := range objective.FileKinds {
+			if _, supported := supportedFileKinds[kind]; !supported {
+				return fmt.Errorf("objectives[%d].file-kinds[%d] %q is not a code evidence kind", index, kindIndex, kind)
 			}
-			if _, exists := seenEvidence[evidence.ID]; exists {
-				return fmt.Errorf("controls[%d].evidence[%d].id %q is duplicated", index, evidenceIndex, evidence.ID)
+		}
+		if objective.Verification != "technical-and-human" && objective.Verification != "technical-semantic-and-human" {
+			return fmt.Errorf("objectives[%d].verification %q is not supported", index, objective.Verification)
+		}
+		if len(objective.KeywordGroups) == 0 && len(objective.PathKeywords) == 0 {
+			return fmt.Errorf("objectives[%d] must declare keyword groups or path keywords", index)
+		}
+		for _, keyword := range objective.PathKeywords {
+			if strings.TrimSpace(keyword) == "" {
+				return fmt.Errorf("objectives[%d] contains an empty path keyword", index)
 			}
-			seenEvidence[evidence.ID] = struct{}{}
-			if strings.TrimSpace(evidence.Description) == "" || len(evidence.FileKinds) == 0 || strings.TrimSpace(evidence.Verification) == "" {
-				return fmt.Errorf("controls[%d].evidence[%d] must declare description, file-kinds, and verification", index, evidenceIndex)
+		}
+		for groupIndex, group := range objective.KeywordGroups {
+			if len(group) == 0 {
+				return fmt.Errorf("objectives[%d].keyword-groups[%d] must not be empty", index, groupIndex)
 			}
-			for kindIndex, kind := range evidence.FileKinds {
-				if _, supported := supportedFileKinds[kind]; !supported {
-					return fmt.Errorf("controls[%d].evidence[%d].file-kinds[%d] %q is not supported", index, evidenceIndex, kindIndex, kind)
-				}
-			}
-			if evidence.Verification != "semantic-and-human" && evidence.Verification != "technical-semantic-and-human" {
-				return fmt.Errorf("controls[%d].evidence[%d].verification %q is not supported", index, evidenceIndex, evidence.Verification)
-			}
-			if len(evidence.KeywordGroups) == 0 && len(evidence.PathKeywords) == 0 {
-				return fmt.Errorf("controls[%d].evidence[%d] must declare keyword groups or path keywords", index, evidenceIndex)
-			}
-			for _, keyword := range evidence.PathKeywords {
+			for _, keyword := range group {
 				if strings.TrimSpace(keyword) == "" {
-					return fmt.Errorf("controls[%d].evidence[%d] contains an empty path keyword", index, evidenceIndex)
-				}
-			}
-			for groupIndex, group := range evidence.KeywordGroups {
-				if len(group) == 0 {
-					return fmt.Errorf("controls[%d].evidence[%d].keyword-groups[%d] must not be empty", index, evidenceIndex, groupIndex)
-				}
-				for _, keyword := range group {
-					if strings.TrimSpace(keyword) == "" {
-						return fmt.Errorf("controls[%d].evidence[%d] contains an empty keyword", index, evidenceIndex)
-					}
+					return fmt.Errorf("objectives[%d] contains an empty keyword", index)
 				}
 			}
 		}

@@ -124,8 +124,8 @@ func TestTerminalCompletionShowsApplicabilitySeparatelyFromFindings(t *testing.T
 	}
 }
 
-func TestTerminalCompletionShowsFrameworkGapsSeparatelyFromFindings(t *testing.T) {
-	pack, err := framework.LoadBuiltin(framework.EUAIActHighRiskProviderPackID)
+func TestTerminalCompletionShowsTechnicalEvidenceSeparatelyFromFindings(t *testing.T) {
+	pack, err := framework.LoadBuiltin(framework.EUAIActTechnicalEvidencePackID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,12 +135,12 @@ func TestTerminalCompletionShowsFrameworkGapsSeparatelyFromFindings(t *testing.T
 	system.UseCaseDomains = []profile.UseCaseDomain{profile.DomainEmployment}
 	assessment := framework.Evaluate(pack, []profile.System{system}, discovery.Repository{})
 	value := New(".", "0.2.0-dev", nil, nil, 0)
-	value.FrameworkAssessment = &assessment
+	value.TechnicalEvidence = &assessment
 	var output bytes.Buffer
 	if err := WriteTerminalCompletion(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"Framework assessment", "MISSING", "Control summary: 7 missing", "Scan complete: 0 potential issues"} {
+	for _, expected := range []string{"Technical evidence", "NOT DETECTED", "Technical summary:", "Scan complete: 0 potential issues"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("terminal output missing %q:\n%s", expected, output.String())
 		}

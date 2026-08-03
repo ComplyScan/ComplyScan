@@ -15,7 +15,7 @@ import (
 func newFrameworkCommand(stdout io.Writer) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "framework",
-		Short: "List versioned control packs and assess repository evidence",
+		Short: "List versioned technical packs and inspect code evidence",
 		Args:  cobra.NoArgs,
 	}
 	command.AddCommand(newFrameworkListCommand(stdout))
@@ -27,7 +27,7 @@ func newFrameworkListCommand(stdout io.Writer) *cobra.Command {
 	var format string
 	command := &cobra.Command{
 		Use:   "list",
-		Short: "List built-in framework packs and their coverage boundaries",
+		Short: "List built-in technical evidence packs and their boundaries",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			outputFormat := strings.ToLower(strings.TrimSpace(format))
@@ -61,7 +61,7 @@ func newFrameworkAssessCommand(stdout io.Writer) *cobra.Command {
 	)
 	command := &cobra.Command{
 		Use:   "assess [path]",
-		Short: "Map repository evidence candidates to a versioned control pack",
+		Short: "Map code evidence candidates to versioned technical objectives",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := "."
@@ -75,9 +75,6 @@ func newFrameworkAssessCommand(stdout io.Writer) *cobra.Command {
 			cfg, _, err := config.Resolve(target, configPath)
 			if err != nil {
 				return err
-			}
-			if len(cfg.Systems) == 0 {
-				return errors.New("framework assessment requires at least one system profile; run `complyscan profile setup` first")
 			}
 			pack, err := framework.LoadBuiltin(packID)
 			if err != nil {
@@ -124,14 +121,14 @@ func newFrameworkAssessCommand(stdout io.Writer) *cobra.Command {
 			if outputFormat == "json" {
 				return framework.WriteJSON(stdout, report)
 			}
-			if err := framework.WriteAssessmentTerminal(stdout, report); err != nil {
+			if err := framework.WriteTechnicalEvidenceTerminal(stdout, report); err != nil {
 				return err
 			}
 			return nil
 		},
 	}
 	command.Flags().StringVarP(&format, "format", "f", "terminal", "output format: terminal or json")
-	command.Flags().StringVar(&packID, "pack", framework.EUAIActHighRiskProviderPackID, "built-in framework pack ID")
+	command.Flags().StringVar(&packID, "pack", framework.EUAIActTechnicalEvidencePackID, "built-in technical evidence pack ID")
 	command.Flags().StringVar(&configPath, "config", "", "configuration file (defaults to <path>/.complyscan.yml)")
 	command.Flags().StringArrayVar(&additionalExcludes, "exclude", nil, "exclude a path or directory name (repeatable)")
 	command.Flags().BoolVar(&trackedOnly, "tracked-only", false, "assess only files tracked by Git")

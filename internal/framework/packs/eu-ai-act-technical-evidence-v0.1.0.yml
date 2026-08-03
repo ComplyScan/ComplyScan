@@ -1,0 +1,163 @@
+# complyscan:ignore-technical-evidence
+schema-version: 1
+id: eu-ai-act-technical-evidence
+name: EU AI Act technical code evidence
+version: 0.1.0
+released: "2026-08-03"
+source:
+  title: Artificial Intelligence Act
+  reference: Regulation (EU) 2024/1689
+  url: https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32024R1689
+  edition: Official Journal text dated 13 June 2024
+coverage:
+  framework: eu-ai-act
+  evidence-type: code
+  provisions: [Article 9, Article 10, Article 12, Article 14, Article 15, Article 50]
+  limitations:
+    - This pack contains code, configuration, test, CI, and infrastructure objectives only; documentary, organisational, operational, and attestation evidence belongs in the dashboard.
+    - Detected code is candidate technical evidence, not proof that a mechanism is reachable, enabled, effective, legally applicable, or compliant.
+    - No evidence detected means only that the bounded scan did not locate a configured technical signal; it does not prove that an implementation is absent.
+objectives:
+  - id: eu-aia-9-risk-control-testing
+    title: Risk-control testing hooks
+    source-reference: Article 9
+    description: Tests or automated evaluation hooks connect identified AI safety or risk conditions to validation activity.
+    applicability-note: Article 9 applies to high-risk AI systems; the dashboard determines legal applicability from declared context.
+    file-kinds: [source, configuration, ci, github-actions]
+    path-keywords: [risk, safety, evaluation, test]
+    keyword-groups:
+      - [risk, safety, hazard]
+      - [test, evaluation, validation]
+    verification: technical-semantic-and-human
+  - id: eu-aia-10-dataset-validation
+    title: Dataset validation controls
+    source-reference: Article 10
+    description: Code validates training, validation, or test data for expected schema, completeness, or quality properties.
+    applicability-note: Detailed Article 10 duties depend on the system and its use of training, validation, or test data.
+    file-kinds: [source, configuration, ci, github-actions]
+    path-keywords: [data, dataset, validation]
+    keyword-groups:
+      - [training data, validation data, test data, dataset]
+      - [validate, schema, quality, completeness, missing]
+    verification: technical-semantic-and-human
+  - id: eu-aia-10-bias-evaluation
+    title: Bias and fairness evaluation
+    source-reference: Article 10
+    description: Automated tests or evaluation code measure bias, discrimination, or fairness-related behavior.
+    applicability-note: A technical signal cannot establish which affected groups, metrics, or mitigations are legally appropriate.
+    file-kinds: [source, configuration, ci, github-actions]
+    path-keywords: [bias, fairness, evaluation, test]
+    keyword-groups:
+      - [bias, fairness, discrimination, demographic parity, equalized odds]
+      - [test, evaluation, metric, threshold]
+    verification: technical-semantic-and-human
+  - id: eu-aia-12-automatic-event-logging
+    title: Automatic AI event logging
+    source-reference: Article 12
+    description: Code or configuration emits structured events for AI inference, prediction, response, or decision activity.
+    applicability-note: A match does not prove that logging is enabled, complete, protected, or retained in production.
+    file-kinds: [source, configuration, terraform, dockerfile]
+    path-keywords: [log, audit, telemetry]
+    keyword-groups:
+      - [audit log, event log, telemetry, logger, logging]
+      - [inference, prediction, decision, prompt, response, event]
+    verification: technical-semantic-and-human
+  - id: eu-aia-12-log-retention-configuration
+    title: AI log retention configuration
+    source-reference: Article 12
+    description: Configuration or infrastructure code defines retention or expiry behavior for AI-related logs or audit records.
+    applicability-note: Repository configuration cannot prove the effective production retention period.
+    file-kinds: [source, configuration, terraform, dockerfile]
+    path-keywords: [log, audit, retention, lifecycle]
+    keyword-groups:
+      - [log, audit, telemetry]
+      - [retention, ttl, lifecycle, expiry, expiration]
+    verification: technical-semantic-and-human
+  - id: eu-aia-14-human-review-gate
+    title: Human review gate
+    source-reference: Article 14
+    description: Code routes an AI-assisted decision or output through an explicit human approval or rejection step.
+    applicability-note: A match does not establish reviewer competence, authority, availability, or actual production use.
+    file-kinds: [source, configuration]
+    path-keywords: [review, approval, decision]
+    keyword-groups:
+      - [human review, manual review, reviewer, approval]
+      - [approve, reject, pending, decision]
+    verification: technical-semantic-and-human
+  - id: eu-aia-14-override-intervention
+    title: Human override or intervention mechanism
+    source-reference: Article 14
+    description: Code allows an authorised person to override, disregard, or intervene in an AI output or decision.
+    applicability-note: Static evidence cannot establish that the mechanism covers every relevant operating condition.
+    file-kinds: [source, configuration]
+    path-keywords: [override, intervention, decision]
+    keyword-groups:
+      - [override, intervene, intervention, disregard]
+      - [decision, output, prediction, result]
+    verification: technical-semantic-and-human
+  - id: eu-aia-14-safe-stop
+    title: Safe stop or disable mechanism
+    source-reference: Article 14
+    description: Code or configuration can stop, disable, or gate an AI model, inference path, or automated decision feature.
+    applicability-note: A repository match cannot prove the control is reachable, authorised, timely, or enabled in production.
+    file-kinds: [source, configuration, terraform]
+    path-keywords: [stop, shutdown, disable, feature]
+    keyword-groups:
+      - [stop, shutdown, disable, kill switch, feature flag]
+      - [model, ai, inference, decision]
+    verification: technical-semantic-and-human
+  - id: eu-aia-15-performance-thresholds
+    title: Performance metrics and acceptance thresholds
+    source-reference: Article 15
+    description: Tests, CI, or configuration enforce measurable AI accuracy or performance acceptance thresholds.
+    applicability-note: Technical thresholds require contextual review for suitability, representativeness, and continued validity.
+    file-kinds: [source, configuration, ci, github-actions]
+    path-keywords: [evaluation, benchmark, performance, test]
+    keyword-groups:
+      - [accuracy, precision, recall, f1, performance]
+      - [threshold, acceptance criteria, minimum, assert]
+    verification: technical-semantic-and-human
+  - id: eu-aia-15-robustness-failure-handling
+    title: Robustness and failure handling
+    source-reference: Article 15
+    description: Code or tests exercise faults or adversarial conditions and implement bounded fallback, retry, or fail-safe behavior.
+    applicability-note: Static evidence cannot demonstrate effectiveness across the system's real operating environment.
+    file-kinds: [source, configuration, ci, github-actions, terraform]
+    path-keywords: [robustness, adversarial, fault, fallback, test]
+    keyword-groups:
+      - [robustness, adversarial, fuzz, fault, timeout]
+      - [fallback, fail-safe, circuit breaker, retry, test]
+    verification: technical-semantic-and-human
+  - id: eu-aia-15-ai-security-controls
+    title: AI-specific security controls
+    source-reference: Article 15
+    description: Code, tests, or configuration address AI-specific threats such as prompt injection, poisoning, evasion, or adversarial inputs.
+    applicability-note: Detection does not replace a threat model, penetration test, or assessment of control effectiveness.
+    file-kinds: [source, configuration, ci, github-actions, terraform]
+    path-keywords: [security, threat, adversarial, injection]
+    keyword-groups:
+      - [prompt injection, data poisoning, model poisoning, adversarial input, model evasion]
+      - [sanitize, validate, detect, filter, test]
+    verification: technical-semantic-and-human
+  - id: eu-aia-50-ai-interaction-disclosure
+    title: AI interaction disclosure
+    source-reference: Article 50
+    description: User-facing source or configuration contains a disclosure that a person is interacting with an AI system.
+    applicability-note: Article 50 contains scope conditions and exceptions that require dashboard context and human review.
+    file-kinds: [source, configuration]
+    path-keywords: [chat, assistant, disclosure, notice]
+    keyword-groups:
+      - [ai assistant, artificial intelligence, chatbot, automated system]
+      - [disclosure, powered by, generated by, interacting with]
+    verification: technical-semantic-and-human
+  - id: eu-aia-50-synthetic-content-marking
+    title: Machine-readable synthetic-content marking
+    source-reference: Article 50
+    description: Code marks synthetic audio, image, video, or text output using labels, metadata, provenance, or watermarking.
+    applicability-note: Applicability and technical feasibility depend on the system, content, role, and statutory exceptions.
+    file-kinds: [source, configuration]
+    path-keywords: [synthetic, watermark, provenance, metadata]
+    keyword-groups:
+      - [synthetic, generated content, ai generated, deepfake]
+      - [watermark, metadata, machine readable, label, provenance]
+    verification: technical-semantic-and-human

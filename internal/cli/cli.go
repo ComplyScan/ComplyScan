@@ -349,15 +349,15 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			if len(cfg.Systems) > 0 {
 				assessment := profile.AssessEUAIAct(cfg.Systems)
 				reportValue.Applicability = &assessment
-				pack, err := framework.LoadBuiltin(framework.EUAIActHighRiskProviderPackID)
-				if err != nil {
-					return err
-				}
-				frameworkAssessment := framework.Evaluate(pack, cfg.Systems, result.FullRepository)
-				frameworkAssessment.Target = target
-				frameworkAssessment.Warnings = append([]string(nil), result.Warnings...)
-				reportValue.FrameworkAssessment = &frameworkAssessment
 			}
+			pack, err := framework.LoadBuiltin(framework.EUAIActTechnicalEvidencePackID)
+			if err != nil {
+				return err
+			}
+			technicalEvidence := framework.Evaluate(pack, cfg.Systems, result.FullRepository)
+			technicalEvidence.Target = target
+			technicalEvidence.Warnings = append([]string(nil), result.Warnings...)
+			reportValue.TechnicalEvidence = &technicalEvidence
 			if cfg.AI.Provider == "ollama" {
 				if outputFormat == "terminal" {
 					if _, err := fmt.Fprintf(stdout, "Ollama advisory review requested for %d finding(s) with %s...\n\n", len(visible), cfg.AI.Ollama.Model); err != nil {

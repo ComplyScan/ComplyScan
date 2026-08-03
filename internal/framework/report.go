@@ -8,10 +8,10 @@ import (
 )
 
 type PackListing struct {
-	Pack     PackReference `json:"pack"`
-	Source   Source        `json:"source"`
-	Coverage Coverage      `json:"coverage"`
-	Controls int           `json:"controls"`
+	Pack       PackReference `json:"pack"`
+	Source     Source        `json:"source"`
+	Coverage   Coverage      `json:"coverage"`
+	Objectives int           `json:"objectives"`
 }
 
 func ListBuiltins() ([]PackListing, error) {
@@ -23,7 +23,7 @@ func ListBuiltins() ([]PackListing, error) {
 	for _, pack := range packs {
 		listings = append(listings, PackListing{
 			Pack:   PackReference{ID: pack.ID, Name: pack.Name, Version: pack.Version, Released: pack.Released, Digest: pack.Digest},
-			Source: pack.Source, Coverage: pack.Coverage, Controls: len(pack.Controls),
+			Source: pack.Source, Coverage: pack.Coverage, Objectives: len(pack.Objectives),
 		})
 	}
 	return listings, nil
@@ -47,7 +47,7 @@ func WritePackListTerminal(writer io.Writer, listings []PackListing) error {
 		if _, err := fmt.Fprintf(writer, "%s @ %s\n", listing.Pack.ID, listing.Pack.Version); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(writer, "  %s\n  Coverage: %s; roles %s; %d controls\n  Source: %s\n", listing.Pack.Name, listing.Coverage.RiskClassification, strings.Join(listing.Coverage.Roles, ", "), listing.Controls, listing.Source.Reference); err != nil {
+		if _, err := fmt.Fprintf(writer, "  %s\n  Evidence: %s; %d technical objectives\n  Provisions: %s\n  Source: %s\n", listing.Pack.Name, listing.Coverage.EvidenceType, listing.Objectives, strings.Join(listing.Coverage.Provisions, ", "), listing.Source.Reference); err != nil {
 			return err
 		}
 		for _, limitation := range listing.Coverage.Limitations {
@@ -62,8 +62,8 @@ func WritePackListTerminal(writer io.Writer, listings []PackListing) error {
 	return nil
 }
 
-func WriteAssessmentTerminal(writer io.Writer, report AssessmentReport) error {
-	if _, err := fmt.Fprintf(writer, "Framework assessment: %s @ %s\n", report.Pack.Name, report.Pack.Version); err != nil {
+func WriteTechnicalEvidenceTerminal(writer io.Writer, report TechnicalEvidenceReport) error {
+	if _, err := fmt.Fprintf(writer, "Technical evidence: %s @ %s\n", report.Pack.Name, report.Pack.Version); err != nil {
 		return err
 	}
 	if report.Target != "" {
@@ -77,51 +77,35 @@ func WriteAssessmentTerminal(writer io.Writer, report AssessmentReport) error {
 	if _, err := fmt.Fprintf(writer, "Source: %s — %s\n\n", report.Source.Reference, report.Source.URL); err != nil {
 		return err
 	}
-	for _, system := range report.Systems {
-		if _, err := fmt.Fprintf(writer, "%s (%s)\n  Pack activation: %s\n", system.SystemName, system.SystemID, system.Activation); err != nil {
-			return err
+	if len(report.Systems) > 0 {
+		systems := make([]string, len(report.Systems))
+		for index, system := range report.Systems {
+			systems[index] = fmt.Sprintf("%s (%s)", system.Name, system.ID)
 		}
-		for _, reason := range system.ActivationReasons {
-			if _, err := fmt.Fprintf(writer, "  Activation note: %s\n", reason); err != nil {
-				return err
-			}
-		}
-		for _, control := range system.Controls {
-			if _, err := fmt.Fprintf(writer, "  %-14s %s — %s (%s)\n", strings.ToUpper(string(control.Status)), control.ID, control.Title, control.SourceReference); err != nil {
-				return err
-			}
-			if control.ApplicabilityNote != "" {
-				if _, err := fmt.Fprintf(writer, "                 Applicability: %s\n", control.ApplicabilityNote); err != nil {
-					return err
-				}
-			}
-			for _, evidence := range control.EvidenceRequirements {
-				if evidence.Status == EvidenceMissing {
-					if _, err := fmt.Fprintf(writer, "                 Missing: %s\n", evidence.Description); err != nil {
-						return err
-					}
-					continue
-				}
-				paths := make([]string, len(evidence.Matches))
-				for index, match := range evidence.Matches {
-					paths[index] = match.Path
-				}
-				if _, err := fmt.Fprintf(writer, "                 Candidate: %s [%s]\n", evidence.Description, strings.Join(paths, ", ")); err != nil {
-					return err
-				}
-			}
-		}
-		if system.Summary.Total > 0 {
-			if _, err := fmt.Fprintf(writer, "  Control summary: %d missing, %d partial, %d evidence-found\n", system.Summary.Missing, system.Summary.Partial, system.Summary.EvidenceFound); err != nil {
-				return err
-			}
-		}
-		if _, err := fmt.Fprintln(writer); err != nil {
+		if _, err := fmt.Fprintf(writer, "Declared systems: %s\n\n", strings.Join(systems, ", ")); err != nil {
 			return err
 		}
 	}
+	for _, objective := range report.Objectives {
+		label := strings.ToUpper(strings.ReplaceAll(string(objective.Status), "-", " "))
+		if _, err := fmt.Fprintf(writer, "  %-18s %s — %s (%s)\n", label, objective.ID, objective.Title, objective.SourceReference); err != nil {
+			return err
+		}
+		for _, match := range objective.Matches {
+			location := match.Path
+			if match.StartLine > 0 {
+				location = fmt.Sprintf("%s:%d", location, match.StartLine)
+			}
+			if _, err := fmt.Fprintf(writer, "                       Candidate location: %s\n", location); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := fmt.Fprintf(writer, "\nTechnical summary: %d checks with candidate evidence, %d with no evidence detected, %d not evaluated\n", report.Summary.CandidateEvidence, report.Summary.NotDetected, report.Summary.NotEvaluated); err != nil {
+		return err
+	}
 	for _, note := range report.Notes {
-		if _, err := fmt.Fprintf(writer, "Framework note: %s\n", note); err != nil {
+		if _, err := fmt.Fprintf(writer, "Technical evidence note: %s\n", note); err != nil {
 			return err
 		}
 	}
@@ -131,7 +115,7 @@ func WriteAssessmentTerminal(writer io.Writer, report AssessmentReport) error {
 		}
 	}
 	for _, warning := range report.Warnings {
-		if _, err := fmt.Fprintf(writer, "Framework warning: %s\n", warning); err != nil {
+		if _, err := fmt.Fprintf(writer, "Technical evidence warning: %s\n", warning); err != nil {
 			return err
 		}
 	}

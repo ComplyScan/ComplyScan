@@ -476,8 +476,8 @@ func TestScanJSONIncludesApplicabilityWithoutChangingFindings(t *testing.T) {
 	if decoded.Applicability == nil || len(decoded.Applicability.Systems) != 1 {
 		t.Fatalf("missing applicability: %#v", decoded.Applicability)
 	}
-	if decoded.FrameworkAssessment == nil || len(decoded.FrameworkAssessment.Systems) != 1 || decoded.FrameworkAssessment.Systems[0].Activation != framework.ActivationNeedsReview {
-		t.Fatalf("missing framework assessment: %#v", decoded.FrameworkAssessment)
+	if decoded.TechnicalEvidence == nil || len(decoded.TechnicalEvidence.Systems) != 1 || decoded.TechnicalEvidence.Summary.Total == 0 {
+		t.Fatalf("missing technical evidence: %#v", decoded.TechnicalEvidence)
 	}
 	if decoded.Summary.Total != 0 {
 		t.Fatalf("applicability changed findings: %#v", decoded.Summary)
@@ -500,10 +500,7 @@ func TestFrameworkListWritesVersionedCoverageJSON(t *testing.T) {
 
 func TestFrameworkAssessMapsFullRepositoryEvidence(t *testing.T) {
 	target := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(target, "docs"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(target, "docs", "risk-assessment.md"), []byte("Risk assessment and mitigation controls cover intended purpose, foreseeable misuse, fundamental rights, testing, and post-market monitoring.\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(target, "override.go"), []byte("package review\nfunc OverrideDecision(output string) {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.Default()
@@ -515,41 +512,38 @@ func TestFrameworkAssessMapsFullRepositoryEvidence(t *testing.T) {
 	if code := Execute([]string{"framework", "assess", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
 	}
-	var decoded framework.AssessmentReport
+	var decoded framework.TechnicalEvidenceReport
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Pack.ID != framework.EUAIActHighRiskProviderPackID || len(decoded.Systems) != 1 || decoded.Systems[0].Activation != framework.ActivationCandidate {
+	if decoded.Pack.ID != framework.EUAIActTechnicalEvidencePackID || len(decoded.Systems) != 1 {
 		t.Fatalf("unexpected assessment: %#v", decoded)
 	}
-	if decoded.Systems[0].Controls[0].Status != framework.ControlEvidenceFound {
-		t.Fatalf("Article 9 was not mapped: %#v", decoded.Systems[0].Controls[0])
+	found := false
+	for _, objective := range decoded.Objectives {
+		if objective.ID == "eu-aia-14-override-intervention" && objective.Status == framework.ObjectiveCandidate {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Article 14 override evidence was not mapped: %#v", decoded.Objectives)
 	}
 }
 
-func TestFrameworkAssessRequiresProfileAndKnownPack(t *testing.T) {
+func TestFrameworkAssessWorksWithoutProfileAndRejectsUnknownPack(t *testing.T) {
 	target := t.TempDir()
 	if err := config.Write(filepath.Join(target, config.FileName), config.Default(), false); err != nil {
 		t.Fatal(err)
 	}
-	for _, arguments := range [][]string{
-		{"framework", "assess", target},
-		{"framework", "assess", "--pack", "unknown", "--config", filepath.Join(target, config.FileName), target},
-	} {
-		if arguments[2] == "--pack" {
-			cfg, err := config.Load(filepath.Join(target, config.FileName))
-			if err != nil {
-				t.Fatal(err)
-			}
-			cfg.Systems = []profile.System{cliCandidateProviderSystem()}
-			if err := config.Write(filepath.Join(target, config.FileName), cfg, true); err != nil {
-				t.Fatal(err)
-			}
-		}
-		var stdout, stderr bytes.Buffer
-		if code := Execute(arguments, &stdout, &stderr, testBuild); code != 2 {
-			t.Fatalf("Execute(%v) code=%d stderr=%q", arguments, code, stderr.String())
-		}
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"framework", "assess", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("profile-free assessment code=%d stderr=%q", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	arguments := []string{"framework", "assess", "--pack", "unknown", "--config", filepath.Join(target, config.FileName), target}
+	if code := Execute(arguments, &stdout, &stderr, testBuild); code != 2 {
+		t.Fatalf("Execute(%v) code=%d stderr=%q", arguments, code, stderr.String())
 	}
 }
 

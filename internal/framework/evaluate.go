@@ -1,41 +1,40 @@
 package framework
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
 	"github.com/1eonardodawinki/ComplyScan/internal/profile"
 )
 
-type ActivationStatus string
-type ControlStatus string
-type EvidenceStatus string
+type ObjectiveStatus string
 
 const (
-	ActivationCandidate    ActivationStatus = "candidate"
-	ActivationNeedsReview  ActivationStatus = "needs-review"
-	ActivationNotEvaluated ActivationStatus = "not-evaluated"
-
-	ControlMissing       ControlStatus = "missing"
-	ControlPartial       ControlStatus = "partial"
-	ControlEvidenceFound ControlStatus = "evidence-found"
-
-	EvidenceMissing   EvidenceStatus = "missing"
-	EvidenceCandidate EvidenceStatus = "candidate-evidence"
+	ObjectiveCandidate    ObjectiveStatus = "candidate-evidence"
+	ObjectiveNotDetected  ObjectiveStatus = "not-detected"
+	ObjectiveNotEvaluated ObjectiveStatus = "not-evaluated"
 
 	maxEvidenceMatches = 5
+
+	ignoreMarkerPrefix = "complyscan:"
+	ignoreMarkerSuffix = "ignore-technical-evidence"
 )
 
-type AssessmentReport struct {
-	SchemaVersion int                `json:"schema_version"`
-	Target        string             `json:"target,omitempty"`
-	Pack          PackReference      `json:"pack"`
-	Source        Source             `json:"source"`
-	Coverage      Coverage           `json:"coverage"`
-	Systems       []SystemAssessment `json:"systems"`
-	Warnings      []string           `json:"warnings,omitempty"`
-	Notes         []string           `json:"notes"`
+type TechnicalEvidenceReport struct {
+	SchemaVersion int                   `json:"schema_version"`
+	Target        string                `json:"target,omitempty"`
+	Pack          PackReference         `json:"pack"`
+	Source        Source                `json:"source"`
+	Coverage      Coverage              `json:"coverage"`
+	Systems       []SystemReference     `json:"systems"`
+	Objectives    []ObjectiveAssessment `json:"objectives"`
+	Summary       ObjectiveSummary      `json:"summary"`
+	Warnings      []string              `json:"warnings,omitempty"`
+	Notes         []string              `json:"notes"`
 }
 
 type PackReference struct {
@@ -46,245 +45,187 @@ type PackReference struct {
 	Digest   string `json:"digest"`
 }
 
-type SystemAssessment struct {
-	SystemID          string              `json:"system_id"`
-	SystemName        string              `json:"system_name"`
-	Activation        ActivationStatus    `json:"activation"`
-	ActivationReasons []string            `json:"activation_reasons"`
-	Controls          []ControlAssessment `json:"controls"`
-	Summary           ControlSummary      `json:"summary"`
+type SystemReference struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
-type ControlSummary struct {
-	Total         int `json:"total"`
-	Missing       int `json:"missing"`
-	Partial       int `json:"partial"`
-	EvidenceFound int `json:"evidence_found"`
+type ObjectiveSummary struct {
+	Total             int `json:"total"`
+	CandidateEvidence int `json:"candidate_evidence"`
+	NotDetected       int `json:"not_detected"`
+	NotEvaluated      int `json:"not_evaluated"`
 }
 
-type ControlAssessment struct {
-	ID                   string               `json:"id"`
-	Title                string               `json:"title"`
-	SourceReference      string               `json:"source_reference"`
-	Objective            string               `json:"objective"`
-	ApplicabilityNote    string               `json:"applicability_note,omitempty"`
-	Status               ControlStatus        `json:"status"`
-	EvidenceRequirements []EvidenceAssessment `json:"evidence"`
-}
-
-type EvidenceAssessment struct {
-	ID           string          `json:"id"`
-	Description  string          `json:"description"`
-	Status       EvidenceStatus  `json:"status"`
-	Verification string          `json:"verification"`
-	Matches      []EvidenceMatch `json:"matches"`
+type ObjectiveAssessment struct {
+	ID                string          `json:"id"`
+	Title             string          `json:"title"`
+	SourceReference   string          `json:"source_reference"`
+	Description       string          `json:"description"`
+	ApplicabilityNote string          `json:"applicability_note,omitempty"`
+	Status            ObjectiveStatus `json:"status"`
+	Verification      string          `json:"verification"`
+	Matches           []EvidenceMatch `json:"matches"`
 }
 
 type EvidenceMatch struct {
+	Fingerprint  string   `json:"fingerprint"`
 	Path         string   `json:"path"`
 	Kind         string   `json:"kind"`
+	StartLine    int      `json:"start_line,omitempty"`
 	MatchedTerms []string `json:"matched_terms"`
 }
 
-// Evaluate maps repository evidence candidates to a pack. Candidate evidence
-// is never treated as proof that a legal requirement is satisfied.
-func Evaluate(pack Pack, systems []profile.System, repository discovery.Repository) AssessmentReport {
-	profileReport := profile.AssessEUAIAct(systems)
-	profileAssessments := make(map[string]profile.Assessment, len(profileReport.Systems))
-	for _, assessment := range profileReport.Systems {
-		profileAssessments[assessment.SystemID] = assessment
-	}
-	controlCandidates := evaluateControls(pack, repository)
-	report := AssessmentReport{
+// Evaluate maps repository code and configuration to technical objectives.
+// Candidate evidence is never treated as proof of legal applicability,
+// operational effectiveness, or compliance.
+func Evaluate(pack Pack, systems []profile.System, repository discovery.Repository) TechnicalEvidenceReport {
+	report := TechnicalEvidenceReport{
 		SchemaVersion: 1,
-		Pack:          PackReference{ID: pack.ID, Name: pack.Name, Version: pack.Version, Released: pack.Released, Digest: pack.Digest},
-		Source:        pack.Source, Coverage: pack.Coverage,
-		Systems: make([]SystemAssessment, 0, len(systems)), Warnings: []string{},
+		Pack: PackReference{
+			ID: pack.ID, Name: pack.Name, Version: pack.Version,
+			Released: pack.Released, Digest: pack.Digest,
+		},
+		Source:     pack.Source,
+		Coverage:   pack.Coverage,
+		Systems:    make([]SystemReference, 0, len(systems)),
+		Objectives: evaluateObjectives(pack, repository),
+		Warnings:   []string{},
 		Notes: []string{
-			"Statuses describe repository evidence candidates, not legal compliance or operational effectiveness.",
-			"The strongest automated status is evidence-found; every match still requires the pack's stated semantic, technical, and human verification.",
+			"This report contains technical code evidence only; documentary, organisational, operational, and attestation evidence is outside the CLI boundary.",
+			"Candidate evidence requires technical and human verification and is not a legal compliance conclusion.",
+			"No evidence detected means only that this bounded scan did not locate the configured signal.",
 		},
 	}
 	for _, system := range systems {
-		assessment := SystemAssessment{
-			SystemID: system.ID, SystemName: system.Name,
-			ActivationReasons: []string{}, Controls: []ControlAssessment{},
-		}
-		assessment.Activation, assessment.ActivationReasons = activationFor(system, profileAssessments[system.ID])
-		if assessment.Activation == ActivationCandidate {
-			assessment.Controls = cloneControlAssessments(controlCandidates)
-			assessment.Summary = summarizeControls(assessment.Controls)
-		}
-		report.Systems = append(report.Systems, assessment)
+		report.Systems = append(report.Systems, SystemReference{ID: system.ID, Name: system.Name})
 	}
+	report.Summary = summarizeObjectives(report.Objectives)
 	return report
 }
 
-func activationFor(system profile.System, applicability profile.Assessment) (ActivationStatus, []string) {
-	for _, decision := range system.Applicability {
-		if decision.Framework == profile.FrameworkEUAIAct && decision.Status == profile.ApplicabilityNotApplicable {
-			return ActivationNotEvaluated, []string{"A human-recorded decision marks the EU AI Act not applicable; ComplyScan does not independently validate that decision."}
-		}
-	}
-	if !contains(system.OrganizationRoles, profile.RoleProvider) {
-		if contains(system.OrganizationRoles, profile.RoleUnknown) {
-			return ActivationNeedsReview, []string{"The provider role required by this pack has not been established."}
-		}
-		return ActivationNeedsReview, []string{"This pack currently covers providers only; the declared role requires a different control pack or role review."}
-	}
-	scopeCandidate := applicability.AutomatedScope == profile.ScopePotentiallyApplicable
-	for _, decision := range system.Applicability {
-		if decision.Framework == profile.FrameworkEUAIAct && decision.Status == profile.ApplicabilityApplicable {
-			scopeCandidate = true
-		}
-	}
-	if !scopeCandidate {
-		return ActivationNeedsReview, []string{"EU AI Act scope is not established from the declared profile."}
-	}
-	if applicability.HighRiskScreening != profile.HighRiskPotential {
-		return ActivationNeedsReview, []string{"A high-risk classification is not established; this Articles 9–15 pack is not automatically activated."}
-	}
-	reasons := []string{"Declared facts make provider-facing high-risk system requirements a candidate for assessment."}
-	if system.ProfileReview.Status != profile.ReviewConfirmed {
-		reasons = append(reasons, "The factual profile is still draft, so activation requires human confirmation.")
-	}
-	return ActivationCandidate, reasons
-}
-
-func evaluateControls(pack Pack, repository discovery.Repository) []ControlAssessment {
-	assessments := make([]ControlAssessment, len(pack.Controls))
+func evaluateObjectives(pack Pack, repository discovery.Repository) []ObjectiveAssessment {
+	assessments := make([]ObjectiveAssessment, len(pack.Objectives))
 	usedKinds := make(map[string]struct{})
-	for controlIndex, control := range pack.Controls {
-		assessment := ControlAssessment{
-			ID: control.ID, Title: control.Title, SourceReference: control.SourceReference,
-			Objective: control.Objective, ApplicabilityNote: control.ApplicabilityNote,
-			EvidenceRequirements: make([]EvidenceAssessment, len(control.EvidenceRequirements)),
+	for index, objective := range pack.Objectives {
+		assessments[index] = ObjectiveAssessment{
+			ID: objective.ID, Title: objective.Title, SourceReference: objective.SourceReference,
+			Description: objective.Description, ApplicabilityNote: objective.ApplicabilityNote,
+			Status: ObjectiveNotDetected, Verification: objective.Verification, Matches: []EvidenceMatch{},
 		}
-		for evidenceIndex, requirement := range control.EvidenceRequirements {
-			assessment.EvidenceRequirements[evidenceIndex] = EvidenceAssessment{
-				ID: requirement.ID, Description: requirement.Description, Status: EvidenceMissing,
-				Verification: requirement.Verification, Matches: []EvidenceMatch{},
-			}
-			for _, kind := range requirement.FileKinds {
-				usedKinds[kind] = struct{}{}
-			}
+		for _, kind := range objective.FileKinds {
+			usedKinds[kind] = struct{}{}
 		}
-		assessments[controlIndex] = assessment
 	}
 
+	ignoreMarker := ignoreMarkerPrefix + ignoreMarkerSuffix
 	for _, file := range repository.Files {
 		if _, relevant := usedKinds[string(file.Kind)]; !relevant {
 			continue
 		}
 		content := strings.ToLower(string(file.Content))
+		if strings.Contains(content, ignoreMarker) {
+			continue
+		}
 		path := strings.ToLower(file.Path)
-		for controlIndex, control := range pack.Controls {
-			for evidenceIndex, requirement := range control.EvidenceRequirements {
-				if !containsString(requirement.FileKinds, string(file.Kind)) {
-					continue
-				}
-				matched, terms := matchesRequirement(path, content, requirement)
-				if !matched || len(assessments[controlIndex].EvidenceRequirements[evidenceIndex].Matches) >= maxEvidenceMatches {
-					continue
-				}
-				assessments[controlIndex].EvidenceRequirements[evidenceIndex].Matches = append(
-					assessments[controlIndex].EvidenceRequirements[evidenceIndex].Matches,
-					EvidenceMatch{Path: file.Path, Kind: string(file.Kind), MatchedTerms: terms},
-				)
+		for index, objective := range pack.Objectives {
+			if !containsString(objective.FileKinds, string(file.Kind)) || len(assessments[index].Matches) >= maxEvidenceMatches {
+				continue
 			}
+			matched, terms, line := matchesObjective(path, content, objective)
+			if !matched {
+				continue
+			}
+			assessments[index].Matches = append(assessments[index].Matches, EvidenceMatch{
+				Fingerprint:  evidenceFingerprint(objective.ID, file.Path, line, terms),
+				Path:         file.Path,
+				Kind:         string(file.Kind),
+				StartLine:    line,
+				MatchedTerms: terms,
+			})
 		}
 	}
 
-	for controlIndex := range assessments {
-		found := 0
-		for evidenceIndex := range assessments[controlIndex].EvidenceRequirements {
-			evidence := &assessments[controlIndex].EvidenceRequirements[evidenceIndex]
-			sort.Slice(evidence.Matches, func(left, right int) bool { return evidence.Matches[left].Path < evidence.Matches[right].Path })
-			if len(evidence.Matches) > 0 {
-				evidence.Status = EvidenceCandidate
-				found++
+	for index := range assessments {
+		sort.Slice(assessments[index].Matches, func(left, right int) bool {
+			if assessments[index].Matches[left].Path != assessments[index].Matches[right].Path {
+				return assessments[index].Matches[left].Path < assessments[index].Matches[right].Path
 			}
-		}
-		switch {
-		case found == 0:
-			assessments[controlIndex].Status = ControlMissing
-		case found == len(assessments[controlIndex].EvidenceRequirements):
-			assessments[controlIndex].Status = ControlEvidenceFound
-		default:
-			assessments[controlIndex].Status = ControlPartial
+			return assessments[index].Matches[left].StartLine < assessments[index].Matches[right].StartLine
+		})
+		if len(assessments[index].Matches) > 0 {
+			assessments[index].Status = ObjectiveCandidate
 		}
 	}
 	return assessments
 }
 
-func matchesRequirement(path, content string, requirement EvidenceRequirement) (bool, []string) {
-	terms := make([]string, 0, len(requirement.KeywordGroups)+1)
-	if len(requirement.KeywordGroups) > 0 {
-		for _, group := range requirement.KeywordGroups {
-			matched := ""
-			for _, keyword := range group {
-				if strings.Contains(content, strings.ToLower(keyword)) {
-					matched = keyword
-					break
-				}
+func matchesObjective(path, content string, objective TechnicalObjective) (bool, []string, int) {
+	terms := make([]string, 0, len(objective.KeywordGroups)+1)
+	firstOffset := -1
+	for _, group := range objective.KeywordGroups {
+		matched := ""
+		matchedOffset := -1
+		for _, keyword := range group {
+			offset := strings.Index(content, strings.ToLower(keyword))
+			if offset >= 0 {
+				matched = keyword
+				matchedOffset = offset
+				break
 			}
-			if matched == "" {
-				return false, nil
-			}
-			terms = append(terms, matched)
+		}
+		if matched == "" {
+			return false, nil, 0
+		}
+		terms = append(terms, matched)
+		if firstOffset < 0 || matchedOffset < firstOffset {
+			firstOffset = matchedOffset
 		}
 	}
 	pathMatched := false
-	for _, keyword := range requirement.PathKeywords {
+	for _, keyword := range objective.PathKeywords {
 		if strings.Contains(path, strings.ToLower(keyword)) {
 			terms = append(terms, "path:"+keyword)
 			pathMatched = true
 			break
 		}
 	}
-	if len(requirement.KeywordGroups) == 0 && !pathMatched {
-		return false, nil
+	if len(objective.KeywordGroups) == 0 && !pathMatched {
+		return false, nil, 0
 	}
-	return true, terms
+	line := 0
+	if firstOffset >= 0 {
+		line = strings.Count(content[:firstOffset], "\n") + 1
+	}
+	return true, terms, line
 }
 
-func summarizeControls(controls []ControlAssessment) ControlSummary {
-	summary := ControlSummary{Total: len(controls)}
-	for _, control := range controls {
-		switch control.Status {
-		case ControlMissing:
-			summary.Missing++
-		case ControlPartial:
-			summary.Partial++
-		case ControlEvidenceFound:
-			summary.EvidenceFound++
+func evidenceFingerprint(objectiveID, path string, line int, terms []string) string {
+	value := strings.Join([]string{objectiveID, path, strconv.Itoa(line), strings.Join(terms, "\x00")}, "\x00")
+	digest := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(digest[:])
+}
+
+func summarizeObjectives(objectives []ObjectiveAssessment) ObjectiveSummary {
+	summary := ObjectiveSummary{Total: len(objectives)}
+	for _, objective := range objectives {
+		switch objective.Status {
+		case ObjectiveCandidate:
+			summary.CandidateEvidence++
+		case ObjectiveNotDetected:
+			summary.NotDetected++
+		case ObjectiveNotEvaluated:
+			summary.NotEvaluated++
 		}
 	}
 	return summary
 }
 
-func cloneControlAssessments(values []ControlAssessment) []ControlAssessment {
-	cloned := make([]ControlAssessment, len(values))
-	for index, control := range values {
-		cloned[index] = control
-		cloned[index].EvidenceRequirements = make([]EvidenceAssessment, len(control.EvidenceRequirements))
-		for evidenceIndex, evidence := range control.EvidenceRequirements {
-			cloned[index].EvidenceRequirements[evidenceIndex] = evidence
-			cloned[index].EvidenceRequirements[evidenceIndex].Matches = append([]EvidenceMatch(nil), evidence.Matches...)
-		}
-	}
-	return cloned
-}
-
-func contains[T comparable](values []T, wanted T) bool {
+func containsString(values []string, wanted string) bool {
 	for _, value := range values {
 		if value == wanted {
 			return true
 		}
 	}
 	return false
-}
-
-func containsString(values []string, wanted string) bool {
-	return contains(values, wanted)
 }
