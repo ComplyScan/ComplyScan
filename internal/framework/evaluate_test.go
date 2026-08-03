@@ -53,6 +53,19 @@ func TestEvaluateWorksWithoutSystemProfile(t *testing.T) {
 	}
 }
 
+func TestObjectivePathSignalIsRequiredWhenConfigured(t *testing.T) {
+	objective := TechnicalObjective{
+		PathKeywords:  []string{"override"},
+		KeywordGroups: [][]string{{"override"}, {"decision"}},
+	}
+	if matched, _, _ := matchesObjective("service.go", "func override decision", objective); matched {
+		t.Fatal("generic path matched an objective with a configured path signal")
+	}
+	if matched, _, _ := matchesObjective("override/service.go", "func override decision", objective); !matched {
+		t.Fatal("configured path and content signals did not match")
+	}
+}
+
 func TestEvidenceMatchesAreBoundedAndDeterministic(t *testing.T) {
 	pack, err := LoadBuiltin(EUAIActTechnicalEvidencePackID)
 	if err != nil {

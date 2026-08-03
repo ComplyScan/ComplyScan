@@ -122,7 +122,7 @@ Every technical objective receives one of these statuses:
 | `not-detected` | The bounded scan did not locate the configured technical signal. This does not prove the implementation is absent. |
 | `not-evaluated` | The technical check could not be evaluated. This status is reserved for explicit limitations rather than treated as a failure. |
 
-Evidence matching requires every configured keyword group to appear in one eligible file. Results include a stable fingerprint, repository-relative path, line number, file kind, and matched terms—not a source excerpt. Pack version, SHA-256 content digest, source edition, scan identity, target, and discovery scope remain visible for reproducibility.
+Evidence matching requires every configured keyword group and path signal to match one eligible file. This deliberately conservative first-version anchor may miss generically named implementations; the planned repository graph will expand connected context without weakening the evidence label. Results include a stable fingerprint, repository-relative path, line number, file kind, and matched terms—not a source excerpt. Pack version, SHA-256 content digest, source edition, scan identity, target, and discovery scope remain visible for reproducibility.
 
 This technical pack is deliberately not a complete regulatory catalog. The future dashboard will own documentary, organisational, operational, and attestation objectives and combine them with the same stable CLI objective IDs. Its authoritative source is the [official EUR-Lex text](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32024R1689).
 

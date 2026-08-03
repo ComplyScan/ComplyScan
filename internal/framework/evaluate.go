@@ -190,7 +190,10 @@ func matchesObjective(path, content string, objective TechnicalObjective) (bool,
 			break
 		}
 	}
-	if len(objective.KeywordGroups) == 0 && !pathMatched {
+	if len(objective.PathKeywords) > 0 && !pathMatched {
+		return false, nil, 0
+	}
+	if len(objective.KeywordGroups) == 0 && len(objective.PathKeywords) == 0 {
 		return false, nil, 0
 	}
 	line := 0
