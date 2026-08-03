@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/1eonardodawinki/ComplyScan/internal/codegraph"
 	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
 	"github.com/1eonardodawinki/ComplyScan/internal/profile"
 )
@@ -30,11 +31,22 @@ type TechnicalEvidenceReport struct {
 	Pack          PackReference         `json:"pack"`
 	Source        Source                `json:"source"`
 	Coverage      Coverage              `json:"coverage"`
+	Analysis      RepositoryAnalysis    `json:"repository_analysis"`
 	Systems       []SystemReference     `json:"systems"`
 	Objectives    []ObjectiveAssessment `json:"objectives"`
 	Summary       ObjectiveSummary      `json:"summary"`
 	Warnings      []string              `json:"warnings,omitempty"`
 	Notes         []string              `json:"notes"`
+}
+
+type RepositoryAnalysis struct {
+	GraphSchemaVersion     int                  `json:"graph_schema_version"`
+	Languages              []codegraph.Language `json:"languages"`
+	SourceFilesSeen        int                  `json:"source_files_seen"`
+	FilesIndexed           int                  `json:"files_indexed"`
+	UnsupportedSourceFiles []string             `json:"unsupported_source_files,omitempty"`
+	SymbolsIndexed         int                  `json:"symbols_indexed"`
+	RelationshipsIndexed   int                  `json:"relationships_indexed"`
 }
 
 type PackReference struct {
@@ -58,39 +70,50 @@ type ObjectiveSummary struct {
 }
 
 type ObjectiveAssessment struct {
-	ID                string          `json:"id"`
-	Title             string          `json:"title"`
-	SourceReference   string          `json:"source_reference"`
-	Description       string          `json:"description"`
-	ApplicabilityNote string          `json:"applicability_note,omitempty"`
-	Status            ObjectiveStatus `json:"status"`
-	Verification      string          `json:"verification"`
-	Matches           []EvidenceMatch `json:"matches"`
+	ID                  string          `json:"id"`
+	Title               string          `json:"title"`
+	SourceReference     string          `json:"source_reference"`
+	Description         string          `json:"description"`
+	ApplicabilityNote   string          `json:"applicability_note,omitempty"`
+	Status              ObjectiveStatus `json:"status"`
+	Verification        string          `json:"verification"`
+	Matches             []EvidenceMatch `json:"matches"`
+	UnresolvedQuestions []string        `json:"unresolved_questions,omitempty"`
 }
 
 type EvidenceMatch struct {
-	Fingerprint  string   `json:"fingerprint"`
-	Path         string   `json:"path"`
-	Kind         string   `json:"kind"`
-	StartLine    int      `json:"start_line,omitempty"`
-	MatchedTerms []string `json:"matched_terms"`
+	Fingerprint  string                   `json:"fingerprint"`
+	Path         string                   `json:"path"`
+	Kind         string                   `json:"kind"`
+	StartLine    int                      `json:"start_line,omitempty"`
+	MatchedTerms []string                 `json:"matched_terms"`
+	Context      codegraph.ContextPackage `json:"context"`
 }
 
 // Evaluate maps repository code and configuration to technical objectives.
 // Candidate evidence is never treated as proof of legal applicability,
 // operational effectiveness, or compliance.
 func Evaluate(pack Pack, systems []profile.System, repository discovery.Repository) TechnicalEvidenceReport {
+	graph := codegraph.Build(repository)
 	report := TechnicalEvidenceReport{
-		SchemaVersion: 1,
+		SchemaVersion: 2,
 		Pack: PackReference{
 			ID: pack.ID, Name: pack.Name, Version: pack.Version,
 			Released: pack.Released, Digest: pack.Digest,
 		},
-		Source:     pack.Source,
-		Coverage:   pack.Coverage,
+		Source:   pack.Source,
+		Coverage: pack.Coverage,
+		Analysis: RepositoryAnalysis{
+			GraphSchemaVersion:     1,
+			Languages:              append([]codegraph.Language(nil), graph.Languages...),
+			SourceFilesSeen:        graph.SourceFilesSeen,
+			FilesIndexed:           graph.FilesIndexed,
+			UnsupportedSourceFiles: append([]string(nil), graph.UnsupportedSourceFiles...),
+			SymbolsIndexed:         len(graph.Symbols), RelationshipsIndexed: len(graph.Edges),
+		},
 		Systems:    make([]SystemReference, 0, len(systems)),
-		Objectives: evaluateObjectives(pack, repository),
-		Warnings:   []string{},
+		Objectives: evaluateObjectives(pack, repository, graph),
+		Warnings:   append([]string(nil), graph.Warnings...),
 		Notes: []string{
 			"This report contains technical code evidence only; documentary, organisational, operational, and attestation evidence is outside the CLI boundary.",
 			"Candidate evidence requires technical and human verification and is not a legal compliance conclusion.",
@@ -104,7 +127,7 @@ func Evaluate(pack Pack, systems []profile.System, repository discovery.Reposito
 	return report
 }
 
-func evaluateObjectives(pack Pack, repository discovery.Repository) []ObjectiveAssessment {
+func evaluateObjectives(pack Pack, repository discovery.Repository, graph codegraph.Graph) []ObjectiveAssessment {
 	assessments := make([]ObjectiveAssessment, len(pack.Objectives))
 	usedKinds := make(map[string]struct{})
 	for index, objective := range pack.Objectives {
@@ -121,6 +144,9 @@ func evaluateObjectives(pack Pack, repository discovery.Repository) []ObjectiveA
 	ignoreMarker := ignoreMarkerPrefix + ignoreMarkerSuffix
 	for _, file := range repository.Files {
 		if _, relevant := usedKinds[string(file.Kind)]; !relevant {
+			continue
+		}
+		if file.Kind == discovery.KindSource && !graph.SupportsSourcePath(file.Path) {
 			continue
 		}
 		content := strings.ToLower(string(file.Content))
@@ -142,6 +168,7 @@ func evaluateObjectives(pack Pack, repository discovery.Repository) []ObjectiveA
 				Kind:         string(file.Kind),
 				StartLine:    line,
 				MatchedTerms: terms,
+				Context:      graph.ContextForMatch(file.Path, line, terms, 20),
 			})
 		}
 	}
@@ -155,9 +182,48 @@ func evaluateObjectives(pack Pack, repository discovery.Repository) []ObjectiveA
 		})
 		if len(assessments[index].Matches) > 0 {
 			assessments[index].Status = ObjectiveCandidate
+			for matchIndex := range assessments[index].Matches {
+				addObjectiveContextQuestions(&assessments[index].Matches[matchIndex].Context, assessments[index].ID)
+			}
+		} else if graph.SourceFilesSeen > 0 && graph.FilesIndexed == 0 && containsString(pack.Objectives[index].FileKinds, string(discovery.KindSource)) {
+			assessments[index].Status = ObjectiveNotEvaluated
+			assessments[index].UnresolvedQuestions = []string{
+				"Source files were present, but none could be indexed by a supported language analyzer.",
+			}
 		}
 	}
 	return assessments
+}
+
+func addObjectiveContextQuestions(context *codegraph.ContextPackage, objectiveID string) {
+	if context.Anchor == nil {
+		return
+	}
+	has := func(kind codegraph.EdgeKind) bool {
+		for _, relationship := range context.Relationships {
+			if relationship.Kind == kind {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case strings.HasPrefix(objectiveID, "eu-aia-14-"):
+		if !has(codegraph.EdgeAuthorization) {
+			context.UnresolvedQuestions = append(context.UnresolvedQuestions,
+				"No connected authorization check was resolved; confirm who may invoke this mechanism.")
+		}
+	case objectiveID == "eu-aia-12-automatic-event-logging":
+		if !has(codegraph.EdgeLogging) {
+			context.UnresolvedQuestions = append(context.UnresolvedQuestions,
+				"No connected audit or telemetry call was resolved from this anchor.")
+		}
+	case objectiveID == "eu-aia-9-risk-control-testing" || objectiveID == "eu-aia-10-bias-evaluation" || objectiveID == "eu-aia-15-performance-thresholds":
+		if !has(codegraph.EdgeTest) && context.Anchor.Kind != codegraph.SymbolTest {
+			context.UnresolvedQuestions = append(context.UnresolvedQuestions,
+				"No connected test relationship was resolved for this candidate.")
+		}
+	}
 }
 
 func matchesObjective(path, content string, objective TechnicalObjective) (bool, []string, int) {

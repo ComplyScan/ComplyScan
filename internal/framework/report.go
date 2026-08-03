@@ -77,6 +77,26 @@ func WriteTechnicalEvidenceTerminal(writer io.Writer, report TechnicalEvidenceRe
 	if _, err := fmt.Fprintf(writer, "Source: %s — %s\n\n", report.Source.Reference, report.Source.URL); err != nil {
 		return err
 	}
+	languages := make([]string, len(report.Analysis.Languages))
+	for index, language := range report.Analysis.Languages {
+		languages[index] = string(language)
+	}
+	if len(languages) == 0 {
+		languages = []string{"none"}
+	}
+	if _, err := fmt.Fprintf(writer, "Repository graph: %d of %d source files indexed (%s); %d symbols; %d relationships\n",
+		report.Analysis.FilesIndexed, report.Analysis.SourceFilesSeen, strings.Join(languages, ", "),
+		report.Analysis.SymbolsIndexed, report.Analysis.RelationshipsIndexed); err != nil {
+		return err
+	}
+	if len(report.Analysis.UnsupportedSourceFiles) > 0 {
+		if _, err := fmt.Fprintf(writer, "Unsupported source files: %d\n", len(report.Analysis.UnsupportedSourceFiles)); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintln(writer); err != nil {
+		return err
+	}
 	if len(report.Systems) > 0 {
 		systems := make([]string, len(report.Systems))
 		for index, system := range report.Systems {
@@ -97,6 +117,34 @@ func WriteTechnicalEvidenceTerminal(writer io.Writer, report TechnicalEvidenceRe
 				location = fmt.Sprintf("%s:%d", location, match.StartLine)
 			}
 			if _, err := fmt.Fprintf(writer, "                       Candidate location: %s\n", location); err != nil {
+				return err
+			}
+			if match.Context.Anchor != nil {
+				if _, err := fmt.Fprintf(writer, "                       Anchor: %s (%s)\n", match.Context.Anchor.QualifiedName, match.Context.Anchor.Reachability); err != nil {
+					return err
+				}
+			}
+			for _, relationship := range match.Context.Relationships {
+				if _, err := fmt.Fprintf(writer, "                       Relationship: %s — %s -> %s", relationship.Kind, relationship.From, relationship.To); err != nil {
+					return err
+				}
+				if relationship.Label != "" {
+					if _, err := fmt.Fprintf(writer, " (%s)", relationship.Label); err != nil {
+						return err
+					}
+				}
+				if _, err := fmt.Fprintln(writer); err != nil {
+					return err
+				}
+			}
+			for _, question := range match.Context.UnresolvedQuestions {
+				if _, err := fmt.Fprintf(writer, "                       Unresolved: %s\n", question); err != nil {
+					return err
+				}
+			}
+		}
+		for _, question := range objective.UnresolvedQuestions {
+			if _, err := fmt.Fprintf(writer, "                       Unresolved: %s\n", question); err != nil {
 				return err
 			}
 		}

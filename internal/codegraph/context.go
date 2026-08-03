@@ -3,6 +3,7 @@ package codegraph
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // SymbolReference is the report-safe subset of a symbol.
@@ -32,17 +33,24 @@ type Relationship struct {
 // It intentionally excludes source text from report serialization.
 type ContextPackage struct {
 	Anchor              *SymbolReference  `json:"anchor,omitempty" yaml:"anchor,omitempty"`
+	Imports             []Import          `json:"imports,omitempty" yaml:"imports,omitempty"`
 	RelatedSymbols      []SymbolReference `json:"related_symbols,omitempty" yaml:"related_symbols,omitempty"`
 	Relationships       []Relationship    `json:"relationships,omitempty" yaml:"relationships,omitempty"`
 	UnresolvedQuestions []string          `json:"unresolved_questions,omitempty" yaml:"unresolved_questions,omitempty"`
 }
 
-// ContextFor returns the enclosing symbol and a bounded one-hop neighborhood.
+// ContextFor returns the enclosing symbol and a bounded structural neighborhood.
 func (graph Graph) ContextFor(path string, line, maxRelationships int) ContextPackage {
+	return graph.ContextForMatch(path, line, nil, maxRelationships)
+}
+
+// ContextForMatch uses objective terms to prefer an implementation symbol over
+// an earlier caller in the same file.
+func (graph Graph) ContextForMatch(path string, line int, matchedTerms []string, maxRelationships int) ContextPackage {
 	if maxRelationships <= 0 {
 		maxRelationships = 20
 	}
-	anchor, found := graph.enclosingSymbol(path, line)
+	anchor, found := graph.matchingSymbol(path, line, matchedTerms)
 	if !found {
 		return ContextPackage{UnresolvedQuestions: []string{
 			fmt.Sprintf("No supported-language symbol encloses %s:%d.", path, line),
@@ -50,28 +58,45 @@ func (graph Graph) ContextFor(path string, line, maxRelationships int) ContextPa
 	}
 
 	context := ContextPackage{Anchor: symbolReference(anchor)}
+	for _, repositoryImport := range graph.Imports {
+		if repositoryImport.Path == anchor.Path {
+			context.Imports = append(context.Imports, repositoryImport)
+		}
+	}
 	related := make(map[string]SymbolReference)
-	for _, edge := range graph.Edges {
-		if len(context.Relationships) >= maxRelationships {
-			break
+	frontier := map[string]bool{anchor.ID: true}
+	visitedSymbols := make(map[string]bool)
+	visitedEdges := make(map[int]bool)
+	for depth := 0; depth < 2 && len(frontier) > 0 && len(context.Relationships) < maxRelationships; depth++ {
+		next := make(map[string]bool)
+		for id := range frontier {
+			visitedSymbols[id] = true
 		}
-		if edge.From != anchor.ID && edge.To != anchor.ID {
-			continue
-		}
-		from := graph.displayName(edge.From)
-		to := graph.displayName(edge.To)
-		context.Relationships = append(context.Relationships, Relationship{
-			Kind: edge.Kind, From: from, To: to, Label: edge.Label,
-			Path: edge.Path, Line: edge.Line, Resolved: edge.Resolved,
-		})
-		for _, id := range []string{edge.From, edge.To} {
-			if id == anchor.ID {
+		for edgeIndex, edge := range graph.Edges {
+			if visitedEdges[edgeIndex] || (!frontier[edge.From] && !frontier[edge.To]) {
 				continue
 			}
-			if symbol, ok := graph.symbol(id); ok {
-				related[id] = *symbolReference(symbol)
+			visitedEdges[edgeIndex] = true
+			context.Relationships = append(context.Relationships, Relationship{
+				Kind: edge.Kind, From: graph.displayName(edge.From), To: graph.displayName(edge.To),
+				Label: edge.Label, Path: edge.Path, Line: edge.Line, Resolved: edge.Resolved,
+			})
+			for _, id := range []string{edge.From, edge.To} {
+				if id == anchor.ID {
+					continue
+				}
+				if symbol, ok := graph.symbol(id); ok {
+					related[id] = *symbolReference(symbol)
+					if !visitedSymbols[id] {
+						next[id] = true
+					}
+				}
+			}
+			if len(context.Relationships) >= maxRelationships {
+				break
 			}
 		}
+		frontier = next
 	}
 	for _, reference := range related {
 		context.RelatedSymbols = append(context.RelatedSymbols, reference)
@@ -105,6 +130,39 @@ func (graph Graph) SourceForSymbol(id string, maxBytes int) string {
 		return symbol.source
 	}
 	return symbol.source[:maxBytes]
+}
+
+func (graph Graph) matchingSymbol(path string, line int, matchedTerms []string) (Symbol, bool) {
+	selected, found := graph.enclosingSymbol(path, line)
+	bestScore := 0
+	bestDistance := 0
+	for _, symbol := range graph.Symbols {
+		if symbol.Path != path || symbol.Kind == SymbolType {
+			continue
+		}
+		candidate := compactSymbolTerm(symbol.QualifiedName)
+		score := 0
+		for _, term := range matchedTerms {
+			if strings.HasPrefix(strings.ToLower(term), "path:") {
+				continue
+			}
+			if compact := compactSymbolTerm(term); compact != "" && strings.Contains(candidate, compact) {
+				score++
+			}
+		}
+		distance := symbol.StartLine - line
+		if distance < 0 {
+			distance = -distance
+		}
+		if score > bestScore || (score == bestScore && score > 0 && distance < bestDistance) {
+			selected, found, bestScore, bestDistance = symbol, true, score, distance
+		}
+	}
+	return selected, found
+}
+
+func compactSymbolTerm(value string) string {
+	return strings.NewReplacer(" ", "", "-", "", "_", "").Replace(strings.ToLower(value))
 }
 
 func (graph Graph) enclosingSymbol(path string, line int) (Symbol, bool) {

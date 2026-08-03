@@ -43,6 +43,9 @@ func TestDeadOverride(t *testing.T) { deadOverride() }
 	if graph.FilesIndexed != 2 || len(graph.Languages) != 1 || graph.Languages[0] != LanguageGo {
 		t.Fatalf("unexpected coverage: %#v", graph)
 	}
+	if graph.SourceFilesSeen != 2 || len(graph.Imports) != 3 {
+		t.Fatalf("unexpected source/import coverage: %#v", graph)
+	}
 	assertEdge(t, graph, EdgeRoute, "registerRoutes", "handleOverride", "HANDLEFUNC /override")
 	assertEdge(t, graph, EdgeConfiguration, "handleOverride", "config:OVERRIDE_ENABLED", "OVERRIDE_ENABLED")
 	assertEdge(t, graph, EdgeAuthorization, "handleOverride", "authorizeReviewer", "authorizeReviewer")

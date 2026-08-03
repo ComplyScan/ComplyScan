@@ -104,3 +104,45 @@ func TestEvidenceDefinitionFilesCanOptOutOfSelfMatching(t *testing.T) {
 		t.Fatalf("definition file matched itself: %#v", report.Objectives)
 	}
 }
+
+func TestEvaluateAttachesBoundedProductionContext(t *testing.T) {
+	pack := Pack{Objectives: []TechnicalObjective{{
+		ID: "eu-aia-14-override-intervention", Title: "Override", SourceReference: "Article 14",
+		Description: "Override decision", FileKinds: []string{"source"},
+		PathKeywords: []string{"override"}, KeywordGroups: [][]string{{"override"}, {"decision"}},
+	}}}
+	repository := discovery.Repository{Files: []discovery.File{{
+		Path: "override/main.go", Kind: discovery.KindSource,
+		Content: []byte(`package main
+func main() { overrideDecision() }
+func overrideDecision() { authorizeReviewer() }
+func authorizeReviewer() {}
+`),
+	}}}
+	report := Evaluate(pack, nil, repository)
+	if report.SchemaVersion != 2 || report.Analysis.FilesIndexed != 1 || report.Analysis.RelationshipsIndexed < 2 {
+		t.Fatalf("unexpected graph coverage: %#v", report.Analysis)
+	}
+	match := report.Objectives[0].Matches[0]
+	if match.Context.Anchor == nil || match.Context.Anchor.QualifiedName != "main.overrideDecision" || match.Context.Anchor.Reachability != "production-reachable" {
+		t.Fatalf("unexpected context anchor: %#v", match.Context)
+	}
+	for _, question := range match.Context.UnresolvedQuestions {
+		if strings.Contains(question, "authorization") {
+			t.Fatalf("resolved authorization was reported unresolved: %#v", match.Context)
+		}
+	}
+}
+
+func TestEvaluateMarksUnsupportedSourceObjectivesNotEvaluated(t *testing.T) {
+	pack := Pack{Objectives: []TechnicalObjective{{
+		ID: "source-control", FileKinds: []string{"source"},
+		PathKeywords: []string{"worker"}, KeywordGroups: [][]string{{"decision"}},
+	}}}
+	report := Evaluate(pack, nil, discovery.Repository{Files: []discovery.File{{
+		Path: "worker.py", Kind: discovery.KindSource, Content: []byte("decision = model.predict(value)"),
+	}}})
+	if report.Objectives[0].Status != ObjectiveNotEvaluated || report.Summary.NotEvaluated != 1 {
+		t.Fatalf("unsupported source was treated as evaluated: %#v", report)
+	}
+}

@@ -134,6 +134,23 @@ func writeTechnicalEvidenceMarkdown(writer io.Writer, evidence framework.Technic
 		evidence.Summary.CandidateEvidence, evidence.Summary.NotDetected, evidence.Summary.NotEvaluated); err != nil {
 		return err
 	}
+	languages := make([]string, len(evidence.Analysis.Languages))
+	for index, language := range evidence.Analysis.Languages {
+		languages[index] = string(language)
+	}
+	if len(languages) == 0 {
+		languages = []string{"none"}
+	}
+	if _, err := fmt.Fprintf(writer, "\n### Repository analysis\n\n- Source files seen: %d\n- Files indexed: %d\n- Indexed languages: %s\n- Symbols indexed: %d\n- Relationships indexed: %d\n- Unsupported source files: %d\n",
+		evidence.Analysis.SourceFilesSeen, evidence.Analysis.FilesIndexed, inlineCode(strings.Join(languages, ", ")),
+		evidence.Analysis.SymbolsIndexed, evidence.Analysis.RelationshipsIndexed, len(evidence.Analysis.UnsupportedSourceFiles)); err != nil {
+		return err
+	}
+	for _, path := range evidence.Analysis.UnsupportedSourceFiles {
+		if _, err := fmt.Fprintf(writer, "  - %s\n", inlineCode(path)); err != nil {
+			return err
+		}
+	}
 	currentReference := ""
 	for _, objective := range evidence.Objectives {
 		if objective.SourceReference != currentReference {
@@ -151,6 +168,11 @@ func writeTechnicalEvidenceMarkdown(writer io.Writer, evidence framework.Technic
 				return err
 			}
 		}
+		for _, question := range objective.UnresolvedQuestions {
+			if _, err := fmt.Fprintf(writer, "\nUnresolved: %s\n", markdownText(question)); err != nil {
+				return err
+			}
+		}
 		if len(objective.Matches) == 0 {
 			if _, err := fmt.Fprintln(writer, "\nNo configured technical signal was detected in the bounded scan."); err != nil {
 				return err
@@ -163,6 +185,26 @@ func writeTechnicalEvidenceMarkdown(writer io.Writer, evidence framework.Technic
 		for _, match := range objective.Matches {
 			if _, err := fmt.Fprintf(writer, "\n- %s — matched %s", inlineCode(locationText(match.Path, match.StartLine)), inlineCode(strings.Join(match.MatchedTerms, ", "))); err != nil {
 				return err
+			}
+			if match.Context.Anchor != nil {
+				if _, err := fmt.Fprintf(writer, "\n  - Anchor: %s (%s)", inlineCode(match.Context.Anchor.QualifiedName), inlineCode(string(match.Context.Anchor.Reachability))); err != nil {
+					return err
+				}
+			}
+			for _, relationship := range match.Context.Relationships {
+				if _, err := fmt.Fprintf(writer, "\n  - Relationship: %s — %s → %s", inlineCode(string(relationship.Kind)), inlineCode(relationship.From), inlineCode(relationship.To)); err != nil {
+					return err
+				}
+				if relationship.Label != "" {
+					if _, err := fmt.Fprintf(writer, " (%s)", inlineCode(relationship.Label)); err != nil {
+						return err
+					}
+				}
+			}
+			for _, question := range match.Context.UnresolvedQuestions {
+				if _, err := fmt.Fprintf(writer, "\n  - Unresolved: %s", markdownText(question)); err != nil {
+					return err
+				}
 			}
 		}
 		if _, err := fmt.Fprintln(writer); err != nil {

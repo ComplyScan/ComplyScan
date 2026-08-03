@@ -46,6 +46,7 @@ func Build(repository discovery.Repository) Graph {
 		if bytes.Contains(repositoryFile.Content, []byte(ignoreTechnicalEvidenceMarker)) {
 			continue
 		}
+		graph.SourceFilesSeen++
 		if strings.ToLower(filepath.Ext(repositoryFile.Path)) != ".go" {
 			graph.UnsupportedSourceFiles = append(graph.UnsupportedSourceFiles, repositoryFile.Path)
 			continue
@@ -66,6 +67,21 @@ func Build(repository discovery.Repository) Graph {
 			packageKey:     packageKey,
 		})
 		graph.FilesIndexed++
+		graph.IndexedSourceFiles = append(graph.IndexedSourceFiles, repositoryFile.Path)
+		for _, importSpec := range file.Imports {
+			importedPath, err := strconv.Unquote(importSpec.Path.Value)
+			if err != nil {
+				continue
+			}
+			alias := ""
+			if importSpec.Name != nil {
+				alias = importSpec.Name.Name
+			}
+			graph.Imports = append(graph.Imports, Import{
+				Language: LanguageGo, Path: repositoryFile.Path, Package: file.Name.Name,
+				Alias: alias, ImportedPath: importedPath,
+			})
+		}
 		if packageNames[packageKey] == nil {
 			packageNames[packageKey] = make(map[string]string)
 		}
