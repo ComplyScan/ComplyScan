@@ -152,7 +152,7 @@ case ":${PATH}:" in
 esac
 
 if [ "$run_setup" -eq 1 ]; then
-	if [ -r /dev/tty ]; then
+	if [ -t 1 ] && [ -r /dev/tty ]; then
 		printf '%s\n' "Starting guided setup..."
 		"${install_dir}/complyscan" setup --interactive </dev/tty
 	else
