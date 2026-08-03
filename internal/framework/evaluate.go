@@ -185,10 +185,10 @@ func evaluateObjectives(pack Pack, repository discovery.Repository, graph codegr
 			for matchIndex := range assessments[index].Matches {
 				addObjectiveContextQuestions(&assessments[index].Matches[matchIndex].Context, assessments[index].ID)
 			}
-		} else if graph.SourceFilesSeen > 0 && graph.FilesIndexed == 0 && containsString(pack.Objectives[index].FileKinds, string(discovery.KindSource)) {
+		} else if graph.SourceFilesSeen > graph.FilesIndexed && containsString(pack.Objectives[index].FileKinds, string(discovery.KindSource)) {
 			assessments[index].Status = ObjectiveNotEvaluated
 			assessments[index].UnresolvedQuestions = []string{
-				"Source files were present, but none could be indexed by a supported language analyzer.",
+				"This objective was not fully evaluated because one or more source files could not be indexed by a supported language analyzer.",
 			}
 		}
 	}

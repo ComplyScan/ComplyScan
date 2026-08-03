@@ -390,7 +390,7 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			}
 			technicalEvidence := framework.Evaluate(pack, cfg.Systems, result.FullRepository)
 			technicalEvidence.Target = target
-			technicalEvidence.Warnings = append([]string(nil), result.Warnings...)
+			technicalEvidence.Warnings = append(technicalEvidence.Warnings, result.Warnings...)
 			reportValue.TechnicalEvidence = &technicalEvidence
 			if cfg.AI.Provider == "ollama" {
 				candidateCount := technicalCandidateCount(technicalEvidence)

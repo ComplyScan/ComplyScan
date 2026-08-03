@@ -139,9 +139,10 @@ func TestEvaluateMarksUnsupportedSourceObjectivesNotEvaluated(t *testing.T) {
 		ID: "source-control", FileKinds: []string{"source"},
 		PathKeywords: []string{"worker"}, KeywordGroups: [][]string{{"decision"}},
 	}}}
-	report := Evaluate(pack, nil, discovery.Repository{Files: []discovery.File{{
-		Path: "worker.py", Kind: discovery.KindSource, Content: []byte("decision = model.predict(value)"),
-	}}})
+	report := Evaluate(pack, nil, discovery.Repository{Files: []discovery.File{
+		{Path: "main.go", Kind: discovery.KindSource, Content: []byte("package main\nfunc main() {}\n")},
+		{Path: "worker.py", Kind: discovery.KindSource, Content: []byte("decision = model.predict(value)")},
+	}})
 	if report.Objectives[0].Status != ObjectiveNotEvaluated || report.Summary.NotEvaluated != 1 {
 		t.Fatalf("unsupported source was treated as evaluated: %#v", report)
 	}

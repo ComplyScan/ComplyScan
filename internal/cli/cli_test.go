@@ -259,6 +259,25 @@ func authorizeReviewer() {}
 	}
 }
 
+func TestScanPreservesGraphCoverageWarnings(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "broken.go"), []byte("package broken\nfunc"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := Execute([]string{"scan", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild)
+	if code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
+	}
+	var decoded report.Report
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, stdout.String())
+	}
+	if decoded.TechnicalEvidence == nil || len(decoded.TechnicalEvidence.Warnings) == 0 || !strings.Contains(decoded.TechnicalEvidence.Warnings[0], "broken.go") {
+		t.Fatalf("graph parse warning was lost: %#v", decoded.TechnicalEvidence)
+	}
+}
+
 func TestScanRejectsUnsafeOrInactiveOllamaOverrides(t *testing.T) {
 	for _, arguments := range [][]string{
 		{"scan", "--review", "openai"},

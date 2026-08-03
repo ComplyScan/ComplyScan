@@ -117,7 +117,7 @@ func newFrameworkAssessCommand(stdout io.Writer) *cobra.Command {
 			}
 			evidenceReport := framework.Evaluate(pack, cfg.Systems, discovered.Repository)
 			evidenceReport.Target = target
-			evidenceReport.Warnings = append([]string(nil), discovered.Warnings...)
+			evidenceReport.Warnings = append(evidenceReport.Warnings, discovered.Warnings...)
 			if outputFormat == "json" {
 				return framework.WriteJSON(stdout, evidenceReport)
 			}
