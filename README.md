@@ -8,9 +8,9 @@ ComplyScan does **not** interpret a complete system, determine an EU AI Act clas
 
 ## Install
 
-> Development status: the v0.2 functionality documented below is currently unreleased. `v0.1.1` remains the latest tagged release; build `main` to evaluate the development version.
+> Current release: v0.1.2. Ollama review is optional and experimental; deterministic scanning remains the default.
 
-Starting with v0.2.0, macOS and Linux users can install ComplyScan and immediately start guided setup with one command:
+Starting with v0.1.2, macOS and Linux users can install ComplyScan and immediately start guided setup with one command:
 
 ```bash
 curl -fsSL https://complyscan.github.io/ComplyScan/install.sh | sh
@@ -19,10 +19,10 @@ curl -fsSL https://complyscan.github.io/ComplyScan/install.sh | sh
 The installer is published from this repository through GitHub Pages. It detects the operating system and CPU architecture, downloads the matching release archive, verifies its published SHA-256 checksum, installs `complyscan` into `~/.local/bin`, and launches `complyscan setup` through the terminal. It does not use `sudo`. Pass `--no-setup` for automation or pin both the installer and binary version:
 
 ```bash
-curl -fsSL https://github.com/ComplyScan/ComplyScan/releases/download/v0.2.0/install.sh | sh -s -- --version v0.2.0 --no-setup
+curl -fsSL https://github.com/ComplyScan/ComplyScan/releases/download/v0.1.2/install.sh | sh -s -- --version v0.1.2 --no-setup
 ```
 
-The Pages installer can install the current v0.1.1 release but will direct users to the older `init` flow because guided setup starts in v0.2.0. Prebuilt archives for macOS, Linux, and Windows remain available on [GitHub Releases](https://github.com/ComplyScan/ComplyScan/releases). The current stable release can also be installed with Go 1.22 or newer:
+Prebuilt archives for macOS, Linux, and Windows are also available on [GitHub Releases](https://github.com/ComplyScan/ComplyScan/releases). The current stable release can be installed with Go 1.22 or newer:
 
 ```bash
 go install github.com/1eonardodawinki/ComplyScan/cmd/complyscan@latest
@@ -39,7 +39,7 @@ go build -o complyscan ./cmd/complyscan
 Release builds can inject metadata with `-ldflags`:
 
 ```bash
-go build -ldflags "-X main.version=0.2.0-dev -X main.commit=$(git rev-parse --short HEAD) -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o complyscan ./cmd/complyscan
+go build -ldflags "-X main.version=0.1.2-dev -X main.commit=$(git rev-parse --short HEAD) -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o complyscan ./cmd/complyscan
 ```
 
 ## Quick start
@@ -257,7 +257,7 @@ complyscan scan . --review ollama --ollama-model qwen3:8b
 
 You can instead set `ai.provider: ollama` in `.complyscan.yml`. `--review none` disables a configured reviewer for one scan. If explicitly enabled review cannot connect, times out, cannot find the model, or returns invalid structured output, the scan exits with code `2` rather than silently omitting the requested review.
 
-The development default is the official Ollama `qwen3:8b` model. Ollama does not currently publish a `qwen3-coder:8b` tag; its official Qwen3-Coder family starts at `30b`, which has a substantially larger installation footprint. The model remains configurable. Setup may install Ollama, start its Homebrew service, or pull the selected model only after explicit confirmation; normal scans never install software or models. Fake-transport tests enforce the structured-output, redaction, injection, and identifier-binding contract; a successful live `qwen3:8b` quality and resource run remains required before release.
+The experimental default is the official Ollama `qwen3:8b` model. Ollama does not currently publish a `qwen3-coder:8b` tag; its official Qwen3-Coder family starts at `30b`, which has a substantially larger installation footprint. The model remains configurable. Setup may install Ollama, start its Homebrew service, or pull the selected model only after explicit confirmation; normal scans never install software or models. Fake-transport tests enforce the structured-output, redaction, injection, and identifier-binding contract; a successful live `qwen3:8b` quality and resource run remains required before Ollama review is promoted from experimental status.
 
 ComplyScan uses two separate Ollama requests, both bounded by `max-findings`. The first sends visible, unsuppressed deterministic finding records with re-redacted metadata such as the rule ID, fingerprint, title, message, relative path, line, short evidence, remediation, severity, and confidence. The second sends existing technical candidates with their objective ID, evidence fingerprint, reachability, imports, graph relationships, unresolved questions, and up to six connected source-symbol excerpts. A non-source technical match may include a small excerpt around the matched line. ComplyScan never sends a complete repository or an unbounded file. Input excerpts are re-redacted and are not copied into the saved report.
 
@@ -280,7 +280,7 @@ steps:
   - uses: actions/checkout@v6
     with:
       fetch-depth: 0
-  - uses: 1eonardodawinki/ComplyScan@main # unreleased development version
+  - uses: ComplyScan/ComplyScan@v0.1.2
     with:
       severity: medium
       changed-since: ${{ github.event.pull_request.base.sha }}
@@ -294,7 +294,7 @@ The action also accepts `review`, `ollama-model`, and `ollama-endpoint`. Ollama 
 
 ## Privacy and security guarantees
 
-In the default deterministic mode, the ComplyScan v0.2 development CLI:
+In the default deterministic mode, the ComplyScan v0.1.2 CLI:
 
 - runs entirely on the local machine;
 - makes no network requests;

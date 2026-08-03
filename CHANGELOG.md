@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Target: 0.2.0
+## 0.1.2 - 2026-08-03
 
 ### Added
 
@@ -43,6 +43,6 @@ Target: 0.2.0
 
 ### Fixed
 
-- Public module path and installation flow.
+- Public repository references and installation flow.
 - Secret detection no longer treats ordinary hyphenated words ending in `sk-...` as credentials.
 - ComplyScan's detector signatures and synthetic fixtures no longer appear as AI components in its self-inventory.

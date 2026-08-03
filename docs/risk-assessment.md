@@ -3,11 +3,11 @@
 | Field | Value |
 | --- | --- |
 | Product | ComplyScan |
-| Version assessed | Unreleased 0.2.0 development branch |
+| Version assessed | 0.1.2 |
 | Assessment date | 2026-08-03 |
 | Owner | ComplyScan maintainers |
-| Status | Updated for repository-graph context and separate Ollama technical-objective review; live-model validation and applicability review remain open before release |
-| Next review | Before release, any material product change, or by 2027-02-02 |
+| Status | Updated for repository-graph context and separate Ollama technical-objective review; Ollama review remains experimental while live-model validation and applicability review are open |
+| Next review | Before promoting Ollama review from experimental status, after any material product change, or by 2027-02-02 |
 
 ## Scope and method
 
@@ -48,7 +48,7 @@ Likelihood and impact are qualitative: low, medium, or high. Residual risk refle
 
 ## Accepted limitations
 
-ComplyScan 0.2 development combines self-declared profile facts with repository evidence rather than observing a complete deployed system. It cannot verify that profile answers match real operations, runtime configuration, actual data subjects, organisational controls, intended use outside the repository, or downstream decisions. Ollama sees only bounded findings or connected technical context and therefore cannot resolve most missing system context. The relationship graph currently indexes Go only; language, provider, graph-resolution, and model-evaluation coverage remain incomplete. These limitations are communicated to users and are not treated as defects that can be eliminated solely through more rules or model prompts.
+ComplyScan 0.1.2 combines self-declared profile facts with repository evidence rather than observing a complete deployed system. It cannot verify that profile answers match real operations, runtime configuration, actual data subjects, organisational controls, intended use outside the repository, or downstream decisions. Ollama sees only bounded findings or connected technical context and therefore cannot resolve most missing system context. The relationship graph currently indexes Go only; language, provider, graph-resolution, and model-evaluation coverage remain incomplete. These limitations are communicated to users and are not treated as defects that can be eliminated solely through more rules or model prompts.
 
 ## Verification evidence
 
@@ -57,7 +57,7 @@ The maintained verification baseline includes:
 - unit and integration tests for discovery, rules, fingerprints, suppressions, baselines, reports, and CLI exit codes;
 - labelled detector-corpus metrics with enforced precision and recall thresholds;
 - changed-since tests covering committed, staged, unstaged, untracked, subdirectory, and repository-wide governance behavior;
-- race-enabled tests and `go vet` before release;
+- race-enabled tests and `go vet` for each release;
 - a self-scan that exercises the published composite action and GitHub SARIF upload;
 - secret-redaction and false-positive regression tests;
 - fake-transport Ollama tests covering separate finding and technical schemas, bounded source redaction, prompt-injection containment, exact identifier binding, API errors, remote-endpoint rejection, and empty-input behavior;
@@ -70,7 +70,7 @@ The maintained verification baseline includes:
 - release checksums and attestations; and
 - POSIX installer integration tests covering platform archive selection, successful checksum verification, executable installation, and hard failure on a checksum mismatch.
 
-Before release, verification must also include a successful `qwen3:8b` smoke test, review-output inspection using the live/test-only/prompt-injection fixtures, and time and memory measurements on a representative repository. The expected fixture outcome is `partial` or `strong` for the production-routed candidate and `weak` or `not_supported` for both test-only candidates. Automated tests do not download or execute an Ollama model, so they cannot close this quality gate.
+Before Ollama review is promoted from experimental status, verification must also include a successful `qwen3:8b` smoke test, review-output inspection using the live/test-only/prompt-injection fixtures, and time and memory measurements on a representative repository. The expected fixture outcome is `partial` or `strong` for the production-routed candidate and `weak` or `not_supported` for both test-only candidates. Automated tests do not download or execute an Ollama model, so they cannot close this quality gate.
 
 ## Review and escalation
 

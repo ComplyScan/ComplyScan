@@ -3,11 +3,11 @@
 | Field | Value |
 | --- | --- |
 | Product | ComplyScan |
-| Version assessed | Unreleased 0.2.0 development branch |
+| Version assessed | 0.1.2 |
 | Assessment date | 2026-08-03 |
 | Owner | ComplyScan maintainers |
 | Status | Reassessment in progress following graph-backed technical context and optional Ollama review; not legal advice |
-| Next review | Required before release, then before any reassessment trigger below |
+| Next review | Required before promoting Ollama review from experimental status, then before any reassessment trigger below |
 
 ## Intended purpose
 
@@ -15,7 +15,7 @@ ComplyScan is an offline-by-default developer CLI that identifies technical sign
 
 ## Current system boundary
 
-The unreleased 0.2 development branch consists of:
+ComplyScan 0.1.2 consists of:
 
 - bounded local repository discovery and file classification;
 - typed dependency, import, endpoint, and environment signal extraction;
@@ -32,7 +32,7 @@ The unreleased 0.2 development branch consists of:
 - a verified release installer and guided setup orchestrator that can provision a separately distributed Ollama runtime and user-selected model after explicit confirmation; and
 - an optional GitHub Action that builds the CLI and can upload SARIF metadata to GitHub code scanning.
 
-Ollama review is disabled by the built-in scan default. Interactive setup recommends it, but the user must confirm the selection and separately confirm any runtime installation or model pull. The default scan remains deterministic and makes no model call. When explicitly enabled, ComplyScan calls a configured model through Ollama's loopback API. The development configuration selects `qwen3:8b`, and a live quality/resource gate remains open before release. OpenAI, Anthropic, Gemini, and ComplyScan Cloud remain inactive extension types.
+Ollama review is disabled by the built-in scan default. Interactive setup recommends it, but the user must confirm the selection and separately confirm any runtime installation or model pull. The default scan remains deterministic and makes no model call. When explicitly enabled, ComplyScan calls a configured model through Ollama's loopback API. The experimental configuration selects `qwen3:8b`, and a live quality/resource gate remains open before it is promoted to stable status. OpenAI, Anthropic, Gemini, and ComplyScan Cloud remain inactive extension types.
 
 The technical pack, keyword-group evidence matcher, repository graph, and context selection remain deterministic in both configurations. With Ollama disabled, no technical-objective context leaves the CLI process. With Ollama enabled, existing technical candidates are reviewed in a second request using bounded graph metadata and connected excerpts; profiles are not sent. The pack's `technical-semantic-and-human` verification labels still require human review and never mean that a model established compliance. Generated Markdown and JSON reports remain local unless a future dashboard connection is explicitly enabled.
 
@@ -42,7 +42,7 @@ Two operating configurations must now be distinguished.
 
 In default deterministic mode, the working technical assessment remains that ComplyScan automatically executes human-defined rules and does not use model inference to generate findings. The earlier rationale for treating that configuration as traditional deterministic software therefore remains relevant.
 
-In Ollama-enabled mode, a model infers advisory verdicts or technical-evidence strengths, rationales, confidence, unresolved questions, and suggested review actions from deterministic findings or bounded connected code context. The earlier project-wide conclusion cannot be extended to this configuration without further analysis. Before release, maintainers must record a qualified assessment of whether the configured system meets the Article 3(1) definition, the relevant value-chain roles, the effect of free and open-source distribution, and any resulting obligations. Keeping model observations advisory and separate from deterministic evidence is a control, not by itself an exemption or classification decision.
+In Ollama-enabled mode, a model infers advisory verdicts or technical-evidence strengths, rationales, confidence, unresolved questions, and suggested review actions from deterministic findings or bounded connected code context. The earlier project-wide conclusion cannot be extended to this configuration without further analysis. Before Ollama review is promoted from experimental status, maintainers must record a qualified assessment of whether the configured system meets the Article 3(1) definition, the relevant value-chain roles, the effect of free and open-source distribution, and any resulting obligations. Keeping model observations advisory and separate from deterministic evidence is a control, not by itself an exemption or classification decision.
 
 This assessment follows the distinction in Recital 12 and the European Commission's non-binding guidance between AI systems with an inference capability and simpler software that automatically executes human-defined rules. The project's free and open-source distribution may also be relevant to Article 2(12), but it is not the primary basis for this assessment and its exceptions must be considered if the product changes.
 
@@ -79,7 +79,7 @@ Guided setup records declared facts and optional human decisions; it does not ve
 
 ## Reassessment triggers
 
-This assessment must be reviewed before release and again if ComplyScan adds any of the following:
+This assessment must be reviewed before Ollama review is promoted from experimental status and again if ComplyScan adds any of the following:
 
 - any remote model-backed provider or permission for non-loopback review endpoints;
 - learned, adaptive, probabilistic, or model-derived logic that creates, removes, re-severities, suppresses, or gates deterministic findings;

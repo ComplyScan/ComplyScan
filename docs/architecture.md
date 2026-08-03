@@ -1,6 +1,6 @@
 # Architecture
 
-ComplyScan v0.2 development has an offline-by-default pipeline:
+ComplyScan v0.1.2 has an offline-by-default pipeline:
 
 ```text
 target directory
