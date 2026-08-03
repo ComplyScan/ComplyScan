@@ -65,6 +65,9 @@ func newInitCommand(stdout io.Writer) *cobra.Command {
 			if err := config.Write(path, cfg, force); err != nil {
 				return err
 			}
+			if err := ensureReportGitIgnore(target); err != nil {
+				return fmt.Errorf("created %s but could not ignore generated reports: %w", path, err)
+			}
 			_, err = fmt.Fprintf(stdout, "Created %s with %d system profile(s)\n", path, len(cfg.Systems))
 			return err
 		},
@@ -73,6 +76,67 @@ func newInitCommand(stdout io.Writer) *cobra.Command {
 	command.Flags().BoolVar(&forceInteractive, "interactive", false, "collect system context even when input is redirected")
 	command.Flags().BoolVar(&nonInteractive, "non-interactive", false, "create scanner configuration without asking setup questions")
 	return command
+}
+
+const reportGitIgnoreEntry = "/.complyscan/reports/"
+
+func ensureReportGitIgnore(target string) error {
+	path := filepath.Join(target, ".gitignore")
+	mode := os.FileMode(0o644)
+	content := []byte{}
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("%s must be a regular file and must not be a symlink", path)
+		}
+		mode = info.Mode().Perm()
+		content, err = os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect %s: %w", path, err)
+	}
+	for _, line := range strings.Split(strings.ReplaceAll(string(content), "\r\n", "\n"), "\n") {
+		normalized := strings.Trim(strings.TrimSpace(line), "/")
+		if normalized == ".complyscan/reports" {
+			return nil
+		}
+	}
+	if len(content) > 0 && content[len(content)-1] != '\n' {
+		content = append(content, '\n')
+	}
+	content = append(content, reportGitIgnoreEntry...)
+	content = append(content, '\n')
+
+	temporary, err := os.CreateTemp(target, ".complyscan-gitignore-*")
+	if err != nil {
+		return fmt.Errorf("create temporary .gitignore: %w", err)
+	}
+	temporaryPath := temporary.Name()
+	closed := false
+	defer func() {
+		if !closed {
+			_ = temporary.Close()
+		}
+		_ = os.Remove(temporaryPath)
+	}()
+	if err := temporary.Chmod(mode); err != nil {
+		return fmt.Errorf("set temporary .gitignore permissions: %w", err)
+	}
+	if _, err := temporary.Write(content); err != nil {
+		return fmt.Errorf("write temporary .gitignore: %w", err)
+	}
+	if err := temporary.Sync(); err != nil {
+		return fmt.Errorf("sync temporary .gitignore: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("close temporary .gitignore: %w", err)
+	}
+	closed = true
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return fmt.Errorf("replace %s: %w", path, err)
+	}
+	return nil
 }
 
 func collectSystemProfile(input io.Reader, output io.Writer, target string, now time.Time) (profile.System, error) {

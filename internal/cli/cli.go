@@ -111,7 +111,7 @@ func newGenerateDocumentCommand(stdout io.Writer, build BuildInfo, name, default
 			}
 			destination := resolveTargetPath(target, outputPath)
 			discovered, err := discovery.Discover(cmd.Context(), target, discovery.Options{
-				Exclude:                   append(append([]string(nil), cfg.Scan.Exclude...), additionalExcludes...),
+				Exclude:                   withGeneratedReportExclusion(append(append([]string(nil), cfg.Scan.Exclude...), additionalExcludes...)),
 				MaxFiles:                  cfg.Scan.MaxFiles,
 				MaxTotalBytes:             cfg.Scan.MaxTotalBytes,
 				IncludeNestedRepositories: cfg.Scan.IncludeNestedRepositories,
@@ -179,7 +179,7 @@ func newInventoryCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				effectiveMaxTotalBytes = maxTotalBytes
 			}
 			discoveryOptions := discovery.Options{
-				Exclude:                   append(append([]string(nil), cfg.Scan.Exclude...), additionalExcludes...),
+				Exclude:                   withGeneratedReportExclusion(append(append([]string(nil), cfg.Scan.Exclude...), additionalExcludes...)),
 				MaxFiles:                  effectiveMaxFiles,
 				MaxTotalBytes:             effectiveMaxTotalBytes,
 				IncludeNestedRepositories: cfg.Scan.IncludeNestedRepositories || includeNestedRepositories,
@@ -232,6 +232,8 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 		reviewProvider            string
 		ollamaModel               string
 		ollamaEndpoint            string
+		reportDirectory           string
+		noReport                  bool
 	)
 	command := &cobra.Command{
 		Use:   "scan [path]",
@@ -278,6 +280,16 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			if noBaseline && cmd.Flags().Changed("baseline") {
 				return errors.New("--baseline and --no-baseline cannot be used together")
 			}
+			if noReport && cmd.Flags().Changed("report-dir") {
+				return errors.New("--report-dir and --no-report cannot be used together")
+			}
+			resolvedReportDirectory := ""
+			if !noReport {
+				resolvedReportDirectory, err = resolveReportDirectory(target, reportDirectory)
+				if err != nil {
+					return err
+				}
+			}
 
 			configuredBaseline := cfg.Baseline
 			baselineRequired := cmd.Flags().Changed("baseline")
@@ -305,7 +317,12 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			if cmd.Flags().Changed("max-total-bytes") {
 				effectiveMaxTotalBytes = maxTotalBytes
 			}
-			excludes := append(append([]string(nil), cfg.Scan.Exclude...), additionalExcludes...)
+			excludes := withGeneratedReportExclusion(append(append([]string(nil), cfg.Scan.Exclude...), additionalExcludes...))
+			if resolvedReportDirectory != "" {
+				if exclusion := targetExclusion(target, resolvedReportDirectory); exclusion != "" {
+					excludes = append(excludes, exclusion)
+				}
+			}
 			if !noBaseline && configuredBaseline != "" {
 				if exclusion := targetExclusion(target, configuredBaseline); exclusion != "" {
 					excludes = append(excludes, exclusion)
@@ -386,6 +403,13 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				}
 				reportValue.Review = &review
 			}
+			var artifacts report.Artifacts
+			if resolvedReportDirectory != "" {
+				artifacts, err = report.WriteArtifacts(resolvedReportDirectory, reportValue)
+				if err != nil {
+					return fmt.Errorf("save scan reports: %w", err)
+				}
+			}
 			if outputFormat == "json" {
 				if err := report.WriteJSON(stdout, reportValue); err != nil {
 					return err
@@ -397,6 +421,11 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			} else {
 				if err := report.WriteTerminalCompletion(stdout, reportValue); err != nil {
 					return fmt.Errorf("write terminal report: %w", err)
+				}
+				if artifacts.Markdown != "" {
+					if _, err := fmt.Fprintf(stdout, "\nReports saved:\n  Human-readable: %s\n  Evidence bundle: %s\n", artifacts.Markdown, artifacts.JSON); err != nil {
+						return fmt.Errorf("write report paths: %w", err)
+					}
 				}
 			}
 			if report.MeetsThreshold(result.Findings, cfg.FailOn) {
@@ -420,6 +449,8 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().StringVar(&reviewProvider, "review", "", "advisory review provider: none or ollama (defaults to configuration)")
 	command.Flags().StringVar(&ollamaModel, "ollama-model", "", "Ollama model name (overrides ai.ollama.model)")
 	command.Flags().StringVar(&ollamaEndpoint, "ollama-endpoint", "", "local Ollama base URL (overrides ai.ollama.endpoint)")
+	command.Flags().StringVar(&reportDirectory, "report-dir", report.DefaultDirectory, "directory for latest.md and latest.json (relative to the scan target)")
+	command.Flags().BoolVar(&noReport, "no-report", false, "do not save local Markdown and JSON reports")
 	return command
 }
 
@@ -465,7 +496,7 @@ func newBaselineCommand(stdout io.Writer) *cobra.Command {
 				destination = baseline.FileName
 			}
 			resolvedDestination := resolveTargetPath(target, destination)
-			excludes := append([]string(nil), cfg.Scan.Exclude...)
+			excludes := withGeneratedReportExclusion(append([]string(nil), cfg.Scan.Exclude...))
 			if exclusion := targetExclusion(target, destination); exclusion != "" {
 				excludes = append(excludes, exclusion)
 			}
@@ -510,6 +541,42 @@ func resolveTargetPath(target, value string) string {
 		return filepath.Clean(value)
 	}
 	return filepath.Clean(filepath.Join(target, filepath.FromSlash(value)))
+}
+
+func resolveReportDirectory(target, value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", errors.New("--report-dir must not be empty")
+	}
+	if filepath.IsAbs(value) {
+		return "", errors.New("--report-dir must be relative to the scan target")
+	}
+	clean := filepath.Clean(filepath.FromSlash(value))
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", errors.New("--report-dir must stay inside the scan target")
+	}
+	targetPath, err := filepath.Abs(target)
+	if err != nil {
+		return "", fmt.Errorf("resolve scan target for reports: %w", err)
+	}
+	destination, err := filepath.Abs(filepath.Join(targetPath, clean))
+	if err != nil {
+		return "", fmt.Errorf("resolve report directory: %w", err)
+	}
+	relative, err := filepath.Rel(targetPath, destination)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", errors.New("--report-dir must stay inside the scan target")
+	}
+	return destination, nil
+}
+
+func withGeneratedReportExclusion(excludes []string) []string {
+	for _, exclusion := range excludes {
+		if filepath.ToSlash(filepath.Clean(filepath.FromSlash(exclusion))) == report.DefaultDirectory {
+			return excludes
+		}
+	}
+	return append(excludes, report.DefaultDirectory)
 }
 
 func targetExclusion(target, value string) string {

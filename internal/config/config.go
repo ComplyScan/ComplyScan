@@ -78,7 +78,7 @@ func Default() Config {
 	return Config{
 		Version: 1,
 		Scan: ScanConfig{
-			Exclude:       []string{"node_modules", "vendor", "dist", "build"},
+			Exclude:       []string{"node_modules", "vendor", "dist", "build", ".complyscan/reports"},
 			MaxFiles:      25_000,
 			MaxTotalBytes: 100 << 20,
 		},

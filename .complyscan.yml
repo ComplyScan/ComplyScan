@@ -7,6 +7,7 @@ scan:
     - dist
     - build
     - testdata
+    - .complyscan/reports
   max-files: 25000
   max-total-bytes: 104857600
   include-nested-repositories: false

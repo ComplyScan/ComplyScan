@@ -32,7 +32,7 @@ func TestScanExitCodes(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			target := filepath.Join("..", "..", "testdata", test.target)
-			if got := Execute([]string{"scan", "--no-color", target}, &stdout, &stderr, testBuild); got != test.want {
+			if got := Execute([]string{"scan", "--no-report", "--no-color", target}, &stdout, &stderr, testBuild); got != test.want {
 				t.Fatalf("exit code = %d, want %d; stdout=%q stderr=%q", got, test.want, stdout.String(), stderr.String())
 			}
 		})
@@ -42,7 +42,7 @@ func TestScanExitCodes(t *testing.T) {
 func TestScanJSONOutputAndSeverityFilter(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	target := filepath.Join("..", "..", "testdata", "vulnerable-python-ai-app")
-	code := Execute([]string{"scan", "--format", "json", "--severity", "high", target}, &stdout, &stderr, testBuild)
+	code := Execute([]string{"scan", "--no-report", "--format", "json", "--severity", "high", target}, &stdout, &stderr, testBuild)
 	if code != 1 {
 		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
 	}
@@ -61,7 +61,7 @@ func TestScanJSONOutputAndSeverityFilter(t *testing.T) {
 func TestScanSARIFOutput(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	target := filepath.Join("..", "..", "testdata", "vulnerable-python-ai-app")
-	code := Execute([]string{"scan", "--format", "sarif", "--severity", "high", target}, &stdout, &stderr, testBuild)
+	code := Execute([]string{"scan", "--no-report", "--format", "sarif", "--severity", "high", target}, &stdout, &stderr, testBuild)
 	if code != 1 {
 		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
 	}
@@ -77,7 +77,7 @@ func TestScanSARIFOutput(t *testing.T) {
 func TestTerminalScanStreamsFindingsBeforeCompletion(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	target := filepath.Join("..", "..", "testdata", "vulnerable-python-ai-app")
-	code := Execute([]string{"scan", "--no-color", "--severity", "high", target}, &stdout, &stderr, testBuild)
+	code := Execute([]string{"scan", "--no-report", "--no-color", "--severity", "high", target}, &stdout, &stderr, testBuild)
 	if code != 1 {
 		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
 	}
@@ -99,7 +99,7 @@ func TestTerminalScanStreamsFindingsBeforeCompletion(t *testing.T) {
 func TestScanSupportsAdditionalExcludes(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	target := filepath.Join("..", "..", "testdata", "vulnerable-python-ai-app")
-	code := Execute([]string{"scan", "--no-color", "--exclude", "app.py", target}, &stdout, &stderr, testBuild)
+	code := Execute([]string{"scan", "--no-report", "--no-color", "--exclude", "app.py", target}, &stdout, &stderr, testBuild)
 	if code != 0 {
 		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
@@ -117,9 +117,81 @@ func TestScanRejectsInvalidBudgets(t *testing.T) {
 	}
 }
 
+func TestScanAutomaticallySavesHumanAndMachineReports(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "override.go"), []byte("package review\nfunc OverrideDecision(output string) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	for id := range cfg.Rules {
+		cfg.Rules[id] = config.RuleConfig{Enabled: false}
+	}
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--no-color", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	reportDirectory := filepath.Join(target, ".complyscan", "reports")
+	markdownPath := filepath.Join(reportDirectory, "latest.md")
+	jsonPath := filepath.Join(reportDirectory, "latest.json")
+	for _, path := range []string{markdownPath, jsonPath} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("report %q was not written: %v", path, err)
+		}
+	}
+	if !strings.Contains(stdout.String(), "Reports saved:") || !strings.Contains(stdout.String(), markdownPath) {
+		t.Fatalf("terminal did not identify saved reports:\n%s", stdout.String())
+	}
+	data, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded report.Report
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.TechnicalEvidence == nil || decoded.TechnicalEvidence.Summary.CandidateEvidence == 0 {
+		t.Fatalf("saved bundle lacks technical evidence: %#v", decoded.TechnicalEvidence)
+	}
+	for _, objective := range decoded.TechnicalEvidence.Objectives {
+		for _, match := range objective.Matches {
+			if strings.HasPrefix(match.Path, ".complyscan/reports/") {
+				t.Fatalf("generated report was scanned as evidence: %#v", match)
+			}
+		}
+	}
+}
+
+func TestScanReportFlagsAreSafeAndOptional(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("no-report exit code = %d; stderr=%q", code, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(target, ".complyscan")); !os.IsNotExist(err) {
+		t.Fatalf("--no-report created report directory: %v", err)
+	}
+	for _, arguments := range [][]string{
+		{"scan", "--no-report", "--report-dir", "reports", target},
+		{"scan", "--report-dir", "../outside", target},
+		{"scan", "--report-dir", filepath.Join(string(filepath.Separator), "tmp", "reports"), target},
+	} {
+		stdout.Reset()
+		stderr.Reset()
+		if code := Execute(arguments, &stdout, &stderr, testBuild); code != 2 {
+			t.Fatalf("Execute(%v) code=%d stderr=%q", arguments, code, stderr.String())
+		}
+	}
+}
+
 func TestScanChangedSinceRequiresGitRepository(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := Execute([]string{"scan", "--changed-since", "main", t.TempDir()}, &stdout, &stderr, testBuild)
+	code := Execute([]string{"scan", "--no-report", "--changed-since", "main", t.TempDir()}, &stdout, &stderr, testBuild)
 	if code != 2 || !strings.Contains(stderr.String(), "locate Git repository") {
 		t.Fatalf("exit code = %d; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -131,7 +203,7 @@ func TestScanChangedSinceRequiresGitRepository(t *testing.T) {
 func TestScanCanEnableOllamaWithoutCallingItForClearRepository(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	target := filepath.Join("..", "..", "testdata", "non-ai-repository")
-	code := Execute([]string{"scan", "--format", "json", "--review", "ollama", "--ollama-model", "test-model", target}, &stdout, &stderr, testBuild)
+	code := Execute([]string{"scan", "--no-report", "--format", "json", "--review", "ollama", "--ollama-model", "test-model", target}, &stdout, &stderr, testBuild)
 	if code != 0 {
 		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
 	}
@@ -177,7 +249,7 @@ suppressions:
 	}
 	var stdout, stderr bytes.Buffer
 	target := filepath.Join("..", "..", "testdata", "vulnerable-python-ai-app")
-	code := Execute([]string{"scan", "--no-color", "--config", configPath, target}, &stdout, &stderr, testBuild)
+	code := Execute([]string{"scan", "--no-report", "--no-color", "--config", configPath, target}, &stdout, &stderr, testBuild)
 	if code != 0 {
 		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
@@ -204,7 +276,7 @@ func TestBaselineAcceptsCurrentFindingsButNotNewOnes(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := Execute([]string{"scan", "--no-color", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--no-report", "--no-color", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("baselined scan exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "Suppressed:") {
@@ -216,7 +288,7 @@ func TestBaselineAcceptsCurrentFindingsButNotNewOnes(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := Execute([]string{"scan", "--no-color", target}, &stdout, &stderr, testBuild); code != 1 {
+	if code := Execute([]string{"scan", "--no-report", "--no-color", target}, &stdout, &stderr, testBuild); code != 1 {
 		t.Fatalf("changed scan exit code = %d, want 1; stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "response") {
@@ -400,6 +472,39 @@ func TestNonInteractiveInitCreatesConfigWithoutInventingContext(t *testing.T) {
 	if len(cfg.Systems) != 0 || !strings.Contains(stdout.String(), "no system profile was collected") {
 		t.Fatalf("systems=%#v output=%q", cfg.Systems, stdout.String())
 	}
+	ignoreData, err := os.ReadFile(filepath.Join(target, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ignoreData), reportGitIgnoreEntry) {
+		t.Fatalf("generated reports are not ignored:\n%s", ignoreData)
+	}
+}
+
+func TestInitPreservesExistingGitIgnoreWithoutDuplicatingReportEntry(t *testing.T) {
+	target := t.TempDir()
+	ignorePath := filepath.Join(target, ".gitignore")
+	if err := os.WriteFile(ignorePath, []byte("node_modules/\n/.complyscan/reports/\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"init", "--non-interactive", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("init code=%d stderr=%q", code, stderr.String())
+	}
+	data, err := os.ReadFile(ignorePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(data), ".complyscan/reports") != 1 || !strings.Contains(string(data), "node_modules/") {
+		t.Fatalf("unexpected .gitignore:\n%s", data)
+	}
+	info, err := os.Stat(ignorePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o640 {
+		t.Fatalf(".gitignore permissions = %o", info.Mode().Perm())
+	}
 }
 
 func TestInitRejectsConflictingInteractionFlags(t *testing.T) {
@@ -469,7 +574,7 @@ func TestScanJSONIncludesApplicabilityWithoutChangingFindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
 	}
 	var decoded report.Report

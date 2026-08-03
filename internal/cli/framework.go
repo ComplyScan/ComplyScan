@@ -94,7 +94,7 @@ func newFrameworkAssessCommand(stdout io.Writer) *cobra.Command {
 			if cmd.Flags().Changed("max-total-bytes") {
 				effectiveMaxTotalBytes = maxTotalBytes
 			}
-			excludes := append(append([]string(nil), cfg.Scan.Exclude...), additionalExcludes...)
+			excludes := withGeneratedReportExclusion(append(append([]string(nil), cfg.Scan.Exclude...), additionalExcludes...))
 			if cfg.Baseline != "" {
 				if exclusion := targetExclusion(target, cfg.Baseline); exclusion != "" {
 					excludes = append(excludes, exclusion)
@@ -115,13 +115,13 @@ func newFrameworkAssessCommand(stdout io.Writer) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("discover framework evidence in %q: %w", target, err)
 			}
-			report := framework.Evaluate(pack, cfg.Systems, discovered.Repository)
-			report.Target = target
-			report.Warnings = append([]string(nil), discovered.Warnings...)
+			evidenceReport := framework.Evaluate(pack, cfg.Systems, discovered.Repository)
+			evidenceReport.Target = target
+			evidenceReport.Warnings = append([]string(nil), discovered.Warnings...)
 			if outputFormat == "json" {
-				return framework.WriteJSON(stdout, report)
+				return framework.WriteJSON(stdout, evidenceReport)
 			}
-			if err := framework.WriteTechnicalEvidenceTerminal(stdout, report); err != nil {
+			if err := framework.WriteTechnicalEvidenceTerminal(stdout, evidenceReport); err != nil {
 				return err
 			}
 			return nil
