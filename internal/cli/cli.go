@@ -70,6 +70,7 @@ func newRootCommand(stdout, stderr io.Writer, build BuildInfo) *cobra.Command {
 	root.AddCommand(newGenerateCommand(stdout, build))
 	root.AddCommand(newBaselineCommand(stdout))
 	root.AddCommand(newInitCommand(stdout))
+	root.AddCommand(newSetupCommand(stdout, build))
 	root.AddCommand(newProfileCommand(stdout))
 	root.AddCommand(newFrameworkCommand(stdout))
 	root.AddCommand(newVersionCommand(stdout, build))

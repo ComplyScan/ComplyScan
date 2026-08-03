@@ -140,6 +140,11 @@ func ensureReportGitIgnore(target string) error {
 }
 
 func collectSystemProfile(input io.Reader, output io.Writer, target string, now time.Time) (profile.System, error) {
+	return collectSystemProfileWithPrompt(promptSession{reader: bufio.NewReader(input), output: output}, target, now)
+}
+
+func collectSystemProfileWithPrompt(prompt promptSession, target string, now time.Time) (profile.System, error) {
+	output := prompt.output
 	absolute, err := filepath.Abs(target)
 	if err != nil {
 		return profile.System{}, fmt.Errorf("resolve init target: %w", err)
@@ -150,7 +155,6 @@ func collectSystemProfile(input io.Reader, output io.Writer, target string, now 
 		defaultID = "system"
 	}
 	value := profile.NewDraftSystem(defaultID, defaultName)
-	prompt := promptSession{reader: bufio.NewReader(input), output: output}
 	if _, err := fmt.Fprintln(output, "\nSystem applicability setup"); err != nil {
 		return profile.System{}, err
 	}
@@ -263,6 +267,38 @@ func collectSystemProfile(input io.Reader, output io.Writer, target string, now 
 type promptSession struct {
 	reader *bufio.Reader
 	output io.Writer
+}
+
+func (session promptSession) confirm(label string, defaultValue bool) (bool, error) {
+	defaultText := "y/N"
+	if defaultValue {
+		defaultText = "Y/n"
+	}
+	for {
+		if _, err := fmt.Fprintf(session.output, "? %s [%s]: ", label, defaultText); err != nil {
+			return false, err
+		}
+		line, err := session.reader.ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return false, fmt.Errorf("read %s: %w", strings.ToLower(label), err)
+		}
+		value := strings.ToLower(strings.TrimSpace(line))
+		switch value {
+		case "":
+			return defaultValue, nil
+		case "y", "yes":
+			return true, nil
+		case "n", "no":
+			return false, nil
+		default:
+			if _, writeErr := fmt.Fprintln(session.output, "  Enter yes or no."); writeErr != nil {
+				return false, writeErr
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			return false, fmt.Errorf("read %s: input ended before a valid answer was supplied", strings.ToLower(label))
+		}
+	}
 }
 
 func (session promptSession) text(label, defaultValue string) (string, error) {
