@@ -153,8 +153,12 @@ esac
 
 if [ "$run_setup" -eq 1 ]; then
 	if [ -t 1 ] && [ -r /dev/tty ]; then
-		printf '%s\n' "Starting guided setup..."
-		"${install_dir}/complyscan" setup --interactive </dev/tty
+		if "${install_dir}/complyscan" setup --help >/dev/null 2>&1; then
+			printf '%s\n' "Starting guided setup..."
+			"${install_dir}/complyscan" setup --interactive </dev/tty
+		else
+			printf '\nComplyScan %s predates guided setup. Start with:\n  %s init\n' "$version_tag" "${install_dir}/complyscan"
+		fi
 	else
 		printf '\nNo interactive terminal was detected. Start setup later with:\n  %s setup\n' "${install_dir}/complyscan"
 	fi
