@@ -182,7 +182,11 @@ func writeTechnicalEvidenceMarkdown(writer io.Writer, evidence framework.Technic
 }
 
 func markdownFindingSummary(summary Summary) string {
-	return fmt.Sprintf("**%d findings:** %d critical, %d high, %d medium, %d low, %d info.", summary.Total, summary.Critical, summary.High, summary.Medium, summary.Low, summary.Info)
+	label := "findings"
+	if summary.Total == 1 {
+		label = "finding"
+	}
+	return fmt.Sprintf("**%d %s:** %d critical, %d high, %d medium, %d low, %d info.", summary.Total, label, summary.Critical, summary.High, summary.Medium, summary.Low, summary.Info)
 }
 
 func objectiveStatusLabel(status framework.ObjectiveStatus) string {

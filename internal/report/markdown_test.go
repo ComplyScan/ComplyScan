@@ -42,6 +42,7 @@ func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
 		"Technical evidence only",
 		"scan-",
 		"## Rule findings",
+		"**1 finding:**",
 		"Review \\*logging\\*",
 		"## EU AI Act technical evidence",
 		"Candidate evidence detected — Human override or intervention mechanism",
