@@ -1,3 +1,4 @@
+// complyscan:ignore-technical-evidence -- this file embeds synthetic technical-objective fixtures.
 package cli
 
 import (
