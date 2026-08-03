@@ -64,3 +64,76 @@ type ReviewResult struct {
 type Provider interface {
 	Review(ctx context.Context, request ReviewRequest) (ReviewResult, error)
 }
+
+// TechnicalReviewRequest is intentionally separate from deterministic finding
+// review. Each candidate remains bound to an existing objective and evidence
+// fingerprint.
+type TechnicalReviewRequest struct {
+	Candidates []TechnicalCandidate
+}
+
+type TechnicalCandidate struct {
+	ObjectiveID         string                   `json:"objective_id"`
+	Title               string                   `json:"title"`
+	SourceReference     string                   `json:"source_reference"`
+	Description         string                   `json:"description"`
+	EvidenceFingerprint string                   `json:"evidence_fingerprint"`
+	Path                string                   `json:"path"`
+	StartLine           int                      `json:"start_line,omitempty"`
+	Anchor              string                   `json:"anchor,omitempty"`
+	Reachability        string                   `json:"reachability,omitempty"`
+	Imports             []string                 `json:"imports,omitempty"`
+	Relationships       []TechnicalRelationship  `json:"relationships,omitempty"`
+	UnresolvedQuestions []string                 `json:"unresolved_questions,omitempty"`
+	SourceContexts      []TechnicalSourceContext `json:"source_contexts"`
+}
+
+type TechnicalRelationship struct {
+	Kind     string `json:"kind"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Label    string `json:"label,omitempty"`
+	Resolved bool   `json:"resolved"`
+}
+
+// TechnicalSourceContext is local model input only. Review results never echo
+// it into ComplyScan's saved evidence bundle.
+type TechnicalSourceContext struct {
+	Role         string `json:"role"`
+	Symbol       string `json:"symbol"`
+	Path         string `json:"path"`
+	StartLine    int    `json:"start_line"`
+	EndLine      int    `json:"end_line"`
+	Reachability string `json:"reachability"`
+	Source       string `json:"source"`
+}
+
+type EvidenceStrength string
+
+const (
+	StrengthStrong       EvidenceStrength = "strong"
+	StrengthPartial      EvidenceStrength = "partial"
+	StrengthWeak         EvidenceStrength = "weak"
+	StrengthUncertain    EvidenceStrength = "uncertain"
+	StrengthNotSupported EvidenceStrength = "not_supported"
+)
+
+type TechnicalObservation struct {
+	ObjectiveID         string           `json:"objective_id"`
+	EvidenceFingerprint string           `json:"evidence_fingerprint"`
+	Strength            EvidenceStrength `json:"strength"`
+	Confidence          string           `json:"confidence"`
+	Rationale           string           `json:"rationale"`
+	UnresolvedQuestions []string         `json:"unresolved_questions,omitempty"`
+	SuggestedReview     string           `json:"suggested_review,omitempty"`
+}
+
+type TechnicalReviewResult struct {
+	Provider        Kind                   `json:"provider"`
+	Model           string                 `json:"model"`
+	InputCandidates int                    `json:"input_candidates"`
+	Reviewed        int                    `json:"reviewed"`
+	Observations    []TechnicalObservation `json:"observations"`
+	Notes           []string               `json:"notes,omitempty"`
+	Usage           Usage                  `json:"usage,omitempty"`
+}

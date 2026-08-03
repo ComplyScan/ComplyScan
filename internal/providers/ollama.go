@@ -172,39 +172,9 @@ func (provider *OllamaProvider) Review(ctx context.Context, request ReviewReques
 		Stream: false, Format: ollamaReviewSchema(), Think: false, KeepAlive: "5m",
 		Options: map[string]any{"temperature": 0},
 	}
-	body, err := json.Marshal(requestBody)
+	response, err := provider.chat(ctx, requestBody)
 	if err != nil {
-		return ReviewResult{}, fmt.Errorf("encode Ollama request: %w", err)
-	}
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, provider.chatURL, bytes.NewReader(body))
-	if err != nil {
-		return ReviewResult{}, fmt.Errorf("create Ollama request: %w", err)
-	}
-	httpRequest.Header.Set("Content-Type", "application/json")
-	httpResponse, err := provider.client.Do(httpRequest)
-	if err != nil {
-		return ReviewResult{}, fmt.Errorf("review with Ollama at %s: %w", provider.chatURL, err)
-	}
-	defer httpResponse.Body.Close()
-	responseBody, err := readLimited(httpResponse.Body, maxOllamaResponseBytes)
-	if err != nil {
-		return ReviewResult{}, fmt.Errorf("read Ollama response: %w", err)
-	}
-	if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
-		return ReviewResult{}, ollamaStatusError(httpResponse.StatusCode, responseBody)
-	}
-	var response ollamaChatResponse
-	if err := json.Unmarshal(responseBody, &response); err != nil {
-		return ReviewResult{}, fmt.Errorf("decode Ollama response: %w", err)
-	}
-	if response.Error != "" {
-		return ReviewResult{}, fmt.Errorf("Ollama review failed: %s", cleanReviewText(response.Error, maxReviewMessageChars))
-	}
-	if !response.Done {
-		return ReviewResult{}, errors.New("Ollama review returned an incomplete non-streaming response")
-	}
-	if strings.TrimSpace(response.Message.Content) == "" {
-		return ReviewResult{}, errors.New("Ollama review returned an empty structured response")
+		return ReviewResult{}, err
 	}
 	var payload ollamaReviewPayload
 	if err := json.Unmarshal([]byte(response.Message.Content), &payload); err != nil {
@@ -224,6 +194,44 @@ func (provider *OllamaProvider) Review(ctx context.Context, request ReviewReques
 		result.Notes = append(result.Notes, fmt.Sprintf("Ollama returned %d valid observation(s) for %d submitted findings.", result.Reviewed, len(selected)))
 	}
 	return result, nil
+}
+
+func (provider *OllamaProvider) chat(ctx context.Context, requestBody ollamaChatRequest) (ollamaChatResponse, error) {
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		return ollamaChatResponse{}, fmt.Errorf("encode Ollama request: %w", err)
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, provider.chatURL, bytes.NewReader(body))
+	if err != nil {
+		return ollamaChatResponse{}, fmt.Errorf("create Ollama request: %w", err)
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	httpResponse, err := provider.client.Do(httpRequest)
+	if err != nil {
+		return ollamaChatResponse{}, fmt.Errorf("review with Ollama at %s: %w", provider.chatURL, err)
+	}
+	defer httpResponse.Body.Close()
+	responseBody, err := readLimited(httpResponse.Body, maxOllamaResponseBytes)
+	if err != nil {
+		return ollamaChatResponse{}, fmt.Errorf("read Ollama response: %w", err)
+	}
+	if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
+		return ollamaChatResponse{}, ollamaStatusError(httpResponse.StatusCode, responseBody)
+	}
+	var response ollamaChatResponse
+	if err := json.Unmarshal(responseBody, &response); err != nil {
+		return ollamaChatResponse{}, fmt.Errorf("decode Ollama response: %w", err)
+	}
+	if response.Error != "" {
+		return ollamaChatResponse{}, fmt.Errorf("Ollama review failed: %s", cleanReviewText(response.Error, maxReviewMessageChars))
+	}
+	if !response.Done {
+		return ollamaChatResponse{}, errors.New("Ollama review returned an incomplete non-streaming response")
+	}
+	if strings.TrimSpace(response.Message.Content) == "" {
+		return ollamaChatResponse{}, errors.New("Ollama review returned an empty structured response")
+	}
+	return response, nil
 }
 
 func validateOllamaObservations(values []ollamaObservation, wanted map[string]string) ([]Observation, error) {
