@@ -67,10 +67,13 @@ complyscan inventory . --format json
 complyscan generate ai-system .
 complyscan generate risk-assessment .
 complyscan baseline .
+complyscan doctor .
 complyscan version
 ```
 
 `setup` is the recommended first command. It creates or updates `.complyscan.yml`, runs the factual system and human-applicability questionnaire, recommends local Ollama review, lets the user choose any Ollama model, offers to install and start Ollama when it is missing, offers to pull the selected model, and can run the first scan. Each software installation and model download requires a separate confirmation. If setup cannot finish an external installation or download, it still saves the collected repository configuration and prints the exact recovery command.
+
+`doctor` performs an offline readiness check for the installed build, repository configuration, Git detection, report-directory permissions, the Ollama executable, its loopback service, and the configured model. Missing optional tools are warnings; a required but unavailable Ollama service or model is a blocking failure.
 
 Interactive setup selects `qwen3:8b` by default, but the user can enter another local model or decline Ollama and keep deterministic scanning. Automation never installs software or downloads a model unless `--install-ollama` or `--pull-model` is explicitly passed. Use `--non-interactive --review none` for a network-free starter configuration, or `--skip-ollama-install`, `--skip-model-pull`, and `--skip-scan` to control individual interactive steps.
 

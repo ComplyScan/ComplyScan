@@ -4,6 +4,8 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -364,6 +366,119 @@ func TestVersionCommand(t *testing.T) {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("version output missing %q: %s", want, stdout.String())
 		}
+	}
+}
+
+func TestDoctorReportsOfflineRepositoryReadiness(t *testing.T) {
+	target := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"doctor", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	for _, expected := range []string{
+		"[PASS] version: ComplyScan 0.1.0",
+		"[WARN] config: no .complyscan.yml found",
+		"[PASS] reports: writable",
+		"ollama executable",
+		"[SKIP] ollama service: AI review is disabled",
+		"Doctor found no blocking issues.",
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("doctor output missing %q:\n%s", expected, stdout.String())
+		}
+	}
+}
+
+func TestDoctorChecksConfiguredOllamaModel(t *testing.T) {
+	target := t.TempDir()
+	useDoctorHTTPTransport(t, func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path != "/api/tags" {
+			t.Errorf("request path = %q", request.URL.Path)
+		}
+		return doctorHTTPResponse(http.StatusOK, `{"models":[{"name":"qwen3:8b","model":"qwen3:8b"}]}`), nil
+	})
+
+	cfg := config.Default()
+	cfg.AI.Provider = "ollama"
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	commandDirectory := t.TempDir()
+	ollamaPath := filepath.Join(commandDirectory, "ollama")
+	if err := os.WriteFile(ollamaPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", commandDirectory+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"doctor", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	for _, expected := range []string{"[PASS] ollama executable:", "[PASS] ollama service:", "[PASS] ollama model: qwen3:8b"} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("doctor output missing %q:\n%s", expected, stdout.String())
+		}
+	}
+}
+
+func TestDoctorFailsWhenConfiguredOllamaModelIsMissing(t *testing.T) {
+	target := t.TempDir()
+	useDoctorHTTPTransport(t, func(*http.Request) (*http.Response, error) {
+		return doctorHTTPResponse(http.StatusOK, `{"models":[]}`), nil
+	})
+
+	cfg := config.Default()
+	cfg.AI.Provider = "ollama"
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	commandDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(commandDirectory, "ollama"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", commandDirectory+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"doctor", target}, &stdout, &stderr, testBuild); code != 1 {
+		t.Fatalf("exit code = %d, want 1; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "[FAIL] ollama model: qwen3:8b is not installed") {
+		t.Fatalf("missing model was not reported:\n%s", stdout.String())
+	}
+}
+
+func TestDoctorReportsInvalidConfiguration(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, config.FileName), []byte("version: 99\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"doctor", target}, &stdout, &stderr, testBuild); code != 1 {
+		t.Fatalf("exit code = %d, want 1; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "[FAIL] config:") || !strings.Contains(stdout.String(), "unsupported version 99") {
+		t.Fatalf("invalid config was not reported:\n%s", stdout.String())
+	}
+}
+
+type doctorRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function doctorRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
+}
+
+func useDoctorHTTPTransport(t *testing.T, function doctorRoundTripFunc) {
+	t.Helper()
+	previous := doctorHTTPClient
+	doctorHTTPClient = &http.Client{Transport: function}
+	t.Cleanup(func() { doctorHTTPClient = previous })
+}
+
+func doctorHTTPResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     make(http.Header),
 	}
 }
 
