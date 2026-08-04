@@ -38,7 +38,7 @@ objectives:
     path-keywords: [data, dataset, validation]
     keyword-groups:
       - [training data, validation data, test data, dataset]
-      - [validate, schema validation, quality check, completeness, missing]
+      - [validate training data, validate training dataset, validate validation data, validate validation dataset, validate test data, validate test dataset, validate dataset, validates dataset, dataset validation, schema validation, quality check, completeness, missing value, missing field]
     verification: technical-semantic-and-human
   - id: eu-aia-10-bias-evaluation
     title: Bias and fairness evaluation
@@ -46,7 +46,7 @@ objectives:
     description: Automated tests or evaluation code measure bias, discrimination, or fairness-related behavior.
     applicability-note: A technical signal cannot establish which affected groups, metrics, or mitigations are legally appropriate.
     file-kinds: [source, configuration, ci, github-actions]
-    path-keywords: [bias, fairness, evaluation, test]
+    path-keywords: [bias, fairness, evaluation]
     keyword-groups:
       - [fairness, discrimination, demographic parity, equalized odds, political bias, anchoring bias, gender bias, racial bias]
       - [test, evaluation, metric, threshold]
@@ -57,10 +57,10 @@ objectives:
     description: Code or configuration emits structured events for AI inference, prediction, response, or decision activity.
     applicability-note: A match does not prove that logging is enabled, complete, protected, or retained in production.
     file-kinds: [source, configuration, terraform, dockerfile]
-    path-keywords: [log, audit, telemetry]
+    path-keywords: [log, logging, audit, telemetry]
     keyword-groups:
       - [audit log, event log, telemetry, logger, logging]
-      - [inference, prediction, decision, prompt, response, event]
+      - [inference, prediction, automated decision, model output, model response, ai response]
     verification: technical-semantic-and-human
   - id: eu-aia-12-log-retention-configuration
     title: AI log retention configuration
@@ -114,7 +114,7 @@ objectives:
     file-kinds: [source, configuration, ci, github-actions]
     path-keywords: [evaluation, benchmark, performance, test]
     keyword-groups:
-      - [accuracy, precision, recall, f1, performance]
+      - [model accuracy, evaluation accuracy, accuracy metric, precision, recall, f1, model performance, inference performance]
       - [threshold, acceptance criteria, minimum]
     verification: technical-semantic-and-human
   - id: eu-aia-15-robustness-failure-handling
@@ -126,7 +126,7 @@ objectives:
     path-keywords: [robustness, adversarial, fault, fallback, test]
     keyword-groups:
       - [robustness, adversarial, fuzz, model fault, inference fault, inference timeout]
-      - [fallback, fail-safe, circuit breaker, retry, recovery test]
+      - [model fallback, inference fallback, fail-safe, circuit breaker, retry, recovery test]
     verification: technical-semantic-and-human
   - id: eu-aia-15-ai-security-controls
     title: AI-specific security controls

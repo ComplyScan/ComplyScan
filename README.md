@@ -130,7 +130,7 @@ The deterministic rule layer remains deliberately technical. Technical-objective
 
 ## Versioned technical evidence
 
-The built-in `eu-ai-act-technical-evidence` pack version `0.1.0` contains 13 code objectives associated with Articles 9, 10, 12, 14, 15, and 50 of Regulation (EU) 2024/1689. They cover technical signals for risk-control tests, dataset validation, bias evaluation, automatic logging, retention configuration, human review, override and stop mechanisms, performance thresholds, robustness, AI-specific security, interaction disclosure, and synthetic-content marking.
+The built-in `eu-ai-act-technical-evidence` pack version `0.1.1` contains 13 code objectives associated with Articles 9, 10, 12, 14, 15, and 50 of Regulation (EU) 2024/1689. They cover technical signals for risk-control tests, dataset validation, bias evaluation, automatic logging, retention configuration, human review, override and stop mechanisms, performance thresholds, robustness, AI-specific security, interaction disclosure, and synthetic-content marking. Version 0.1.1 tightens ambiguous metric, risk, bias, dataset, retention, and failure-handling terms using evidence from pinned public-repository evaluation.
 
 The pack accepts only source, configuration, dependency, test, CI, container, and infrastructure file kinds. It does not contain objectives for policies, risk assessments, training records, conformity documents, attestations, or other evidence intended for a future dashboard. The CLI runs technical checks even when no system profile exists; declared context remains a separate, provisional report section rather than an activation gate.
 

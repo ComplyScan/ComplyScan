@@ -19,7 +19,9 @@ const (
 	ObjectiveNotDetected  ObjectiveStatus = "not-detected"
 	ObjectiveNotEvaluated ObjectiveStatus = "not-evaluated"
 
-	maxEvidenceMatches = 5
+	maxEvidenceMatches    = 5
+	maxEvidenceLineSpan   = 20
+	maxKeywordOccurrences = 128
 
 	ignoreMarkerPrefix = "complyscan:"
 	ignoreMarkerSuffix = "ignore-technical-evidence"
@@ -153,7 +155,7 @@ func evaluateObjectives(pack Pack, repository discovery.Repository, graph codegr
 		if strings.Contains(content, ignoreMarker) {
 			continue
 		}
-		path := strings.ToLower(file.Path)
+		path := file.Path
 		for index, objective := range pack.Objectives {
 			if !containsString(objective.FileKinds, string(file.Kind)) || len(assessments[index].Matches) >= maxEvidenceMatches {
 				continue
@@ -227,30 +229,27 @@ func addObjectiveContextQuestions(context *codegraph.ContextPackage, objectiveID
 }
 
 func matchesObjective(path, content string, objective TechnicalObjective) (bool, []string, int) {
-	terms := make([]string, 0, len(objective.KeywordGroups)+1)
-	firstOffset := -1
-	for _, group := range objective.KeywordGroups {
-		matched := ""
-		matchedOffset := -1
+	lineStarts := contentLineStarts(content)
+	groupedOccurrences := make([][]objectiveTermOccurrence, len(objective.KeywordGroups))
+	for groupIndex, group := range objective.KeywordGroups {
 		for _, keyword := range group {
-			offset := keywordOffset(content, strings.ToLower(keyword))
-			if offset >= 0 {
-				matched = keyword
-				matchedOffset = offset
-				break
+			for _, offset := range keywordOffsets(content, strings.ToLower(keyword)) {
+				groupedOccurrences[groupIndex] = append(groupedOccurrences[groupIndex], objectiveTermOccurrence{
+					group: groupIndex, term: keyword, offset: offset, line: lineForOffset(lineStarts, offset),
+				})
 			}
 		}
-		if matched == "" {
+		if len(groupedOccurrences[groupIndex]) == 0 {
 			return false, nil, 0
 		}
-		terms = append(terms, matched)
-		if firstOffset < 0 || matchedOffset < firstOffset {
-			firstOffset = matchedOffset
-		}
+	}
+	terms, firstOffset, lineSpan := closestObjectiveTerms(groupedOccurrences)
+	if len(objective.KeywordGroups) > 1 && lineSpan > maxEvidenceLineSpan {
+		return false, nil, 0
 	}
 	pathMatched := false
 	for _, keyword := range objective.PathKeywords {
-		if strings.Contains(path, strings.ToLower(keyword)) {
+		if keywordOffset(normalizeSearchContent(path), strings.ToLower(keyword)) >= 0 {
 			terms = append(terms, "path:"+keyword)
 			pathMatched = true
 			break
@@ -264,31 +263,122 @@ func matchesObjective(path, content string, objective TechnicalObjective) (bool,
 	}
 	line := 0
 	if firstOffset >= 0 {
-		line = strings.Count(content[:firstOffset], "\n") + 1
+		line = lineForOffset(lineStarts, firstOffset)
 	}
 	return true, terms, line
 }
 
+type objectiveTermOccurrence struct {
+	group  int
+	term   string
+	offset int
+	line   int
+}
+
+func closestObjectiveTerms(groups [][]objectiveTermOccurrence) ([]string, int, int) {
+	if len(groups) == 0 {
+		return nil, -1, 0
+	}
+	all := make([]objectiveTermOccurrence, 0)
+	for _, group := range groups {
+		all = append(all, group...)
+	}
+	sort.Slice(all, func(left, right int) bool {
+		if all[left].line != all[right].line {
+			return all[left].line < all[right].line
+		}
+		if all[left].offset != all[right].offset {
+			return all[left].offset < all[right].offset
+		}
+		return all[left].group < all[right].group
+	})
+	counts := make([]int, len(groups))
+	covered := 0
+	left := 0
+	bestLeft, bestRight := 0, len(all)-1
+	bestSpan := int(^uint(0) >> 1)
+	bestByteSpan := bestSpan
+	for right, occurrence := range all {
+		if counts[occurrence.group] == 0 {
+			covered++
+		}
+		counts[occurrence.group]++
+		for covered == len(groups) && left <= right {
+			lineSpan := all[right].line - all[left].line
+			byteSpan := all[right].offset - all[left].offset
+			if lineSpan < bestSpan || lineSpan == bestSpan && byteSpan < bestByteSpan {
+				bestLeft, bestRight = left, right
+				bestSpan, bestByteSpan = lineSpan, byteSpan
+			}
+			counts[all[left].group]--
+			if counts[all[left].group] == 0 {
+				covered--
+			}
+			left++
+		}
+	}
+	selected := make([]objectiveTermOccurrence, len(groups))
+	selectedSet := make([]bool, len(groups))
+	for _, occurrence := range all[bestLeft : bestRight+1] {
+		if !selectedSet[occurrence.group] {
+			selected[occurrence.group] = occurrence
+			selectedSet[occurrence.group] = true
+		}
+	}
+	terms := make([]string, len(groups))
+	firstOffset := selected[0].offset
+	for index, occurrence := range selected {
+		terms[index] = occurrence.term
+		if occurrence.offset < firstOffset {
+			firstOffset = occurrence.offset
+		}
+	}
+	return terms, firstOffset, bestSpan
+}
+
+func contentLineStarts(content string) []int {
+	starts := []int{0}
+	for index := 0; index < len(content); index++ {
+		if content[index] == '\n' {
+			starts = append(starts, index+1)
+		}
+	}
+	return starts
+}
+
+func lineForOffset(lineStarts []int, offset int) int {
+	return sort.Search(len(lineStarts), func(index int) bool { return lineStarts[index] > offset })
+}
+
 func keywordOffset(content, keyword string) int {
-	if keyword == "" {
+	offsets := keywordOffsets(content, keyword)
+	if len(offsets) == 0 {
 		return -1
 	}
+	return offsets[0]
+}
+
+func keywordOffsets(content, keyword string) []int {
+	if keyword == "" {
+		return nil
+	}
+	offsets := make([]int, 0, 4)
 	searchFrom := 0
-	for searchFrom <= len(content)-len(keyword) {
+	for searchFrom <= len(content)-len(keyword) && len(offsets) < maxKeywordOccurrences {
 		relative := strings.Index(content[searchFrom:], keyword)
 		if relative < 0 {
-			return -1
+			break
 		}
 		offset := searchFrom + relative
 		end := offset + len(keyword)
 		beforeBoundary := offset == 0 || !keywordWordByte(content[offset-1])
 		afterBoundary := end == len(content) || !keywordWordByte(content[end])
 		if beforeBoundary && afterBoundary {
-			return offset
+			offsets = append(offsets, offset)
 		}
 		searchFrom = offset + 1
 	}
-	return -1
+	return offsets
 }
 
 func normalizeSearchContent(content string) string {

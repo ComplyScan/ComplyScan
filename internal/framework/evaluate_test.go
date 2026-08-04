@@ -20,7 +20,7 @@ func TestEvaluateMapsCodeEvidenceWithoutControlOrComplianceClaims(t *testing.T) 
 		},
 		{
 			Path: "internal/evaluation/metrics_test.go", Kind: discovery.KindSource,
-			Content: []byte("package evaluation\nconst accuracyThreshold = 0.95\n"),
+			Content: []byte("package evaluation\nconst modelAccuracyThreshold = 0.95\n"),
 		},
 	}}
 	report := Evaluate(pack, []profile.System{profile.NewDraftSystem("example", "Example")}, repository)
@@ -63,6 +63,35 @@ func TestObjectivePathSignalIsRequiredWhenConfigured(t *testing.T) {
 	}
 	if matched, _, _ := matchesObjective("override/service.go", "func override decision", objective); !matched {
 		t.Fatal("configured path and content signals did not match")
+	}
+}
+
+func TestObjectiveTermsMustOccurWithinBoundedContext(t *testing.T) {
+	objective := TechnicalObjective{
+		PathKeywords:  []string{"override"},
+		KeywordGroups: [][]string{{"override"}, {"decision"}},
+	}
+	content := "override\n" + strings.Repeat("unrelated\n", maxEvidenceLineSpan+1) + "decision\n"
+	if matched, _, _ := matchesObjective("override/service.go", content, objective); matched {
+		t.Fatal("unrelated terms from distant parts of a file were combined")
+	}
+	content += "override decision\n"
+	if matched, terms, _ := matchesObjective("override/service.go", content, objective); !matched || len(terms) != 3 {
+		t.Fatalf("nearby evidence was not preferred: matched=%t terms=%#v", matched, terms)
+	}
+}
+
+func TestObjectivePathMatchingPreservesCamelCaseBoundaries(t *testing.T) {
+	objective := TechnicalObjective{
+		PathKeywords:  []string{"injection"},
+		KeywordGroups: [][]string{{"prompt injection"}, {"test"}},
+	}
+	if matched, terms, _ := matchesObjective(
+		"redteam/indirectPromptInjection.ts",
+		"const id = 'prompt injection'\nconst test = true\n",
+		objective,
+	); !matched || len(terms) != 3 {
+		t.Fatalf("camel-case path signal was not preserved: matched=%t terms=%#v", matched, terms)
 	}
 }
 
