@@ -35,7 +35,7 @@ objectives:
     description: Code validates training, validation, or test data for expected schema, completeness, or quality properties.
     applicability-note: Detailed Article 10 duties depend on the system and its use of training, validation, or test data.
     file-kinds: [source, configuration, ci, github-actions]
-    path-keywords: [data, dataset, validation]
+    path-keywords: [data, dataset, validation, schema, schemas]
     keyword-groups:
       - [training data, validation data, test data, dataset]
       - [validate training data, validate training dataset, validate validation data, validate validation dataset, validate test data, validate test dataset, validate dataset, validates dataset, dataset validation, schema validation, quality check, completeness, missing value, missing field]

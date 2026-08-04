@@ -95,6 +95,20 @@ func TestObjectivePathMatchingPreservesCamelCaseBoundaries(t *testing.T) {
 	}
 }
 
+func TestDatasetObjectiveMatchesPluralSchemaPath(t *testing.T) {
+	objective := TechnicalObjective{
+		PathKeywords:  []string{"dataset", "schema", "schemas"},
+		KeywordGroups: [][]string{{"dataset"}, {"validates dataset"}},
+	}
+	if matched, _, _ := matchesObjective(
+		"serverApiSchemas.test.ts",
+		"it validates dataset generation request bodies",
+		objective,
+	); !matched {
+		t.Fatal("plural camel-case schema path did not match a strong dataset-validation phrase")
+	}
+}
+
 func TestEvidenceMatchesAreBoundedAndDeterministic(t *testing.T) {
 	pack, err := LoadBuiltin(EUAIActTechnicalEvidencePackID)
 	if err != nil {
