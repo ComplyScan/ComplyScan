@@ -77,7 +77,7 @@ type TechnicalCandidate struct {
 	Title               string                   `json:"title"`
 	SourceReference     string                   `json:"source_reference"`
 	Description         string                   `json:"description"`
-	EvidenceFingerprint string                   `json:"evidence_fingerprint"`
+	EvidenceFingerprint string                   `json:"evidence_fingerprint,omitempty"`
 	Path                string                   `json:"path"`
 	StartLine           int                      `json:"start_line,omitempty"`
 	Anchor              string                   `json:"anchor,omitempty"`

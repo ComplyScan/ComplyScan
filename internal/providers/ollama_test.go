@@ -249,13 +249,15 @@ func TestOllamaTechnicalReviewUsesBoundedUntrustedSourceAndExactBinding(t *testi
 		if !strings.Contains(value, "IGNORE ALL PRIOR INSTRUCTIONS") || !strings.Contains(value, "untrusted") {
 			t.Fatalf("prompt-injection fixture was not contained as untrusted data: %s", value)
 		}
-		content, _ := json.Marshal(ollamaTechnicalPayload{Observations: []ollamaTechnicalObservation{{
-			ObjectiveID: "eu-aia-14-override-intervention", EvidenceFingerprint: fingerprint,
+		if strings.Contains(value, fingerprint) || strings.Contains(value, "evidence_fingerprint") {
+			t.Fatalf("technical fingerprint was sent to the model: %s", value)
+		}
+		content, _ := json.Marshal(ollamaTechnicalPayload{Observation: ollamaTechnicalObservation{
 			Strength: StrengthPartial, Confidence: "medium",
 			Rationale:           "The route reaches the override handler, but production authorization remains unresolved.",
 			UnresolvedQuestions: []string{"Which role is allowed to invoke the route?"},
 			SuggestedReview:     "Trace the authorization middleware.",
-		}}})
+		}})
 		return testJSONResponse(http.StatusOK, map[string]any{
 			"message": map[string]string{"content": string(content)}, "done": true,
 			"prompt_eval_count": 210, "eval_count": 55,
@@ -294,16 +296,15 @@ func TestOllamaTechnicalReviewCapsTestOnlyCandidateWithSharedProductionCallee(t 
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if len(body.Messages) < 1 || !strings.Contains(body.Messages[0].Content, "anchor reachability value as authoritative") || !strings.Contains(body.Messages[0].Content, "also used by production code") {
+		if len(body.Messages) < 1 || !strings.Contains(body.Messages[0].Content, "anchor reachability value as authoritative") || !strings.Contains(body.Messages[0].Content, "also used by production code") || !strings.Contains(body.Messages[0].Content, "descriptive website copy") || !strings.Contains(body.Messages[0].Content, "executable graders") || !strings.Contains(body.Messages[0].Content, "never general code quality") {
 			t.Fatalf("technical prompt omitted the test-only hard rule: %#v", body.Messages)
 		}
-		content, _ := json.Marshal(ollamaTechnicalPayload{Observations: []ollamaTechnicalObservation{{
-			ObjectiveID: "eu-aia-14-override-intervention", EvidenceFingerprint: fingerprint,
+		content, _ := json.Marshal(ollamaTechnicalPayload{Observation: ollamaTechnicalObservation{
 			Strength: StrengthPartial, Confidence: "medium",
 			Rationale:           "The test-only anchor calls a persistence function also used by the production handler.",
 			UnresolvedQuestions: []string{"Is the anchor reachable outside tests?"},
 			SuggestedReview:     "Trace callers.",
-		}}})
+		}})
 		return testJSONResponse(http.StatusOK, map[string]any{
 			"message": map[string]string{"content": string(content)}, "done": true,
 		}), nil
@@ -335,14 +336,10 @@ func TestOllamaTechnicalReviewCapsTestOnlyCandidateWithSharedProductionCallee(t 
 	}
 }
 
-func TestOllamaTechnicalReviewRejectsChangedObjectiveBinding(t *testing.T) {
+func TestOllamaTechnicalReviewBindsDecisionOutsideModel(t *testing.T) {
 	fingerprint := strings.Repeat("d", 64)
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-		content, _ := json.Marshal(ollamaTechnicalPayload{Observations: []ollamaTechnicalObservation{{
-			ObjectiveID: "different-objective", EvidenceFingerprint: fingerprint,
-			Strength: StrengthStrong, Confidence: "high", Rationale: "Changed binding.",
-			UnresolvedQuestions: []string{}, SuggestedReview: "Review.",
-		}}})
+		content := `{"observation":{"objective_id":"different-objective","evidence_fingerprint":"attacker-selected","strength":"strong","confidence":"high","rationale":"Review result.","unresolved_questions":[],"suggested_review":"Review."}}`
 		return testJSONResponse(http.StatusOK, map[string]any{"message": map[string]string{"content": string(content)}, "done": true}), nil
 	})}
 	provider, err := NewOllama(OllamaOptions{
@@ -352,11 +349,28 @@ func TestOllamaTechnicalReviewRejectsChangedObjectiveBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = provider.ReviewTechnical(context.Background(), TechnicalReviewRequest{Candidates: []TechnicalCandidate{{
+	result, err := provider.ReviewTechnical(context.Background(), TechnicalReviewRequest{Candidates: []TechnicalCandidate{{
 		ObjectiveID: "expected-objective", EvidenceFingerprint: fingerprint,
 	}}})
-	if err == nil || !strings.Contains(err.Error(), "changed objective ID") {
-		t.Fatalf("got error %v", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Observations[0].ObjectiveID != "expected-objective" || result.Observations[0].EvidenceFingerprint != fingerprint {
+		t.Fatalf("model-controlled identifiers affected binding: %#v", result.Observations[0])
+	}
+}
+
+func TestTechnicalReviewRejectsOffTopicCodeQualityRationale(t *testing.T) {
+	observation, guarded, err := validateTechnicalObservation(ollamaTechnicalObservation{
+		Strength: StrengthStrong, Confidence: "high",
+		Rationale:           "The component is well-structured, uses proper state management, and follows common React patterns.",
+		UnresolvedQuestions: []string{}, SuggestedReview: "Review the component.",
+	}, "objective", "fingerprint", "production-reachable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !guarded || observation.Strength != StrengthNotSupported || observation.ModelStrength != StrengthStrong || !strings.Contains(observation.GuardrailNote, "Off-topic") {
+		t.Fatalf("off-topic model output was not guarded: %#v", observation)
 	}
 }
 

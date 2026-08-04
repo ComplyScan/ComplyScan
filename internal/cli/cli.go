@@ -475,9 +475,7 @@ func reviewWithOllama(ctx context.Context, settings config.OllamaConfig, target 
 	if err != nil {
 		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, fmt.Errorf("Ollama advisory review: %w", err)
 	}
-	technicalContext, cancelTechnical := context.WithTimeout(ctx, time.Duration(settings.TimeoutSeconds)*time.Second)
-	technicalResult, err := reviewer.ReviewTechnical(technicalContext, reviewcontext.Build(evidence, repository))
-	cancelTechnical()
+	technicalResult, err := reviewer.ReviewTechnical(ctx, reviewcontext.Build(evidence, repository))
 	if err != nil {
 		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, fmt.Errorf("Ollama technical-objective review: %w", err)
 	}
