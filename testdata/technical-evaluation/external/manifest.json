@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "name": "Pinned public repository technical-evidence study",
+  "pack_id": "eu-ai-act-technical-evidence",
+  "pack_version": "0.1.1",
+  "thresholds": {
+    "candidate_precision": 0.7,
+    "candidate_recall": 1.0,
+    "anchor_accuracy": 1.0,
+    "reachability_accuracy": 1.0,
+    "relationship_recall": 1.0,
+    "language_coverage": 1.0,
+    "max_forbidden_relationships": 0
+  },
+  "cases": [
+    {
+      "id": "localai",
+      "path": "localai",
+      "languages": ["go", "python", "javascript"],
+      "expected_candidates": [
+        {
+          "objective_id": "eu-aia-12-automatic-event-logging",
+          "path": "pkg/model/initializers_load_logging_test.go"
+        },
+        {
+          "objective_id": "eu-aia-14-safe-stop",
+          "path": "pkg/model/remote_shutdown_test.go"
+        }
+      ]
+    },
+    {
+      "id": "simple-evals",
+      "path": "simple-evals",
+      "languages": ["python"],
+      "expected_candidates": []
+    },
+    {
+      "id": "promptfoo",
+      "path": "promptfoo",
+      "languages": ["go", "python", "javascript", "typescript"],
+      "expected_candidates": [
+        {
+          "objective_id": "eu-aia-9-risk-control-testing",
+          "path": "test/providers/google/vertex.test.ts"
+        },
+        {
+          "objective_id": "eu-aia-10-dataset-validation",
+          "path": "test/server/routes/serverApiSchemas.test.ts"
+        },
+        {
+          "objective_id": "eu-aia-10-bias-evaluation",
+          "path": "src/redteam/plugins/medical/medicalAnchoringBias.ts"
+        },
+        {
+          "objective_id": "eu-aia-10-bias-evaluation",
+          "path": "test/redteam/plugins/bias.test.ts"
+        },
+        {
+          "objective_id": "eu-aia-15-performance-thresholds",
+          "path": "test/assertions/bleu.test.ts"
+        },
+        {
+          "objective_id": "eu-aia-15-performance-thresholds",
+          "path": "test/assertions/contextPropagation.test.ts"
+        },
+        {
+          "objective_id": "eu-aia-15-performance-thresholds",
+          "path": "test/assertions/contextRecall.test.ts"
+        },
+        {
+          "objective_id": "eu-aia-15-performance-thresholds",
+          "path": "test/assertions/gleu.test.ts"
+        },
+        {
+          "objective_id": "eu-aia-15-performance-thresholds",
+          "path": "test/assertions/python.test.ts"
+        },
+        {
+          "objective_id": "eu-aia-15-ai-security-controls",
+          "path": "src/redteam/plugins/indirectPromptInjection.ts"
+        },
+        {
+          "objective_id": "eu-aia-15-ai-security-controls",
+          "path": "test/redteam/plugins/indirectPromptInjection.test.ts"
+        }
+      ]
+    }
+  ]
+}

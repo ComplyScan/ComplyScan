@@ -258,8 +258,20 @@ func supportedBenchmarkEdgeKind(kind codegraph.EdgeKind) bool {
 
 // RunBenchmark evaluates every labelled repository against a built-in pack.
 func RunBenchmark(ctx context.Context, manifestPath string, manifest BenchmarkManifest, pack Pack) (BenchmarkReport, error) {
+	return RunBenchmarkInWorkspace(ctx, filepath.Dir(manifestPath), manifest, pack)
+}
+
+// RunBenchmarkInWorkspace evaluates a manifest whose case paths live under an
+// explicit workspace. It allows a source-free manifest to be checked against
+// separately downloaded repositories without writing those repositories into
+// the manifest directory.
+func RunBenchmarkInWorkspace(ctx context.Context, workspace string, manifest BenchmarkManifest, pack Pack) (BenchmarkReport, error) {
 	if err := manifest.Validate(); err != nil {
 		return BenchmarkReport{}, fmt.Errorf("validate technical benchmark manifest: %w", err)
+	}
+	workspace, err := filepath.Abs(workspace)
+	if err != nil {
+		return BenchmarkReport{}, fmt.Errorf("resolve technical benchmark workspace: %w", err)
 	}
 	if manifest.PackID != pack.ID || manifest.PackVersion != pack.Version {
 		return BenchmarkReport{}, fmt.Errorf("benchmark requires pack %s@%s, got %s@%s", manifest.PackID, manifest.PackVersion, pack.ID, pack.Version)
@@ -275,14 +287,13 @@ func RunBenchmark(ctx context.Context, manifestPath string, manifest BenchmarkMa
 		Thresholds:    manifest.Thresholds,
 		Cases:         make([]BenchmarkCaseResult, 0, len(manifest.Cases)),
 	}
-	root := filepath.Dir(manifestPath)
 	for _, benchmarkCase := range manifest.Cases {
 		for _, expected := range benchmarkCase.ExpectedCandidates {
 			if _, ok := objectiveIDs[expected.ObjectiveID]; !ok {
 				return BenchmarkReport{}, fmt.Errorf("case %s references unknown objective %s", benchmarkCase.ID, expected.ObjectiveID)
 			}
 		}
-		discovered, err := discovery.Discover(ctx, filepath.Join(root, filepath.FromSlash(benchmarkCase.Path)), discovery.Options{})
+		discovered, err := discovery.Discover(ctx, filepath.Join(workspace, filepath.FromSlash(benchmarkCase.Path)), discovery.Options{})
 		if err != nil {
 			return BenchmarkReport{}, fmt.Errorf("discover benchmark case %s: %w", benchmarkCase.ID, err)
 		}

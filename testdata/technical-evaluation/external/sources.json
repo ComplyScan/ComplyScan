@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-08-04",
+  "repositories": [
+    {
+      "id": "localai",
+      "name": "LocalAI",
+      "url": "https://github.com/mudler/LocalAI.git",
+      "revision": "8f52437c8106ea50cd2ad13e77263cc6e9208822",
+      "license": "MIT",
+      "license_file": "LICENSE"
+    },
+    {
+      "id": "simple-evals",
+      "name": "OpenAI Simple Evals",
+      "url": "https://github.com/openai/simple-evals.git",
+      "revision": "652c89d0ca9df547706735883097e9537d40dc47",
+      "license": "MIT",
+      "license_file": "LICENSE"
+    },
+    {
+      "id": "promptfoo",
+      "name": "Promptfoo",
+      "url": "https://github.com/promptfoo/promptfoo.git",
+      "revision": "7b898cbdb16205cb7f0e2994baa807d131eb2326",
+      "license": "MIT",
+      "license_file": "LICENSE"
+    }
+  ]
+}
