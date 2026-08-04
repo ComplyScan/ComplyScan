@@ -43,18 +43,27 @@ printf 'Building current ComplyScan source...\n'
 (cd "$repository_root" && go build -trimpath -o "$binary" ./cmd/complyscan)
 
 printf 'Validating %s against %s...\n' "$model" "$fixture"
+{
+	printf 'ComplyScan CLI resource use is reported by /usr/bin/time below.\n'
+	printf 'The separately running Ollama model allocation is reported by ollama ps after the scan.\n\n'
+} >"$metrics_path"
 case "$(uname -s)" in
 	Darwin)
-		/usr/bin/time -l "$binary" scan "$fixture" --review ollama --ollama-model "$model" --format json --no-report >"$result_path" 2>"$metrics_path"
+		/usr/bin/time -l "$binary" scan "$fixture" --review ollama --ollama-model "$model" --format json --no-report >"$result_path" 2>>"$metrics_path"
 		;;
 	Linux)
-		/usr/bin/time -v "$binary" scan "$fixture" --review ollama --ollama-model "$model" --format json --no-report >"$result_path" 2>"$metrics_path"
+		/usr/bin/time -v "$binary" scan "$fixture" --review ollama --ollama-model "$model" --format json --no-report >"$result_path" 2>>"$metrics_path"
 		;;
 	*)
 		printf 'Error: live resource validation is not implemented for %s.\n' "$(uname -s)" >&2
 		exit 1
 		;;
 esac
+
+{
+	printf '\nOllama loaded-model allocation after scan:\n'
+	ollama ps
+} >>"$metrics_path"
 
 (cd "$repository_root" && go run ./scripts/validate_ollama_result.go "$result_path" "$model") >"$summary_path"
 cat "$summary_path"
