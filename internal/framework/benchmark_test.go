@@ -27,13 +27,13 @@ func TestTechnicalEvidenceBenchmarkCorpus(t *testing.T) {
 		t.Fatalf("benchmark failed: %#v", report.Failures)
 	}
 	metrics := report.Metrics
-	if metrics.TruePositiveCandidates != 9 || metrics.FalsePositiveCandidates != 0 || metrics.FalseNegativeCandidates != 0 {
+	if metrics.TruePositiveCandidates != 10 || metrics.FalsePositiveCandidates != 0 || metrics.FalseNegativeCandidates != 0 {
 		t.Fatalf("unexpected candidate metrics: %#v", metrics)
 	}
-	if metrics.CorrectAnchors != 9 || metrics.CorrectReachability != 9 || metrics.MatchedRelationships != 12 || metrics.ForbiddenRelationshipsFound != 0 {
+	if metrics.CorrectAnchors != 10 || metrics.CorrectReachability != 10 || metrics.MatchedRelationships != 14 || metrics.ForbiddenRelationshipsFound != 0 {
 		t.Fatalf("unexpected context metrics: %#v", metrics)
 	}
-	if metrics.DetectedLanguages != 4 || metrics.ExpectedLanguages != 4 {
+	if metrics.DetectedLanguages != 5 || metrics.ExpectedLanguages != 5 {
 		t.Fatalf("unexpected language coverage: %#v", metrics)
 	}
 	encoded, err := json.Marshal(report)

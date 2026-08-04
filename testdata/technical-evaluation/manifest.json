@@ -121,6 +121,23 @@
       ]
     },
     {
+      "id": "javascript-review-service",
+      "path": "repositories/javascript-review-service",
+      "languages": ["javascript"],
+      "expected_candidates": [
+        {
+          "objective_id": "eu-aia-14-human-review-gate",
+          "path": "src/review/approval.js",
+          "anchor": "src.review.approval.approveHumanReviewDecision",
+          "reachability": "production-reachable",
+          "relationships": [
+            {"kind": "route", "label": "POST /review", "resolved": true},
+            {"kind": "authorization", "label": "requireReviewer", "resolved": true}
+          ]
+        }
+      ]
+    },
+    {
       "id": "hard-negative",
       "path": "repositories/hard-negative",
       "languages": ["go"],

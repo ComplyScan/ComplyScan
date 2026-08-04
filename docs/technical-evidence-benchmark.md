@@ -28,7 +28,7 @@ The versioned manifest at `testdata/technical-evaluation/manifest.json` binds th
 
 The result reports candidate precision and recall, anchor accuracy, reachability accuracy, required-relationship recall, forbidden-relationship hits, and language coverage. Per-case diagnostics identify unexpected or missing candidates and incorrect context. Reports contain labels and aggregate metrics only; they do not serialize repository source.
 
-The initial corpus contains repository-shaped Go operations, Python model-pipeline, and TypeScript assistant cases plus a hard-negative repository. It deliberately exercises routes, dataset validation, bias and performance tests, audit logging, override and stop mechanisms, prompt-injection filtering, interaction disclosure, and synthetic-content provenance. These small maintained cases are regression evidence, not a substitute for larger representative-repository studies.
+The initial corpus contains repository-shaped Go operations, Python model-pipeline, JavaScript review-service, and TypeScript assistant cases plus a hard-negative repository. It deliberately exercises routes, dataset validation, bias and performance tests, audit logging, human review, override and stop mechanisms, prompt-injection filtering, interaction disclosure, and synthetic-content provenance. These small maintained cases are regression evidence, not a substitute for larger representative-repository studies.
 
 ## Adding a case
 
