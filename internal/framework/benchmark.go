@@ -173,6 +173,19 @@ func (manifest BenchmarkManifest) Validate() error {
 		if err := validateBenchmarkPath(benchmarkCase.Path); err != nil {
 			return fmt.Errorf("cases[%d].path: %w", caseIndex, err)
 		}
+		if len(benchmarkCase.Languages) == 0 {
+			return fmt.Errorf("cases[%d].languages must not be empty", caseIndex)
+		}
+		languages := make(map[codegraph.Language]struct{}, len(benchmarkCase.Languages))
+		for languageIndex, language := range benchmarkCase.Languages {
+			if !supportedBenchmarkLanguage(language) {
+				return fmt.Errorf("cases[%d].languages[%d] %q is not supported", caseIndex, languageIndex, language)
+			}
+			if _, exists := languages[language]; exists {
+				return fmt.Errorf("cases[%d].languages[%d] %q is duplicated", caseIndex, languageIndex, language)
+			}
+			languages[language] = struct{}{}
+		}
 		candidateKeys := make(map[string]struct{}, len(benchmarkCase.ExpectedCandidates))
 		for candidateIndex, candidate := range benchmarkCase.ExpectedCandidates {
 			if strings.TrimSpace(candidate.ObjectiveID) == "" {
@@ -186,6 +199,17 @@ func (manifest BenchmarkManifest) Validate() error {
 				return fmt.Errorf("cases[%d] contains duplicate candidate %s", caseIndex, key)
 			}
 			candidateKeys[key] = struct{}{}
+			if candidate.Reachability != "" && candidate.Anchor == "" {
+				return fmt.Errorf("cases[%d].expected_candidates[%d] cannot declare reachability without an anchor", caseIndex, candidateIndex)
+			}
+			if candidate.Reachability != "" && !supportedBenchmarkReachability(candidate.Reachability) {
+				return fmt.Errorf("cases[%d].expected_candidates[%d].reachability %q is not supported", caseIndex, candidateIndex, candidate.Reachability)
+			}
+			for relationshipIndex, relationship := range append(append([]BenchmarkRelationship(nil), candidate.Relationships...), candidate.ForbiddenRelationships...) {
+				if !supportedBenchmarkEdgeKind(relationship.Kind) {
+					return fmt.Errorf("cases[%d].expected_candidates[%d].relationships[%d].kind %q is not supported", caseIndex, candidateIndex, relationshipIndex, relationship.Kind)
+				}
+			}
 		}
 	}
 	return nil
@@ -195,6 +219,9 @@ func validateBenchmarkPath(path string) error {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("must not be empty")
 	}
+	if strings.Contains(path, "\\") {
+		return fmt.Errorf("must use slash-separated paths")
+	}
 	cleaned := filepath.Clean(filepath.FromSlash(path))
 	if filepath.IsAbs(cleaned) || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("must be a relative path within the benchmark directory")
@@ -202,8 +229,38 @@ func validateBenchmarkPath(path string) error {
 	return nil
 }
 
+func supportedBenchmarkLanguage(language codegraph.Language) bool {
+	switch language {
+	case codegraph.LanguageGo, codegraph.LanguagePython, codegraph.LanguageJavaScript, codegraph.LanguageTypeScript:
+		return true
+	default:
+		return false
+	}
+}
+
+func supportedBenchmarkReachability(reachability codegraph.Reachability) bool {
+	switch reachability {
+	case codegraph.ReachableProduction, codegraph.ReachableExported, codegraph.ReachableTestOnly, codegraph.ReachableUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+func supportedBenchmarkEdgeKind(kind codegraph.EdgeKind) bool {
+	switch kind {
+	case codegraph.EdgeCall, codegraph.EdgeRoute, codegraph.EdgeTest, codegraph.EdgeAuthorization, codegraph.EdgePersistence, codegraph.EdgeLogging, codegraph.EdgeConfiguration:
+		return true
+	default:
+		return false
+	}
+}
+
 // RunBenchmark evaluates every labelled repository against a built-in pack.
 func RunBenchmark(ctx context.Context, manifestPath string, manifest BenchmarkManifest, pack Pack) (BenchmarkReport, error) {
+	if err := manifest.Validate(); err != nil {
+		return BenchmarkReport{}, fmt.Errorf("validate technical benchmark manifest: %w", err)
+	}
 	if manifest.PackID != pack.ID || manifest.PackVersion != pack.Version {
 		return BenchmarkReport{}, fmt.Errorf("benchmark requires pack %s@%s, got %s@%s", manifest.PackID, manifest.PackVersion, pack.ID, pack.Version)
 	}
