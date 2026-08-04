@@ -11,8 +11,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/framework"
+	"github.com/ComplyScan/ComplyScan/internal/providers"
 )
 
 const externalSourceSchemaVersion = 1
@@ -47,9 +49,14 @@ func run() int {
 	sourcesPath := flag.String("sources", "testdata/technical-evaluation/external/sources.json", "path to pinned repository provenance")
 	workspace := flag.String("workspace", "", "reuse an existing directory containing the pinned repositories")
 	format := flag.String("format", "text", "output format: text or json")
+	review := flag.String("review", "none", "semantic review: none or ollama")
+	semanticPath := flag.String("semantic-config", "testdata/technical-evaluation/external/semantic.json", "path to semantic benchmark policy")
+	semanticCandidatePath := flag.String("semantic-path", "", "review only one exact repository-relative candidate path for debugging")
+	ollamaModel := flag.String("ollama-model", "", "override the semantic benchmark Ollama model")
+	ollamaEndpoint := flag.String("ollama-endpoint", "http://127.0.0.1:11434", "local Ollama base URL")
 	flag.Parse()
-	if flag.NArg() != 0 || (*format != "text" && *format != "json") {
-		fmt.Fprintln(os.Stderr, "Usage: evaluate-external-repositories [--workspace DIRECTORY] [--format text|json]")
+	if flag.NArg() != 0 || (*format != "text" && *format != "json") || (*review != "none" && *review != "ollama") {
+		fmt.Fprintln(os.Stderr, "Usage: evaluate-external-repositories [--workspace DIRECTORY] [--format text|json] [--review none|ollama]")
 		return 2
 	}
 
@@ -102,16 +109,54 @@ func run() int {
 	if err != nil {
 		return operationalError(err)
 	}
-	if *format == "json" {
+	var semantic *semanticBenchmarkReport
+	if *review == "ollama" {
+		configuration, err := loadSemanticBenchmarkConfig(*semanticPath)
+		if err != nil {
+			return operationalError(err)
+		}
+		model := configuration.Model
+		if strings.TrimSpace(*ollamaModel) != "" {
+			model = strings.TrimSpace(*ollamaModel)
+		}
+		reviewer, err := providers.NewOllama(providers.OllamaOptions{
+			Endpoint: *ollamaEndpoint, Model: model,
+			Timeout:     time.Duration(configuration.TimeoutSeconds) * time.Second,
+			MaxFindings: configuration.BatchSize,
+		})
+		if err != nil {
+			return operationalError(err)
+		}
+		semanticReport, err := runSemanticBenchmark(ctx, benchmarkWorkspace, manifest, pack, configuration, model, *semanticCandidatePath, reviewer)
+		if err != nil {
+			return operationalError(err)
+		}
+		semantic = &semanticReport
+	}
+
+	if *format == "json" && semantic != nil {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(externalStudyReport{Deterministic: report, Semantic: semantic}); err != nil {
+			return operationalError(fmt.Errorf("write JSON result: %w", err))
+		}
+	} else if *format == "json" {
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
 		if err := encoder.Encode(report); err != nil {
 			return operationalError(fmt.Errorf("write JSON result: %w", err))
 		}
-	} else if err := framework.WriteBenchmarkSummary(os.Stdout, report); err != nil {
-		return operationalError(fmt.Errorf("write benchmark summary: %w", err))
+	} else {
+		if err := framework.WriteBenchmarkSummary(os.Stdout, report); err != nil {
+			return operationalError(fmt.Errorf("write benchmark summary: %w", err))
+		}
+		if semantic != nil {
+			if err := writeSemanticBenchmarkSummary(os.Stdout, *semantic); err != nil {
+				return operationalError(fmt.Errorf("write semantic benchmark summary: %w", err))
+			}
+		}
 	}
-	if !report.Passed {
+	if !report.Passed || semantic != nil && !semantic.Passed {
 		return 1
 	}
 	return 0

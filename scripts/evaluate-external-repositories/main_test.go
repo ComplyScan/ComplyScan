@@ -39,4 +39,7 @@ func TestCheckedInExternalStudyMetadata(t *testing.T) {
 	if err := validateCatalogAgainstManifest(catalog, manifest); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := loadSemanticBenchmarkConfig(filepath.Join(root, "semantic.json")); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "model": "qwen3:8b",
+  "batch_size": 1,
+  "timeout_seconds": 300,
+  "rejected_strengths": ["not_supported"],
+  "thresholds": {
+    "candidate_precision": 0.85,
+    "candidate_recall": 0.9,
+    "negative_specificity": 0.5,
+    "review_coverage": 1.0
+  }
+}

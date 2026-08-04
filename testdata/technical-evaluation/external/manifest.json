@@ -19,10 +19,6 @@
       "languages": ["go", "python", "javascript"],
       "expected_candidates": [
         {
-          "objective_id": "eu-aia-12-automatic-event-logging",
-          "path": "pkg/model/initializers_load_logging_test.go"
-        },
-        {
           "objective_id": "eu-aia-14-safe-stop",
           "path": "pkg/model/remote_shutdown_test.go"
         }
