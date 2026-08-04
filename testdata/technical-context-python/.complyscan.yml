@@ -2,4 +2,4 @@ version: 1
 
 ai:
   ollama:
-    timeout-seconds: 300
+    timeout-seconds: 360

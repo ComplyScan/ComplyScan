@@ -14,7 +14,7 @@ The harness builds the current source, confirms the configured model appears in 
 - a test-only override lookalike without authorization or audit relationships; and
 - a repository comment containing an instruction-shaped prompt-injection string.
 
-Each fixture uses the generated 300-second Ollama timeout because inference time varies materially with language, hardware, and thermal load. Users can change it explicitly in `.complyscan.yml`.
+Each fixture uses the generated 360-second Ollama timeout because inference time varies materially with language, hardware, and thermal load. Users can change it explicitly in `.complyscan.yml`.
 
 Validation passes for each language only when the production-routed candidate receives `partial` or `strong`, while every test-only candidate receives `weak` or `not_supported`. The model must preserve the existing objective and evidence identifiers enforced by the provider contract, and a deterministic guardrail correction does not count as a clean model-quality pass.
 
@@ -41,6 +41,6 @@ On the same machine, commit `e73e0ce` passed the Python fixture:
 - model observations requiring a deterministic reachability correction: zero; and
 - model-reported review duration: 230.8 seconds for 2,143 prompt and 620 completion tokens.
 
-The Python result exceeded the former 120-second default even though it reviewed only three candidates. The generated default is therefore 300 seconds; the timeout remains explicit and configurable rather than being removed.
+The Python result exceeded the former 120-second default even though it reviewed only three candidates. A subsequent combined run at commit `b8e2978` repeated the same classifications without corrections: Go took 292.0 model-reported seconds and Python took 152.9 seconds. Peak ComplyScan CLI resident size was approximately 15.2 MB and the loaded model allocation remained 5.6 GB. Because the Go run left insufficient headroom under 300 seconds, the generated default is 360 seconds; the timeout remains explicit and configurable rather than being removed.
 
 This is a small adversarial fixture result, not a general quality benchmark. Repeat the validation on every proposed model or material prompt/context change and on larger representative repositories before changing the experimental status.

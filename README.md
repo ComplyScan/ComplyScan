@@ -200,7 +200,7 @@ ai:
   ollama:
     endpoint: http://127.0.0.1:11434
     model: qwen3:8b
-    timeout-seconds: 300
+    timeout-seconds: 360
     max-findings: 20
 
 systems:
