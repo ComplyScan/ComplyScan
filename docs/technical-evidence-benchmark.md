@@ -30,6 +30,18 @@ The result reports candidate precision and recall, anchor accuracy, reachability
 
 The initial corpus contains repository-shaped Go operations, Python model-pipeline, JavaScript review-service, and TypeScript assistant cases plus a hard-negative repository. It deliberately exercises routes, dataset validation, bias and performance tests, audit logging, human review, override and stop mechanisms, prompt-injection filtering, interaction disclosure, and synthetic-content provenance. These small maintained cases are regression evidence, not a substitute for larger representative-repository studies.
 
+## Pinned public-repository study
+
+A separate manual study evaluates exact commits of three MIT-licensed public AI repositories without committing their source. Run it with network access:
+
+```sh
+./scripts/evaluate-external-repositories.sh
+```
+
+The provenance catalog and human candidate labels live under `testdata/technical-evaluation/external`. The runner creates a temporary workspace, fetches only the pinned revisions, verifies each checkout and licence file, scans locally, prints source-free metrics, and deletes the checkout. Use `--workspace DIRECTORY` to reuse existing pinned checkouts and `--format json` for automation.
+
+The pack `0.1.1` baseline records 13 true-positive candidates, four false positives, no false negatives, and complete expected language detection: 76.5% precision and 100% recall on the labelled paths. The remaining false positives are retained and documented because this deterministic retrieval stage is designed to favor reviewable candidates; optional semantic review can reject them. This small three-repository study is evidence for regression tuning, not a general accuracy claim, and it is not a network-dependent CI gate.
+
 ## Adding a case
 
 1. Add a minimal repository-shaped fixture under `testdata/technical-evaluation/repositories` without real secrets, personal data, or third-party copyrighted source.
@@ -40,7 +52,7 @@ The initial corpus contains repository-shaped Go operations, Python model-pipeli
 
 Intentional scanner changes may require label changes. Acceptance thresholds must not be reduced merely to accommodate a regression; threshold changes require an explicit rationale and review.
 
-## Evaluating separate repositories
+## Evaluating other separate repositories
 
 The runner accepts another manifest with `--manifest`. Case paths must remain inside the directory containing that manifest, so a separate evaluation workspace can place a manifest alongside curated public checkouts or authorised private fixtures. The runner is read-only with respect to cases and uses the same bounded discovery and ignore behavior as ComplyScan.
 

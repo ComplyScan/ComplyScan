@@ -8,11 +8,13 @@
 - A repeatable `qwen3:8b` live-validation harness with enforced production/test-only expectations and saved resource metrics.
 - Go, Python, JavaScript, and TypeScript repository-graph context for technical evidence, including routes, authorization, persistence, logging, configuration, and production/test reachability.
 - A versioned technical-evidence benchmark with labelled multi-language repository cases, hard negatives, machine-readable metrics, and CI acceptance thresholds.
+- A source-free external benchmark that verifies and scans exact commits of three permissively licensed public AI repositories, with recorded provenance and human candidate labels.
 
 ### Changed
 
 - The public Go module and source references now use `github.com/ComplyScan/ComplyScan`.
 - CI now verifies the documented Go 1.22 minimum.
+- Technical evidence now uses bounded keyword boundaries and local line context, preserves camel-case path signals, and applies the refined EU AI Act technical pack `0.1.1` terms derived from public-repository false-positive review.
 
 ### Testing
 
