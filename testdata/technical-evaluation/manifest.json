@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "name": "EU AI Act technical evidence benchmark",
+  "pack_id": "eu-ai-act-technical-evidence",
+  "pack_version": "0.1.0",
+  "thresholds": {
+    "candidate_precision": 0.95,
+    "candidate_recall": 0.90,
+    "anchor_accuracy": 0.95,
+    "reachability_accuracy": 0.95,
+    "relationship_recall": 0.90,
+    "language_coverage": 1.0,
+    "max_forbidden_relationships": 0
+  },
+  "cases": [
+    {
+      "id": "go-operations",
+      "path": "repositories/go-operations",
+      "languages": ["go"],
+      "expected_candidates": [
+        {
+          "objective_id": "eu-aia-12-automatic-event-logging",
+          "path": "logging.go",
+          "anchor": "main.auditDecisionEvent",
+          "reachability": "production-reachable",
+          "relationships": [
+            {"kind": "logging", "label": "auditDecisionEvent", "resolved": true}
+          ]
+        },
+        {
+          "objective_id": "eu-aia-14-override-intervention",
+          "path": "override.go",
+          "anchor": "main.handleOverrideDecision",
+          "reachability": "production-reachable",
+          "relationships": [
+            {"kind": "route", "label": "HANDLEFUNC /decisions/override", "resolved": true},
+            {"kind": "authorization", "label": "authorizeOperator", "resolved": true},
+            {"kind": "persistence", "label": "persistOverrideDecision", "resolved": true},
+            {"kind": "logging", "label": "auditDecisionEvent", "resolved": true}
+          ]
+        },
+        {
+          "objective_id": "eu-aia-14-safe-stop",
+          "path": "stop.go",
+          "anchor": "main.handleStopModel",
+          "reachability": "production-reachable",
+          "relationships": [
+            {"kind": "route", "label": "HANDLEFUNC /admin/stop", "resolved": true},
+            {"kind": "authorization", "label": "authorizeOperator", "resolved": true},
+            {"kind": "call", "label": "disableModelInference", "resolved": true}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "python-ml-service",
+      "path": "repositories/python-ml-service",
+      "languages": ["python"],
+      "expected_candidates": [
+        {
+          "objective_id": "eu-aia-10-dataset-validation",
+          "path": "pipeline/dataset_validation.py",
+          "anchor": "pipeline.dataset_validation.validate_training_dataset",
+          "reachability": "production-reachable",
+          "relationships": [
+            {"kind": "route", "label": "POST /datasets/validate", "resolved": true}
+          ]
+        },
+        {
+          "objective_id": "eu-aia-10-bias-evaluation",
+          "path": "evaluation/test_fairness.py",
+          "anchor": "evaluation.test_fairness.test_fairness_metric_threshold",
+          "reachability": "test-only",
+          "forbidden_relationships": [
+            {"kind": "authorization"}
+          ]
+        },
+        {
+          "objective_id": "eu-aia-15-performance-thresholds",
+          "path": "evaluation/test_performance.py",
+          "anchor": "evaluation.test_performance.test_model_accuracy_threshold",
+          "reachability": "test-only",
+          "forbidden_relationships": [
+            {"kind": "authorization"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "typescript-assistant",
+      "path": "repositories/typescript-assistant",
+      "languages": ["typescript"],
+      "expected_candidates": [
+        {
+          "objective_id": "eu-aia-15-ai-security-controls",
+          "path": "src/security/prompt_injection.ts",
+          "anchor": "src.security.prompt_injection.sanitizePromptInjectionInput",
+          "reachability": "production-reachable",
+          "relationships": [
+            {"kind": "route", "label": "POST /generate", "resolved": true}
+          ]
+        },
+        {
+          "objective_id": "eu-aia-50-ai-interaction-disclosure",
+          "path": "src/chat/disclosure.ts",
+          "anchor": "src.chat.disclosure.aiAssistantDisclosure",
+          "reachability": "production-reachable",
+          "relationships": [
+            {"kind": "route", "label": "POST /generate", "resolved": true}
+          ]
+        },
+        {
+          "objective_id": "eu-aia-50-synthetic-content-marking",
+          "path": "src/synthetic/provenance.ts",
+          "anchor": "src.synthetic.provenance.attachSyntheticContentMetadata",
+          "reachability": "production-reachable",
+          "relationships": [
+            {"kind": "route", "label": "POST /generate", "resolved": true}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hard-negative",
+      "path": "repositories/hard-negative",
+      "languages": ["go"],
+      "expected_candidates": []
+    }
+  ]
+}
