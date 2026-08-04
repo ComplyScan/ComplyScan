@@ -149,7 +149,7 @@ func evaluateObjectives(pack Pack, repository discovery.Repository, graph codegr
 		if file.Kind == discovery.KindSource && !graph.SupportsSourcePath(file.Path) {
 			continue
 		}
-		content := strings.ToLower(string(file.Content))
+		content := normalizeSearchContent(string(file.Content))
 		if strings.Contains(content, ignoreMarker) {
 			continue
 		}
@@ -233,7 +233,7 @@ func matchesObjective(path, content string, objective TechnicalObjective) (bool,
 		matched := ""
 		matchedOffset := -1
 		for _, keyword := range group {
-			offset := strings.Index(content, strings.ToLower(keyword))
+			offset := keywordOffset(content, strings.ToLower(keyword))
 			if offset >= 0 {
 				matched = keyword
 				matchedOffset = offset
@@ -267,6 +267,62 @@ func matchesObjective(path, content string, objective TechnicalObjective) (bool,
 		line = strings.Count(content[:firstOffset], "\n") + 1
 	}
 	return true, terms, line
+}
+
+func keywordOffset(content, keyword string) int {
+	if keyword == "" {
+		return -1
+	}
+	searchFrom := 0
+	for searchFrom <= len(content)-len(keyword) {
+		relative := strings.Index(content[searchFrom:], keyword)
+		if relative < 0 {
+			return -1
+		}
+		offset := searchFrom + relative
+		end := offset + len(keyword)
+		beforeBoundary := offset == 0 || !keywordWordByte(content[offset-1])
+		afterBoundary := end == len(content) || !keywordWordByte(content[end])
+		if beforeBoundary && afterBoundary {
+			return offset
+		}
+		searchFrom = offset + 1
+	}
+	return -1
+}
+
+func normalizeSearchContent(content string) string {
+	var normalized strings.Builder
+	normalized.Grow(len(content))
+	previousLowerOrDigit := false
+	previousUpper := false
+	for index := 0; index < len(content); index++ {
+		value := content[index]
+		if value >= 'A' && value <= 'Z' {
+			nextLower := index+1 < len(content) && content[index+1] >= 'a' && content[index+1] <= 'z'
+			if previousLowerOrDigit || previousUpper && nextLower {
+				normalized.WriteByte(' ')
+			}
+			normalized.WriteByte(value + ('a' - 'A'))
+			previousLowerOrDigit = false
+			previousUpper = true
+			continue
+		}
+		if value == '_' {
+			normalized.WriteByte(' ')
+			previousLowerOrDigit = false
+			previousUpper = false
+			continue
+		}
+		normalized.WriteByte(value)
+		previousLowerOrDigit = value >= 'a' && value <= 'z' || value >= '0' && value <= '9'
+		previousUpper = false
+	}
+	return normalized.String()
+}
+
+func keywordWordByte(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= '0' && value <= '9'
 }
 
 func evidenceFingerprint(objectiveID, path string, line int, terms []string) string {

@@ -75,7 +75,7 @@ func TestEvidenceMatchesAreBoundedAndDeterministic(t *testing.T) {
 	for index := 9; index >= 0; index-- {
 		files = append(files, discovery.File{
 			Path: "src/risk_" + string(rune('a'+index)) + "_test.go", Kind: discovery.KindSource,
-			Content: []byte("package risk\nfunc TestSafetyValidation() {}\n"),
+			Content: []byte("package risk\nfunc TestAISafetyValidation() {}\n"),
 		})
 	}
 	report := Evaluate(pack, nil, discovery.Repository{Files: files})
@@ -131,6 +131,27 @@ func authorizeReviewer() {}
 		if strings.Contains(question, "authorization") {
 			t.Fatalf("resolved authorization was reported unresolved: %#v", match.Context)
 		}
+	}
+}
+
+func TestEvaluateRequiresKeywordBoundaries(t *testing.T) {
+	pack := Pack{Objectives: []TechnicalObjective{{
+		ID: "metric-threshold", Title: "Metric threshold", SourceReference: "test", Description: "test",
+		FileKinds: []string{"source"}, PathKeywords: []string{"test"},
+		KeywordGroups: [][]string{{"f1"}, {"assert"}}, Verification: "technical-and-human",
+	}}}
+	repository := discovery.Repository{Files: []discovery.File{{
+		Path: "metric_test.go", Kind: discovery.KindSource,
+		Content: []byte("package metric\nconst f16 = 1\nfunc assertive() {}\n"),
+	}}}
+	report := Evaluate(pack, nil, repository)
+	if report.Objectives[0].Status != ObjectiveNotDetected {
+		t.Fatalf("embedded substrings created evidence: %#v", report.Objectives[0])
+	}
+	repository.Files[0].Content = []byte("package metric\nfunc TestMetric() {\n f1 := 1\n assert(f1 > 0)\n}\n")
+	report = Evaluate(pack, nil, repository)
+	if report.Objectives[0].Status != ObjectiveCandidate || len(report.Objectives[0].Matches) != 1 {
+		t.Fatalf("bounded keywords were not detected: %#v", report.Objectives[0])
 	}
 }
 
