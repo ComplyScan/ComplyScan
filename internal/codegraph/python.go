@@ -12,11 +12,21 @@ import (
 )
 
 var (
-	pythonDefinitionPattern = regexp.MustCompile(`^(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
-	pythonClassPattern      = regexp.MustCompile(`^class\s+([A-Za-z_][A-Za-z0-9_]*)\b`)
-	pythonCallPattern       = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)*)\s*\(`)
-	pythonMainGuardPattern  = regexp.MustCompile(`^if\s+__name__\s*==\s*['"]__main__['"]\s*:`)
+	pythonDefinitionPattern    = regexp.MustCompile(`^(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
+	pythonClassPattern         = regexp.MustCompile(`^class\s+([A-Za-z_][A-Za-z0-9_]*)\b`)
+	pythonCallPattern          = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)*)\s*\(`)
+	pythonMainGuardPattern     = regexp.MustCompile(`^if\s+__name__\s*==\s*['"]__main__['"]\s*:`)
+	pythonHTTPMethodPattern    = regexp.MustCompile(`(?i)['"](GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)['"]`)
+	pythonDependsPattern       = regexp.MustCompile(`\bDepends\s*\(\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)`)
+	pythonDjangoRoutePattern   = regexp.MustCompile(`\b(path|re_path)\s*\(\s*['"]([^'"]+)['"]\s*,\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)`)
+	pythonEnvironPattern       = regexp.MustCompile(`\bos\s*\.\s*environ\s*\[\s*['"]([^'"]+)['"]`)
+	pythonEnvironAccessPattern = regexp.MustCompile(`\bos\s*\.\s*environ\s*\[`)
 )
+
+type pythonDecorator struct {
+	expression string
+	line       int
+}
 
 type pythonScope struct {
 	kind          SymbolKind
@@ -33,6 +43,7 @@ type pythonFunction struct {
 	startLine          int
 	endLine            int
 	indent             int
+	decorators         []pythonDecorator
 }
 
 type parsedPythonFile struct {
@@ -61,6 +72,7 @@ func parsePythonFile(repositoryFile discovery.File) (parsedPythonFile, error) {
 		aliases:        make(map[string]string),
 	}
 	scopes := make([]pythonScope, 0)
+	pendingDecorators := make(map[int][]pythonDecorator)
 	mainGuard := false
 
 	for index, masked := range maskedLines {
@@ -76,6 +88,13 @@ func parsePythonFile(repositoryFile discovery.File) (parsedPythonFile, error) {
 		for len(scopes) > 0 && indent <= scopes[len(scopes)-1].indent {
 			scopes = scopes[:len(scopes)-1]
 		}
+		if strings.HasPrefix(originalTrimmed, "@") {
+			pendingDecorators[indent] = append(pendingDecorators[indent], pythonDecorator{
+				expression: strings.TrimSpace(strings.TrimPrefix(originalTrimmed, "@")),
+				line:       index + 1,
+			})
+			continue
+		}
 
 		if imported, ok := parsePythonImport(originalTrimmed, parsed.module); ok {
 			for index := range imported.imports {
@@ -88,6 +107,7 @@ func parsePythonFile(repositoryFile discovery.File) (parsedPythonFile, error) {
 		}
 
 		if strings.HasPrefix(trimmed, "class ") {
+			delete(pendingDecorators, indent)
 			match := pythonClassPattern.FindStringSubmatch(trimmed)
 			if len(match) != 2 || !pythonDeclarationComplete(maskedLines, index) {
 				return parsedPythonFile{}, fmt.Errorf("unsupported class declaration at line %d", index+1)
@@ -117,15 +137,23 @@ func parsePythonFile(repositoryFile discovery.File) (parsedPythonFile, error) {
 			}
 			endLine := pythonBlockEnd(lines, maskedLines, index, indent)
 			entryPoint := mainGuard && name == "main" && len(scopes) == 0
+			decorators := append([]pythonDecorator(nil), pendingDecorators[indent]...)
 			symbol := pythonSymbol(repositoryFile, parsed.module, name, qualified, kind, index+1, endLine, entryPoint)
+			if len(decorators) > 0 {
+				symbol.source = pythonSourceExcerpt(repositoryFile.Content, decorators[0].line, endLine)
+			}
 			parsed.symbols = append(parsed.symbols, symbol)
 			parsed.functions = append(parsed.functions, pythonFunction{
 				symbolID: symbol.ID, name: name, qualifiedName: qualified,
 				classQualifiedName: classQualified, path: repositoryFile.Path,
 				startLine: index + 1, endLine: endLine, indent: indent,
+				decorators: decorators,
 			})
+			delete(pendingDecorators, indent)
 			scopes = append(scopes, pythonScope{kind: kind, indent: indent, qualifiedName: qualified})
+			continue
 		}
+		delete(pendingDecorators, indent)
 	}
 
 	if mainGuard {
@@ -157,11 +185,24 @@ func pythonSymbol(repositoryFile discovery.File, module, name, qualified string,
 
 func indexPythonFile(graph *Graph, file parsedPythonFile, qualifiedNames map[string]string, globalNames map[string][]string) {
 	for _, function := range file.functions {
+		indexPythonDecorators(graph, function, file, qualifiedNames, globalNames)
 		for lineNumber := function.startLine; lineNumber <= function.endLine && lineNumber <= len(file.maskedLines); lineNumber++ {
 			if owner, ok := innermostPythonFunction(file.functions, lineNumber); !ok || owner.symbolID != function.symbolID {
 				continue
 			}
 			line := file.maskedLines[lineNumber-1]
+			originalLine := file.lines[lineNumber-1]
+			for _, match := range pythonEnvironPattern.FindAllStringSubmatch(originalLine, -1) {
+				if !pythonEnvironAccessPattern.MatchString(line) {
+					continue
+				}
+				if len(match) == 2 {
+					graph.Edges = append(graph.Edges, Edge{
+						Kind: EdgeConfiguration, From: function.symbolID, To: "config:" + match[1], Label: match[1],
+						Path: function.path, Line: lineNumber, Resolved: false,
+					})
+				}
+			}
 			for _, match := range pythonCallPattern.FindAllStringSubmatch(line, -1) {
 				if len(match) != 2 {
 					continue
@@ -172,17 +213,91 @@ func indexPythonFile(graph *Graph, file parsedPythonFile, qualifiedNames map[str
 					continue
 				}
 				target, resolved := resolvePythonCall(callName, function, file, qualifiedNames, globalNames)
-				kind := classifyCall(shortName)
+				kind := classifyPythonCall(callName)
+				label := callName
+				if kind == EdgeConfiguration {
+					if key, ok := pythonFirstStringArgument(originalLine, callName); ok {
+						target = "config:" + key
+						label = key
+						resolved = false
+					}
+				}
 				if kind == EdgeCall {
 					if symbol, ok := graphSymbolByID(graph.Symbols, function.symbolID); ok && symbol.Kind == SymbolTest {
 						kind = EdgeTest
 					}
 				}
 				graph.Edges = append(graph.Edges, Edge{
-					Kind: kind, From: function.symbolID, To: target, Label: callName,
+					Kind: kind, From: function.symbolID, To: target, Label: label,
 					Path: function.path, Line: lineNumber, Resolved: resolved,
 				})
 			}
+		}
+	}
+	indexPythonModuleRoutes(graph, file, qualifiedNames, globalNames)
+}
+
+func indexPythonDecorators(graph *Graph, function pythonFunction, file parsedPythonFile, qualifiedNames map[string]string, globalNames map[string][]string) {
+	for _, decorator := range function.decorators {
+		for _, label := range pythonRouteLabels(decorator.expression) {
+			markGraphEntryPoint(graph, function.symbolID)
+			graph.Edges = append(graph.Edges, Edge{
+				Kind: EdgeRoute, From: "framework-route:" + label, To: function.symbolID, Label: label,
+				Path: function.path, Line: decorator.line, Resolved: true,
+			})
+		}
+		decoratorName := pythonDecoratorName(decorator.expression)
+		if pythonAuthorizationName(decoratorName) {
+			target, resolved := resolvePythonCall(decoratorName, function, file, qualifiedNames, globalNames)
+			graph.Edges = append(graph.Edges, Edge{
+				Kind: EdgeAuthorization, From: function.symbolID, To: target, Label: decoratorName,
+				Path: function.path, Line: decorator.line, Resolved: resolved,
+			})
+		}
+		indexPythonDependencies(graph, function, file, decorator.expression, decorator.line, qualifiedNames, globalNames)
+	}
+	if function.startLine > 0 && function.startLine <= len(file.lines) {
+		indexPythonDependencies(graph, function, file, file.lines[function.startLine-1], function.startLine, qualifiedNames, globalNames)
+	}
+}
+
+func indexPythonDependencies(graph *Graph, function pythonFunction, file parsedPythonFile, source string, line int, qualifiedNames map[string]string, globalNames map[string][]string) {
+	for _, match := range pythonDependsPattern.FindAllStringSubmatch(source, -1) {
+		if len(match) != 2 || !pythonAuthorizationName(match[1]) {
+			continue
+		}
+		target, resolved := resolvePythonCall(match[1], function, file, qualifiedNames, globalNames)
+		graph.Edges = append(graph.Edges, Edge{
+			Kind: EdgeAuthorization, From: function.symbolID, To: target, Label: "Depends(" + match[1] + ")",
+			Path: function.path, Line: line, Resolved: resolved,
+		})
+	}
+}
+
+func indexPythonModuleRoutes(graph *Graph, file parsedPythonFile, qualifiedNames map[string]string, globalNames map[string][]string) {
+	for index, line := range file.lines {
+		lineNumber := index + 1
+		if _, insideFunction := innermostPythonFunction(file.functions, lineNumber); insideFunction {
+			continue
+		}
+		masked := file.maskedLines[index]
+		if !strings.Contains(masked, "path") {
+			continue
+		}
+		for _, match := range pythonDjangoRoutePattern.FindAllStringSubmatch(line, -1) {
+			if len(match) != 4 {
+				continue
+			}
+			dummy := pythonFunction{path: file.repositoryFile.Path}
+			target, resolved := resolvePythonCall(match[3], dummy, file, qualifiedNames, globalNames)
+			if resolved {
+				markGraphEntryPoint(graph, target)
+			}
+			label := "ANY /" + strings.TrimPrefix(match[2], "/")
+			graph.Edges = append(graph.Edges, Edge{
+				Kind: EdgeRoute, From: "django-route:" + label, To: target, Label: label,
+				Path: file.repositoryFile.Path, Line: lineNumber, Resolved: resolved,
+			})
 		}
 	}
 }
@@ -214,6 +329,165 @@ func resolvePythonCall(callName string, function pythonFunction, file parsedPyth
 		return candidates[0], true
 	}
 	return "unresolved:" + callName, false
+}
+
+func classifyPythonCall(callName string) EdgeKind {
+	lower := strings.ToLower(callName)
+	shortName := strings.ToLower(pythonLastName(callName))
+	receiver := strings.TrimSuffix(lower, "."+shortName)
+	if shortName == "getenv" || (shortName == "get" && pythonConfigurationReceiver(receiver)) || strings.Contains(shortName, "feature_enabled") || strings.Contains(shortName, "featureenabled") {
+		return EdgeConfiguration
+	}
+	if pythonAuthorizationName(callName) {
+		return EdgeAuthorization
+	}
+	if pythonLoggingCall(receiver, shortName) {
+		return EdgeLogging
+	}
+	if pythonPersistenceCall(receiver, shortName) {
+		return EdgePersistence
+	}
+	return classifyCall(shortName)
+}
+
+func pythonConfigurationReceiver(receiver string) bool {
+	for _, marker := range []string{"config", "settings", "environ", "environment", "feature_flag", "featureflag", "flags"} {
+		if strings.Contains(receiver, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func pythonAuthorizationName(value string) bool {
+	lower := strings.ToLower(pythonLastName(value))
+	for _, marker := range []string{"authoriz", "authenticat", "permission", "require_role", "requires_role", "role_required", "login_required", "access_control", "access_check", "reviewer"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return lower == "has_access" || lower == "check_access" || lower == "can_override" || lower == "current_user"
+}
+
+func pythonLoggingCall(receiver, shortName string) bool {
+	if strings.Contains(shortName, "audit") || strings.Contains(shortName, "telemetry") || strings.Contains(shortName, "record_event") {
+		return true
+	}
+	loggingReceiver := receiver == "log" || strings.Contains(receiver, "logger") || strings.Contains(receiver, "logging") || strings.Contains(receiver, "audit") || strings.Contains(receiver, "telemetry")
+	if !loggingReceiver {
+		return false
+	}
+	switch shortName {
+	case "debug", "info", "warning", "warn", "error", "exception", "critical", "log", "event", "bind":
+		return true
+	default:
+		return false
+	}
+}
+
+func pythonPersistenceCall(receiver, shortName string) bool {
+	switch shortName {
+	case "save", "save_all", "commit", "flush", "add", "add_all", "create", "bulk_create", "delete", "execute", "executemany", "merge", "upsert", "insert", "update", "persist", "store":
+		return true
+	}
+	for _, marker := range []string{"session", "database", "repository", "store", "collection", "table", "queryset"} {
+		if strings.Contains(receiver, marker) && (strings.HasPrefix(shortName, "write") || strings.HasPrefix(shortName, "set")) {
+			return true
+		}
+	}
+	return false
+}
+
+func pythonRouteLabels(expression string) []string {
+	name := strings.ToLower(pythonDecoratorName(expression))
+	shortName := pythonLastName(name)
+	path, ok := pythonFirstQuotedValue(expression)
+	if !ok {
+		path = "<dynamic>"
+	}
+	if path != "<dynamic>" && !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	switch shortName {
+	case "get", "post", "put", "patch", "delete", "options", "head", "websocket":
+		return []string{strings.ToUpper(shortName) + " " + path}
+	case "route", "api_route":
+		methods := pythonHTTPMethodPattern.FindAllStringSubmatch(expression, -1)
+		if len(methods) == 0 {
+			return []string{"GET " + path}
+		}
+		labels := make([]string, 0, len(methods))
+		seen := make(map[string]bool)
+		for _, method := range methods {
+			if len(method) != 2 {
+				continue
+			}
+			label := strings.ToUpper(method[1]) + " " + path
+			if !seen[label] {
+				labels = append(labels, label)
+				seen[label] = true
+			}
+		}
+		return labels
+	default:
+		return nil
+	}
+}
+
+func pythonDecoratorName(expression string) string {
+	name := expression
+	if index := strings.Index(name, "("); index >= 0 {
+		name = name[:index]
+	}
+	return strings.ReplaceAll(strings.TrimSpace(name), " ", "")
+}
+
+func pythonFirstStringArgument(source, callName string) (string, bool) {
+	shortName := pythonLastName(callName)
+	index := strings.Index(source, shortName)
+	if index < 0 {
+		return "", false
+	}
+	return pythonFirstQuotedValue(source[index+len(shortName):])
+}
+
+func pythonFirstQuotedValue(source string) (string, bool) {
+	open := strings.Index(source, "(")
+	if open < 0 {
+		return "", false
+	}
+	for index := open + 1; index < len(source); index++ {
+		quote := source[index]
+		if quote != '\'' && quote != '"' {
+			if source[index] == ')' {
+				return "", false
+			}
+			continue
+		}
+		var builder strings.Builder
+		for index++; index < len(source); index++ {
+			if source[index] == '\\' && index+1 < len(source) {
+				index++
+				builder.WriteByte(source[index])
+				continue
+			}
+			if source[index] == quote {
+				return builder.String(), true
+			}
+			builder.WriteByte(source[index])
+		}
+		return "", false
+	}
+	return "", false
+}
+
+func markGraphEntryPoint(graph *Graph, symbolID string) {
+	for index := range graph.Symbols {
+		if graph.Symbols[index].ID == symbolID {
+			graph.Symbols[index].EntryPoint = true
+			return
+		}
+	}
 }
 
 func innermostPythonFunction(functions []pythonFunction, line int) (pythonFunction, bool) {
