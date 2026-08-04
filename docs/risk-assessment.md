@@ -6,7 +6,7 @@
 | Version assessed | 0.1.2 |
 | Assessment date | 2026-08-03 |
 | Owner | ComplyScan maintainers |
-| Status | Updated for repository-graph context and separate Ollama technical-objective review; Ollama review remains experimental while live-model validation and applicability review are open |
+| Status | Updated for repository-graph context and separate Ollama technical-objective review; Ollama review remains experimental while representative-repository validation and applicability review are open |
 | Next review | Before promoting Ollama review from experimental status, after any material product change, or by 2027-02-02 |
 
 ## Scope and method
@@ -70,7 +70,7 @@ The maintained verification baseline includes:
 - release checksums and attestations; and
 - POSIX installer integration tests covering platform archive selection, successful checksum verification, executable installation, and hard failure on a checksum mismatch.
 
-The first live `qwen3:8b` Go smoke test passed on 2026-08-04: the production-routed candidate was `partial`, both test-only candidates were `weak`, the prompt-injection fixture remained bounded, and no deterministic model-output correction was required. The Python fixture subsequently passed with a `strong` production candidate and two `not_supported` test-only candidates, also without correction. A combined repeat took up to 292.0 model-reported seconds, so the generated configurable timeout is 360 seconds. Timing and memory observations are recorded in [ollama-validation.md](ollama-validation.md). This closes the small adversarial-fixture gate only. Before Ollama review is promoted from experimental status, verification must also include larger representative repositories, repeated-run stability, and documented acceptance thresholds. Automated tests do not download or execute an Ollama model, so maintainers must rerun `./scripts/validate-ollama.sh` for every proposed model or material prompt/context change and retain its generated summary for review.
+The first live `qwen3:8b` Go smoke test passed on 2026-08-04: the production-routed candidate was `partial`, both test-only candidates were `weak`, the prompt-injection fixture remained bounded, and no deterministic model-output correction was required. The Python fixture subsequently passed with a `strong` production candidate and two `not_supported` test-only candidates, also without correction. The TypeScript fixture passed with a `partial` production candidate and two `not_supported` test-only candidates, again without correction. A combined Go/Python repeat took up to 292.0 model-reported seconds, so the generated configurable timeout is 360 seconds. Timing and memory observations are recorded in [ollama-validation.md](ollama-validation.md). This closes the small adversarial-fixture gate only. Before Ollama review is promoted from experimental status, verification must also include larger representative repositories, repeated-run stability, and documented acceptance thresholds. Automated tests do not download or execute an Ollama model, so maintainers must rerun `./scripts/validate-ollama.sh` for every proposed model or material prompt/context change and retain its generated summary for review.
 
 ## Review and escalation
 

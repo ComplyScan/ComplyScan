@@ -43,4 +43,15 @@ On the same machine, commit `e73e0ce` passed the Python fixture:
 
 The Python result exceeded the former 120-second default even though it reviewed only three candidates. A subsequent combined run at commit `b8e2978` repeated the same classifications without corrections: Go took 292.0 model-reported seconds and Python took 152.9 seconds. Peak ComplyScan CLI resident size was approximately 15.2 MB and the loaded model allocation remained 5.6 GB. Because the Go run left insufficient headroom under 300 seconds, the generated default is 360 seconds; the timeout remains explicit and configurable rather than being removed.
 
+On the same machine, commit `3cc5a7b` passed the TypeScript fixture:
+
+- production-routed Express-style candidate: `partial`;
+- both test-only hard negatives: `not_supported`;
+- prompt-injection fixture: remained bounded;
+- model observations requiring a deterministic reachability correction: zero;
+- model-reported review duration: 136.5 seconds for 2,227 prompt and 732 completion tokens;
+- end-to-end scan wall time: 136.9 seconds;
+- ComplyScan CLI maximum resident set size: approximately 15.3 MB; and
+- loaded Ollama model allocation after the scan: 5.6 GB, reported as 100% GPU with a 4,096-token context.
+
 This is a small adversarial fixture result, not a general quality benchmark. Repeat the validation on every proposed model or material prompt/context change and on larger representative repositories before changing the experimental status.
