@@ -42,6 +42,7 @@ func Build(evidence framework.TechnicalEvidenceReport, repository discovery.Repo
 			candidate.UnresolvedQuestions = append(candidate.UnresolvedQuestions, match.Context.UnresolvedQuestions...)
 
 			remainingSource := 12_000
+			remainingSource = appendMatchedEvidenceSource(&candidate, repository, match.Path, match.StartLine, match.Context.Anchor != nil, remainingSource)
 			if match.Context.Anchor != nil {
 				candidate.Anchor = match.Context.Anchor.QualifiedName
 				candidate.Reachability = string(match.Context.Anchor.Reachability)
@@ -58,17 +59,34 @@ func Build(evidence framework.TechnicalEvidenceReport, repository discovery.Repo
 					}
 					remainingSource = appendTechnicalSource(&candidate, graph, related, "related", remainingSource)
 				}
-			} else if content, ok := repositoryFileContent(repository, match.Path); ok {
-				candidate.SourceContexts = append(candidate.SourceContexts, providers.TechnicalSourceContext{
-					Role: "matched-file", Symbol: "file:" + match.Path, Path: match.Path,
-					StartLine: match.StartLine, EndLine: match.StartLine,
-					Source: boundedRepositoryExcerpt(content, match.StartLine, remainingSource),
-				})
 			}
 			request.Candidates = append(request.Candidates, candidate)
 		}
 	}
 	return request
+}
+
+func appendMatchedEvidenceSource(candidate *providers.TechnicalCandidate, repository discovery.Repository, path string, line int, hasAnchor bool, remaining int) int {
+	if remaining <= 0 {
+		return 0
+	}
+	content, ok := repositoryFileContent(repository, path)
+	if !ok {
+		return remaining
+	}
+	limit := remaining
+	if hasAnchor && limit > 6_000 {
+		limit = 6_000
+	}
+	source := boundedRepositoryExcerpt(content, line, limit)
+	if source == "" {
+		return remaining
+	}
+	candidate.SourceContexts = append(candidate.SourceContexts, providers.TechnicalSourceContext{
+		Role: "matched-evidence", Symbol: "file:" + path, Path: path,
+		StartLine: line, EndLine: line, Source: source,
+	})
+	return remaining - len([]rune(source))
 }
 
 func appendTechnicalRelationshipSource(candidate *providers.TechnicalCandidate, repository discovery.Repository, relationship codegraph.Relationship, remaining int) int {
@@ -136,11 +154,11 @@ func boundedRepositoryExcerpt(content []byte, line, maxChars int) string {
 		return ""
 	}
 	lines := strings.Split(string(content), "\n")
-	start := line - 20
+	start := line - 60
 	if start < 0 {
 		start = 0
 	}
-	end := line + 20
+	end := line + 60
 	if line <= 0 {
 		start, end = 0, len(lines)
 	}
