@@ -73,14 +73,15 @@ func TestDeadOverride(t *testing.T) { deadOverride() }
 
 func TestBuildTracksUnsupportedAndParseFailures(t *testing.T) {
 	repository := discovery.Repository{Files: []discovery.File{
-		{Path: "worker.py", Kind: discovery.KindSource, Content: []byte("print('hello')")},
+		{Path: "worker.rb", Kind: discovery.KindSource, Content: []byte("puts 'hello'")},
 		{Path: "broken.go", Kind: discovery.KindSource, Content: []byte("package broken\nfunc")},
+		{Path: "broken.py", Kind: discovery.KindSource, Content: []byte("def broken(")},
 	}}
 	graph := Build(repository)
-	if len(graph.UnsupportedSourceFiles) != 1 || graph.UnsupportedSourceFiles[0] != "worker.py" {
+	if len(graph.UnsupportedSourceFiles) != 1 || graph.UnsupportedSourceFiles[0] != "worker.rb" {
 		t.Fatalf("unexpected unsupported files: %#v", graph.UnsupportedSourceFiles)
 	}
-	if len(graph.Warnings) != 1 || !strings.Contains(graph.Warnings[0], "broken.go") {
+	if len(graph.Warnings) != 2 || !strings.Contains(strings.Join(graph.Warnings, "\n"), "broken.go") || !strings.Contains(strings.Join(graph.Warnings, "\n"), "broken.py") {
 		t.Fatalf("unexpected warnings: %#v", graph.Warnings)
 	}
 }

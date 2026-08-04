@@ -39,7 +39,7 @@ func TestUnsupportedLanguageFixtureIsExplicitCoverageDebt(t *testing.T) {
 		t.Fatal(err)
 	}
 	graph := Build(result.Repository)
-	if graph.FilesIndexed != 0 || graph.SourceFilesSeen != 1 || len(graph.UnsupportedSourceFiles) != 1 || graph.UnsupportedSourceFiles[0] != "override_worker.py" {
+	if graph.FilesIndexed != 0 || graph.SourceFilesSeen != 1 || len(graph.UnsupportedSourceFiles) != 1 || graph.UnsupportedSourceFiles[0] != "override_worker.rb" {
 		t.Fatalf("unsupported fixture was not reported conservatively: %#v", graph)
 	}
 }

@@ -6,7 +6,8 @@ import "sort"
 type Language string
 
 const (
-	LanguageGo Language = "go"
+	LanguageGo     Language = "go"
+	LanguagePython Language = "python"
 )
 
 // SymbolKind classifies a repository symbol without tying consumers to a

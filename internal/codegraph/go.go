@@ -38,6 +38,11 @@ func Build(repository discovery.Repository) Graph {
 	functions := make([]goFunction, 0)
 	packageNames := make(map[string]map[string]string)
 	globalNames := make(map[string][]string)
+	pythonFiles := make([]parsedPythonFile, 0)
+	pythonQualifiedNames := make(map[string]string)
+	pythonGlobalNames := make(map[string][]string)
+	goFilesIndexed := 0
+	pythonFilesIndexed := 0
 
 	for _, repositoryFile := range repository.Files {
 		if repositoryFile.Kind != discovery.KindSource {
@@ -47,7 +52,26 @@ func Build(repository discovery.Repository) Graph {
 			continue
 		}
 		graph.SourceFilesSeen++
-		if strings.ToLower(filepath.Ext(repositoryFile.Path)) != ".go" {
+		extension := strings.ToLower(filepath.Ext(repositoryFile.Path))
+		if extension == ".py" {
+			parsed, err := parsePythonFile(repositoryFile)
+			if err != nil {
+				graph.Warnings = append(graph.Warnings, fmt.Sprintf("could not parse Python source %s: %v", repositoryFile.Path, err))
+				continue
+			}
+			pythonFiles = append(pythonFiles, parsed)
+			graph.FilesIndexed++
+			pythonFilesIndexed++
+			graph.IndexedSourceFiles = append(graph.IndexedSourceFiles, repositoryFile.Path)
+			graph.Imports = append(graph.Imports, parsed.imports...)
+			graph.Symbols = append(graph.Symbols, parsed.symbols...)
+			for _, function := range parsed.functions {
+				pythonQualifiedNames[function.qualifiedName] = function.symbolID
+				pythonGlobalNames[function.name] = append(pythonGlobalNames[function.name], function.symbolID)
+			}
+			continue
+		}
+		if extension != ".go" {
 			graph.UnsupportedSourceFiles = append(graph.UnsupportedSourceFiles, repositoryFile.Path)
 			continue
 		}
@@ -67,6 +91,7 @@ func Build(repository discovery.Repository) Graph {
 			packageKey:     packageKey,
 		})
 		graph.FilesIndexed++
+		goFilesIndexed++
 		graph.IndexedSourceFiles = append(graph.IndexedSourceFiles, repositoryFile.Path)
 		for _, importSpec := range file.Imports {
 			importedPath, err := strconv.Unquote(importSpec.Path.Value)
@@ -118,12 +143,18 @@ func Build(repository discovery.Repository) Graph {
 		}
 	}
 
-	if graph.FilesIndexed > 0 {
-		graph.Languages = []Language{LanguageGo}
+	if goFilesIndexed > 0 {
+		graph.Languages = append(graph.Languages, LanguageGo)
+	}
+	if pythonFilesIndexed > 0 {
+		graph.Languages = append(graph.Languages, LanguagePython)
 	}
 
 	for _, function := range functions {
 		indexGoFunction(&graph, function, packageNames, globalNames)
+	}
+	for _, file := range pythonFiles {
+		indexPythonFile(&graph, file, pythonQualifiedNames, pythonGlobalNames)
 	}
 
 	graph.finalize()
@@ -388,10 +419,10 @@ func classifyReachability(graph *Graph) {
 		switch {
 		case production[symbol.ID]:
 			symbol.Reachability = ReachableProduction
-		case symbol.Exported && symbol.Kind != SymbolTest:
-			symbol.Reachability = ReachableExported
 		case tests[symbol.ID]:
 			symbol.Reachability = ReachableTestOnly
+		case symbol.Exported && symbol.Kind != SymbolTest:
+			symbol.Reachability = ReachableExported
 		default:
 			symbol.Reachability = ReachableUnknown
 		}
