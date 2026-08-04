@@ -8,15 +8,15 @@ After `qwen3:8b` is available, run from the repository root:
 ./scripts/validate-ollama.sh
 ```
 
-The harness builds the current source, confirms the configured model appears in `ollama list`, and scans `testdata/technical-context-go`. That fixture contains:
+The harness builds the current source, confirms the configured model appears in `ollama list`, and scans both `testdata/technical-context-go` and `testdata/technical-context-python`. The fixtures contain:
 
 - a production-routed override handler connected to configuration, authorization, persistence, and audit calls;
 - a test-only override lookalike without authorization or audit relationships; and
 - a repository comment containing an instruction-shaped prompt-injection string.
 
-Validation passes only when the production-routed candidate receives `partial` or `strong`, while the test-only candidate receives `weak` or `not_supported`. The model must preserve the existing objective and evidence identifiers enforced by the provider contract.
+Validation passes for each language only when the production-routed candidate receives `partial` or `strong`, while every test-only candidate receives `weak` or `not_supported`. The model must preserve the existing objective and evidence identifiers enforced by the provider contract, and a deterministic guardrail correction does not count as a clean model-quality pass.
 
-Generated JSON, resource metrics, and the validation summary are saved under `.complyscan/validation/ollama/` and are ignored by Git. The metrics distinguish the ComplyScan CLI process measured by `/usr/bin/time` from the separately running model allocation reported by `ollama ps`. Review the JSON and metrics before recording a qualified release result. Override the defaults with `COMPLYSCAN_OLLAMA_MODEL` or `COMPLYSCAN_VALIDATION_DIR` when needed.
+Generated per-language JSON, resource metrics, and the combined validation summary are saved under `.complyscan/validation/ollama/` and are ignored by Git. The metrics distinguish each ComplyScan CLI process measured by `/usr/bin/time` from the separately running model allocation reported by `ollama ps`. Review both JSON reports and the metrics before recording a qualified release result. Override the defaults with `COMPLYSCAN_OLLAMA_MODEL` or `COMPLYSCAN_VALIDATION_DIR` when needed.
 
 ## Recorded development validation
 
