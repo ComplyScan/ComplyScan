@@ -26,4 +26,6 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Validate installer syntax
-        run: sh -n install.sh
+        run: |
+          sh -n install.sh
+          sh -n scripts/validate-ollama.sh

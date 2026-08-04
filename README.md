@@ -75,6 +75,8 @@ complyscan version
 
 `doctor` performs an offline readiness check for the installed build, repository configuration, Git detection, report-directory permissions, the Ollama executable, its loopback service, and the configured model. Missing optional tools are warnings; a required but unavailable Ollama service or model is a blocking failure.
 
+Maintainers can run the repeatable live-model quality and resource gate with `./scripts/validate-ollama.sh` after `qwen3:8b` is available. See [Ollama live-model validation](docs/ollama-validation.md) for the enforced production/test-only expectations and saved artifacts.
+
 Interactive setup selects `qwen3:8b` by default, but the user can enter another local model or decline Ollama and keep deterministic scanning. Automation never installs software or downloads a model unless `--install-ollama` or `--pull-model` is explicitly passed. Use `--non-interactive --review none` for a network-free starter configuration, or `--skip-ollama-install`, `--skip-model-pull`, and `--skip-scan` to control individual interactive steps.
 
 `scan` defaults to the current directory, so `complyscan scan` and `complyscan scan .` are equivalent. In a terminal, `init` guides you through factual questions about each system's purpose, operating regions, value-chain role, use-case domain, users, affected groups, decision impact, data, human oversight, and deployment. Use `unknown` rather than guessing. Redirected or CI initialization is non-interactive and can be made explicit with `--non-interactive`.

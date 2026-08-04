@@ -1,0 +1,61 @@
+#!/bin/sh
+
+set -eu
+
+script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repository_root=$(CDPATH= cd -- "${script_directory}/.." && pwd)
+model=${COMPLYSCAN_OLLAMA_MODEL:-qwen3:8b}
+output_directory=${COMPLYSCAN_VALIDATION_DIR:-${repository_root}/.complyscan/validation/ollama}
+fixture=${repository_root}/testdata/technical-context-go
+
+command -v go >/dev/null 2>&1 || {
+	printf '%s\n' "Error: Go is required to build the current ComplyScan source." >&2
+	exit 1
+}
+command -v ollama >/dev/null 2>&1 || {
+	printf '%s\n' "Error: Ollama is not installed. Run complyscan setup when installation is possible." >&2
+	exit 1
+}
+ollama list | awk -v wanted="$model" 'NR > 1 && $1 == wanted { found = 1 } END { exit !found }' || {
+	printf 'Error: Ollama model %s is not available. Run: ollama pull %s\n' "$model" "$model" >&2
+	exit 1
+}
+[ -x /usr/bin/time ] || {
+	printf '%s\n' "Error: /usr/bin/time is required to record resource measurements." >&2
+	exit 1
+}
+
+mkdir -p "$output_directory"
+timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+result_path=${output_directory}/${timestamp}-report.json
+metrics_path=${output_directory}/${timestamp}-metrics.txt
+summary_path=${output_directory}/${timestamp}-summary.txt
+temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/complyscan-ollama-validation.XXXXXX")
+binary=${temporary_directory}/complyscan
+
+cleanup() {
+	rm -f "$binary"
+	rmdir "$temporary_directory" 2>/dev/null || true
+}
+trap cleanup EXIT HUP INT TERM
+
+printf 'Building current ComplyScan source...\n'
+(cd "$repository_root" && go build -trimpath -o "$binary" ./cmd/complyscan)
+
+printf 'Validating %s against %s...\n' "$model" "$fixture"
+case "$(uname -s)" in
+	Darwin)
+		/usr/bin/time -l "$binary" scan "$fixture" --review ollama --ollama-model "$model" --format json --no-report >"$result_path" 2>"$metrics_path"
+		;;
+	Linux)
+		/usr/bin/time -v "$binary" scan "$fixture" --review ollama --ollama-model "$model" --format json --no-report >"$result_path" 2>"$metrics_path"
+		;;
+	*)
+		printf 'Error: live resource validation is not implemented for %s.\n' "$(uname -s)" >&2
+		exit 1
+		;;
+esac
+
+(cd "$repository_root" && go run ./scripts/validate_ollama_result.go "$result_path" "$model") >"$summary_path"
+cat "$summary_path"
+printf '\nSaved report: %s\nSaved metrics: %s\nSaved summary: %s\n' "$result_path" "$metrics_path" "$summary_path"

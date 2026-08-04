@@ -70,7 +70,7 @@ The maintained verification baseline includes:
 - release checksums and attestations; and
 - POSIX installer integration tests covering platform archive selection, successful checksum verification, executable installation, and hard failure on a checksum mismatch.
 
-Before Ollama review is promoted from experimental status, verification must also include a successful `qwen3:8b` smoke test, review-output inspection using the live/test-only/prompt-injection fixtures, and time and memory measurements on a representative repository. The expected fixture outcome is `partial` or `strong` for the production-routed candidate and `weak` or `not_supported` for both test-only candidates. Automated tests do not download or execute an Ollama model, so they cannot close this quality gate.
+Before Ollama review is promoted from experimental status, verification must also include a successful `qwen3:8b` smoke test, review-output inspection using the live/test-only/prompt-injection fixtures, and time and memory measurements on a representative repository. The expected fixture outcome is `partial` or `strong` for the production-routed candidate and `weak` or `not_supported` for both test-only candidates. Automated tests do not download or execute an Ollama model, so they cannot close this quality gate. Maintainers run the repeatable fixture and resource gate with `./scripts/validate-ollama.sh` and retain its generated summary for review.
 
 ## Review and escalation
 

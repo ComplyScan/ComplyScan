@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+
+- `complyscan doctor` for offline build, repository, configuration, report-permission, Git, and optional Ollama readiness checks.
+- A repeatable `qwen3:8b` live-validation harness with enforced production/test-only expectations and saved resource metrics.
+
+### Changed
+
+- The public Go module and source references now use `github.com/ComplyScan/ComplyScan`.
+- CI now verifies the documented Go 1.22 minimum.
+
+### Testing
+
+- Installer regressions cover unsupported systems, incomplete releases, and preservation of existing binaries after failed updates.
+- Offline Ollama tests cover prompt injection, malformed output, invalid verdicts, duplicate bindings, and timeouts without downloading a model.
+
 ## 0.1.2 - 2026-08-03
 
 ### Added
