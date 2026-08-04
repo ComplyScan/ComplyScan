@@ -1,0 +1,49 @@
+# Technical evidence benchmark
+
+ComplyScan maintains a deterministic benchmark for the code-only EU AI Act evidence layer. It is intended to catch scanner and repository-graph regressions before they reach users. It does not measure legal compliance and does not establish general accuracy across arbitrary repositories.
+
+Run the checked-in corpus from the repository root:
+
+```sh
+./scripts/evaluate-technical-evidence.sh
+```
+
+For automation or comparison tooling, request the source-free JSON result:
+
+```sh
+./scripts/evaluate-technical-evidence.sh --format json
+```
+
+The runner exits `0` when every aggregate acceptance threshold passes, `1` when a quality threshold fails, and `2` for an invalid manifest or operational error. CI runs the human-readable form on every supported Go version in addition to the normal tests.
+
+## What is measured
+
+The versioned manifest at `testdata/technical-evaluation/manifest.json` binds the exact technical pack ID and version. For each repository case it labels:
+
+- every expected objective and repository-relative evidence path;
+- the expected enclosing symbol and production, exported, test-only, or unreached classification;
+- required graph relationships, optionally including label, endpoints, and resolution state;
+- relationships that must not appear; and
+- languages that must be indexed.
+
+The result reports candidate precision and recall, anchor accuracy, reachability accuracy, required-relationship recall, forbidden-relationship hits, and language coverage. Per-case diagnostics identify unexpected or missing candidates and incorrect context. Reports contain labels and aggregate metrics only; they do not serialize repository source.
+
+The initial corpus contains repository-shaped Go operations, Python model-pipeline, and TypeScript assistant cases plus a hard-negative repository. It deliberately exercises routes, dataset validation, bias and performance tests, audit logging, override and stop mechanisms, prompt-injection filtering, interaction disclosure, and synthetic-content provenance. These small maintained cases are regression evidence, not a substitute for larger representative-repository studies.
+
+## Adding a case
+
+1. Add a minimal repository-shaped fixture under `testdata/technical-evaluation/repositories` without real secrets, personal data, or third-party copyrighted source.
+2. Run the scanner and inspect every technical candidate, anchor, reachability classification, and relevant relationship.
+3. Label every candidate in the manifest. An unlabelled result is treated as a false positive; a missing label is treated as a false negative.
+4. Add required relationships only when the source makes them unambiguous. Use forbidden relationships for meaningful hard negatives.
+5. Run the benchmark and the full Go test suite.
+
+Intentional scanner changes may require label changes. Acceptance thresholds must not be reduced merely to accommodate a regression; threshold changes require an explicit rationale and review.
+
+## Evaluating separate repositories
+
+The runner accepts another manifest with `--manifest`. Case paths must remain inside the directory containing that manifest, so a separate evaluation workspace can place a manifest alongside curated public checkouts or authorised private fixtures. The runner is read-only with respect to cases and uses the same bounded discovery and ignore behavior as ComplyScan.
+
+Do not commit private repository source or generated benchmark JSON to this public repository. Record provenance, licence, revision, labelling method, hardware-independent deterministic metrics, and reviewer decisions separately when conducting a larger study.
+
+Live `qwen3:8b` quality remains a separate gate because model output and resource use can vary. Use `scripts/validate-ollama.sh` for that evaluation after deterministic benchmark changes pass.

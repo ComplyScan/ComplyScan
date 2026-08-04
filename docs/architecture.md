@@ -51,4 +51,6 @@ Ollama is implemented as an explicit opt-in provider with two calls. Finding rev
 
 Raw technical excerpts exist only in the local Ollama request and are never copied into the Markdown or JSON evidence bundle. A future dashboard will receive that source-free local JSON bundle by explicit connection. Additional language indexers and iterative context retrieval remain future work; any retrieval loop must stay read-only and bounded.
 
+`internal/framework` also owns the source-free technical-evidence benchmark model. A strict versioned manifest labels complete objective candidates, anchors, reachability, required and forbidden relationships, and language coverage for repository-shaped cases. The maintainer runner discovers each labelled repository through the production discovery path, evaluates the embedded pack, emits text or JSON metrics, and fails only against explicit acceptance thresholds. CI runs this independently from the optional live Ollama gate; deterministic graph quality and model quality remain separate measurements.
+
 OpenAI, Anthropic, Gemini, and ComplyScan Cloud remain reserved types only. Any future remote provider must add an explicit disclosure and consent boundary, preserve secret redaction, minimise source disclosure, and keep model observations separate from legal conclusions.

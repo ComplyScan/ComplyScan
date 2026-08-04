@@ -6,6 +6,8 @@
 
 - `complyscan doctor` for offline build, repository, configuration, report-permission, Git, and optional Ollama readiness checks.
 - A repeatable `qwen3:8b` live-validation harness with enforced production/test-only expectations and saved resource metrics.
+- Go, Python, JavaScript, and TypeScript repository-graph context for technical evidence, including routes, authorization, persistence, logging, configuration, and production/test reachability.
+- A versioned technical-evidence benchmark with labelled multi-language repository cases, hard negatives, machine-readable metrics, and CI acceptance thresholds.
 
 ### Changed
 
@@ -16,6 +18,7 @@
 
 - Installer regressions cover unsupported systems, incomplete releases, and preservation of existing binaries after failed updates.
 - Offline Ollama tests cover prompt injection, malformed output, invalid verdicts, duplicate bindings, and timeouts without downloading a model.
+- Technical-evidence regression metrics cover candidate precision and recall, anchor and reachability accuracy, relationship recall, forbidden relationships, and language coverage.
 
 ## 0.1.2 - 2026-08-03
 
