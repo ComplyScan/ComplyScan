@@ -29,6 +29,16 @@ func TestValidateOllamaResultRejectsStrongTestOnlyCandidate(t *testing.T) {
 	}
 }
 
+func TestValidateOllamaResultRejectsHiddenGuardrailCorrection(t *testing.T) {
+	value := validationReport(providers.StrengthStrong, providers.StrengthWeak)
+	value.TechnicalReview.Observations[1].ModelStrength = providers.StrengthPartial
+	value.TechnicalReview.Observations[1].GuardrailNote = "Test-only cap applied."
+	_, err := validateOllamaResult(value, "qwen3:8b")
+	if err == nil || !strings.Contains(err.Error(), "required a deterministic guardrail") {
+		t.Fatalf("got error %v", err)
+	}
+}
+
 func validationReport(production, testOnly providers.EvidenceStrength) report.Report {
 	const (
 		productionFingerprint = "production-fingerprint"

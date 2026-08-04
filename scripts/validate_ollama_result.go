@@ -64,6 +64,9 @@ func validateOllamaResult(value report.Report, expectedModel string) ([]string, 
 	observations := make(map[string]providers.TechnicalObservation)
 	for _, observation := range value.TechnicalReview.Observations {
 		if observation.ObjectiveID == validationObjective {
+			if observation.ModelStrength != "" || observation.GuardrailNote != "" {
+				return nil, fmt.Errorf("model required a deterministic guardrail for candidate %s: model strength %q became %q", observation.EvidenceFingerprint, observation.ModelStrength, observation.Strength)
+			}
 			observations[observation.EvidenceFingerprint] = observation
 		}
 	}

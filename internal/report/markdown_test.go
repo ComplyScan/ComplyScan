@@ -38,7 +38,8 @@ func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
 		Provider: providers.Ollama, Model: "gemma3", InputCandidates: 1, Reviewed: 1,
 		Observations: []providers.TechnicalObservation{{
 			ObjectiveID: "eu-aia-14-override-intervention", EvidenceFingerprint: strings.Repeat("b", 64),
-			Strength: providers.StrengthWeak, Confidence: "high", Rationale: "Only an exported candidate was found.",
+			Strength: providers.StrengthWeak, ModelStrength: providers.StrengthPartial, Confidence: "high", Rationale: "Only an exported candidate was found.",
+			GuardrailNote: "Test-only anchors cannot provide partial evidence.",
 		}},
 	}
 	var output bytes.Buffer
@@ -62,6 +63,7 @@ func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
 		"## Coverage boundary",
 		"## Ollama technical-objective review",
 		"Only an exported candidate was found.",
+		"Original model strength: partial.",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("Markdown missing %q:\n%s", expected, output.String())

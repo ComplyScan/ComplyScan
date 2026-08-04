@@ -33,6 +33,11 @@ type ollamaTechnicalPayload struct {
 	Observations []ollamaTechnicalObservation `json:"observations"`
 }
 
+type wantedTechnicalCandidate struct {
+	ObjectiveID  string
+	Reachability string
+}
+
 // ReviewTechnical performs a separate, bounded semantic review of existing
 // technical-objective candidates. It cannot create or change objective status.
 func (provider *OllamaProvider) ReviewTechnical(ctx context.Context, request TechnicalReviewRequest) (TechnicalReviewResult, error) {
@@ -55,7 +60,7 @@ func (provider *OllamaProvider) ReviewTechnical(ctx context.Context, request Tec
 		result.Notes = append(result.Notes, fmt.Sprintf("Technical review was limited to the first %d of %d candidates.", len(selected), len(request.Candidates)))
 	}
 	inputs := make([]TechnicalCandidate, 0, len(selected))
-	wanted := make(map[string]string, len(selected))
+	wanted := make(map[string]wantedTechnicalCandidate, len(selected))
 	for _, candidate := range selected {
 		if candidate.ObjectiveID == "" || candidate.EvidenceFingerprint == "" {
 			return TechnicalReviewResult{}, errors.New("technical review candidate must include objective ID and evidence fingerprint")
@@ -63,8 +68,12 @@ func (provider *OllamaProvider) ReviewTechnical(ctx context.Context, request Tec
 		if _, duplicate := wanted[candidate.EvidenceFingerprint]; duplicate {
 			return TechnicalReviewResult{}, fmt.Errorf("duplicate technical evidence fingerprint %q", candidate.EvidenceFingerprint)
 		}
-		wanted[candidate.EvidenceFingerprint] = candidate.ObjectiveID
-		inputs = append(inputs, sanitizeTechnicalCandidate(candidate))
+		sanitized := sanitizeTechnicalCandidate(candidate)
+		wanted[candidate.EvidenceFingerprint] = wantedTechnicalCandidate{
+			ObjectiveID:  candidate.ObjectiveID,
+			Reachability: sanitized.Reachability,
+		}
+		inputs = append(inputs, sanitized)
 	}
 	promptData, err := json.Marshal(inputs)
 	if err != nil {
@@ -87,9 +96,12 @@ func (provider *OllamaProvider) ReviewTechnical(ctx context.Context, request Tec
 	if err := json.Unmarshal([]byte(response.Message.Content), &payload); err != nil {
 		return TechnicalReviewResult{}, fmt.Errorf("decode Ollama structured technical review: %w", err)
 	}
-	observations, err := validateTechnicalObservations(payload.Observations, wanted)
+	observations, guarded, err := validateTechnicalObservations(payload.Observations, wanted)
 	if err != nil {
 		return TechnicalReviewResult{}, err
+	}
+	if guarded > 0 {
+		result.Notes = append(result.Notes, fmt.Sprintf("Deterministic reachability guardrail downgraded %d test-only observation(s) to weak; original model strengths remain in model_strength.", guarded))
 	}
 	result.Observations = observations
 	result.Reviewed = len(observations)
@@ -169,33 +181,34 @@ func cleanTechnicalSource(value string, limit int) string {
 	return value
 }
 
-func validateTechnicalObservations(values []ollamaTechnicalObservation, wanted map[string]string) ([]TechnicalObservation, error) {
+func validateTechnicalObservations(values []ollamaTechnicalObservation, wanted map[string]wantedTechnicalCandidate) ([]TechnicalObservation, int, error) {
 	if len(values) == 0 {
-		return nil, errors.New("Ollama structured technical review returned no observations")
+		return nil, 0, errors.New("Ollama structured technical review returned no observations")
 	}
 	seen := make(map[string]bool, len(values))
 	result := make([]TechnicalObservation, 0, len(values))
+	guarded := 0
 	for _, value := range values {
-		objectiveID, ok := wanted[value.EvidenceFingerprint]
+		candidate, ok := wanted[value.EvidenceFingerprint]
 		if !ok {
-			return nil, fmt.Errorf("Ollama structured technical review returned unknown fingerprint %q", value.EvidenceFingerprint)
+			return nil, 0, fmt.Errorf("Ollama structured technical review returned unknown fingerprint %q", value.EvidenceFingerprint)
 		}
 		if seen[value.EvidenceFingerprint] {
-			return nil, fmt.Errorf("Ollama structured technical review returned duplicate fingerprint %q", value.EvidenceFingerprint)
+			return nil, 0, fmt.Errorf("Ollama structured technical review returned duplicate fingerprint %q", value.EvidenceFingerprint)
 		}
 		seen[value.EvidenceFingerprint] = true
-		if value.ObjectiveID != objectiveID {
-			return nil, fmt.Errorf("Ollama structured technical review changed objective ID for fingerprint %q", value.EvidenceFingerprint)
+		if value.ObjectiveID != candidate.ObjectiveID {
+			return nil, 0, fmt.Errorf("Ollama structured technical review changed objective ID for fingerprint %q", value.EvidenceFingerprint)
 		}
 		if !validEvidenceStrength(value.Strength) {
-			return nil, fmt.Errorf("Ollama structured technical review returned invalid strength %q", value.Strength)
+			return nil, 0, fmt.Errorf("Ollama structured technical review returned invalid strength %q", value.Strength)
 		}
 		if value.Confidence != "low" && value.Confidence != "medium" && value.Confidence != "high" {
-			return nil, fmt.Errorf("Ollama structured technical review returned invalid confidence %q", value.Confidence)
+			return nil, 0, fmt.Errorf("Ollama structured technical review returned invalid confidence %q", value.Confidence)
 		}
 		rationale := cleanReviewText(value.Rationale, maxReviewMessageChars)
 		if rationale == "" {
-			return nil, fmt.Errorf("Ollama structured technical review omitted rationale for fingerprint %q", value.EvidenceFingerprint)
+			return nil, 0, fmt.Errorf("Ollama structured technical review omitted rationale for fingerprint %q", value.EvidenceFingerprint)
 		}
 		questions := value.UnresolvedQuestions
 		if len(questions) > maxTechnicalQuestions {
@@ -204,14 +217,21 @@ func validateTechnicalObservations(values []ollamaTechnicalObservation, wanted m
 		for index := range questions {
 			questions[index] = cleanReviewText(questions[index], maxReviewMessageChars)
 		}
-		result = append(result, TechnicalObservation{
-			ObjectiveID: objectiveID, EvidenceFingerprint: value.EvidenceFingerprint,
+		observation := TechnicalObservation{
+			ObjectiveID: candidate.ObjectiveID, EvidenceFingerprint: value.EvidenceFingerprint,
 			Strength: value.Strength, Confidence: value.Confidence, Rationale: rationale,
 			UnresolvedQuestions: questions,
 			SuggestedReview:     cleanReviewText(value.SuggestedReview, maxReviewActionChars),
-		})
+		}
+		if candidate.Reachability == "test-only" && (value.Strength == StrengthPartial || value.Strength == StrengthStrong) {
+			observation.ModelStrength = value.Strength
+			observation.Strength = StrengthWeak
+			observation.GuardrailNote = "Test-only anchors cannot provide partial or strong production evidence, even when they call code that is also used in production."
+			guarded++
+		}
+		result = append(result, observation)
 	}
-	return result, nil
+	return result, guarded, nil
 }
 
 func validEvidenceStrength(value EvidenceStrength) bool {
@@ -258,6 +278,8 @@ For each supplied objective_id and evidence_fingerprint pair:
 - assess only how strongly the supplied technical context supports the stated code objective;
 - consider reachability, callers, routes, authorization, configuration, persistence, logging, tests, and unresolved relationships;
 - use not_supported when context contradicts the candidate, weak for superficial or likely dead/test-only matches, partial when some necessary connections exist, strong only for directly connected implementation evidence, and uncertain when context is insufficient;
+- treat the anchor reachability value as authoritative: when the candidate anchor reachability is test-only, strength MUST be weak or not_supported;
+- never upgrade a test-only anchor because it calls a function that is also used by production code, or because a separate production-reachable relationship appears in the context;
 - identify missing technical context as unresolved questions;
 - do not decide legal applicability, certify compliance, infer documentary controls, invent code, change identifiers, or create new objectives.
 

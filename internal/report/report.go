@@ -271,6 +271,11 @@ func WriteTerminalTechnicalReview(w io.Writer, review providers.TechnicalReviewR
 		if _, err := fmt.Fprintf(w, "        Evidence: %s\n        %s\n", observation.EvidenceFingerprint, observation.Rationale); err != nil {
 			return err
 		}
+		if observation.GuardrailNote != "" {
+			if _, err := fmt.Fprintf(w, "        Guardrail: %s (model returned %s)\n", observation.GuardrailNote, observation.ModelStrength); err != nil {
+				return err
+			}
+		}
 		for _, question := range observation.UnresolvedQuestions {
 			if _, err := fmt.Fprintf(w, "        Unresolved: %s\n", question); err != nil {
 				return err

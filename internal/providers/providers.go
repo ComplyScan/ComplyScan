@@ -122,10 +122,12 @@ type TechnicalObservation struct {
 	ObjectiveID         string           `json:"objective_id"`
 	EvidenceFingerprint string           `json:"evidence_fingerprint"`
 	Strength            EvidenceStrength `json:"strength"`
+	ModelStrength       EvidenceStrength `json:"model_strength,omitempty"`
 	Confidence          string           `json:"confidence"`
 	Rationale           string           `json:"rationale"`
 	UnresolvedQuestions []string         `json:"unresolved_questions,omitempty"`
 	SuggestedReview     string           `json:"suggested_review,omitempty"`
+	GuardrailNote       string           `json:"guardrail_note,omitempty"`
 }
 
 type TechnicalReviewResult struct {

@@ -285,6 +285,56 @@ func TestOllamaTechnicalReviewUsesBoundedUntrustedSourceAndExactBinding(t *testi
 	}
 }
 
+func TestOllamaTechnicalReviewCapsTestOnlyCandidateWithSharedProductionCallee(t *testing.T) {
+	fingerprint := strings.Repeat("e", 64)
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var body struct {
+			Messages []ollamaMessage `json:"messages"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Messages) < 1 || !strings.Contains(body.Messages[0].Content, "anchor reachability value as authoritative") || !strings.Contains(body.Messages[0].Content, "also used by production code") {
+			t.Fatalf("technical prompt omitted the test-only hard rule: %#v", body.Messages)
+		}
+		content, _ := json.Marshal(ollamaTechnicalPayload{Observations: []ollamaTechnicalObservation{{
+			ObjectiveID: "eu-aia-14-override-intervention", EvidenceFingerprint: fingerprint,
+			Strength: StrengthPartial, Confidence: "medium",
+			Rationale:           "The test-only anchor calls a persistence function also used by the production handler.",
+			UnresolvedQuestions: []string{"Is the anchor reachable outside tests?"},
+			SuggestedReview:     "Trace callers.",
+		}}})
+		return testJSONResponse(http.StatusOK, map[string]any{
+			"message": map[string]string{"content": string(content)}, "done": true,
+		}), nil
+	})}
+	provider, err := NewOllama(OllamaOptions{
+		Endpoint: "http://127.0.0.1:11434", Model: "test", Timeout: time.Second,
+		MaxFindings: 1, HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := provider.ReviewTechnical(context.Background(), TechnicalReviewRequest{Candidates: []TechnicalCandidate{{
+		ObjectiveID: "eu-aia-14-override-intervention", EvidenceFingerprint: fingerprint,
+		Anchor: "main.deadOverrideDecision", Reachability: "test-only",
+		Relationships: []TechnicalRelationship{
+			{Kind: "call", From: "main.deadOverrideDecision", To: "main.updateDecision", Resolved: true},
+			{Kind: "call", From: "main.handleOverrideDecision", To: "main.updateDecision", Resolved: true},
+		},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := result.Observations[0]
+	if observation.Strength != StrengthWeak || observation.ModelStrength != StrengthPartial || observation.GuardrailNote == "" {
+		t.Fatalf("test-only guardrail was not transparent: %#v", observation)
+	}
+	if joined := strings.Join(result.Notes, "\n"); !strings.Contains(joined, "reachability guardrail") {
+		t.Fatalf("technical review omitted guardrail note: %#v", result.Notes)
+	}
+}
+
 func TestOllamaTechnicalReviewRejectsChangedObjectiveBinding(t *testing.T) {
 	fingerprint := strings.Repeat("d", 64)
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {

@@ -117,6 +117,11 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 				inlineCode(observation.ObjectiveID), inlineCode(observation.EvidenceFingerprint), markdownText(string(observation.Strength)), markdownText(observation.Confidence), markdownText(observation.Rationale)); err != nil {
 				return err
 			}
+			if observation.GuardrailNote != "" {
+				if _, err := fmt.Fprintf(writer, "\nGuardrail: %s Original model strength: %s.\n", markdownText(observation.GuardrailNote), markdownText(string(observation.ModelStrength))); err != nil {
+					return err
+				}
+			}
 			for _, question := range observation.UnresolvedQuestions {
 				if _, err := fmt.Fprintf(writer, "\n- Unresolved: %s", markdownText(question)); err != nil {
 					return err
