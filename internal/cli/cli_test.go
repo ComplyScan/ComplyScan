@@ -303,6 +303,50 @@ def override_decision(reviewer=Depends(authorize_reviewer)):
 	}
 }
 
+func TestBuildTechnicalReviewRequestIncludesConnectedTypeScriptSource(t *testing.T) {
+	pack := framework.Pack{Objectives: []framework.TechnicalObjective{{
+		ID: "eu-aia-14-override-intervention", Title: "Override", SourceReference: "Article 14",
+		Description: "An authorised person can override a decision.", FileKinds: []string{"source"},
+		PathKeywords: []string{"override"}, KeywordGroups: [][]string{{"override"}, {"decision"}},
+	}}}
+	repository := discovery.Repository{Files: []discovery.File{
+		{
+			Path: "override/api.ts", Kind: discovery.KindSource,
+			Content: []byte(`import { requireReviewer } from "./auth";
+
+export function overrideDecision(): void {
+  persistResult();
+}
+
+app.post("/override", requireReviewer, overrideDecision);
+`),
+		},
+		{
+			Path: "override/auth.ts", Kind: discovery.KindSource,
+			Content: []byte(`export function requireReviewer(): boolean {
+  return true;
+}
+`),
+		},
+	}}
+	evidence := framework.Evaluate(pack, nil, repository)
+	request := buildTechnicalReviewRequest(evidence, repository)
+	if len(request.Candidates) != 1 {
+		t.Fatalf("unexpected TypeScript candidates: %#v", request)
+	}
+	candidate := request.Candidates[0]
+	if candidate.Anchor != "override.api.overrideDecision" || candidate.Reachability != "production-reachable" || len(candidate.SourceContexts) < 2 {
+		t.Fatalf("TypeScript candidate lost connected context: %#v", candidate)
+	}
+	joined := ""
+	for _, source := range candidate.SourceContexts {
+		joined += source.Source
+	}
+	if !strings.Contains(joined, `app.post("/override"`) || !strings.Contains(joined, "requireReviewer") {
+		t.Fatalf("TypeScript route or authorization source missing: %s", joined)
+	}
+}
+
 func TestScanPreservesGraphCoverageWarnings(t *testing.T) {
 	target := t.TempDir()
 	if err := os.WriteFile(filepath.Join(target, "broken.go"), []byte("package broken\nfunc"), 0o644); err != nil {

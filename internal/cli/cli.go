@@ -525,6 +525,12 @@ func buildTechnicalReviewRequest(evidence framework.TechnicalEvidenceReport, rep
 				candidate.Anchor = match.Context.Anchor.QualifiedName
 				candidate.Reachability = string(match.Context.Anchor.Reachability)
 				remainingSource = appendTechnicalSource(&candidate, graph, *match.Context.Anchor, "anchor", remainingSource)
+				for _, relationship := range match.Context.Relationships {
+					if relationship.Kind != codegraph.EdgeRoute || remainingSource <= 0 || len(candidate.SourceContexts) >= 6 {
+						continue
+					}
+					remainingSource = appendTechnicalRelationshipSource(&candidate, repository, relationship, remainingSource)
+				}
 				for _, related := range match.Context.RelatedSymbols {
 					if remainingSource <= 0 || len(candidate.SourceContexts) >= 6 {
 						break
@@ -542,6 +548,34 @@ func buildTechnicalReviewRequest(evidence framework.TechnicalEvidenceReport, rep
 		}
 	}
 	return request
+}
+
+func appendTechnicalRelationshipSource(candidate *providers.TechnicalCandidate, repository discovery.Repository, relationship codegraph.Relationship, remaining int) int {
+	if remaining <= 0 || relationship.Path == "" || relationship.Line <= 0 {
+		return remaining
+	}
+	for _, source := range candidate.SourceContexts {
+		if source.Path == relationship.Path && relationship.Line >= source.StartLine && relationship.Line <= source.EndLine {
+			return remaining
+		}
+	}
+	content, ok := repositoryFileContent(repository, relationship.Path)
+	if !ok {
+		return remaining
+	}
+	limit := 2_000
+	if remaining < limit {
+		limit = remaining
+	}
+	source := boundedRepositoryExcerpt(content, relationship.Line, limit)
+	if source == "" {
+		return remaining
+	}
+	candidate.SourceContexts = append(candidate.SourceContexts, providers.TechnicalSourceContext{
+		Role: "relationship", Symbol: relationship.Label, Path: relationship.Path,
+		StartLine: relationship.Line, EndLine: relationship.Line, Source: source,
+	})
+	return remaining - len([]rune(source))
 }
 
 func appendTechnicalSource(candidate *providers.TechnicalCandidate, graph codegraph.Graph, reference codegraph.SymbolReference, role string, remaining int) int {

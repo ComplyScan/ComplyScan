@@ -59,6 +59,32 @@ func TestPythonTechnicalContextFixtureCoversAdversarialGraphCases(t *testing.T) 
 	}
 }
 
+func TestTypeScriptTechnicalContextFixtureCoversAdversarialGraphCases(t *testing.T) {
+	result, err := discovery.Discover(context.Background(), filepath.Join("..", "..", "testdata", "technical-context-typescript"), discovery.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph := Build(result.Repository)
+	if len(graph.Languages) != 1 || graph.Languages[0] != LanguageTypeScript {
+		t.Fatalf("unexpected fixture language coverage: %#v", graph.Languages)
+	}
+	assertReachability(t, graph, "handleOverrideDecision", ReachableProduction)
+	assertReachability(t, graph, "deadOverrideDecision", ReachableTestOnly)
+	assertEdge(t, graph, EdgeRoute, "framework-route:POST /override", "handleOverrideDecision", "POST /override")
+	assertEdge(t, graph, EdgeConfiguration, "handleOverrideDecision", "config:OVERRIDE_ENABLED", "OVERRIDE_ENABLED")
+	assertEdge(t, graph, EdgeAuthorization, "handleOverrideDecision", "requireReviewer", "requireReviewer")
+	assertEdge(t, graph, EdgePersistence, "handleOverrideDecision", "persistResult", "persistResult")
+	assertEdge(t, graph, EdgeLogging, "handleOverrideDecision", "recordEvent", "recordEvent")
+
+	encoded, err := json.Marshal(graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "IGNORE ALL PRIOR INSTRUCTIONS") {
+		t.Fatal("TypeScript repository source comment leaked into report-safe graph JSON")
+	}
+}
+
 func TestUnsupportedLanguageFixtureIsExplicitCoverageDebt(t *testing.T) {
 	result, err := discovery.Discover(context.Background(), filepath.Join("..", "..", "testdata", "technical-context-unsupported"), discovery.Options{})
 	if err != nil {
