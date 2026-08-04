@@ -47,8 +47,8 @@ func TestPythonTechnicalContextFixtureCoversAdversarialGraphCases(t *testing.T) 
 	assertEdge(t, graph, EdgeRoute, "framework-route:POST /override", "handle_override_decision", "POST /override")
 	assertEdge(t, graph, EdgeConfiguration, "handle_override_decision", "config:OVERRIDE_ENABLED", "OVERRIDE_ENABLED")
 	assertEdge(t, graph, EdgeAuthorization, "handle_override_decision", "authorize_reviewer", "Depends(authorize_reviewer)")
-	assertEdge(t, graph, EdgePersistence, "handle_override_decision", "update_decision", "update_decision")
-	assertEdge(t, graph, EdgeLogging, "handle_override_decision", "audit_override", "audit_override")
+	assertEdge(t, graph, EdgePersistence, "handle_override_decision", "persist_result", "persist_result")
+	assertEdge(t, graph, EdgeLogging, "handle_override_decision", "record_event", "record_event")
 
 	encoded, err := json.Marshal(graph)
 	if err != nil {

@@ -1,6 +1,6 @@
-def update_decision():
+def persist_result():
     pass
 
 
-def audit_override():
+def record_event():
     pass
