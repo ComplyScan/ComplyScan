@@ -66,6 +66,68 @@ func TestShellInstallerRejectsChecksumMismatch(t *testing.T) {
 	}
 }
 
+func TestShellInstallerPreservesExistingBinaryWhenReleaseIsMissing(t *testing.T) {
+	requireInstallerCommands(t)
+	installDirectory := t.TempDir()
+	installed := filepath.Join(installDirectory, "complyscan")
+	if err := os.WriteFile(installed, []byte("existing binary\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	command := exec.Command("/bin/sh", filepath.Join("..", "..", "install.sh"),
+		"--version", "v1.2.3", "--install-dir", installDirectory, "--no-setup")
+	command.Env = append(os.Environ(), "COMPLYSCAN_RELEASE_BASE_URL="+fileURL(t.TempDir()))
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("installer accepted a missing release:\n%s", output)
+	}
+	content, readErr := os.ReadFile(installed)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(content) != "existing binary\n" {
+		t.Fatalf("existing installation changed after failed update: %q", content)
+	}
+}
+
+func TestShellInstallerRejectsChecksumWithoutPlatformArchive(t *testing.T) {
+	requireInstallerCommands(t)
+	archiveName := installerArchiveName(t, "1.2.3")
+	archive := releaseArchive(t, "fixture")
+	releaseBase := releaseFixture(t, "v1.2.3", archiveName, archive, strings.Repeat("a", 64)+"  another-archive.tar.gz\n")
+
+	installDirectory := t.TempDir()
+	command := exec.Command("/bin/sh", filepath.Join("..", "..", "install.sh"),
+		"--version", "v1.2.3", "--install-dir", installDirectory, "--no-setup")
+	command.Env = append(os.Environ(), "COMPLYSCAN_RELEASE_BASE_URL="+releaseBase)
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("installer accepted an incomplete checksum manifest:\n%s", output)
+	}
+	if !strings.Contains(string(output), "does not contain "+archiveName) {
+		t.Fatalf("unexpected failure:\n%s", output)
+	}
+}
+
+func TestShellInstallerRejectsUnsupportedOperatingSystemBeforeDownload(t *testing.T) {
+	requireInstallerCommands(t)
+	commandDirectory := t.TempDir()
+	uname := filepath.Join(commandDirectory, "uname")
+	if err := os.WriteFile(uname, []byte("#!/bin/sh\nprintf 'Plan9\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	command := exec.Command("/bin/sh", filepath.Join("..", "..", "install.sh"), "--no-setup")
+	command.Env = append(os.Environ(), "PATH="+commandDirectory+string(os.PathListSeparator)+os.Getenv("PATH"))
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("installer accepted an unsupported operating system:\n%s", output)
+	}
+	if !strings.Contains(string(output), "unsupported operating system Plan9") {
+		t.Fatalf("unexpected failure:\n%s", output)
+	}
+}
+
 func requireInstallerCommands(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -124,5 +186,9 @@ func releaseFixture(t *testing.T, tag, archiveName string, archive []byte, check
 	if err := os.WriteFile(filepath.Join(directory, "checksums.txt"), []byte(checksums), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return (&url.URL{Scheme: "file", Path: root}).String()
+	return fileURL(root)
+}
+
+func fileURL(path string) string {
+	return (&url.URL{Scheme: "file", Path: path}).String()
 }
