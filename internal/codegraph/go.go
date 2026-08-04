@@ -41,8 +41,13 @@ func Build(repository discovery.Repository) Graph {
 	pythonFiles := make([]parsedPythonFile, 0)
 	pythonQualifiedNames := make(map[string]string)
 	pythonGlobalNames := make(map[string][]string)
+	javascriptFiles := make([]parsedJavaScriptFile, 0)
+	javascriptQualifiedNames := make(map[string]string)
+	javascriptGlobalNames := make(map[string][]string)
 	goFilesIndexed := 0
 	pythonFilesIndexed := 0
+	javascriptFilesIndexed := 0
+	typeScriptFilesIndexed := 0
 
 	for _, repositoryFile := range repository.Files {
 		if repositoryFile.Kind != discovery.KindSource {
@@ -53,6 +58,28 @@ func Build(repository discovery.Repository) Graph {
 		}
 		graph.SourceFilesSeen++
 		extension := strings.ToLower(filepath.Ext(repositoryFile.Path))
+		if language, ok := javascriptLanguageForExtension(extension); ok {
+			parsed, err := parseJavaScriptFile(repositoryFile, language)
+			if err != nil {
+				graph.Warnings = append(graph.Warnings, fmt.Sprintf("could not parse %s source %s: %v", language, repositoryFile.Path, err))
+				continue
+			}
+			javascriptFiles = append(javascriptFiles, parsed)
+			graph.FilesIndexed++
+			if language == LanguageTypeScript {
+				typeScriptFilesIndexed++
+			} else {
+				javascriptFilesIndexed++
+			}
+			graph.IndexedSourceFiles = append(graph.IndexedSourceFiles, repositoryFile.Path)
+			graph.Imports = append(graph.Imports, parsed.imports...)
+			graph.Symbols = append(graph.Symbols, parsed.symbols...)
+			for _, function := range parsed.functions {
+				javascriptQualifiedNames[function.qualifiedName] = function.symbolID
+				javascriptGlobalNames[function.name] = append(javascriptGlobalNames[function.name], function.symbolID)
+			}
+			continue
+		}
 		if extension == ".py" {
 			parsed, err := parsePythonFile(repositoryFile)
 			if err != nil {
@@ -149,12 +176,21 @@ func Build(repository discovery.Repository) Graph {
 	if pythonFilesIndexed > 0 {
 		graph.Languages = append(graph.Languages, LanguagePython)
 	}
+	if javascriptFilesIndexed > 0 {
+		graph.Languages = append(graph.Languages, LanguageJavaScript)
+	}
+	if typeScriptFilesIndexed > 0 {
+		graph.Languages = append(graph.Languages, LanguageTypeScript)
+	}
 
 	for _, function := range functions {
 		indexGoFunction(&graph, function, packageNames, globalNames)
 	}
 	for _, file := range pythonFiles {
 		indexPythonFile(&graph, file, pythonQualifiedNames, pythonGlobalNames)
+	}
+	for _, file := range javascriptFiles {
+		indexJavaScriptFile(&graph, file, javascriptQualifiedNames, javascriptGlobalNames)
 	}
 
 	graph.finalize()

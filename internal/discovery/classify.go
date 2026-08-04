@@ -7,9 +7,9 @@ import (
 
 var sourceExtensions = map[string]struct{}{
 	".c": {}, ".cc": {}, ".cpp": {}, ".cs": {}, ".go": {}, ".h": {}, ".hpp": {},
-	".java": {}, ".js": {}, ".jsx": {}, ".kt": {}, ".kts": {}, ".php": {},
+	".java": {}, ".js": {}, ".jsx": {}, ".mjs": {}, ".cjs": {}, ".kt": {}, ".kts": {}, ".php": {},
 	".py": {}, ".rb": {}, ".rs": {}, ".scala": {}, ".sh": {}, ".swift": {},
-	".ts": {}, ".tsx": {},
+	".ts": {}, ".tsx": {}, ".mts": {}, ".cts": {},
 }
 
 var manifests = map[string]struct{}{
