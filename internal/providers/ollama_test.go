@@ -179,7 +179,10 @@ func TestOllamaReviewHonorsHTTPTimeout(t *testing.T) {
 	_, err = provider.Review(context.Background(), ReviewRequest{Findings: []rules.Finding{{
 		Fingerprint: strings.Repeat("a", 64), RuleID: "AI-LOG-001",
 	}}})
-	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+	var timeoutError interface{ Timeout() bool }
+	deadlineExceeded := errors.Is(err, context.DeadlineExceeded)
+	timedOut := errors.As(err, &timeoutError) && timeoutError.Timeout()
+	if err == nil || (!deadlineExceeded && !timedOut) {
 		t.Fatalf("got error %v", err)
 	}
 }
