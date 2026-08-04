@@ -25,7 +25,7 @@ var identifierPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 var semanticVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 
 var builtinPaths = map[string]string{
-	EUAIActTechnicalEvidencePackID: "packs/eu-ai-act-technical-evidence-v0.1.0.yml",
+	EUAIActTechnicalEvidencePackID: "packs/eu-ai-act-technical-evidence-v0.1.1.yml",
 }
 
 var supportedFileKinds = map[string]struct{}{

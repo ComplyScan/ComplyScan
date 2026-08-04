@@ -2,8 +2,8 @@
 schema-version: 1
 id: eu-ai-act-technical-evidence
 name: EU AI Act technical code evidence
-version: 0.1.0
-released: "2026-08-03"
+version: 0.1.1
+released: "2026-08-04"
 source:
   title: Artificial Intelligence Act
   reference: Regulation (EU) 2024/1689
@@ -26,7 +26,7 @@ objectives:
     file-kinds: [source, configuration, ci, github-actions]
     path-keywords: [risk, safety, evaluation, test]
     keyword-groups:
-      - [risk, safety, hazard]
+      - [ai risk, model risk, risk control, ai safety, model safety, safety evaluation, hazard analysis]
       - [test, evaluation, validation]
     verification: technical-semantic-and-human
   - id: eu-aia-10-dataset-validation
@@ -38,7 +38,7 @@ objectives:
     path-keywords: [data, dataset, validation]
     keyword-groups:
       - [training data, validation data, test data, dataset]
-      - [validate, schema, quality, completeness, missing]
+      - [validate, schema validation, quality check, completeness, missing]
     verification: technical-semantic-and-human
   - id: eu-aia-10-bias-evaluation
     title: Bias and fairness evaluation
@@ -48,7 +48,7 @@ objectives:
     file-kinds: [source, configuration, ci, github-actions]
     path-keywords: [bias, fairness, evaluation, test]
     keyword-groups:
-      - [bias, fairness, discrimination, demographic parity, equalized odds]
+      - [fairness, discrimination, demographic parity, equalized odds, political bias, anchoring bias, gender bias, racial bias]
       - [test, evaluation, metric, threshold]
     verification: technical-semantic-and-human
   - id: eu-aia-12-automatic-event-logging
@@ -70,7 +70,7 @@ objectives:
     file-kinds: [source, configuration, terraform, dockerfile]
     path-keywords: [log, audit, retention, lifecycle]
     keyword-groups:
-      - [log, audit, telemetry]
+      - [audit log, event log, telemetry log, inference log, model log]
       - [retention, ttl, lifecycle, expiry, expiration]
     verification: technical-semantic-and-human
   - id: eu-aia-14-human-review-gate
@@ -115,7 +115,7 @@ objectives:
     path-keywords: [evaluation, benchmark, performance, test]
     keyword-groups:
       - [accuracy, precision, recall, f1, performance]
-      - [threshold, acceptance criteria, minimum, assert]
+      - [threshold, acceptance criteria, minimum]
     verification: technical-semantic-and-human
   - id: eu-aia-15-robustness-failure-handling
     title: Robustness and failure handling
@@ -125,8 +125,8 @@ objectives:
     file-kinds: [source, configuration, ci, github-actions, terraform]
     path-keywords: [robustness, adversarial, fault, fallback, test]
     keyword-groups:
-      - [robustness, adversarial, fuzz, fault, timeout]
-      - [fallback, fail-safe, circuit breaker, retry, test]
+      - [robustness, adversarial, fuzz, model fault, inference fault, inference timeout]
+      - [fallback, fail-safe, circuit breaker, retry, recovery test]
     verification: technical-semantic-and-human
   - id: eu-aia-15-ai-security-controls
     title: AI-specific security controls

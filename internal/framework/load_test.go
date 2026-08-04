@@ -10,7 +10,7 @@ func TestBuiltinEUAIActPackContainsCodeObjectivesOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pack.Version != "0.1.0" || pack.Source.Reference != "Regulation (EU) 2024/1689" || pack.Coverage.EvidenceType != "code" {
+	if pack.Version != "0.1.1" || pack.Source.Reference != "Regulation (EU) 2024/1689" || pack.Coverage.EvidenceType != "code" {
 		t.Fatalf("unexpected pack metadata: %#v", pack)
 	}
 	if len(pack.Digest) != 64 || len(pack.Objectives) < 10 {

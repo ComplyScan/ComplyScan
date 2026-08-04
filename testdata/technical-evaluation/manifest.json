@@ -2,7 +2,7 @@
   "schema_version": 1,
   "name": "EU AI Act technical evidence benchmark",
   "pack_id": "eu-ai-act-technical-evidence",
-  "pack_version": "0.1.0",
+  "pack_version": "0.1.1",
   "thresholds": {
     "candidate_precision": 0.95,
     "candidate_recall": 0.90,

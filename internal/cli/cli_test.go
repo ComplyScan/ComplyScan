@@ -861,7 +861,7 @@ func TestFrameworkListWritesVersionedCoverageJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &listings); err != nil {
 		t.Fatal(err)
 	}
-	if len(listings) != 1 || listings[0].Pack.Version != "0.1.0" || len(listings[0].Coverage.Limitations) == 0 {
+	if len(listings) != 1 || listings[0].Pack.Version != "0.1.1" || len(listings[0].Coverage.Limitations) == 0 {
 		t.Fatalf("unexpected listings: %#v", listings)
 	}
 }
