@@ -6,6 +6,7 @@ script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repository_root=$(CDPATH= cd -- "${script_directory}/.." && pwd)
 model=${COMPLYSCAN_OLLAMA_MODEL:-qwen3:8b}
 output_directory=${COMPLYSCAN_VALIDATION_DIR:-${repository_root}/.complyscan/validation/ollama}
+fixture_names=${COMPLYSCAN_VALIDATION_FIXTURES:-"go python typescript"}
 
 command -v go >/dev/null 2>&1 || {
 	printf '%s\n' "Error: Go is required to build the current ComplyScan source." >&2
@@ -30,9 +31,11 @@ metrics_path=${output_directory}/${timestamp}-metrics.txt
 summary_path=${output_directory}/${timestamp}-summary.txt
 temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/complyscan-ollama-validation.XXXXXX")
 binary=${temporary_directory}/complyscan
+saved_reports_path=${temporary_directory}/saved-reports.txt
+: >"$saved_reports_path"
 
 cleanup() {
-	rm -f "$binary"
+	rm -f "$binary" "$saved_reports_path"
 	rmdir "$temporary_directory" 2>/dev/null || true
 }
 trap cleanup EXIT HUP INT TERM
@@ -46,7 +49,14 @@ printf 'Building current ComplyScan source...\n'
 } >"$metrics_path"
 : >"$summary_path"
 
-for fixture_name in go python; do
+for fixture_name in $fixture_names; do
+	case "$fixture_name" in
+	go | python | typescript) ;;
+	*)
+		printf 'Error: unsupported validation fixture %s (choose go, python, or typescript).\n' "$fixture_name" >&2
+		exit 1
+		;;
+	esac
 	fixture=${repository_root}/testdata/technical-context-${fixture_name}
 	result_path=${output_directory}/${timestamp}-${fixture_name}-report.json
 	printf 'Validating %s against %s...\n' "$model" "$fixture"
@@ -65,6 +75,7 @@ for fixture_name in go python; do
 	esac
 	printf '\n%s fixture:\n' "$fixture_name" >>"$summary_path"
 	(cd "$repository_root" && go run ./scripts/validate_ollama_result.go "$result_path" "$model") >>"$summary_path"
+	printf 'Saved %s report: %s\n' "$fixture_name" "$result_path" >>"$saved_reports_path"
 done
 
 {
@@ -73,5 +84,6 @@ done
 } >>"$metrics_path"
 
 cat "$summary_path"
-printf '\nSaved Go report: %s\n' "${output_directory}/${timestamp}-go-report.json"
-printf 'Saved Python report: %s\nSaved metrics: %s\nSaved summary: %s\n' "${output_directory}/${timestamp}-python-report.json" "$metrics_path" "$summary_path"
+printf '\n'
+cat "$saved_reports_path"
+printf 'Saved metrics: %s\nSaved summary: %s\n' "$metrics_path" "$summary_path"

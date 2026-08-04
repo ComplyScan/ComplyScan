@@ -8,7 +8,7 @@ After `qwen3:8b` is available, run from the repository root:
 ./scripts/validate-ollama.sh
 ```
 
-The harness builds the current source, confirms the configured model appears in `ollama list`, and scans both `testdata/technical-context-go` and `testdata/technical-context-python`. The fixtures contain:
+The harness builds the current source, confirms the configured model appears in `ollama list`, and scans the Go, Python, and TypeScript fixtures under `testdata/technical-context-*`. The fixtures contain:
 
 - a production-routed override handler connected to configuration, authorization, persistence, and audit calls;
 - a test-only override lookalike without authorization or audit relationships; and
@@ -18,7 +18,7 @@ Each fixture uses the generated 360-second Ollama timeout because inference time
 
 Validation passes for each language only when the production-routed candidate receives `partial` or `strong`, while every test-only candidate receives `weak` or `not_supported`. The model must preserve the existing objective and evidence identifiers enforced by the provider contract, and a deterministic guardrail correction does not count as a clean model-quality pass.
 
-Generated per-language JSON, resource metrics, and the combined validation summary are saved under `.complyscan/validation/ollama/` and are ignored by Git. The metrics distinguish each ComplyScan CLI process measured by `/usr/bin/time` from the separately running model allocation reported by `ollama ps`. Review both JSON reports and the metrics before recording a qualified release result. Override the defaults with `COMPLYSCAN_OLLAMA_MODEL` or `COMPLYSCAN_VALIDATION_DIR` when needed.
+Generated per-language JSON, resource metrics, and the combined validation summary are saved under `.complyscan/validation/ollama/` and are ignored by Git. The metrics distinguish each ComplyScan CLI process measured by `/usr/bin/time` from the separately running model allocation reported by `ollama ps`. Review all JSON reports and the metrics before recording a qualified release result. Override the defaults with `COMPLYSCAN_OLLAMA_MODEL` or `COMPLYSCAN_VALIDATION_DIR` when needed. To run only selected fixtures during development, provide a space-separated list such as `COMPLYSCAN_VALIDATION_FIXTURES="typescript"` or `COMPLYSCAN_VALIDATION_FIXTURES="python typescript"`.
 
 ## Recorded development validation
 
