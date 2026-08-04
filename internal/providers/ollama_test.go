@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/rules"
+	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
 
 func TestOllamaReviewUsesStructuredLocalRequestAndRedactsEvidence(t *testing.T) {

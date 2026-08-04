@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
+	"github.com/ComplyScan/ComplyScan/internal/discovery"
 )
 
 // Severity describes the potential engineering impact of a finding.

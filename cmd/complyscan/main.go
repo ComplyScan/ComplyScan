@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/cli"
+	"github.com/ComplyScan/ComplyScan/internal/cli"
 )
 
 var (

@@ -1,4 +1,4 @@
-module github.com/1eonardodawinki/ComplyScan
+module github.com/ComplyScan/ComplyScan
 
 go 1.22
 

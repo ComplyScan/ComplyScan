@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/profile"
-	"github.com/1eonardodawinki/ComplyScan/internal/rules"
+	"github.com/ComplyScan/ComplyScan/internal/profile"
+	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
 
 func TestLoadMergesDefaultsAndParsesConfig(t *testing.T) {

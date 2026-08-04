@@ -8,7 +8,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
+	"github.com/ComplyScan/ComplyScan/internal/discovery"
 )
 
 type evaluationLabel struct {

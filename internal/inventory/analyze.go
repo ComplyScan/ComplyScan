@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
+	"github.com/ComplyScan/ComplyScan/internal/discovery"
 )
 
 const IgnoreSignalsMarker = "complyscan:ignore-ai-signals"

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/inventory"
+	"github.com/ComplyScan/ComplyScan/internal/inventory"
 )
 
 func TestDocumentsIncludeInventoryAndReviewGuardrails(t *testing.T) {

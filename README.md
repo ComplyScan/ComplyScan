@@ -25,7 +25,7 @@ curl -fsSL https://github.com/ComplyScan/ComplyScan/releases/download/v0.1.2/ins
 Prebuilt archives for macOS, Linux, and Windows are also available on [GitHub Releases](https://github.com/ComplyScan/ComplyScan/releases). The current stable release can be installed with Go 1.22 or newer:
 
 ```bash
-go install github.com/1eonardodawinki/ComplyScan/cmd/complyscan@latest
+go install github.com/ComplyScan/ComplyScan/cmd/complyscan@latest
 ```
 
 Building the development version from source requires Go 1.22 or newer:

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
+	"github.com/ComplyScan/ComplyScan/internal/discovery"
 )
 
 type HardcodedSecretRule struct{}

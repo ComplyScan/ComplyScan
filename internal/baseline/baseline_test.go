@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/rules"
+	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
 
 func TestWriteAndLoadDeterministicSourceFreeBaseline(t *testing.T) {

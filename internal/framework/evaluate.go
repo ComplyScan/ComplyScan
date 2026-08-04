@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/codegraph"
-	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
-	"github.com/1eonardodawinki/ComplyScan/internal/profile"
+	"github.com/ComplyScan/ComplyScan/internal/codegraph"
+	"github.com/ComplyScan/ComplyScan/internal/discovery"
+	"github.com/ComplyScan/ComplyScan/internal/profile"
 )
 
 type ObjectiveStatus string

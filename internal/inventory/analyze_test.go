@@ -4,7 +4,7 @@ package inventory
 import (
 	"testing"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
+	"github.com/ComplyScan/ComplyScan/internal/discovery"
 )
 
 func TestAnalyzeFindsTypedSignals(t *testing.T) {

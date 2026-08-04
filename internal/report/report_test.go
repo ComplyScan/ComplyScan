@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
-	"github.com/1eonardodawinki/ComplyScan/internal/framework"
-	"github.com/1eonardodawinki/ComplyScan/internal/profile"
-	"github.com/1eonardodawinki/ComplyScan/internal/providers"
-	"github.com/1eonardodawinki/ComplyScan/internal/rules"
+	"github.com/ComplyScan/ComplyScan/internal/discovery"
+	"github.com/ComplyScan/ComplyScan/internal/framework"
+	"github.com/ComplyScan/ComplyScan/internal/profile"
+	"github.com/ComplyScan/ComplyScan/internal/providers"
+	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
 
 func TestSeverityFilteringAndThreshold(t *testing.T) {

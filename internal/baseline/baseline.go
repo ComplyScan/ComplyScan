@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/rules"
+	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
 
 const FileName = ".complyscan-baseline.json"

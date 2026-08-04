@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
+	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"gopkg.in/yaml.v3"
 )
 

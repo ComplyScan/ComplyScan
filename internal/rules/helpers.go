@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
-	"github.com/1eonardodawinki/ComplyScan/internal/inventory"
+	"github.com/ComplyScan/ComplyScan/internal/discovery"
+	"github.com/ComplyScan/ComplyScan/internal/inventory"
 )
 
 type aiMatch = inventory.Signal

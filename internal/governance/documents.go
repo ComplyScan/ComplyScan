@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/inventory"
+	"github.com/ComplyScan/ComplyScan/internal/inventory"
 )
 
 const (

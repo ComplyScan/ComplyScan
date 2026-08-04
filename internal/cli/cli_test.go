@@ -9,13 +9,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/config"
-	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
-	"github.com/1eonardodawinki/ComplyScan/internal/framework"
-	"github.com/1eonardodawinki/ComplyScan/internal/inventory"
-	"github.com/1eonardodawinki/ComplyScan/internal/profile"
-	"github.com/1eonardodawinki/ComplyScan/internal/providers"
-	"github.com/1eonardodawinki/ComplyScan/internal/report"
+	"github.com/ComplyScan/ComplyScan/internal/config"
+	"github.com/ComplyScan/ComplyScan/internal/discovery"
+	"github.com/ComplyScan/ComplyScan/internal/framework"
+	"github.com/ComplyScan/ComplyScan/internal/inventory"
+	"github.com/ComplyScan/ComplyScan/internal/profile"
+	"github.com/ComplyScan/ComplyScan/internal/providers"
+	"github.com/ComplyScan/ComplyScan/internal/report"
 )
 
 var testBuild = BuildInfo{Version: "0.1.0", Commit: "test", BuildDate: "today"}

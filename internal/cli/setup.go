@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/config"
-	"github.com/1eonardodawinki/ComplyScan/internal/profile"
+	"github.com/ComplyScan/ComplyScan/internal/config"
+	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/spf13/cobra"
 )
 

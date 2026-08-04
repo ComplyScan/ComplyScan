@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
+	"github.com/ComplyScan/ComplyScan/internal/discovery"
 )
 
 func TestHardcodedSecretRuleRedactsAndIgnoresEnvironmentReferences(t *testing.T) {

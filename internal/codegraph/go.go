@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
+	"github.com/ComplyScan/ComplyScan/internal/discovery"
 )
 
 const ignoreTechnicalEvidenceMarker = "complyscan:ignore-technical-evidence"

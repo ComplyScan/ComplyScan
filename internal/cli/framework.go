@@ -6,9 +6,9 @@ import (
 	"io"
 	"strings"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/config"
-	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
-	"github.com/1eonardodawinki/ComplyScan/internal/framework"
+	"github.com/ComplyScan/ComplyScan/internal/config"
+	"github.com/ComplyScan/ComplyScan/internal/discovery"
+	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/spf13/cobra"
 )
 

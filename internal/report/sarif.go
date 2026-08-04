@@ -6,8 +6,8 @@ import (
 	"io"
 	"sort"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/providers"
-	"github.com/1eonardodawinki/ComplyScan/internal/rules"
+	"github.com/ComplyScan/ComplyScan/internal/providers"
+	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
 
 const sarifSchema = "https://json.schemastore.org/sarif-2.1.0.json"
@@ -106,7 +106,7 @@ func WriteSARIF(writer io.Writer, report Report) error {
 			Tool: sarifTool{Driver: sarifDriver{
 				Name:           report.Tool.Name,
 				Version:        report.Tool.Version,
-				InformationURI: "https://github.com/1eonardodawinki/ComplyScan",
+				InformationURI: "https://github.com/ComplyScan/ComplyScan",
 				Rules:          sarifRules(report.Findings),
 			}},
 			Results: results,

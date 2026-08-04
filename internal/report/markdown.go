@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/framework"
+	"github.com/ComplyScan/ComplyScan/internal/framework"
 )
 
 // WriteMarkdown renders the same scan result as a human-readable local report.

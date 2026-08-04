@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/discovery"
-	"github.com/1eonardodawinki/ComplyScan/internal/profile"
+	"github.com/ComplyScan/ComplyScan/internal/discovery"
+	"github.com/ComplyScan/ComplyScan/internal/profile"
 )
 
 func TestEvaluateMapsCodeEvidenceWithoutControlOrComplianceClaims(t *testing.T) {

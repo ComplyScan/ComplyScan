@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/1eonardodawinki/ComplyScan/internal/config"
+	"github.com/ComplyScan/ComplyScan/internal/config"
 )
 
 func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
