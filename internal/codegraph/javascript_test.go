@@ -89,6 +89,84 @@ func TestBuildIndexesJavaScriptAndTypeScriptSeparately(t *testing.T) {
 	}
 }
 
+func TestBuildIndexesJavaScriptFrameworkRelationships(t *testing.T) {
+	repository := discovery.Repository{Files: []discovery.File{
+		{
+			Path: "src/api.ts", Kind: discovery.KindSource, Content: []byte(`import { requireReviewer } from "./auth";
+
+export async function handleOverride(): Promise<void> {
+  const enabled = process.env.OVERRIDE_ENABLED;
+  await prisma.decision.update({});
+  logger.info("override stored");
+}
+
+app.post("/override", requireReviewer, handleOverride);
+fastify.route({ method: "DELETE", url: "/override/:id", preHandler: requireReviewer, handler: handleOverride });
+
+router.patch("/inline", requireReviewer, async (_request, response) => {
+  await repository.save();
+  audit.recordEvent();
+  response.send();
+});
+`),
+		},
+		{
+			Path: "src/auth.ts", Kind: discovery.KindSource, Content: []byte(`export function requireReviewer(): boolean {
+  return true;
+}
+`),
+		},
+		{
+			Path: "src/controller.ts", Kind: discovery.KindSource, Content: []byte(`@Controller("decisions")
+export class DecisionController {
+  @Post("override")
+  @UseGuards(ReviewerGuard)
+  overrideDecision(): void {
+    repository.save();
+    logger.info("override");
+  }
+}
+`),
+		},
+		{
+			Path: "src/app/api/review/route.ts", Kind: discovery.KindSource, Content: []byte(`export async function POST(): Promise<void> {
+  await audit.recordEvent();
+}
+`),
+		},
+	}}
+
+	graph := Build(repository)
+	assertEdge(t, graph, EdgeRoute, "framework-route:POST /override", "handleOverride", "POST /override")
+	assertEdge(t, graph, EdgeRoute, "framework-route:DELETE /override/:id", "handleOverride", "DELETE /override/:id")
+	assertEdge(t, graph, EdgeAuthorization, "handleOverride", "requireReviewer", "requireReviewer")
+	assertEdge(t, graph, EdgeConfiguration, "handleOverride", "config:OVERRIDE_ENABLED", "OVERRIDE_ENABLED")
+	assertEdge(t, graph, EdgePersistence, "handleOverride", "prisma.decision.update", "prisma.decision.update")
+	assertEdge(t, graph, EdgeLogging, "handleOverride", "logger.info", "logger.info")
+	assertEdge(t, graph, EdgeRoute, "framework-route:PATCH /inline", "route_handler", "PATCH /inline")
+	assertEdge(t, graph, EdgePersistence, "route_handler", "repository.save", "repository.save")
+	assertEdge(t, graph, EdgeLogging, "route_handler", "audit.recordEvent", "audit.recordEvent")
+	assertEdge(t, graph, EdgeRoute, "framework-route:POST /decisions/override", "overrideDecision", "POST /decisions/override")
+	assertEdge(t, graph, EdgeAuthorization, "overrideDecision", "ReviewerGuard", "ReviewerGuard")
+	assertEdge(t, graph, EdgeRoute, "framework-route:POST /api/review", "POST", "POST /api/review")
+	assertReachability(t, graph, "handleOverride", ReachableProduction)
+	assertReachability(t, graph, "overrideDecision", ReachableProduction)
+}
+
+func TestJavaScriptCommentsCannotCreateFrameworkRelationships(t *testing.T) {
+	graph := Build(discovery.Repository{Files: []discovery.File{{
+		Path: "app.js", Kind: discovery.KindSource, Content: []byte(`export function worker() {
+  // app.post("/fake", requireAuth, fakeHandler);
+  const message = 'process.env.FAKE_FLAG logger.info()';
+  return message;
+}
+`),
+	}}})
+	if len(graph.Edges) != 0 {
+		t.Fatalf("comment or string created JavaScript relationships: %#v", graph.Edges)
+	}
+}
+
 func TestJavaScriptCommentsAndStringsDoNotCreateStructure(t *testing.T) {
 	graph := Build(discovery.Repository{Files: []discovery.File{{
 		Path: "worker.js", Kind: discovery.KindSource, Content: []byte(`const message = "fakeCall()";

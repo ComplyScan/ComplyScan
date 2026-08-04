@@ -12,19 +12,28 @@ import (
 )
 
 var (
-	javascriptFunctionPattern         = regexp.MustCompile(`^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)\b`)
-	javascriptArrowPattern            = regexp.MustCompile(`^(?:export\s+)?(?:default\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b[^=]*=\s*(?:async\s+)?(?:\([^;]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*(?::\s*[^=]+)?=>`)
-	javascriptFunctionValuePattern    = regexp.MustCompile(`^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b[^=]*=\s*(?:async\s+)?function\b`)
-	javascriptClassPattern            = regexp.MustCompile(`^(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z_$][A-Za-z0-9_$]*)\b`)
-	javascriptTypePattern             = regexp.MustCompile(`^(?:export\s+)?(?:default\s+)?(?:interface|type|enum)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b`)
-	javascriptMethodPattern           = regexp.MustCompile(`^(?:(?:public|private|protected|static|async|readonly|abstract|override|get|set)\s+)*([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:<[^>{}]*>)?\s*\(`)
-	javascriptCallPattern             = regexp.MustCompile(`([A-Za-z_$][A-Za-z0-9_$]*(?:\s*(?:\.|\?\.)\s*[A-Za-z_$][A-Za-z0-9_$]*)*)\s*\(`)
-	javascriptESMImportPattern        = regexp.MustCompile(`^\s*import\s+(.+?)\s+from\s+['"]([^'"]+)['"]`)
-	javascriptSideEffectImportPattern = regexp.MustCompile(`^\s*import\s+['"]([^'"]+)['"]`)
-	javascriptRequirePattern          = regexp.MustCompile(`^\s*(?:const|let|var)\s+(.+?)\s*=\s*require\s*\(\s*['"]([^'"]+)['"]\s*\)`)
-	javascriptExportListPattern       = regexp.MustCompile(`^\s*export\s*\{([^}]+)\}`)
-	javascriptTestPattern             = regexp.MustCompile(`\b(?:it|test)(?:\.(?:only|skip|todo))?\s*\(`)
+	javascriptFunctionPattern          = regexp.MustCompile(`^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)\b`)
+	javascriptArrowPattern             = regexp.MustCompile(`^(?:export\s+)?(?:default\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b[^=]*=\s*(?:async\s+)?(?:\([^;]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*(?::\s*[^=]+)?=>`)
+	javascriptFunctionValuePattern     = regexp.MustCompile(`^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b[^=]*=\s*(?:async\s+)?function\b`)
+	javascriptClassPattern             = regexp.MustCompile(`^(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z_$][A-Za-z0-9_$]*)\b`)
+	javascriptTypePattern              = regexp.MustCompile(`^(?:export\s+)?(?:default\s+)?(?:interface|type|enum)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b`)
+	javascriptMethodPattern            = regexp.MustCompile(`^(?:(?:public|private|protected|static|async|readonly|abstract|override|get|set)\s+)*([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:<[^>{}]*>)?\s*\(`)
+	javascriptCallPattern              = regexp.MustCompile(`([A-Za-z_$][A-Za-z0-9_$]*(?:\s*(?:\.|\?\.)\s*[A-Za-z_$][A-Za-z0-9_$]*)*)\s*\(`)
+	javascriptESMImportPattern         = regexp.MustCompile(`^\s*import\s+(.+?)\s+from\s+['"]([^'"]+)['"]`)
+	javascriptSideEffectImportPattern  = regexp.MustCompile(`^\s*import\s+['"]([^'"]+)['"]`)
+	javascriptRequirePattern           = regexp.MustCompile(`^\s*(?:const|let|var)\s+(.+?)\s*=\s*require\s*\(\s*['"]([^'"]+)['"]\s*\)`)
+	javascriptExportListPattern        = regexp.MustCompile(`^\s*export\s*\{([^}]+)\}`)
+	javascriptTestPattern              = regexp.MustCompile(`\b(?:it|test)(?:\.(?:only|skip|todo))?\s*\(`)
+	javascriptRouteCallPattern         = regexp.MustCompile(`\b([A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*)\.(get|post|put|patch|delete|options|head|use)\s*\(`)
+	javascriptObjectRoutePattern       = regexp.MustCompile(`\b([A-Za-z_$][A-Za-z0-9_$]*)\.route\s*\(`)
+	javascriptProcessEnvDotPattern     = regexp.MustCompile(`\b(?:process|Bun)\.env\.([A-Za-z_$][A-Za-z0-9_$]*)`)
+	javascriptProcessEnvBracketPattern = regexp.MustCompile(`\b(?:process|Bun)\.env\s*\[\s*['"]([^'"]+)['"]\s*\]`)
 )
+
+type javascriptDecorator struct {
+	expression string
+	line       int
+}
 
 type javascriptClass struct {
 	name          string
@@ -32,6 +41,7 @@ type javascriptClass struct {
 	startLine     int
 	endLine       int
 	indent        int
+	routePrefix   string
 }
 
 type javascriptFunction struct {
@@ -45,6 +55,7 @@ type javascriptFunction struct {
 	indent             int
 	exported           bool
 	declarationLine    string
+	decorators         []javascriptDecorator
 }
 
 type parsedJavaScriptFile struct {
@@ -100,9 +111,11 @@ func parseJavaScriptFile(repositoryFile discovery.File, language Language) (pars
 				return parsedJavaScriptFile{}, fmt.Errorf("unterminated class %s at line %d", match[1], index+1)
 			}
 			qualified := parsed.module + "." + match[1]
+			decorators := javascriptDecoratorsBefore(lines, masked, index)
 			parsed.classes = append(parsed.classes, javascriptClass{
 				name: match[1], qualifiedName: qualified, startLine: index + 1,
 				endLine: endLine, indent: javascriptIndentWidth(lines[index]),
+				routePrefix: javascriptControllerPrefix(decorators),
 			})
 			parsed.symbols = append(parsed.symbols, javascriptSymbol(
 				repositoryFile, language, parsed.module, match[1], qualified,
@@ -146,13 +159,17 @@ func parseJavaScriptFile(repositoryFile discovery.File, language Language) (pars
 			if javascriptTestPath(repositoryFile.Path) {
 				kind = SymbolTest
 			}
+			decorators := javascriptDecoratorsBefore(lines, masked, index)
 			symbol := javascriptSymbol(repositoryFile, language, parsed.module, name, qualified, kind, index+1, endLine, false, false)
+			if len(decorators) > 0 {
+				symbol.source = javascriptSourceExcerpt(repositoryFile.Content, decorators[0].line, endLine)
+			}
 			parsed.symbols = append(parsed.symbols, symbol)
 			parsed.functions = append(parsed.functions, javascriptFunction{
 				symbolID: symbol.ID, name: name, qualifiedName: qualified,
 				classQualifiedName: class.qualifiedName, path: repositoryFile.Path,
 				startLine: index + 1, endLine: endLine, indent: javascriptIndentWidth(lines[index]),
-				declarationLine: lines[index],
+				declarationLine: lines[index], decorators: decorators,
 			})
 			continue
 		}
@@ -184,6 +201,7 @@ func parseJavaScriptFile(repositoryFile discovery.File, language Language) (pars
 	}
 
 	indexJavaScriptTestCallbacks(&parsed)
+	indexJavaScriptInlineRouteCallbacks(&parsed)
 	markJavaScriptExportLists(&parsed)
 	return parsed, nil
 }
@@ -209,12 +227,22 @@ func javascriptSymbol(repositoryFile discovery.File, language Language, module, 
 
 func indexJavaScriptFile(graph *Graph, file parsedJavaScriptFile, qualifiedNames map[string]string, globalNames map[string][]string) {
 	for _, function := range file.functions {
+		indexJavaScriptDecorators(graph, function, file, qualifiedNames, globalNames)
+		if label, ok := javascriptImplicitRouteLabel(function.path, function.name, function.exported); ok {
+			markGraphEntryPoint(graph, function.symbolID)
+			graph.Edges = append(graph.Edges, Edge{
+				Kind: EdgeRoute, From: "framework-route:" + label, To: function.symbolID, Label: label,
+				Path: function.path, Line: function.startLine, Resolved: true,
+			})
+		}
 		for lineNumber := function.startLine; lineNumber <= function.endLine && lineNumber <= len(file.maskedLines); lineNumber++ {
 			owner, ok := innermostJavaScriptFunction(file.functions, lineNumber)
 			if !ok || owner.symbolID != function.symbolID {
 				continue
 			}
 			line := file.maskedLines[lineNumber-1]
+			originalLine := file.lines[lineNumber-1]
+			indexJavaScriptEnvironmentAccess(graph, function, line, originalLine, lineNumber)
 			for _, match := range javascriptCallPattern.FindAllStringSubmatch(line, -1) {
 				if len(match) != 2 {
 					continue
@@ -226,19 +254,47 @@ func indexJavaScriptFile(graph *Graph, file parsedJavaScriptFile, qualifiedNames
 				}
 				target, resolved := resolveJavaScriptCall(callName, function, file, qualifiedNames, globalNames)
 				kind := classifyJavaScriptCall(callName)
+				label := callName
+				if kind == EdgeConfiguration {
+					if key, found := pythonFirstStringArgument(originalLine, callName); found {
+						target = "config:" + key
+						label = key
+						resolved = false
+					}
+				}
 				if kind == EdgeCall {
 					if symbol, found := graphSymbolByID(graph.Symbols, function.symbolID); found && symbol.Kind == SymbolTest {
 						kind = EdgeTest
 					}
 				}
 				graph.Edges = append(graph.Edges, Edge{
-					Kind: kind, From: function.symbolID, To: target, Label: callName,
+					Kind: kind, From: function.symbolID, To: target, Label: label,
 					Path: function.path, Line: lineNumber, Resolved: resolved,
 				})
 			}
 		}
 	}
+	indexJavaScriptRoutes(graph, file, qualifiedNames, globalNames)
 	markTopLevelJavaScriptCalls(graph, file, qualifiedNames, globalNames)
+}
+
+func indexJavaScriptEnvironmentAccess(graph *Graph, function javascriptFunction, masked, original string, line int) {
+	if !strings.Contains(masked, ".env") {
+		return
+	}
+	seen := make(map[string]bool)
+	for _, pattern := range []*regexp.Regexp{javascriptProcessEnvDotPattern, javascriptProcessEnvBracketPattern} {
+		for _, match := range pattern.FindAllStringSubmatch(original, -1) {
+			if len(match) != 2 || seen[match[1]] {
+				continue
+			}
+			seen[match[1]] = true
+			graph.Edges = append(graph.Edges, Edge{
+				Kind: EdgeConfiguration, From: function.symbolID, To: "config:" + match[1], Label: match[1],
+				Path: function.path, Line: line, Resolved: false,
+			})
+		}
+	}
 }
 
 func resolveJavaScriptCall(callName string, function javascriptFunction, file parsedJavaScriptFile, qualifiedNames map[string]string, globalNames map[string][]string) (string, bool) {
@@ -268,6 +324,254 @@ func resolveJavaScriptCall(callName string, function javascriptFunction, file pa
 		return matches[0], true
 	}
 	return "unresolved:" + callName, false
+}
+
+func indexJavaScriptRoutes(graph *Graph, file parsedJavaScriptFile, qualifiedNames map[string]string, globalNames map[string][]string) {
+	for index := range file.maskedLines {
+		if !javascriptRouteCallPattern.MatchString(file.maskedLines[index]) && !javascriptObjectRoutePattern.MatchString(file.maskedLines[index]) {
+			continue
+		}
+		maskedStatement, originalStatement := javascriptStatement(file, index)
+		if maskedStatement == "" {
+			continue
+		}
+		for _, match := range javascriptRouteCallPattern.FindAllStringSubmatchIndex(maskedStatement, -1) {
+			if len(match) != 6 {
+				continue
+			}
+			method := strings.ToUpper(maskedStatement[match[4]:match[5]])
+			if method == "USE" {
+				method = "ANY"
+			}
+			arguments := splitJavaScriptArguments(originalStatement, match[1]-1)
+			if len(arguments) < 2 {
+				continue
+			}
+			path, ok := javascriptFirstQuotedValue(arguments[0])
+			if !ok {
+				path = "<dynamic>"
+			}
+			label := method + " " + normalizeRoutePath(path)
+			handler, resolved := resolveJavaScriptRouteHandler(arguments[len(arguments)-1], index+1, file, qualifiedNames, globalNames)
+			if resolved {
+				markGraphEntryPoint(graph, handler)
+			}
+			graph.Edges = append(graph.Edges, Edge{
+				Kind: EdgeRoute, From: "framework-route:" + label, To: handler, Label: label,
+				Path: file.repositoryFile.Path, Line: index + 1, Resolved: resolved,
+			})
+			for _, middleware := range arguments[1 : len(arguments)-1] {
+				name := javascriptExpressionName(middleware)
+				if !javascriptAuthorizationName(name) {
+					continue
+				}
+				dummy := javascriptFunction{path: file.repositoryFile.Path}
+				target, middlewareResolved := resolveJavaScriptCall(name, dummy, file, qualifiedNames, globalNames)
+				graph.Edges = append(graph.Edges, Edge{
+					Kind: EdgeAuthorization, From: handler, To: target, Label: name,
+					Path: file.repositoryFile.Path, Line: index + 1, Resolved: middlewareResolved,
+				})
+			}
+		}
+		if javascriptObjectRoutePattern.MatchString(maskedStatement) {
+			indexJavaScriptObjectRoute(graph, file, index+1, originalStatement, qualifiedNames, globalNames)
+		}
+	}
+}
+
+func indexJavaScriptObjectRoute(graph *Graph, file parsedJavaScriptFile, line int, statement string, qualifiedNames map[string]string, globalNames map[string][]string) {
+	method := javascriptObjectProperty(statement, "method")
+	path := javascriptObjectProperty(statement, "url")
+	if path == "" {
+		path = javascriptObjectProperty(statement, "path")
+	}
+	handlerExpression := javascriptObjectIdentifierProperty(statement, "handler")
+	if method == "" || path == "" || handlerExpression == "" {
+		return
+	}
+	label := strings.ToUpper(method) + " " + normalizeRoutePath(path)
+	dummy := javascriptFunction{path: file.repositoryFile.Path}
+	handler, resolved := resolveJavaScriptCall(handlerExpression, dummy, file, qualifiedNames, globalNames)
+	if resolved {
+		markGraphEntryPoint(graph, handler)
+	}
+	graph.Edges = append(graph.Edges, Edge{
+		Kind: EdgeRoute, From: "framework-route:" + label, To: handler, Label: label,
+		Path: file.repositoryFile.Path, Line: line, Resolved: resolved,
+	})
+	for _, property := range []string{"preHandler", "onRequest"} {
+		name := javascriptObjectIdentifierProperty(statement, property)
+		if !javascriptAuthorizationName(name) {
+			continue
+		}
+		target, authResolved := resolveJavaScriptCall(name, dummy, file, qualifiedNames, globalNames)
+		graph.Edges = append(graph.Edges, Edge{
+			Kind: EdgeAuthorization, From: handler, To: target, Label: name,
+			Path: file.repositoryFile.Path, Line: line, Resolved: authResolved,
+		})
+	}
+}
+
+func indexJavaScriptDecorators(graph *Graph, function javascriptFunction, file parsedJavaScriptFile, qualifiedNames map[string]string, globalNames map[string][]string) {
+	if len(function.decorators) == 0 {
+		return
+	}
+	class := javascriptClassForLine(file.classes, function.startLine)
+	prefix := ""
+	if class != nil {
+		prefix = class.routePrefix
+	}
+	for _, decorator := range function.decorators {
+		name := javascriptExpressionName(decorator.expression)
+		shortName := strings.ToUpper(javascriptLastName(name))
+		if strings.Contains(" GET POST PUT PATCH DELETE OPTIONS HEAD ALL ", " "+shortName+" ") {
+			method := shortName
+			if method == "ALL" {
+				method = "ANY"
+			}
+			path, _ := javascriptFirstQuotedValue(decorator.expression)
+			label := method + " " + joinRoutePath(prefix, path)
+			markGraphEntryPoint(graph, function.symbolID)
+			graph.Edges = append(graph.Edges, Edge{
+				Kind: EdgeRoute, From: "framework-route:" + label, To: function.symbolID, Label: label,
+				Path: function.path, Line: decorator.line, Resolved: true,
+			})
+		}
+		if javascriptAuthorizationName(name) || strings.EqualFold(javascriptLastName(name), "UseGuards") || strings.EqualFold(javascriptLastName(name), "Roles") {
+			authNames := javascriptDecoratorArguments(decorator.expression)
+			if len(authNames) == 0 {
+				authNames = []string{name}
+			}
+			for _, authName := range authNames {
+				target, resolved := resolveJavaScriptCall(authName, function, file, qualifiedNames, globalNames)
+				graph.Edges = append(graph.Edges, Edge{
+					Kind: EdgeAuthorization, From: function.symbolID, To: target, Label: authName,
+					Path: function.path, Line: decorator.line, Resolved: resolved,
+				})
+			}
+		}
+	}
+}
+
+func resolveJavaScriptRouteHandler(expression string, line int, file parsedJavaScriptFile, qualifiedNames map[string]string, globalNames map[string][]string) (string, bool) {
+	if strings.Contains(expression, "=>") || strings.Contains(expression, "function") {
+		for _, function := range file.functions {
+			if function.startLine == line && strings.HasPrefix(function.name, "route_handler_") {
+				return function.symbolID, true
+			}
+		}
+		return "unresolved:inline-route-handler", false
+	}
+	name := javascriptExpressionName(expression)
+	if name == "" {
+		return "unresolved:route-handler", false
+	}
+	dummy := javascriptFunction{path: file.repositoryFile.Path}
+	return resolveJavaScriptCall(name, dummy, file, qualifiedNames, globalNames)
+}
+
+func javascriptStatement(file parsedJavaScriptFile, start int) (string, string) {
+	if start < 0 || start >= len(file.lines) {
+		return "", ""
+	}
+	var masked, original strings.Builder
+	depth := 0
+	opened := false
+	limit := start + 20
+	if limit > len(file.lines) {
+		limit = len(file.lines)
+	}
+	for index := start; index < limit; index++ {
+		if index > start {
+			masked.WriteByte('\n')
+			original.WriteByte('\n')
+		}
+		masked.WriteString(file.maskedLines[index])
+		original.WriteString(file.lines[index])
+		for _, character := range file.maskedLines[index] {
+			switch character {
+			case '(':
+				depth++
+				opened = true
+			case ')':
+				if depth > 0 {
+					depth--
+				}
+			}
+		}
+		if opened && depth == 0 {
+			break
+		}
+	}
+	return masked.String(), original.String()
+}
+
+func splitJavaScriptArguments(source string, openParenthesis int) []string {
+	if openParenthesis < 0 || openParenthesis >= len(source) || source[openParenthesis] != '(' {
+		return nil
+	}
+	arguments := make([]string, 0)
+	start := openParenthesis + 1
+	paren, bracket, brace := 0, 0, 0
+	quote := byte(0)
+	template := false
+	for index := start; index < len(source); index++ {
+		character := source[index]
+		if quote != 0 {
+			if character == '\\' {
+				index++
+				continue
+			}
+			if character == quote {
+				quote = 0
+			}
+			continue
+		}
+		if template {
+			if character == '\\' {
+				index++
+			} else if character == '`' {
+				template = false
+			}
+			continue
+		}
+		switch character {
+		case '\'', '"':
+			quote = character
+		case '`':
+			template = true
+		case '(':
+			paren++
+		case ')':
+			if paren == 0 && bracket == 0 && brace == 0 {
+				if value := strings.TrimSpace(source[start:index]); value != "" {
+					arguments = append(arguments, value)
+				}
+				return arguments
+			}
+			if paren > 0 {
+				paren--
+			}
+		case '[':
+			bracket++
+		case ']':
+			if bracket > 0 {
+				bracket--
+			}
+		case '{':
+			brace++
+		case '}':
+			if brace > 0 {
+				brace--
+			}
+		case ',':
+			if paren == 0 && bracket == 0 && brace == 0 {
+				arguments = append(arguments, strings.TrimSpace(source[start:index]))
+				start = index + 1
+			}
+		}
+	}
+	return arguments
 }
 
 func markTopLevelJavaScriptCalls(graph *Graph, file parsedJavaScriptFile, qualifiedNames map[string]string, globalNames map[string][]string) {
@@ -382,6 +686,185 @@ func indexJavaScriptTestCallbacks(parsed *parsedJavaScriptFile) {
 			startLine: index + 1, endLine: endLine, indent: javascriptIndentWidth(parsed.lines[index]), declarationLine: parsed.lines[index],
 		})
 	}
+}
+
+func indexJavaScriptInlineRouteCallbacks(parsed *parsedJavaScriptFile) {
+	for index, line := range parsed.maskedLines {
+		if !javascriptRouteCallPattern.MatchString(line) || !strings.Contains(line, "=>") {
+			continue
+		}
+		endLine, ok := javascriptArrowBlockEnd(parsed.maskedLines, index)
+		if !ok {
+			endLine = index + 1
+		}
+		name := fmt.Sprintf("route_handler_%d", index+1)
+		qualified := parsed.module + "." + name
+		symbol := javascriptSymbol(parsed.repositoryFile, parsed.language, parsed.module, name, qualified, SymbolFunction, index+1, endLine, false, false)
+		parsed.symbols = append(parsed.symbols, symbol)
+		parsed.functions = append(parsed.functions, javascriptFunction{
+			symbolID: symbol.ID, name: name, qualifiedName: qualified, path: parsed.repositoryFile.Path,
+			startLine: index + 1, endLine: endLine, indent: javascriptIndentWidth(parsed.lines[index]), declarationLine: parsed.lines[index],
+		})
+	}
+}
+
+func javascriptDecoratorsBefore(lines, masked []string, declarationIndex int) []javascriptDecorator {
+	decorators := make([]javascriptDecorator, 0)
+	for index := declarationIndex - 1; index >= 0; index-- {
+		trimmedMasked := strings.TrimSpace(masked[index])
+		if trimmedMasked == "" {
+			continue
+		}
+		trimmed := strings.TrimSpace(lines[index])
+		if !strings.HasPrefix(trimmed, "@") {
+			break
+		}
+		decorators = append([]javascriptDecorator{{
+			expression: strings.TrimSpace(strings.TrimPrefix(trimmed, "@")), line: index + 1,
+		}}, decorators...)
+	}
+	return decorators
+}
+
+func javascriptControllerPrefix(decorators []javascriptDecorator) string {
+	for _, decorator := range decorators {
+		if strings.EqualFold(javascriptLastName(javascriptExpressionName(decorator.expression)), "Controller") {
+			value, _ := javascriptFirstQuotedValue(decorator.expression)
+			return value
+		}
+	}
+	return ""
+}
+
+func javascriptDecoratorArguments(expression string) []string {
+	open := strings.Index(expression, "(")
+	close := strings.LastIndex(expression, ")")
+	if open < 0 || close <= open {
+		return nil
+	}
+	arguments := splitJavaScriptArguments(expression, open)
+	result := make([]string, 0, len(arguments))
+	for _, argument := range arguments {
+		name := javascriptExpressionName(argument)
+		if javascriptIdentifier(strings.TrimPrefix(name, "this.")) || strings.Contains(name, ".") {
+			result = append(result, name)
+		}
+	}
+	return result
+}
+
+func javascriptExpressionName(expression string) string {
+	value := strings.TrimSpace(expression)
+	value = strings.TrimPrefix(value, "async ")
+	value = strings.TrimPrefix(value, "new ")
+	value = strings.Trim(value, "[]{} ")
+	match := javascriptCallPattern.FindStringSubmatch(value)
+	if len(match) == 2 && strings.Index(value, match[1]) == 0 {
+		name := normalizeJavaScriptCallName(match[1])
+		if strings.HasSuffix(name, ".bind") {
+			name = strings.TrimSuffix(name, ".bind")
+		}
+		return name
+	}
+	end := 0
+	for end < len(value) {
+		character := rune(value[end])
+		if character == '.' || character == '?' || character == '$' || character == '_' || unicode.IsLetter(character) || unicode.IsDigit(character) {
+			end++
+			continue
+		}
+		break
+	}
+	return normalizeJavaScriptCallName(value[:end])
+}
+
+func javascriptFirstQuotedValue(source string) (string, bool) {
+	for index := 0; index < len(source); index++ {
+		quote := source[index]
+		if quote != '\'' && quote != '"' && quote != '`' {
+			continue
+		}
+		var builder strings.Builder
+		for index++; index < len(source); index++ {
+			if source[index] == '\\' && index+1 < len(source) {
+				index++
+				builder.WriteByte(source[index])
+				continue
+			}
+			if source[index] == quote {
+				return builder.String(), true
+			}
+			builder.WriteByte(source[index])
+		}
+		return "", false
+	}
+	return "", false
+}
+
+func javascriptObjectProperty(source, property string) string {
+	pattern := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(property) + `\s*:\s*['"]([^'"]+)['"]`)
+	match := pattern.FindStringSubmatch(source)
+	if len(match) == 2 {
+		return match[1]
+	}
+	return ""
+}
+
+func javascriptObjectIdentifierProperty(source, property string) string {
+	pattern := regexp.MustCompile(`\b` + regexp.QuoteMeta(property) + `\s*:\s*(?:\[\s*)?([A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*)`)
+	match := pattern.FindStringSubmatch(source)
+	if len(match) == 2 {
+		return match[1]
+	}
+	return ""
+}
+
+func normalizeRoutePath(path string) string {
+	if path == "" {
+		return "/"
+	}
+	if path == "<dynamic>" {
+		return path
+	}
+	if !strings.HasPrefix(path, "/") {
+		return "/" + path
+	}
+	return path
+}
+
+func joinRoutePath(prefix, path string) string {
+	value := strings.Trim(strings.TrimSpace(prefix)+"/"+strings.TrimSpace(path), "/")
+	if value == "" {
+		return "/"
+	}
+	return "/" + value
+}
+
+func javascriptImplicitRouteLabel(path, name string, exported bool) (string, bool) {
+	if !exported {
+		return "", false
+	}
+	base := strings.ToLower(filepath.Base(path))
+	upperName := strings.ToUpper(name)
+	method := ""
+	if strings.Contains(" GET POST PUT PATCH DELETE OPTIONS HEAD ", " "+upperName+" ") {
+		method = upperName
+	}
+	normalized := "/" + strings.TrimPrefix(filepath.ToSlash(path), "/")
+	lower := strings.ToLower(normalized)
+	if strings.HasPrefix(base, "route.") && method != "" {
+		if marker := strings.Index(lower, "/app/"); marker >= 0 {
+			route := normalized[marker+len("/app/"):]
+			route = route[:len(route)-len(filepath.Base(route))]
+			return method + " " + normalizeRoutePath(strings.TrimSuffix(route, "/")), true
+		}
+	}
+	if marker := strings.Index(lower, "/pages/api/"); marker >= 0 && (name == "handler" || strings.Contains(strings.ToLower(name), "handler")) {
+		route := normalized[marker+len("/pages"):]
+		route = strings.TrimSuffix(route, filepath.Ext(route))
+		return "ANY " + normalizeRoutePath(route), true
+	}
+	return "", false
 }
 
 func javascriptArrowBlockEnd(lines []string, declarationIndex int) (int, bool) {
@@ -525,7 +1008,7 @@ func javascriptImplicitEntry(path, name string, exported bool) bool {
 	if (base == "route.ts" || base == "route.js" || base == "route.tsx" || base == "route.jsx") && strings.Contains(" GET POST PUT PATCH DELETE OPTIONS HEAD ", " "+lowerName+" ") {
 		return true
 	}
-	return strings.Contains(normalized, "/pages/api/") && (name == "handler" || strings.Contains(strings.ToLower(name), "handler"))
+	return strings.Contains("/"+strings.TrimPrefix(normalized, "/"), "/pages/api/") && (name == "handler" || strings.Contains(strings.ToLower(name), "handler"))
 }
 
 func javascriptTestPath(path string) bool {
@@ -535,7 +1018,26 @@ func javascriptTestPath(path string) bool {
 }
 
 func classifyJavaScriptCall(callName string) EdgeKind {
-	return classifyPythonCall(strings.ReplaceAll(callName, "?.", "."))
+	normalized := strings.ReplaceAll(callName, "?.", ".")
+	lower := strings.ToLower(normalized)
+	shortName := strings.ToLower(javascriptLastName(normalized))
+	if javascriptAuthorizationName(normalized) {
+		return EdgeAuthorization
+	}
+	if shortName == "get" && (strings.Contains(lower, "config") || strings.Contains(lower, "env") || strings.Contains(lower, "settings") || strings.Contains(lower, "feature")) {
+		return EdgeConfiguration
+	}
+	return classifyPythonCall(normalized)
+}
+
+func javascriptAuthorizationName(value string) bool {
+	lower := strings.ToLower(javascriptLastName(value))
+	for _, marker := range []string{"auth", "permission", "role", "guard", "access", "reviewer", "verifytoken", "verify_token", "currentuser", "current_user"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return lower == "canoverride" || lower == "can_override"
 }
 
 func normalizeJavaScriptCallName(value string) string {
