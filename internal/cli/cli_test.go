@@ -261,6 +261,48 @@ func authorizeReviewer() {}
 	}
 }
 
+func TestBuildTechnicalReviewRequestIncludesConnectedPythonSource(t *testing.T) {
+	pack := framework.Pack{Objectives: []framework.TechnicalObjective{{
+		ID: "eu-aia-14-override-intervention", Title: "Override", SourceReference: "Article 14",
+		Description: "An authorised person can override a decision.", FileKinds: []string{"source"},
+		PathKeywords: []string{"override"}, KeywordGroups: [][]string{{"override"}, {"decision"}},
+	}}}
+	repository := discovery.Repository{Files: []discovery.File{
+		{
+			Path: "override/api.py", Kind: discovery.KindSource,
+			Content: []byte(`from fastapi import Depends
+from override.auth import authorize_reviewer
+
+@app.post("/override")
+def override_decision(reviewer=Depends(authorize_reviewer)):
+    update_decision()
+`),
+		},
+		{
+			Path: "override/auth.py", Kind: discovery.KindSource,
+			Content: []byte(`def authorize_reviewer():
+    return True
+`),
+		},
+	}}
+	evidence := framework.Evaluate(pack, nil, repository)
+	request := buildTechnicalReviewRequest(evidence, repository)
+	if len(request.Candidates) != 1 {
+		t.Fatalf("unexpected Python candidates: %#v", request)
+	}
+	candidate := request.Candidates[0]
+	if candidate.Anchor != "override.api.override_decision" || candidate.Reachability != "production-reachable" || len(candidate.SourceContexts) < 2 {
+		t.Fatalf("Python candidate lost connected context: %#v", candidate)
+	}
+	joined := ""
+	for _, source := range candidate.SourceContexts {
+		joined += source.Source
+	}
+	if !strings.Contains(joined, `@app.post("/override")`) || !strings.Contains(joined, "authorize_reviewer") {
+		t.Fatalf("Python route or authorization source missing: %s", joined)
+	}
+}
+
 func TestScanPreservesGraphCoverageWarnings(t *testing.T) {
 	target := t.TempDir()
 	if err := os.WriteFile(filepath.Join(target, "broken.go"), []byte("package broken\nfunc"), 0o644); err != nil {
