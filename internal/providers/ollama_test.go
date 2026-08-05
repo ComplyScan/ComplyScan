@@ -413,6 +413,101 @@ func TestTechnicalReviewRetainsExecutableEvaluationRubric(t *testing.T) {
 	}
 }
 
+func TestTechnicalReviewRetainsExecutableFairnessBenchmark(t *testing.T) {
+	candidates := []TechnicalCandidate{
+		{
+			ObjectiveID: "eu-aia-10-bias-evaluation", Title: "Bias and fairness evaluation",
+			Path: "pyrit/executor/benchmark/fairness_bias.py", Anchor: "FairnessBiasBenchmark", Reachability: "not-reached",
+			SourceContexts: []TechnicalSourceContext{{
+				Source: "class FairnessBiasBenchmark:\n    async def _perform_async(self):\n        score = await self.scorer.score_async()\n        return score",
+			}},
+		},
+		{
+			ObjectiveID: "eu-aia-10-bias-evaluation", Title: "Bias and fairness evaluation",
+			Path: "tests/unit/executor/benchmark/test_fairness_bias.py", Anchor: "TestFairnessBiasBenchmark", Reachability: "test-only",
+			SourceContexts: []TechnicalSourceContext{{
+				Source: "class TestFairnessBiasBenchmark:\n    async def test_perform_async(self):\n        result = await benchmark._perform_async()\n        assert result.last_score",
+			}},
+		},
+	}
+	for _, candidate := range candidates {
+		observation, guarded, err := validateTechnicalObservation(ollamaTechnicalObservation{
+			Strength: StrengthNotSupported, Confidence: "low",
+			Rationale: "The benchmark is not reachable and lacks direct implementation evidence for measuring fairness.",
+		}, candidate, "fingerprint")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !guarded || observation.Strength != StrengthWeak || observation.ModelStrength != StrengthNotSupported {
+			t.Fatalf("executable fairness benchmark was not retained: %#v", observation)
+		}
+	}
+}
+
+func TestTechnicalReviewRetainsExecutableSecurityTestArtifact(t *testing.T) {
+	for _, candidate := range []TechnicalCandidate{
+		{
+			ObjectiveID: "eu-aia-15-ai-security-controls", Path: "pyrit/datasets/jailbreak/templates/system_prompt_injection.yaml",
+			SourceContexts: []TechnicalSourceContext{{Source: "name: System Prompt Injection Attack\nvalue: |\n  test prompt injection override"}},
+		},
+		{
+			ObjectiveID: "eu-aia-15-ai-security-controls", Path: "garak/probes/web_injection.py",
+			SourceContexts: []TechnicalSourceContext{{Source: "class WebInjection(Probe):\n    active = True\n    # prompt injection attack test"}},
+		},
+	} {
+		observation, guarded, err := validateTechnicalObservation(ollamaTechnicalObservation{
+			Strength: StrengthNotSupported, Confidence: "low",
+			Rationale: "This represents an attack payload rather than a security control and does not directly implement a mitigation.",
+		}, candidate, "fingerprint")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !guarded || observation.Strength != StrengthWeak || observation.ModelStrength != StrengthNotSupported || !strings.Contains(observation.GuardrailNote, "security-test") {
+			t.Fatalf("executable security test was not retained: %#v", observation)
+		}
+	}
+}
+
+func TestTechnicalReviewRejectsMetadataOnlyCandidates(t *testing.T) {
+	tests := []struct {
+		candidate TechnicalCandidate
+		rationale string
+	}{
+		{
+			candidate: TechnicalCandidate{ObjectiveID: "eu-aia-15-performance-thresholds", Reachability: "test-only"},
+			rationale: "The test loads JSON metrics and reconstructs scorer metadata including a threshold field.",
+		},
+		{
+			candidate: TechnicalCandidate{ObjectiveID: "eu-aia-15-robustness-failure-handling", Reachability: "test-only"},
+			rationale: "The test serializes retry events but does not directly exercise or demonstrate failure recovery.",
+		},
+	}
+	for _, test := range tests {
+		observation, guarded, err := validateTechnicalObservation(ollamaTechnicalObservation{
+			Strength: StrengthWeak, Confidence: "low", Rationale: test.rationale,
+		}, test.candidate, "fingerprint")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !guarded || observation.Strength != StrengthNotSupported || observation.ModelStrength != StrengthWeak || !strings.Contains(observation.GuardrailNote, "Metadata-only") {
+			t.Fatalf("metadata-only candidate was retained: %#v", observation)
+		}
+	}
+}
+
+func TestTechnicalReviewRejectsExpandedOffTopicSummary(t *testing.T) {
+	observation, guarded, err := validateTechnicalObservation(ollamaTechnicalObservation{
+		Strength: StrengthStrong, Confidence: "high",
+		Rationale: "The tests are well-structured with clear separation of concerns and proper error handling.",
+	}, TechnicalCandidate{ObjectiveID: "eu-aia-15-ai-security-controls"}, "fingerprint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !guarded || observation.Strength != StrengthNotSupported || observation.ModelStrength != StrengthStrong {
+		t.Fatalf("off-topic summary was retained: %#v", observation)
+	}
+}
+
 func TestOllamaTechnicalReviewSkipsHTTPWithoutCandidates(t *testing.T) {
 	provider, err := NewOllama(OllamaOptions{
 		Endpoint: "http://127.0.0.1:1", Model: "test", Timeout: time.Millisecond, MaxFindings: 1,

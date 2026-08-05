@@ -15,7 +15,7 @@ import (
 const (
 	// TechnicalReviewPromptVersion invalidates cached observations whenever the
 	// technical prompt, schema, sanitization, or deterministic guardrails change.
-	TechnicalReviewPromptVersion = "3"
+	TechnicalReviewPromptVersion = "4"
 
 	maxTechnicalContexts           = 8
 	maxTechnicalRelationships      = 20
@@ -226,6 +226,11 @@ func validateTechnicalObservation(value ollamaTechnicalObservation, candidate Te
 		observation.Strength = StrengthNotSupported
 		observation.GuardrailNote = "Off-topic code-quality rationale cannot support a technical objective; the model discussed structure or framework quality instead of the stated mechanism."
 		guarded = true
+	} else if metadataOnlyCandidate(candidate, rationale) && value.Strength != StrengthNotSupported {
+		observation.ModelStrength = value.Strength
+		observation.Strength = StrengthNotSupported
+		observation.GuardrailNote = "Metadata-only guardrail: loading metrics or serializing retry metadata does not implement or test the stated threshold or failure-handling mechanism."
+		guarded = true
 	} else if candidate.Reachability == "test-only" && (value.Strength == StrengthPartial || value.Strength == StrengthStrong) {
 		observation.ModelStrength = value.Strength
 		observation.Strength = StrengthWeak
@@ -235,6 +240,11 @@ func validateTechnicalObservation(value ollamaTechnicalObservation, candidate Te
 		observation.ModelStrength = value.Strength
 		observation.Strength = StrengthWeak
 		observation.GuardrailNote = "Executable-evaluation guardrail: code that constructs a grader, rubric, assertion, or evaluation template is reviewable implementation evidence even when dynamic registration leaves its caller unresolved."
+		guarded = true
+	} else if value.Strength == StrengthNotSupported && executableSecurityTestArtifact(candidate, rationale) {
+		observation.ModelStrength = value.Strength
+		observation.Strength = StrengthWeak
+		observation.GuardrailNote = "Executable-security-test guardrail: a configured red-team payload or executable probe is reviewable security-testing evidence even though it represents the attack rather than a production mitigation."
 		guarded = true
 	}
 	return observation, guarded, nil
@@ -257,22 +267,69 @@ func executableEvaluationArtifact(candidate TechnicalCandidate, rationale string
 		return false
 	}
 	value := strings.ToLower(rationale)
-	if !containsAny(value, "rubric", "grader", "evaluation template", "assertion") ||
-		!containsAny(value,
+	if containsAny(value, "rubric", "grader", "evaluation template", "assertion") &&
+		containsAny(value,
 			"not an actual implementation", "does not contain any implementation", "doesn't contain any implementation",
 			"does not implement", "doesn't implement", "does not directly measure", "doesn't directly measure",
 			"template for", "only a template", "only defines", "human assessment",
-		) {
+		) && containsAny(codeFromCandidate(candidate), "rubric", "grader", "assert", "evaluate", "score") &&
+		containsAny(codeFromCandidate(candidate), "func ", "def ", "function ", "class ", "=>", "render") {
+		return true
+	}
+	if !containsAny(value,
+		"not reachable", "not-reached", "no implementation details", "not directly implemented",
+		"lacks direct implementation evidence", "does not directly measure", "setup and validation rather than",
+	) {
 		return false
 	}
-	source := strings.Builder{}
+	path := strings.ToLower(filepath.ToSlash(candidate.Path))
+	code := codeFromCandidate(candidate)
+	return containsAny(path, "fairness", "bias") && containsAny(code, "fairness", "bias") &&
+		containsAny(code, "benchmark", "score", "_perform_async", "execute_async") &&
+		containsAny(code, "func ", "def ", "function ", "class ", "=>")
+}
+
+func executableSecurityTestArtifact(candidate TechnicalCandidate, rationale string) bool {
+	if candidate.ObjectiveID != "eu-aia-15-ai-security-controls" {
+		return false
+	}
+	value := strings.ToLower(rationale)
+	if !containsAny(value,
+		"attack vector", "attack payload", "rather than a security control", "does not directly address",
+		"does not directly implement", "simulating", "testing for such threats",
+	) {
+		return false
+	}
+	path := strings.ToLower(filepath.ToSlash(candidate.Path))
+	if !containsAny(path, "/probes/", "/jailbreak/templates/", "/redteam/", "/red_team/") {
+		return false
+	}
+	code := codeFromCandidate(candidate)
+	return containsAny(code, "prompt injection", "adversarial", "injection attack") &&
+		containsAny(code, "probe", "test", "template", "active =", "value:")
+}
+
+func codeFromCandidate(candidate TechnicalCandidate) string {
+	var source strings.Builder
 	for _, sourceContext := range candidate.SourceContexts {
 		source.WriteString(strings.ToLower(sourceContext.Source))
 		source.WriteByte('\n')
 	}
-	code := source.String()
-	return containsAny(code, "rubric", "grader", "assert", "evaluate", "score") &&
-		containsAny(code, "func ", "def ", "function ", "class ", "=>", "render")
+	return source.String()
+}
+
+func metadataOnlyCandidate(candidate TechnicalCandidate, rationale string) bool {
+	value := strings.ToLower(rationale)
+	switch candidate.ObjectiveID {
+	case "eu-aia-15-performance-thresholds":
+		return containsAny(value, "loading", "loads", "reconstruct", "parses", "metadata", "json") &&
+			!containsAny(value, "enforce", "acceptance threshold", "fails when", "pass/fail", "minimum performance")
+	case "eu-aia-15-robustness-failure-handling":
+		return containsAny(value, "serializ", "retry events", "retry metadata") &&
+			containsAny(value, "does not directly implement", "does not directly exercise", "does not demonstrate")
+	default:
+		return false
+	}
 }
 
 func containsAny(value string, candidates ...string) bool {
@@ -288,7 +345,8 @@ func offTopicCodeQualityRationale(rationale string) bool {
 	value := strings.ToLower(rationale)
 	phrases := []string{
 		"well-structured", "react best practices", "common react patterns", "proper state management",
-		"easy to maintain", "maintainability and readability", "works as intended", "code quality",
+		"easy to maintain", "easy to understand and maintain", "maintainability and readability",
+		"clear separation of concerns", "clear test cases", "proper error handling", "works as intended", "code quality",
 	}
 	matches := 0
 	for _, phrase := range phrases {
@@ -343,6 +401,9 @@ For the single supplied candidate:
 - for evaluation objectives, executable graders, rubrics, assertions, and evaluation templates can support the candidate when code applies them to model inputs or outputs; do not reject them merely because evaluation criteria are represented as strings or prompts;
 - a class or function that renders a rubric for an evaluation framework is implementation evidence even when dynamic registration prevents the bounded graph from resolving its caller; classify it weak or partial when the rubric directly measures the stated objective;
 - before returning not_supported for an evaluation candidate, check whether executable source defines a grader, rubric renderer, assertion, scoring function, or evaluation template; if it directly measures the stated objective, it must be at least weak even when its caller is unresolved;
+- an executable fairness or bias benchmark is evaluation evidence even when the bounded graph cannot resolve its dynamic entry point; its tests are weak evidence when they exercise benchmark scoring or execution rather than merely checking construction;
+- an executable red-team probe or configured attack template is weak security-testing evidence when the objective explicitly covers testing that threat; do not confuse test evidence with a claim that the payload is a production mitigation;
+- metric-loading, identifier-reconstruction, and retry-event serialization tests are not_supported when they do not enforce a performance threshold or exercise failure recovery;
 - a test-only candidate is weak when the test genuinely verifies the stated technical mechanism, but not_supported when objective terms appear only in unrelated fixture text or imported names;
 - use not_supported when context contradicts the candidate, weak for superficial or likely dead/test-only matches, partial when some necessary connections exist, strong only for directly connected implementation evidence, and uncertain when context is insufficient;
 - treat the anchor reachability value as authoritative: when the candidate anchor reachability is test-only, strength MUST be weak or not_supported;
