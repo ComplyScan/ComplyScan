@@ -227,6 +227,12 @@ func candidatePassesStaticScope(objectiveID, path, content string, line int) boo
 			!containsAny(normalizedPath, "model", "inference", "prediction", "decision", "shutdown", "stop", "kill") {
 			return false
 		}
+	case "eu-aia-15-performance-thresholds":
+		window := normalizeSearchContent(contentLineWindow(content, line, 10))
+		if containsAny(normalizedPath, "test", "spec") &&
+			!containsAny(window, "expect", "assert", "pass", "fail", "greater than", "less than", "minimum", ">=", "<=") {
+			return false
+		}
 	}
 
 	if strings.HasSuffix(strings.ToLower(path), ".py") &&

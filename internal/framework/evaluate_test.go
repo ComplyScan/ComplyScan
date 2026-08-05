@@ -20,7 +20,7 @@ func TestEvaluateMapsCodeEvidenceWithoutControlOrComplianceClaims(t *testing.T) 
 		},
 		{
 			Path: "internal/evaluation/metrics_test.go", Kind: discovery.KindSource,
-			Content: []byte("package evaluation\nconst modelAccuracyThreshold = 0.95\n"),
+			Content: []byte("package evaluation\nfunc TestMetric() { modelAccuracyThreshold := 0.95; assert(modelAccuracyThreshold > 0.9) }\n"),
 		},
 	}}
 	report := Evaluate(pack, []profile.System{profile.NewDraftSystem("example", "Example")}, repository)
@@ -160,6 +160,32 @@ func TestCandidateScopeRejectsLongEmbeddedParserFixture(t *testing.T) {
 		1,
 	) {
 		t.Fatal("an executable threshold test was rejected")
+	}
+}
+
+func TestCandidateScopeRequiresPerformanceThresholdEnforcement(t *testing.T) {
+	metadata := `entry = {
+    "scorer_specific_params": {"threshold": 0.5},
+    "metrics": {"f1_score": 0.85, "recall": 0.82},
+}`
+	if candidatePassesStaticScope(
+		"eu-aia-15-performance-thresholds",
+		"tests/unit/score/test_scorer_metrics.py",
+		metadata,
+		2,
+	) {
+		t.Fatal("threshold metadata was treated as an enforced performance threshold")
+	}
+	assertion := `it("fails below recall threshold", () => {
+  expect(checkRecall({ score: 0.4, threshold: 0.5 }).pass).toBe(false)
+})`
+	if !candidatePassesStaticScope(
+		"eu-aia-15-performance-thresholds",
+		"test/assertions/contextRecall.test.ts",
+		assertion,
+		2,
+	) {
+		t.Fatal("an executable performance threshold assertion was rejected")
 	}
 }
 
