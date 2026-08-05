@@ -28,7 +28,7 @@ type Options struct {
 	OnProgress    func(Progress) error
 }
 
-// Run applies source-free cache reuse around one-candidate model requests.
+// Run applies source-context-free cache reuse around one-candidate model requests.
 // Cache failures are reported as notes and never prevent the requested review.
 func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalReviewRequest, options Options) (providers.TechnicalReviewResult, error) {
 	base, err := reviewer.ReviewTechnical(ctx, providers.TechnicalReviewRequest{})

@@ -344,6 +344,7 @@ For the single supplied candidate:
 - treat the anchor reachability value as authoritative: when the candidate anchor reachability is test-only, strength MUST be weak or not_supported;
 - never upgrade a test-only anchor because it calls a function that is also used by production code, or because a separate production-reachable relationship appears in the context;
 - identify missing technical context as unresolved questions;
+- explain the decision without quoting or reproducing source code or comments;
 - do not decide legal applicability, certify compliance, infer documentary controls, invent code, change identifiers, or create new objectives.
 
 ComplyScan binds the sole structured decision to the sole submitted candidate outside the model. Do not return, repeat, select, or invent an objective ID or evidence fingerprint. Return only the requested structured object.`

@@ -28,6 +28,13 @@ func TestCacheReusesOnlyIdenticalModelPackPromptAndCandidateContext(t *testing.T
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("cache permissions = %o, want 600", info.Mode().Perm())
 	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "return evaluate(output)") || strings.Contains(string(data), "source_contexts") {
+		t.Fatalf("cache retained submitted source context:\n%s", data)
+	}
 
 	reopened, err := Open(path)
 	if err != nil {

@@ -18,7 +18,7 @@ const (
 	cacheSchemaVersion = 1
 	cacheFileName      = "technical-review-v1.json"
 	maxCacheBytes      = 8 << 20
-	maxCacheEntries    = 2_000
+	maxCacheEntries    = 200
 )
 
 type Identity struct {
@@ -43,8 +43,8 @@ type cacheFile struct {
 	Entries       map[string]cacheEntry `json:"entries"`
 }
 
-// Cache stores source-free model observations in the current user's OS cache.
-// Candidate source is represented only by a SHA-256 digest.
+// Cache stores bounded model observations in the current user's OS cache.
+// Submitted candidate context is represented only by a SHA-256 digest.
 type Cache struct {
 	path    string
 	entries map[string]cacheEntry
@@ -173,13 +173,19 @@ func validateEntry(entry cacheEntry) error {
 	if strings.TrimSpace(observation.Rationale) == "" || len([]rune(observation.Rationale)) > 4_000 || len(observation.UnresolvedQuestions) > 10 {
 		return errors.New("observation rationale or questions exceed cache bounds")
 	}
+	totalText := len([]rune(observation.Rationale)) + len([]rune(observation.SuggestedReview)) + len([]rune(observation.GuardrailNote))
 	for _, question := range observation.UnresolvedQuestions {
-		if len([]rune(question)) > 4_000 {
+		questionLength := len([]rune(question))
+		if questionLength > 1_000 {
 			return errors.New("observation question exceeds cache bounds")
 		}
+		totalText += questionLength
 	}
 	if len([]rune(observation.SuggestedReview)) > 2_000 || len([]rune(observation.GuardrailNote)) > 4_000 {
 		return errors.New("observation action or guardrail note exceeds cache bounds")
+	}
+	if totalText > 16_000 {
+		return errors.New("observation text exceeds aggregate cache bounds")
 	}
 	return nil
 }
@@ -224,6 +230,9 @@ func (cache *Cache) write() error {
 		return fmt.Errorf("encode technical review cache: %w", err)
 	}
 	data = append(data, '\n')
+	if len(data) > maxCacheBytes {
+		return fmt.Errorf("encoded technical review cache exceeds %d bytes", maxCacheBytes)
+	}
 	temporary, err := os.CreateTemp(directory, ".complyscan-technical-review-*")
 	if err != nil {
 		return fmt.Errorf("create temporary technical review cache: %w", err)
