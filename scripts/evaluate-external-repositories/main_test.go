@@ -20,6 +20,15 @@ func TestExternalSourceCatalogValidation(t *testing.T) {
 	if err := validateCatalogAgainstManifest(catalog, manifest); err != nil {
 		t.Fatal(err)
 	}
+	catalog.Repositories[0].License = "Apache-2.0"
+	if err := catalog.validate(); err != nil {
+		t.Fatalf("Apache-2.0 source was rejected: %v", err)
+	}
+	catalog.Repositories[0].License = "GPL-3.0"
+	if err := catalog.validate(); err == nil {
+		t.Fatal("unsupported licence was accepted")
+	}
+	catalog.Repositories[0].License = "MIT"
 	catalog.Repositories[0].LicenseFile = "../LICENSE"
 	if err := catalog.validate(); err == nil {
 		t.Fatal("unsafe licence path was accepted")

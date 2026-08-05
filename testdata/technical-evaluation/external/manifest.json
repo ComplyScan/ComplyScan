@@ -80,6 +80,129 @@
           "path": "test/redteam/plugins/indirectPromptInjection.test.ts"
         }
       ]
+    },
+    {
+      "id": "ollama",
+      "path": "ollama",
+      "languages": ["go", "javascript", "typescript"],
+      "expected_candidates": [
+        {
+          "objective_id": "eu-aia-12-automatic-event-logging",
+          "path": "server/inference_request_log.go"
+        },
+        {
+          "objective_id": "eu-aia-12-automatic-event-logging",
+          "path": "server/routes_request_log_test.go"
+        },
+        {
+          "objective_id": "eu-aia-14-human-review-gate",
+          "path": "cmd/tui/chat/approval.go"
+        },
+        {
+          "objective_id": "eu-aia-14-human-review-gate",
+          "path": "cmd/tui/chat/approval_test.go"
+        }
+      ]
+    },
+    {
+      "id": "openai-agents-python",
+      "path": "openai-agents-python",
+      "languages": ["python", "javascript"],
+      "expected_candidates": [
+        {
+          "objective_id": "eu-aia-14-human-review-gate",
+          "path": "examples/hosted_mcp/on_approval.py"
+        },
+        {
+          "objective_id": "eu-aia-14-human-review-gate",
+          "path": "integration_tests/openai/test_approval_resume.py"
+        },
+        {
+          "objective_id": "eu-aia-14-human-review-gate",
+          "path": "tests/mcp/test_mcp_approval.py"
+        }
+      ]
+    },
+    {
+      "id": "llm-guard",
+      "path": "llm-guard",
+      "languages": ["python"],
+      "expected_candidates": [
+        {
+          "objective_id": "eu-aia-15-ai-security-controls",
+          "path": "llm_guard/input_scanners/prompt_injection.py"
+        },
+        {
+          "objective_id": "eu-aia-15-ai-security-controls",
+          "path": "tests/input_scanners/test_prompt_injection.py"
+        }
+      ]
+    },
+    {
+      "id": "langgraph",
+      "path": "langgraph",
+      "languages": ["python", "javascript", "typescript"],
+      "expected_candidates": []
+    },
+    {
+      "id": "llama-index",
+      "path": "llama-index",
+      "languages": ["python", "javascript"],
+      "expected_candidates": []
+    },
+    {
+      "id": "garak",
+      "path": "garak",
+      "languages": ["python", "javascript", "typescript"],
+      "expected_candidates": [
+        {
+          "objective_id": "eu-aia-15-ai-security-controls",
+          "path": "garak/probes/web_injection.py"
+        }
+      ]
+    },
+    {
+      "id": "pyrit",
+      "path": "pyrit",
+      "languages": ["python", "javascript", "typescript"],
+      "expected_candidates": [
+        {
+          "objective_id": "eu-aia-10-bias-evaluation",
+          "path": "pyrit/executor/benchmark/fairness_bias.py"
+        },
+        {
+          "objective_id": "eu-aia-10-bias-evaluation",
+          "path": "tests/unit/executor/benchmark/test_fairness_bias.py"
+        },
+        {
+          "objective_id": "eu-aia-15-robustness-failure-handling",
+          "path": "pyrit/executor/attack/component/adversarial_conversation_manager.py"
+        },
+        {
+          "objective_id": "eu-aia-15-robustness-failure-handling",
+          "path": "tests/unit/executor/attack/component/test_adversarial_conversation_manager.py"
+        },
+        {
+          "objective_id": "eu-aia-15-robustness-failure-handling",
+          "path": "tests/unit/executor/attack/component/test_simulated_conversation.py"
+        },
+        {
+          "objective_id": "eu-aia-15-ai-security-controls",
+          "path": "pyrit/datasets/jailbreak/templates/Arth_Singh/system_prompt_injection.yaml"
+        },
+        {
+          "objective_id": "eu-aia-15-ai-security-controls",
+          "path": "pyrit/datasets/seed_datasets/remote/agent_threat_rules_dataset.py"
+        },
+        {
+          "objective_id": "eu-aia-15-ai-security-controls",
+          "path": "pyrit/score/true_false/regex/static_prompt_injection_scorer.py"
+        },
+        {
+          "objective_id": "eu-aia-15-ai-security-controls",
+          "path": "tests/unit/datasets/test_agent_threat_rules_dataset.py"
+        }
+      ]
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "reviewed_at": "2026-08-04",
+  "reviewed_at": "2026-08-05",
   "repositories": [
     {
       "id": "localai",
@@ -23,6 +23,62 @@
       "name": "Promptfoo",
       "url": "https://github.com/promptfoo/promptfoo.git",
       "revision": "7b898cbdb16205cb7f0e2994baa807d131eb2326",
+      "license": "MIT",
+      "license_file": "LICENSE"
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama",
+      "url": "https://github.com/ollama/ollama.git",
+      "revision": "43983edf1826be640b76e88ae68a5f721d2fb274",
+      "license": "MIT",
+      "license_file": "LICENSE"
+    },
+    {
+      "id": "openai-agents-python",
+      "name": "OpenAI Agents SDK for Python",
+      "url": "https://github.com/openai/openai-agents-python.git",
+      "revision": "c48dd4c1aaa6fddf8afd3a99e6cbdc465148b9d4",
+      "license": "MIT",
+      "license_file": "LICENSE"
+    },
+    {
+      "id": "llm-guard",
+      "name": "LLM Guard",
+      "url": "https://github.com/protectai/llm-guard.git",
+      "revision": "168c1034ffdb33837e7ae6fd6a16b80567c1be03",
+      "license": "MIT",
+      "license_file": "LICENSE"
+    },
+    {
+      "id": "langgraph",
+      "name": "LangGraph",
+      "url": "https://github.com/langchain-ai/langgraph.git",
+      "revision": "fb3d5f0399222504e015fe959e0e79fdc6e00a65",
+      "license": "MIT",
+      "license_file": "LICENSE"
+    },
+    {
+      "id": "llama-index",
+      "name": "LlamaIndex",
+      "url": "https://github.com/run-llama/llama_index.git",
+      "revision": "5c0e64eee28ae0f55601cdf29ae3cc03380fea75",
+      "license": "MIT",
+      "license_file": "LICENSE"
+    },
+    {
+      "id": "garak",
+      "name": "NVIDIA garak",
+      "url": "https://github.com/NVIDIA/garak.git",
+      "revision": "afae291b684ae64055d53a0ea4228f7e760392ba",
+      "license": "Apache-2.0",
+      "license_file": "LICENSE"
+    },
+    {
+      "id": "pyrit",
+      "name": "Microsoft PyRIT",
+      "url": "https://github.com/microsoft/PyRIT.git",
+      "revision": "f24921df514862a07b13ea83445b2b0137b5c2bf",
       "license": "MIT",
       "license_file": "LICENSE"
     }

@@ -208,8 +208,8 @@ func (catalog sourceCatalog) validate() error {
 		if strings.TrimSpace(source.Name) == "" || !githubURLPattern.MatchString(source.URL) || !revisionPattern.MatchString(source.Revision) {
 			return fmt.Errorf("repositories[%d] must have a name, HTTPS GitHub URL, and full lowercase commit SHA", index)
 		}
-		if source.License != "MIT" {
-			return fmt.Errorf("repositories[%d].license must be MIT", index)
+		if source.License != "MIT" && source.License != "Apache-2.0" {
+			return fmt.Errorf("repositories[%d].license must be MIT or Apache-2.0", index)
 		}
 		if source.LicenseFile == "" || filepath.IsAbs(source.LicenseFile) || filepath.Clean(source.LicenseFile) != source.LicenseFile || strings.HasPrefix(source.LicenseFile, "..") {
 			return fmt.Errorf("repositories[%d].license_file must be a safe relative path", index)
