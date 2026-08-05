@@ -29,6 +29,7 @@
 - Technical-evidence regression metrics cover candidate precision and recall, anchor and reachability accuracy, relationship recall, forbidden relationships, and language coverage.
 - The pinned public-repository study records deterministic retrieval and live semantic precision, recall, specificity, coverage, token usage, and model disagreements separately.
 - Regression tests cover the pinned study's medical-bias rubric false negative and interactive safety-quiz false positive; live validation explicitly bypasses cached observations.
+- Three fresh `qwen3:8b` public-repository runs record identical effective decisions and worst-case raw-model versus post-guardrail precision, recall, specificity, coverage, duration, and variability without committing source or full rationales.
 
 ## 0.1.2 - 2026-08-03
 

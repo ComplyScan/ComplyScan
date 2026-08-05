@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-05",
+  "model": "qwen3:8b",
+  "ollama_model_id": "500a1f067a9f",
+  "code_commit": "c222d66303d3",
+  "prompt_version": "3",
+  "platform": {
+    "os": "macOS 26.5.1",
+    "architecture": "arm64"
+  },
+  "candidate_count": 17,
+  "expected_positive_candidates": 12,
+  "expected_negative_candidates": 5,
+  "runs": [
+    {
+      "run": 1,
+      "passed": true,
+      "effective_metrics": {
+        "true_positive_candidates": 12,
+        "false_positive_candidates": 0,
+        "true_negative_candidates": 5,
+        "false_negative_candidates": 0,
+        "candidate_precision": 1.0,
+        "candidate_recall": 1.0,
+        "negative_specificity": 1.0,
+        "review_coverage": 1.0
+      },
+      "raw_model_metrics": {
+        "true_positive_candidates": 11,
+        "false_positive_candidates": 2,
+        "true_negative_candidates": 3,
+        "false_negative_candidates": 1,
+        "candidate_precision": 0.8461538461538461,
+        "candidate_recall": 0.9166666666666666,
+        "negative_specificity": 0.6,
+        "review_coverage": 1.0
+      },
+      "guardrail_adjustments": 7,
+      "acceptance_changing_adjustments": 3,
+      "usage": {
+        "prompt_tokens": 40183,
+        "completion_tokens": 4237,
+        "total_duration_ns": 527943003834
+      }
+    },
+    {
+      "run": 2,
+      "passed": true,
+      "effective_metrics": {
+        "true_positive_candidates": 12,
+        "false_positive_candidates": 0,
+        "true_negative_candidates": 5,
+        "false_negative_candidates": 0,
+        "candidate_precision": 1.0,
+        "candidate_recall": 1.0,
+        "negative_specificity": 1.0,
+        "review_coverage": 1.0
+      },
+      "raw_model_metrics": {
+        "true_positive_candidates": 11,
+        "false_positive_candidates": 2,
+        "true_negative_candidates": 3,
+        "false_negative_candidates": 1,
+        "candidate_precision": 0.8461538461538461,
+        "candidate_recall": 0.9166666666666666,
+        "negative_specificity": 0.6,
+        "review_coverage": 1.0
+      },
+      "guardrail_adjustments": 7,
+      "acceptance_changing_adjustments": 3,
+      "usage": {
+        "prompt_tokens": 40183,
+        "completion_tokens": 4218,
+        "total_duration_ns": 453632273748
+      }
+    },
+    {
+      "run": 3,
+      "passed": true,
+      "effective_metrics": {
+        "true_positive_candidates": 12,
+        "false_positive_candidates": 0,
+        "true_negative_candidates": 5,
+        "false_negative_candidates": 0,
+        "candidate_precision": 1.0,
+        "candidate_recall": 1.0,
+        "negative_specificity": 1.0,
+        "review_coverage": 1.0
+      },
+      "raw_model_metrics": {
+        "true_positive_candidates": 11,
+        "false_positive_candidates": 2,
+        "true_negative_candidates": 3,
+        "false_negative_candidates": 1,
+        "candidate_precision": 0.8461538461538461,
+        "candidate_recall": 0.9166666666666666,
+        "negative_specificity": 0.6,
+        "review_coverage": 1.0
+      },
+      "guardrail_adjustments": 7,
+      "acceptance_changing_adjustments": 3,
+      "usage": {
+        "prompt_tokens": 40183,
+        "completion_tokens": 4218,
+        "total_duration_ns": 496940609664
+      }
+    }
+  ],
+  "worst_case": {
+    "effective_candidate_precision": 1.0,
+    "effective_candidate_recall": 1.0,
+    "effective_negative_specificity": 1.0,
+    "effective_review_coverage": 1.0,
+    "raw_model_candidate_precision": 0.8461538461538461,
+    "raw_model_candidate_recall": 0.9166666666666666,
+    "raw_model_negative_specificity": 0.6,
+    "raw_model_review_coverage": 1.0
+  },
+  "consistency": {
+    "stable_effective_acceptance_candidates": 17,
+    "stable_effective_strength_candidates": 17,
+    "stable_model_strength_candidates": 17,
+    "stable_confidence_candidates": 17,
+    "exactly_stable_rationale_candidates": 16,
+    "total_candidates": 17
+  },
+  "duration": {
+    "minimum_ns": 453632273748,
+    "maximum_ns": 527943003834,
+    "mean_ns": 492838629082
+  },
+  "notes": [
+    "Raw-model metrics use model_strength before deterministic guardrails when present; effective metrics use the final reported strength.",
+    "Four adjustments per run capped test-only anchors at weak. Three adjustments changed acceptance: one executable evaluation rubric was retained as weak and two discussion-only quizzes were rejected as not_supported.",
+    "A preceding diagnostic run exposed a phrase-dependent executable-rubric guardrail and is not counted in these three corrected consistency runs.",
+    "This narrow pinned-repository study is regression evidence, not a general accuracy or legal-compliance claim."
+  ]
+}
