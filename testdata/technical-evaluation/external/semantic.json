@@ -2,7 +2,7 @@
   "schema_version": 1,
   "model": "qwen3:8b",
   "batch_size": 1,
-  "timeout_seconds": 300,
+  "timeout_seconds": 600,
   "rejected_strengths": ["not_supported"],
   "thresholds": {
     "candidate_precision": 0.85,

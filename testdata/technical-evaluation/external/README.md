@@ -24,7 +24,7 @@ To evaluate the deterministic candidates with the configured local model, start 
 ./scripts/evaluate-external-repositories.sh --review ollama
 ```
 
-The semantic policy in `semantic.json` sends one candidate per request, rejects only `not_supported`, and conservatively retains a candidate if an observation is missing while failing the coverage threshold. Each request has a 300-second timeout. Use `--ollama-model`, `--ollama-endpoint`, or `--semantic-config` for deliberate experiments. `--semantic-path PATH` isolates one exact candidate for debugging and is not a complete baseline run.
+The semantic policy in `semantic.json` sends one candidate per request, rejects only `not_supported`, and conservatively retains a candidate if an observation is missing while failing the coverage threshold. Each request has a 600-second timeout because large bounded contexts can occasionally exceed five minutes on an 8B local model. Use `--ollama-model`, `--ollama-endpoint`, or `--semantic-config` for deliberate experiments. `--semantic-path PATH` isolates one exact candidate for debugging and is not a complete baseline run.
 
 ## Initial three-repository baseline
 
