@@ -16,7 +16,7 @@ The harness builds the current source, confirms the configured model appears in 
 
 Each fixture uses the generated 360-second Ollama timeout because inference time varies materially with language, hardware, and thermal load. Users can change it explicitly in `.complyscan.yml`.
 
-Validation passes for each language only when the production-routed candidate receives `partial` or `strong`, while every test-only candidate receives `weak` or `not_supported`. The model must preserve the existing objective and evidence identifiers enforced by the provider contract, and a deterministic guardrail correction does not count as a clean model-quality pass.
+Validation passes for each language only when the production-routed candidate receives `partial` or `strong`, while every test-only candidate receives `weak` or `not_supported`. ComplyScan binds each identifier-free model decision to the sole submitted candidate in trusted code, and a deterministic guardrail correction does not count as a clean model-quality pass.
 
 Generated per-language JSON, resource metrics, and the combined validation summary are saved under `.complyscan/validation/ollama/` and are ignored by Git. The metrics distinguish each ComplyScan CLI process measured by `/usr/bin/time` from the separately running model allocation reported by `ollama ps`. Review all JSON reports and the metrics before recording a qualified release result. Override the defaults with `COMPLYSCAN_OLLAMA_MODEL` or `COMPLYSCAN_VALIDATION_DIR` when needed. To run only selected fixtures during development, provide a space-separated list such as `COMPLYSCAN_VALIDATION_FIXTURES="typescript"` or `COMPLYSCAN_VALIDATION_FIXTURES="python typescript"`.
 
@@ -55,3 +55,5 @@ On the same machine, commit `3cc5a7b` passed the TypeScript fixture:
 - loaded Ollama model allocation after the scan: 5.6 GB, reported as 100% GPU with a 4,096-token context.
 
 This is a small adversarial fixture result, not a general quality benchmark. Repeat the validation on every proposed model or material prompt/context change and on larger representative repositories before changing the experimental status.
+
+The validation harness always passes `--refresh-review`. This guarantees that reported classifications, duration, and resource measurements come from fresh Ollama inference rather than ComplyScan's local technical-observation cache.

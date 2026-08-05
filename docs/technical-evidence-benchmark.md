@@ -44,6 +44,8 @@ The pack `0.1.1` baseline records 12 true-positive candidates, five false positi
 
 With Ollama running and `qwen3:8b` installed, add `--review ollama` to evaluate every deterministic candidate using the policy and thresholds in `testdata/technical-evaluation/external/semantic.json`. ComplyScan makes a separate schema-constrained request for each candidate and attaches the decision to its trusted objective/fingerprint pair outside the model. The policy rejects only `not_supported`; missing observations are retained but reduce review coverage. On 2026-08-04, the complete 17-candidate run reached 91.7% precision, 91.7% recall, 80% negative specificity, and 100% coverage. Its one false positive and one false negative remain documented in the external study README. Live-model evaluation is manual, slow, and variable, so it does not run in CI and cannot support a general accuracy claim.
 
+The two observed disagreements are now explicit provider regression cases: discussion-only interactive quizzes are rejected, and executable evaluation rubrics are retained for review even when dynamic registration prevents static reachability. These deterministic tests protect the reasoning boundary without changing the recorded 2026-08-04 live-run metrics. A fresh repeated live benchmark is still required to measure the revised prompt's variability.
+
 ## Adding a case
 
 1. Add a minimal repository-shaped fixture under `testdata/technical-evaluation/repositories` without real secrets, personal data, or third-party copyrighted source.

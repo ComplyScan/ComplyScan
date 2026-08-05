@@ -39,6 +39,8 @@ Installation and onboarding are a separate pre-scan path: the POSIX installer se
 
 `internal/report` constructs a versioned evidence bundle with scan identity, UTC timestamp, tool build, and explicit scope. Terminal output streams deterministic findings live. Every successful scan atomically replaces `.complyscan/reports/latest.md` and `latest.json`; generated reports are excluded from discovery, target-relative output cannot escape the repository, and symlink artifact destinations are refused. Markdown is the human report and JSON is the future dashboard contract. SARIF 2.1.0 remains a separate source-location integration. Finding observations are attached by finding fingerprint; technical observations are attached by objective ID and evidence fingerprint. Both remain separate from deterministic results and summaries. Structured component inventory has its own versioned JSON model because components and compliance-engineering findings are different records.
 
+`internal/technicalreview` orchestrates one-candidate semantic requests, live progress, and source-context-free reuse. Its OS user-cache key binds the provider, model tag, prompt version, technical-pack identity/digest, objective, evidence fingerprint, and a SHA-256 digest of the complete bounded candidate input. Cached observations are validated against their binding and written atomically with user-only file permissions. Submitted source-context records are not stored; bounded redacted model rationales may still describe repository details.
+
 `internal/providers` defines the optional review boundary:
 
 ```go
