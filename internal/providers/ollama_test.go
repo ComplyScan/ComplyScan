@@ -365,12 +365,46 @@ func TestTechnicalReviewRejectsOffTopicCodeQualityRationale(t *testing.T) {
 		Strength: StrengthStrong, Confidence: "high",
 		Rationale:           "The component is well-structured, uses proper state management, and follows common React patterns.",
 		UnresolvedQuestions: []string{}, SuggestedReview: "Review the component.",
-	}, "objective", "fingerprint", "production-reachable")
+	}, TechnicalCandidate{ObjectiveID: "objective", Reachability: "production-reachable"}, "fingerprint")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !guarded || observation.Strength != StrengthNotSupported || observation.ModelStrength != StrengthStrong || !strings.Contains(observation.GuardrailNote, "Off-topic") {
 		t.Fatalf("off-topic model output was not guarded: %#v", observation)
+	}
+}
+
+func TestTechnicalReviewRejectsDiscussionOnlyQuiz(t *testing.T) {
+	observation, guarded, err := validateTechnicalObservation(ollamaTechnicalObservation{
+		Strength: StrengthStrong, Confidence: "high",
+		Rationale: "This is a React quiz component on a blog. The helper is not reached because the component is not rendered.",
+	}, TechnicalCandidate{
+		ObjectiveID: "eu-aia-9-risk-control-testing", Path: "site/blog/safety/components/SafetyQuiz.tsx",
+	}, "fingerprint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !guarded || observation.Strength != StrengthNotSupported || observation.ModelStrength != StrengthStrong || !strings.Contains(observation.GuardrailNote, "Discussion-only") {
+		t.Fatalf("discussion-only model output was not guarded: %#v", observation)
+	}
+}
+
+func TestTechnicalReviewRetainsExecutableEvaluationRubric(t *testing.T) {
+	observation, guarded, err := validateTechnicalObservation(ollamaTechnicalObservation{
+		Strength: StrengthNotSupported, Confidence: "low",
+		Rationale: "The renderRubric method is a template for evaluation instructions, not an actual implementation of automated bias tests.",
+	}, TechnicalCandidate{
+		ObjectiveID: "eu-aia-10-bias-evaluation", Title: "Bias evaluation", Description: "Evaluate model outputs for bias.",
+		Path: "src/evaluators/anchoringBias.ts", Anchor: "MedicalAnchoringBiasGrader.renderRubric", Reachability: "unreached",
+		SourceContexts: []TechnicalSourceContext{{
+			Role: "anchor", Source: "export class MedicalAnchoringBiasGrader extends Grader { renderRubric(output: string) { return `score bias in ${output}`; } }",
+		}},
+	}, "fingerprint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !guarded || observation.Strength != StrengthWeak || observation.ModelStrength != StrengthNotSupported || !strings.Contains(observation.GuardrailNote, "Executable-evaluation") {
+		t.Fatalf("executable evaluation artifact was not retained: %#v", observation)
 	}
 }
 

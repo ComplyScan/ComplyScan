@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/ComplyScan/ComplyScan/internal/rules"
@@ -100,7 +101,7 @@ func (provider *OllamaProvider) reviewTechnicalCandidate(ctx context.Context, ca
 	if err := json.Unmarshal([]byte(response.Message.Content), &payload); err != nil {
 		return TechnicalObservation{}, Usage{}, false, fmt.Errorf("decode Ollama structured technical review: %w", err)
 	}
-	observation, guarded, err := validateTechnicalObservation(payload.Observation, candidate.ObjectiveID, candidate.EvidenceFingerprint, sanitized.Reachability)
+	observation, guarded, err := validateTechnicalObservation(payload.Observation, sanitized, candidate.EvidenceFingerprint)
 	if err != nil {
 		return TechnicalObservation{}, Usage{}, false, err
 	}
@@ -173,7 +174,7 @@ func cleanTechnicalSource(value string, limit int) string {
 	return value
 }
 
-func validateTechnicalObservation(value ollamaTechnicalObservation, objectiveID, evidenceFingerprint, reachability string) (TechnicalObservation, bool, error) {
+func validateTechnicalObservation(value ollamaTechnicalObservation, candidate TechnicalCandidate, evidenceFingerprint string) (TechnicalObservation, bool, error) {
 	if !validEvidenceStrength(value.Strength) {
 		return TechnicalObservation{}, false, fmt.Errorf("Ollama structured technical review returned invalid strength %q", value.Strength)
 	}
@@ -192,24 +193,74 @@ func validateTechnicalObservation(value ollamaTechnicalObservation, objectiveID,
 		questions[index] = cleanReviewText(questions[index], maxReviewMessageChars)
 	}
 	observation := TechnicalObservation{
-		ObjectiveID: objectiveID, EvidenceFingerprint: evidenceFingerprint,
+		ObjectiveID: candidate.ObjectiveID, EvidenceFingerprint: evidenceFingerprint,
 		Strength: value.Strength, Confidence: value.Confidence, Rationale: rationale,
 		UnresolvedQuestions: questions,
 		SuggestedReview:     cleanReviewText(value.SuggestedReview, maxReviewActionChars),
 	}
 	guarded := false
-	if offTopicCodeQualityRationale(rationale) && (value.Strength == StrengthPartial || value.Strength == StrengthStrong) {
+	if discussionOnlyCandidate(candidate, rationale) && (value.Strength == StrengthPartial || value.Strength == StrengthStrong) {
+		observation.ModelStrength = value.Strength
+		observation.Strength = StrengthNotSupported
+		observation.GuardrailNote = "Discussion-only guardrail: website, documentation, FAQ, or quiz code that discusses a control without implementing it cannot support the technical objective."
+		guarded = true
+	} else if offTopicCodeQualityRationale(rationale) && (value.Strength == StrengthPartial || value.Strength == StrengthStrong) {
 		observation.ModelStrength = value.Strength
 		observation.Strength = StrengthNotSupported
 		observation.GuardrailNote = "Off-topic code-quality rationale cannot support a technical objective; the model discussed structure or framework quality instead of the stated mechanism."
 		guarded = true
-	} else if reachability == "test-only" && (value.Strength == StrengthPartial || value.Strength == StrengthStrong) {
+	} else if candidate.Reachability == "test-only" && (value.Strength == StrengthPartial || value.Strength == StrengthStrong) {
 		observation.ModelStrength = value.Strength
 		observation.Strength = StrengthWeak
 		observation.GuardrailNote = "Test-only reachability guardrail: test-only anchors cannot provide partial or strong production evidence, even when they call code that is also used in production."
 		guarded = true
+	} else if value.Strength == StrengthNotSupported && executableEvaluationArtifact(candidate, rationale) {
+		observation.ModelStrength = value.Strength
+		observation.Strength = StrengthWeak
+		observation.GuardrailNote = "Executable-evaluation guardrail: code that constructs a grader, rubric, assertion, or evaluation template is reviewable implementation evidence even when dynamic registration leaves its caller unresolved."
+		guarded = true
 	}
 	return observation, guarded, nil
+}
+
+func discussionOnlyCandidate(candidate TechnicalCandidate, rationale string) bool {
+	path := "/" + strings.ToLower(filepath.ToSlash(candidate.Path))
+	discussionPath := containsAny(path, "/blog/", "/docs/", "/documentation/", "/faq/", "_faq.", "/examples/")
+	if !discussionPath {
+		return false
+	}
+	value := strings.ToLower(rationale)
+	return containsAny(value, "quiz", "blog", "documentation", "faq", "website", "describes", "discusses") &&
+		containsAny(value, "not reached", "not rendered", "not being used", "does not implement", "doesn't implement", "only discusses", "component")
+}
+
+func executableEvaluationArtifact(candidate TechnicalCandidate, rationale string) bool {
+	objective := strings.ToLower(strings.Join([]string{candidate.ObjectiveID, candidate.Title, candidate.Description}, " "))
+	if !containsAny(objective, "evaluation", "evaluate", "bias", "fairness", "performance threshold", "metric") || candidate.Anchor == "" {
+		return false
+	}
+	value := strings.ToLower(rationale)
+	if !containsAny(value, "rubric", "grader", "evaluation template", "assertion") ||
+		!containsAny(value, "not an actual implementation", "does not contain any implementation", "doesn't contain any implementation", "template for", "only a template") {
+		return false
+	}
+	source := strings.Builder{}
+	for _, sourceContext := range candidate.SourceContexts {
+		source.WriteString(strings.ToLower(sourceContext.Source))
+		source.WriteByte('\n')
+	}
+	code := source.String()
+	return containsAny(code, "rubric", "grader", "assert", "evaluate", "score") &&
+		containsAny(code, "func ", "def ", "function ", "class ", "=>", "render")
+}
+
+func containsAny(value string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if strings.Contains(value, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func offTopicCodeQualityRationale(rationale string) bool {
@@ -270,6 +321,7 @@ For the single supplied candidate:
 - distinguish implementation from discussion: descriptive website copy, documentation, FAQs, blog examples, comments, imports, and parser/test fixture strings are not_supported unless executable surrounding code actually implements or verifies the stated mechanism;
 - for evaluation objectives, executable graders, rubrics, assertions, and evaluation templates can support the candidate when code applies them to model inputs or outputs; do not reject them merely because evaluation criteria are represented as strings or prompts;
 - a class or function that renders a rubric for an evaluation framework is implementation evidence even when dynamic registration prevents the bounded graph from resolving its caller; classify it weak or partial when the rubric directly measures the stated objective;
+- before returning not_supported for an evaluation candidate, check whether executable source defines a grader, rubric renderer, assertion, scoring function, or evaluation template; if it directly measures the stated objective, it must be at least weak even when its caller is unresolved;
 - a test-only candidate is weak when the test genuinely verifies the stated technical mechanism, but not_supported when objective terms appear only in unrelated fixture text or imported names;
 - use not_supported when context contradicts the candidate, weak for superficial or likely dead/test-only matches, partial when some necessary connections exist, strong only for directly connected implementation evidence, and uncertain when context is insufficient;
 - treat the anchor reachability value as authoritative: when the candidate anchor reachability is test-only, strength MUST be weak or not_supported;
