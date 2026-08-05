@@ -15,7 +15,7 @@ import (
 const (
 	// TechnicalReviewPromptVersion invalidates cached observations whenever the
 	// technical prompt, schema, sanitization, or deterministic guardrails change.
-	TechnicalReviewPromptVersion = "2"
+	TechnicalReviewPromptVersion = "3"
 
 	maxTechnicalContexts           = 8
 	maxTechnicalRelationships      = 20
@@ -258,7 +258,11 @@ func executableEvaluationArtifact(candidate TechnicalCandidate, rationale string
 	}
 	value := strings.ToLower(rationale)
 	if !containsAny(value, "rubric", "grader", "evaluation template", "assertion") ||
-		!containsAny(value, "not an actual implementation", "does not contain any implementation", "doesn't contain any implementation", "template for", "only a template") {
+		!containsAny(value,
+			"not an actual implementation", "does not contain any implementation", "doesn't contain any implementation",
+			"does not implement", "doesn't implement", "does not directly measure", "doesn't directly measure",
+			"template for", "only a template", "only defines", "human assessment",
+		) {
 		return false
 	}
 	source := strings.Builder{}

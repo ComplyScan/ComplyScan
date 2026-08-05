@@ -390,21 +390,26 @@ func TestTechnicalReviewRejectsDiscussionOnlyQuiz(t *testing.T) {
 }
 
 func TestTechnicalReviewRetainsExecutableEvaluationRubric(t *testing.T) {
-	observation, guarded, err := validateTechnicalObservation(ollamaTechnicalObservation{
-		Strength: StrengthNotSupported, Confidence: "low",
-		Rationale: "The renderRubric method is a template for evaluation instructions, not an actual implementation of automated bias tests.",
-	}, TechnicalCandidate{
+	candidate := TechnicalCandidate{
 		ObjectiveID: "eu-aia-10-bias-evaluation", Title: "Bias evaluation", Description: "Evaluate model outputs for bias.",
 		Path: "src/evaluators/anchoringBias.ts", Anchor: "MedicalAnchoringBiasGrader.renderRubric", Reachability: "unreached",
 		SourceContexts: []TechnicalSourceContext{{
 			Role: "anchor", Source: "export class MedicalAnchoringBiasGrader extends Grader { renderRubric(output: string) { return `score bias in ${output}`; } }",
 		}},
-	}, "fingerprint")
-	if err != nil {
-		t.Fatal(err)
 	}
-	if !guarded || observation.Strength != StrengthWeak || observation.ModelStrength != StrengthNotSupported || !strings.Contains(observation.GuardrailNote, "Executable-evaluation") {
-		t.Fatalf("executable evaluation artifact was not retained: %#v", observation)
+	for _, rationale := range []string{
+		"The renderRubric method is a template for evaluation instructions, not an actual implementation of automated bias tests.",
+		"The code does not implement automated evaluation mechanisms; it only defines a rubric for human assessment and does not directly measure bias.",
+	} {
+		observation, guarded, err := validateTechnicalObservation(ollamaTechnicalObservation{
+			Strength: StrengthNotSupported, Confidence: "low", Rationale: rationale,
+		}, candidate, "fingerprint")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !guarded || observation.Strength != StrengthWeak || observation.ModelStrength != StrengthNotSupported || !strings.Contains(observation.GuardrailNote, "Executable-evaluation") {
+			t.Fatalf("executable evaluation artifact was not retained for %q: %#v", rationale, observation)
+		}
 	}
 }
 
