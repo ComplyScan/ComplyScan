@@ -151,7 +151,8 @@ func evaluateObjectives(pack Pack, repository discovery.Repository, graph codegr
 		if file.Kind == discovery.KindSource && !graph.SupportsSourcePath(file.Path) {
 			continue
 		}
-		content := normalizeSearchContent(string(file.Content))
+		rawContent := string(file.Content)
+		content := normalizeSearchContent(rawContent)
 		if strings.Contains(content, ignoreMarker) {
 			continue
 		}
@@ -162,6 +163,9 @@ func evaluateObjectives(pack Pack, repository discovery.Repository, graph codegr
 			}
 			matched, terms, line := matchesObjective(path, content, objective)
 			if !matched {
+				continue
+			}
+			if !candidatePassesStaticScope(objective.ID, path, rawContent, line) {
 				continue
 			}
 			assessments[index].Matches = append(assessments[index].Matches, EvidenceMatch{
@@ -195,6 +199,93 @@ func evaluateObjectives(pack Pack, repository discovery.Repository, graph codegr
 		}
 	}
 	return assessments
+}
+
+// candidatePassesStaticScope rejects bounded categories that satisfy lexical
+// rules but cannot represent the objective they matched. Semantic review still
+// handles contextual ambiguity; these checks cover structural false positives.
+func candidatePassesStaticScope(objectiveID, path, content string, line int) bool {
+	normalizedPath := normalizeSearchContent(path)
+	if strings.HasPrefix(path, ".agents/skills/") {
+		return false
+	}
+
+	switch objectiveID {
+	case "eu-aia-10-dataset-validation":
+		window := normalizeSearchContent(contentLineWindow(content, line, 3))
+		if strings.Contains(window, "dataset name") && !containsAny(window,
+			"schema", "completeness", "missing field", "missing value", "quality") {
+			return false
+		}
+	case "eu-aia-10-bias-evaluation":
+		if containsAny(normalizedPath, "/dataset/", "/datasets/", " dataset ") &&
+			!containsAny(normalizedPath, "evaluation", "benchmark", "scorer") {
+			return false
+		}
+	case "eu-aia-14-safe-stop":
+		if containsAny(normalizedPath, "tracing", "telemetry", "logging", "audit") &&
+			!containsAny(normalizedPath, "model", "inference", "prediction", "decision", "shutdown", "stop", "kill") {
+			return false
+		}
+	}
+
+	if strings.HasSuffix(strings.ToLower(path), ".py") &&
+		containsAny(normalizedPath, "test", "parser", "markdown") &&
+		lineInLongTripleQuotedLiteral(content, line, 100) {
+		return false
+	}
+	return true
+}
+
+func contentLineWindow(content string, line, radius int) string {
+	lines := strings.Split(content, "\n")
+	if line < 1 || line > len(lines) {
+		return ""
+	}
+	start := line - 1 - radius
+	if start < 0 {
+		start = 0
+	}
+	end := line + radius
+	if end > len(lines) {
+		end = len(lines)
+	}
+	return strings.Join(lines[start:end], "\n")
+}
+
+func lineInLongTripleQuotedLiteral(content string, line, minimumLines int) bool {
+	lineStarts := contentLineStarts(content)
+	for _, delimiter := range []string{`"""`, `'''`} {
+		searchFrom := 0
+		for searchFrom < len(content) {
+			openingRelative := strings.Index(content[searchFrom:], delimiter)
+			if openingRelative < 0 {
+				break
+			}
+			opening := searchFrom + openingRelative
+			closingRelative := strings.Index(content[opening+len(delimiter):], delimiter)
+			if closingRelative < 0 {
+				break
+			}
+			closing := opening + len(delimiter) + closingRelative
+			startLine := lineForOffset(lineStarts, opening)
+			endLine := lineForOffset(lineStarts, closing)
+			if endLine-startLine >= minimumLines && line >= startLine && line <= endLine {
+				return true
+			}
+			searchFrom = closing + len(delimiter)
+		}
+	}
+	return false
+}
+
+func containsAny(value string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if strings.Contains(value, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func addObjectiveContextQuestions(context *codegraph.ContextPackage, objectiveID string) {

@@ -81,6 +81,88 @@ func TestObjectiveTermsMustOccurWithinBoundedContext(t *testing.T) {
 	}
 }
 
+func TestCandidateScopeRejectsDeveloperAgentMetadata(t *testing.T) {
+	if candidatePassesStaticScope(
+		"eu-aia-14-human-review-gate",
+		".agents/skills/maintainer-review/agents/openai.yaml",
+		"request approval before a decision",
+		1,
+	) {
+		t.Fatal("developer-agent skill metadata was treated as application evidence")
+	}
+}
+
+func TestCandidateScopeRejectsTracingOnlySafeStop(t *testing.T) {
+	if candidatePassesStaticScope(
+		"eu-aia-14-safe-stop",
+		"tests/tracing/test_tracing_env_disable.py",
+		"disable tracing and do not log model data",
+		1,
+	) {
+		t.Fatal("disabling tracing was treated as stopping an AI operation")
+	}
+	if !candidatePassesStaticScope(
+		"eu-aia-14-safe-stop",
+		"internal/inference/model_shutdown.go",
+		"disable model inference",
+		1,
+	) {
+		t.Fatal("an inference shutdown path was rejected")
+	}
+}
+
+func TestCandidateScopeRejectsDatasetNameSelection(t *testing.T) {
+	content := "# Validate dataset names if specified\ninvalid_names = [name for name in dataset_names]\n"
+	if candidatePassesStaticScope("eu-aia-10-dataset-validation", "dataset_provider.py", content, 1) {
+		t.Fatal("dataset-name selection was treated as dataset quality validation")
+	}
+	content = "# Validate dataset schema\nmissing_fields = required - dataset.keys()\n"
+	if !candidatePassesStaticScope("eu-aia-10-dataset-validation", "dataset_validation.py", content, 1) {
+		t.Fatal("dataset schema validation was rejected")
+	}
+}
+
+func TestCandidateScopeRejectsDatasetLoaderAsBiasEvaluation(t *testing.T) {
+	if candidatePassesStaticScope(
+		"eu-aia-10-bias-evaluation",
+		"tests/unit/datasets/test_social_bias_dataset.py",
+		"test discrimination dataset loading",
+		1,
+	) {
+		t.Fatal("a dataset loader test was treated as bias evaluation")
+	}
+	if !candidatePassesStaticScope(
+		"eu-aia-10-bias-evaluation",
+		"tests/benchmark/test_fairness_dataset.py",
+		"evaluate fairness on the dataset",
+		1,
+	) {
+		t.Fatal("a fairness benchmark was rejected")
+	}
+}
+
+func TestCandidateScopeRejectsLongEmbeddedParserFixture(t *testing.T) {
+	content := "def test_markdown():\n    document = \"\"\"\n" +
+		strings.Repeat("reference material\n", 120) +
+		"safety evaluation recall threshold\n\"\"\"\n"
+	if candidatePassesStaticScope(
+		"eu-aia-15-performance-thresholds",
+		"tests/node_parser/test_markdown_element.py",
+		content,
+		123,
+	) {
+		t.Fatal("an embedded document parser fixture was treated as a performance control")
+	}
+	if !candidatePassesStaticScope(
+		"eu-aia-15-performance-thresholds",
+		"tests/evaluation/test_threshold.py",
+		"assert recall >= threshold\n",
+		1,
+	) {
+		t.Fatal("an executable threshold test was rejected")
+	}
+}
+
 func TestObjectivePathMatchingPreservesCamelCaseBoundaries(t *testing.T) {
 	objective := TechnicalObjective{
 		PathKeywords:  []string{"injection"},
