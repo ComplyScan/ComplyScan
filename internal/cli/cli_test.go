@@ -18,6 +18,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/report"
+	"github.com/ComplyScan/ComplyScan/internal/technicalreview"
 )
 
 var testBuild = BuildInfo{Version: "0.1.0", Commit: "test", BuildDate: "today"}
@@ -370,12 +371,28 @@ func TestScanRejectsUnsafeOrInactiveOllamaOverrides(t *testing.T) {
 	for _, arguments := range [][]string{
 		{"scan", "--review", "openai"},
 		{"scan", "--ollama-model", "gemma3"},
+		{"scan", "--refresh-review"},
 		{"scan", "--review", "ollama", "--ollama-endpoint", "https://example.com"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := Execute(arguments, &stdout, &stderr, testBuild); code != 2 {
 			t.Fatalf("Execute(%v) code = %d, want 2; stderr=%q", arguments, code, stderr.String())
 		}
+	}
+}
+
+func TestTechnicalReviewProgressDistinguishesModelAndCache(t *testing.T) {
+	var output bytes.Buffer
+	progress := technicalReviewProgress(&output)
+	candidate := providers.TechnicalCandidate{ObjectiveID: "eu-aia-10-bias-evaluation", Path: "evaluation.go"}
+	if err := progress(technicalreview.Progress{Current: 1, Total: 2, Candidate: candidate}); err != nil {
+		t.Fatal(err)
+	}
+	if err := progress(technicalreview.Progress{Current: 2, Total: 2, Candidate: candidate, Cached: true}); err != nil {
+		t.Fatal(err)
+	}
+	if value := output.String(); !strings.Contains(value, "1/2") || !strings.Contains(value, "reviewing with Ollama") || !strings.Contains(value, "2/2") || !strings.Contains(value, "using cached observation") {
+		t.Fatalf("unexpected progress output:\n%s", value)
 	}
 }
 

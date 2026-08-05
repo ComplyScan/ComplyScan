@@ -22,6 +22,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/reviewcontext"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
 	"github.com/ComplyScan/ComplyScan/internal/scanner"
+	"github.com/ComplyScan/ComplyScan/internal/technicalreview"
 	"github.com/spf13/cobra"
 )
 
@@ -237,6 +238,7 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 		ollamaEndpoint            string
 		reportDirectory           string
 		noReport                  bool
+		refreshReview             bool
 	)
 	command := &cobra.Command{
 		Use:   "scan [path]",
@@ -270,6 +272,9 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			}
 			if (cmd.Flags().Changed("ollama-model") || cmd.Flags().Changed("ollama-endpoint")) && cfg.AI.Provider != "ollama" {
 				return errors.New("--ollama-model and --ollama-endpoint require --review ollama or ai.provider: ollama")
+			}
+			if refreshReview && cfg.AI.Provider != "ollama" {
+				return errors.New("--refresh-review requires --review ollama or ai.provider: ollama")
 			}
 			if err := cfg.Validate(); err != nil {
 				return fmt.Errorf("validate review configuration: %w", err)
@@ -401,7 +406,14 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 						return fmt.Errorf("write terminal report: %w", err)
 					}
 				}
-				review, technicalReview, err := reviewWithOllama(cmd.Context(), cfg.AI.Ollama, target, visible, technicalEvidence, result.FullRepository)
+				progressWriter := io.Writer(stdout)
+				if outputFormat != "terminal" {
+					progressWriter = cmd.ErrOrStderr()
+				}
+				review, technicalReview, err := reviewWithOllama(
+					cmd.Context(), cfg.AI.Ollama, target, visible, technicalEvidence, result.FullRepository,
+					refreshReview, technicalReviewProgress(progressWriter),
+				)
 				if err != nil {
 					return err
 				}
@@ -456,10 +468,20 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().StringVar(&ollamaEndpoint, "ollama-endpoint", "", "local Ollama base URL (overrides ai.ollama.endpoint)")
 	command.Flags().StringVar(&reportDirectory, "report-dir", report.DefaultDirectory, "directory for latest.md and latest.json (relative to the scan target)")
 	command.Flags().BoolVar(&noReport, "no-report", false, "do not save local Markdown and JSON reports")
+	command.Flags().BoolVar(&refreshReview, "refresh-review", false, "ignore cached technical observations and run Ollama again")
 	return command
 }
 
-func reviewWithOllama(ctx context.Context, settings config.OllamaConfig, target string, findings []rules.Finding, evidence framework.TechnicalEvidenceReport, repository discovery.Repository) (providers.ReviewResult, providers.TechnicalReviewResult, error) {
+func reviewWithOllama(
+	ctx context.Context,
+	settings config.OllamaConfig,
+	target string,
+	findings []rules.Finding,
+	evidence framework.TechnicalEvidenceReport,
+	repository discovery.Repository,
+	refresh bool,
+	onProgress func(technicalreview.Progress) error,
+) (providers.ReviewResult, providers.TechnicalReviewResult, error) {
 	reviewer, err := providers.NewOllama(providers.OllamaOptions{
 		Endpoint: settings.Endpoint, Model: settings.Model,
 		Timeout: time.Duration(settings.TimeoutSeconds) * time.Second, MaxFindings: settings.MaxFindings,
@@ -475,11 +497,43 @@ func reviewWithOllama(ctx context.Context, settings config.OllamaConfig, target 
 	if err != nil {
 		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, fmt.Errorf("Ollama advisory review: %w", err)
 	}
-	technicalResult, err := reviewer.ReviewTechnical(ctx, reviewcontext.Build(evidence, repository))
+	var cache *technicalreview.Cache
+	cacheUnavailable := false
+	cachePath, cachePathErr := technicalreview.DefaultPath()
+	if cachePathErr == nil {
+		cache, err = technicalreview.Open(cachePath)
+		if err != nil {
+			cacheUnavailable = true
+			cache = nil
+		}
+	} else {
+		cacheUnavailable = true
+	}
+	technicalResult, err := technicalreview.Run(ctx, reviewer, reviewcontext.Build(evidence, repository), technicalreview.Options{
+		Identity: technicalreview.Identity{
+			Provider: providers.Ollama, Model: settings.Model, PromptVersion: providers.TechnicalReviewPromptVersion,
+			PackID: evidence.Pack.ID, PackVersion: evidence.Pack.Version, PackDigest: evidence.Pack.Digest,
+		},
+		Cache: cache, Refresh: refresh, MaxCandidates: settings.MaxFindings, OnProgress: onProgress,
+	})
 	if err != nil {
 		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, fmt.Errorf("Ollama technical-objective review: %w", err)
 	}
+	if cacheUnavailable {
+		technicalResult.Notes = append(technicalResult.Notes, "The local technical review cache was unavailable; review continued without cache reuse.")
+	}
 	return findingResult, technicalResult, nil
+}
+
+func technicalReviewProgress(output io.Writer) func(technicalreview.Progress) error {
+	return func(progress technicalreview.Progress) error {
+		status := "reviewing with Ollama"
+		if progress.Cached {
+			status = "using cached observation"
+		}
+		_, err := fmt.Fprintf(output, "Technical review %d/%d: %s — %s (%s)\n", progress.Current, progress.Total, progress.Candidate.ObjectiveID, progress.Candidate.Path, status)
+		return err
+	}
 }
 
 func technicalCandidateCount(evidence framework.TechnicalEvidenceReport) int {

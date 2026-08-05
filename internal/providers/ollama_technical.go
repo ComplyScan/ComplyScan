@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,10 @@ import (
 )
 
 const (
+	// TechnicalReviewPromptVersion invalidates cached observations whenever the
+	// technical prompt, schema, sanitization, or deterministic guardrails change.
+	TechnicalReviewPromptVersion = "2"
+
 	maxTechnicalContexts           = 8
 	maxTechnicalRelationships      = 20
 	maxTechnicalQuestions          = 10
@@ -19,6 +24,18 @@ const (
 	maxTechnicalSourceChars        = 6_000
 	maxTechnicalSourcePerCandidate = 16_000
 )
+
+// TechnicalCandidateDigest identifies the complete bounded candidate context
+// actually sent to the model, without retaining source in a cache key.
+func TechnicalCandidateDigest(candidate TechnicalCandidate) (string, error) {
+	sanitized := sanitizeTechnicalCandidate(candidate)
+	sanitized.EvidenceFingerprint = ""
+	data, err := json.Marshal(sanitized)
+	if err != nil {
+		return "", fmt.Errorf("encode technical candidate digest: %w", err)
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(data)), nil
+}
 
 type ollamaTechnicalObservation struct {
 	Strength            EvidenceStrength `json:"strength"`
@@ -40,7 +57,7 @@ func (provider *OllamaProvider) ReviewTechnical(ctx context.Context, request Tec
 		Observations: []TechnicalObservation{},
 		Notes: []string{
 			"Technical model observations are advisory and cannot change objective status, legal applicability, findings, or exit status.",
-			"Only bounded repository excerpts and structural relationships were sent to the configured local Ollama endpoint.",
+			"Model requests contain only bounded repository excerpts and structural relationships sent to the configured local Ollama endpoint.",
 		},
 	}
 	if len(request.Candidates) == 0 {
