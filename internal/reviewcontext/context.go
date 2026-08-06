@@ -85,6 +85,22 @@ func Build(evidence framework.TechnicalEvidenceReport, repository discovery.Repo
 // candidates keep their exact fingerprints and candidate-level context.
 func BuildInvestigations(evidence framework.TechnicalEvidenceReport, repository discovery.Repository, mapping reconciliation.Report) providers.TechnicalReviewRequest {
 	request := Build(evidence, repository)
+	if len(mapping.Systems) > 0 {
+		owned := ownedEvidenceFingerprints(mapping)
+		filtered := make([]providers.TechnicalCandidate, 0, len(request.Candidates))
+		for _, candidate := range request.Candidates {
+			if owned[candidate.ObjectiveID][candidate.EvidenceFingerprint] {
+				filtered = append(filtered, candidate)
+			}
+		}
+		request.Candidates = filtered
+	}
+	// Repository-wide missing-evidence investigations are not yet system-bound.
+	// Running one across a multi-system repository could use code owned by a
+	// different system, so keep that question unresolved instead of guessing.
+	if len(mapping.Systems) > 1 {
+		return request
+	}
 	likely := likelyRequiredObjectives(mapping)
 	for _, objective := range evidence.Objectives {
 		if objective.Status == framework.ObjectiveCandidate || !likely[objective.ID] {
@@ -94,6 +110,24 @@ func BuildInvestigations(evidence framework.TechnicalEvidenceReport, repository 
 		request.Candidates = append(request.Candidates, candidate)
 	}
 	return request
+}
+
+func ownedEvidenceFingerprints(mapping reconciliation.Report) map[string]map[string]bool {
+	result := make(map[string]map[string]bool)
+	for _, system := range mapping.Systems {
+		for _, objective := range system.Objectives {
+			for _, reference := range objective.EvidenceReferences {
+				if reference.Fingerprint == "" {
+					continue
+				}
+				if result[objective.ObjectiveID] == nil {
+					result[objective.ObjectiveID] = make(map[string]bool)
+				}
+				result[objective.ObjectiveID][reference.Fingerprint] = true
+			}
+		}
+	}
+	return result
 }
 
 func likelyRequiredObjectives(mapping reconciliation.Report) map[string]bool {

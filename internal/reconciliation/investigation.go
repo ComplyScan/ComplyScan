@@ -17,7 +17,7 @@ func AttachTechnicalInvestigations(report *Report, review providers.TechnicalRev
 	for systemIndex := range report.Systems {
 		for objectiveIndex := range report.Systems[systemIndex].Objectives {
 			objective := &report.Systems[systemIndex].Objectives[objectiveIndex]
-			observations := byObjective[objective.ObjectiveID]
+			observations := investigationsForObjective(*objective, byObjective[objective.ObjectiveID])
 			if len(observations) == 0 {
 				continue
 			}
@@ -38,6 +38,25 @@ func AttachTechnicalInvestigations(report *Report, review providers.TechnicalRev
 			addInvestigationSummary(&report.Summary, best.Assurance)
 		}
 	}
+}
+
+func investigationsForObjective(objective ObjectiveResult, observations []providers.TechnicalObservation) []providers.TechnicalObservation {
+	fingerprints := make(map[string]struct{}, len(objective.EvidenceReferences))
+	for _, reference := range objective.EvidenceReferences {
+		if reference.Fingerprint != "" {
+			fingerprints[reference.Fingerprint] = struct{}{}
+		}
+	}
+	result := make([]providers.TechnicalObservation, 0, len(observations))
+	for _, observation := range observations {
+		if observation.InvestigationMode == "candidate-validation" {
+			if _, belongs := fingerprints[observation.EvidenceFingerprint]; !belongs {
+				continue
+			}
+		}
+		result = append(result, observation)
+	}
+	return result
 }
 
 func assuranceRank(value providers.AssuranceLevel) int {

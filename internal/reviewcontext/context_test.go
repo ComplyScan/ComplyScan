@@ -7,6 +7,7 @@ import (
 
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
+	"github.com/ComplyScan/ComplyScan/internal/ownership"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
 )
@@ -25,6 +26,42 @@ func TestBoundedRepositoryExcerptIncludesWiderMatchedFileContext(t *testing.T) {
 	}
 	if got := boundedRepositoryExcerpt([]byte(content.String()), 90, 80); len([]rune(got)) > 80 {
 		t.Fatalf("character cap was exceeded: %d", len([]rune(got)))
+	}
+}
+
+func TestBuildInvestigationsUsesOnlyOwnedCandidatesInMultiSystemRepository(t *testing.T) {
+	evidence := framework.TechnicalEvidenceReport{Objectives: []framework.ObjectiveAssessment{{
+		ID: "objective", Status: framework.ObjectiveCandidate,
+		Matches: []framework.EvidenceMatch{
+			{Fingerprint: "ranking", Path: "ranking/review.go"},
+			{Fingerprint: "unassigned", Path: "misc/review.go"},
+		},
+	}}}
+	mapping := reconciliation.Report{Systems: []reconciliation.SystemResult{
+		{SystemID: "ranking", Objectives: []reconciliation.ObjectiveResult{{
+			ObjectiveID: "objective", EvidenceReferences: []reconciliation.EvidenceReference{{
+				Fingerprint: "ranking", Path: "ranking/review.go", Ownership: ownership.StatusAssigned, Systems: []string{"ranking"},
+			}},
+		}}},
+		{SystemID: "support", Objectives: []reconciliation.ObjectiveResult{{ObjectiveID: "objective"}}},
+	}}
+	request := BuildInvestigations(evidence, discovery.Repository{}, mapping)
+	if len(request.Candidates) != 1 || request.Candidates[0].EvidenceFingerprint != "ranking" {
+		t.Fatalf("investigation candidates = %#v", request.Candidates)
+	}
+}
+
+func TestBuildInvestigationsSkipsRepositoryWideSearchAcrossMultipleSystems(t *testing.T) {
+	evidence := framework.TechnicalEvidenceReport{Objectives: []framework.ObjectiveAssessment{{
+		ID: "objective", Status: framework.ObjectiveNotDetected, EligibleFileKinds: []string{"source"},
+	}}}
+	mapping := reconciliation.Report{Systems: []reconciliation.SystemResult{
+		{SystemID: "ranking", Objectives: []reconciliation.ObjectiveResult{{ObjectiveID: "objective", Requirement: reconciliation.RequirementLikelyRequired}}},
+		{SystemID: "support", Objectives: []reconciliation.ObjectiveResult{{ObjectiveID: "objective", Requirement: reconciliation.RequirementLikelyRequired}}},
+	}}
+	request := BuildInvestigations(evidence, discovery.Repository{}, mapping)
+	if len(request.Candidates) != 0 {
+		t.Fatalf("multi-system repository-wide investigation was not bounded: %#v", request.Candidates)
 	}
 }
 
