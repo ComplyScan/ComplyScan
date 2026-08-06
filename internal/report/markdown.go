@@ -234,8 +234,14 @@ func writeAIInventoryMarkdown(writer io.Writer, value inventory.Report) error {
 }
 
 func writeReconciliationMarkdown(writer io.Writer, value reconciliation.Report) error {
-	if _, err := fmt.Fprintf(writer, "\n## Requirement-to-evidence reconciliation\n\n- Mapping version: %s\n- Likely required objectives: %d\n- With candidate evidence: %d\n- Without detected evidence: %d\n- Configuration/evidence mismatches: %d\n- Unresolved results: %d\n- Unassigned evidence: %d\n- AI-substantiated objectives: %d\n- Structurally verified objectives: %d\n- Objectives with isolated test evidence: %d\n- Extended investigations with no evidence: %d\n- Unresolved investigations: %d\n",
-		inlineCode(value.MappingVersion), value.Summary.LikelyRequired, value.Summary.RequirementWithEvidence,
+	configured := "no"
+	if value.Ownership.Configured {
+		configured = "yes"
+	}
+	if _, err := fmt.Fprintf(writer, "\n## Requirement-to-evidence reconciliation\n\n- Mapping version: %s\n- Path ownership configured: %s (%d rules)\n- Assigned evidence references: %d\n- Intentionally shared evidence references: %d\n- Conflicting evidence references: %d\n- Unassigned evidence references: %d\n- Single-system inferred references: %d\n- Likely required objectives: %d\n- With candidate evidence: %d\n- Without detected evidence: %d\n- Configuration/evidence mismatches: %d\n- Unresolved results: %d\n- Evidence groups with unresolved ownership: %d\n- AI-substantiated objectives: %d\n- Structurally verified objectives: %d\n- Objectives with isolated test evidence: %d\n- Extended investigations with no evidence: %d\n- Unresolved investigations: %d\n",
+		inlineCode(value.MappingVersion), configured, len(value.Ownership.Rules), value.Summary.AssignedReferences,
+		value.Summary.SharedReferences, value.Summary.ConflictingReferences, value.Summary.UnassignedReferences, value.Summary.InferredReferences,
+		value.Summary.LikelyRequired, value.Summary.RequirementWithEvidence,
 		value.Summary.RequirementWithoutEvidence, value.Summary.EvidenceMismatches, value.Summary.Unresolved, value.Summary.UnmappedEvidence,
 		value.Summary.AISubstantiated, value.Summary.StructurallyVerified, value.Summary.TestEvidenceObserved, value.Summary.InvestigationNoEvidence, value.Summary.InvestigationUnresolved); err != nil {
 		return err
@@ -265,13 +271,33 @@ func writeReconciliationMarkdown(writer io.Writer, value reconciliation.Report) 
 				return err
 			}
 		}
+		if hasSystemEvidenceReferences(system) {
+			if _, err := fmt.Fprintln(writer, "\nEvidence references attributed to this system:"); err != nil {
+				return err
+			}
+			for _, objective := range system.Objectives {
+				for _, reference := range objective.EvidenceReferences {
+					if _, err := fmt.Fprintf(writer, "\n- %s: %s — %s", inlineCode(objective.ObjectiveID), inlineCode(locationText(reference.Path, reference.Line)), markdownText(ownershipReferenceText(reference))); err != nil {
+						return err
+					}
+				}
+			}
+			if _, err := fmt.Fprintln(writer); err != nil {
+				return err
+			}
+		}
 		if len(system.ObservedComponents) > 0 {
-			if _, err := fmt.Fprintln(writer, "\nProvisionally associated AI components:"); err != nil {
+			if _, err := fmt.Fprintln(writer, "\nAssociated AI components:"); err != nil {
 				return err
 			}
 			for _, component := range system.ObservedComponents {
 				if _, err := fmt.Fprintf(writer, "\n- %s (%s): %s", markdownText(component.Name), markdownText(string(component.Kind)), markdownText(string(component.Mapping))); err != nil {
 					return err
+				}
+				for _, reference := range component.Locations {
+					if _, err := fmt.Fprintf(writer, "\n  - %s — %s", inlineCode(locationText(reference.Path, reference.Line)), markdownText(ownershipReferenceText(reference))); err != nil {
+						return err
+					}
 				}
 			}
 			if _, err := fmt.Fprintln(writer); err != nil {
@@ -306,7 +332,7 @@ func writeReconciliationMarkdown(writer io.Writer, value reconciliation.Report) 
 		}
 	}
 	if len(value.Unmapped) > 0 {
-		if _, err := fmt.Fprintln(writer, "\n### Unassigned repository evidence"); err != nil {
+		if _, err := fmt.Fprintln(writer, "\n### Repository evidence with unresolved ownership"); err != nil {
 			return err
 		}
 		for _, evidence := range value.Unmapped {
@@ -314,7 +340,7 @@ func writeReconciliationMarkdown(writer io.Writer, value reconciliation.Report) 
 				return err
 			}
 			for _, reference := range evidence.References {
-				if _, err := fmt.Fprintf(writer, "\n  - %s", inlineCode(locationText(reference.Path, reference.Line))); err != nil {
+				if _, err := fmt.Fprintf(writer, "\n  - %s — %s", inlineCode(locationText(reference.Path, reference.Line)), markdownText(ownershipReferenceText(reference))); err != nil {
 					return err
 				}
 			}
@@ -324,6 +350,15 @@ func writeReconciliationMarkdown(writer io.Writer, value reconciliation.Report) 
 		}
 	}
 	return nil
+}
+
+func hasSystemEvidenceReferences(system reconciliation.SystemResult) bool {
+	for _, objective := range system.Objectives {
+		if len(objective.EvidenceReferences) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func writeTechnicalEvidenceMarkdown(writer io.Writer, evidence framework.TechnicalEvidenceReport) error {

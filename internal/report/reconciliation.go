@@ -39,6 +39,17 @@ func writeReconciliationTerminal(writer io.Writer, value reconciliation.Report) 
 		value.Summary.RequirementWithoutEvidence, value.Summary.EvidenceMismatches, value.Summary.Unresolved); err != nil {
 		return err
 	}
+	ownershipMode := "not configured"
+	if value.Ownership.Configured {
+		ownershipMode = fmt.Sprintf("configured (%d rule(s))", len(value.Ownership.Rules))
+	} else if value.Summary.InferredReferences > 0 {
+		ownershipMode = "single-system inference"
+	}
+	if _, err := fmt.Fprintf(writer, "Path ownership: %s; %d assigned, %d shared, %d conflicting, %d unassigned reference(s)\n",
+		ownershipMode, value.Summary.AssignedReferences, value.Summary.SharedReferences,
+		value.Summary.ConflictingReferences, value.Summary.UnassignedReferences); err != nil {
+		return err
+	}
 	if len(value.Systems) == 0 {
 		if _, err := fmt.Fprintln(writer, "  No system profile was declared; AI and control evidence is reported below as unassigned."); err != nil {
 			return err
@@ -71,20 +82,48 @@ func writeReconciliationTerminal(writer io.Writer, value reconciliation.Report) 
 					return err
 				}
 			}
+			for _, reference := range objective.EvidenceReferences {
+				if _, err := fmt.Fprintf(writer, "             Evidence: %s [%s]\n", locationText(reference.Path, reference.Line), ownershipReferenceText(reference)); err != nil {
+					return err
+				}
+			}
+		}
+		for _, component := range system.ObservedComponents {
+			if _, err := fmt.Fprintf(writer, "  COMPONENT  %s (%s) — %s\n", component.Name, component.Kind, component.Mapping); err != nil {
+				return err
+			}
+			for _, reference := range component.Locations {
+				if _, err := fmt.Fprintf(writer, "             Evidence: %s [%s]\n", locationText(reference.Path, reference.Line), ownershipReferenceText(reference)); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	if len(value.Unmapped) > 0 {
-		if _, err := fmt.Fprintf(writer, "\n  Unassigned repository evidence: %d\n", len(value.Unmapped)); err != nil {
+		if _, err := fmt.Fprintf(writer, "\n  Repository evidence with unresolved ownership: %d\n", len(value.Unmapped)); err != nil {
 			return err
 		}
 		for _, evidence := range value.Unmapped {
-			if _, err := fmt.Fprintf(writer, "  UNASSIGNED %-20s %s — %s\n", evidence.Kind, evidence.Title, evidence.Reason.Code); err != nil {
+			if _, err := fmt.Fprintf(writer, "  UNRESOLVED %-20s %s — %s\n", evidence.Kind, evidence.Title, evidence.Reason.Code); err != nil {
 				return err
+			}
+			for _, reference := range evidence.References {
+				if _, err := fmt.Fprintf(writer, "             Evidence: %s [%s]\n", locationText(reference.Path, reference.Line), ownershipReferenceText(reference)); err != nil {
+					return err
+				}
 			}
 		}
 	}
 	_, err := fmt.Fprintln(writer)
 	return err
+}
+
+func ownershipReferenceText(reference reconciliation.EvidenceReference) string {
+	owners := "no system"
+	if len(reference.Systems) > 0 {
+		owners = strings.Join(reference.Systems, ", ")
+	}
+	return fmt.Sprintf("%s -> %s", reference.Ownership, owners)
 }
 
 func reconciliationLabel(status reconciliation.MappingStatus) string {

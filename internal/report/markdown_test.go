@@ -69,6 +69,8 @@ func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
 		"## EU AI Act technical evidence",
 		"## Independently observed AI components",
 		"## Requirement-to-evidence reconciliation",
+		"Path ownership configured: no",
+		"unassigned -&gt; no system",
 		"no-declared-system",
 		"### Repository analysis",
 		"exported-entry-candidate",

@@ -10,6 +10,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/inventory"
+	"github.com/ComplyScan/ComplyScan/internal/ownership"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
@@ -49,7 +50,7 @@ func TestWriteJSON(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 3 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
+	if decoded.SchemaVersion != 4 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
 		t.Fatalf("unexpected tool: %#v", decoded.Tool)
 	}
 	if !strings.HasPrefix(decoded.Scan.ID, "scan-") || decoded.Scan.CreatedAt != "2026-08-03T08:30:00Z" || decoded.Scan.Scope.Findings != "changed-files" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
@@ -66,7 +67,7 @@ func TestWriteJSON(t *testing.T) {
 	}
 }
 
-func TestWriteJSONUsesSchemaThreeEvidenceInvestigationContract(t *testing.T) {
+func TestWriteJSONUsesSchemaFourEvidenceInvestigationContract(t *testing.T) {
 	value := New(".", "dev", nil, nil, 0)
 	value.TechnicalReview = &providers.TechnicalReviewResult{
 		Provider: providers.Ollama, Model: "qwen3:8b", InputCandidates: 1, Reviewed: 1,
@@ -80,8 +81,8 @@ func TestWriteJSONUsesSchemaThreeEvidenceInvestigationContract(t *testing.T) {
 	if err := WriteJSON(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), `"schema_version": 3`) || !strings.Contains(output.String(), `"evidence_investigation"`) || strings.Contains(output.String(), `"technical_review"`) {
-		t.Fatalf("unexpected schema-version-3 investigation JSON:\n%s", output.String())
+	if !strings.Contains(output.String(), `"schema_version": 4`) || !strings.Contains(output.String(), `"evidence_investigation"`) || strings.Contains(output.String(), `"technical_review"`) {
+		t.Fatalf("unexpected schema-version-4 investigation JSON:\n%s", output.String())
 	}
 }
 
@@ -133,6 +134,46 @@ func TestWriteTerminalDoesNotAddColorWhenDisabled(t *testing.T) {
 	for _, want := range []string{"ComplyScan found 1 potential issue", "HIGH", "app.py:10", "Summary: 1 high", "Suppressed: 1 accepted or baselined issue"} {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, output.String())
+		}
+	}
+}
+
+func TestWriteTerminalRendersEvidenceOwnership(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	value.Reconciliation = &reconciliation.Report{
+		MappingVersion: "test",
+		Ownership: reconciliation.OwnershipReport{
+			Configured: true,
+			Rules:      []ownership.Rule{{Paths: []string{"shared/**"}, Systems: []string{"ranking", "support"}}},
+		},
+		Summary: reconciliation.Summary{SharedReferences: 1, ConflictingReferences: 1, UnmappedEvidence: 1},
+		Systems: []reconciliation.SystemResult{{
+			SystemID: "ranking", SystemName: "Ranking",
+			Objectives: []reconciliation.ObjectiveResult{{
+				ObjectiveID: "objective", Title: "Human review", SourceReference: "Article 14",
+				Mapping: reconciliation.MappingRequirementWithEvidence,
+				EvidenceReferences: []reconciliation.EvidenceReference{{
+					Path: "shared/review.go", Line: 7, Ownership: ownership.StatusShared, Systems: []string{"ranking", "support"},
+				}},
+			}},
+		}},
+		Unmapped: []reconciliation.UnmappedEvidence{{
+			Kind: reconciliation.UnmappedTechnicalObjective, Title: "Logging", Reason: reconciliation.Reason{Code: "conflicting-path-ownership"},
+			References: []reconciliation.EvidenceReference{{Path: "overlap/log.go", Line: 4, Ownership: ownership.StatusConflicting, Systems: []string{"ranking", "support"}}},
+		}},
+	}
+	var output bytes.Buffer
+	if err := WriteTerminal(&output, value, TerminalOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"Path ownership: configured (1 rule(s))",
+		"shared/review.go:7 [shared -> ranking, support]",
+		"Repository evidence with unresolved ownership: 1",
+		"overlap/log.go:4 [conflicting -> ranking, support]",
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("terminal output missing %q:\n%s", expected, output.String())
 		}
 	}
 }
