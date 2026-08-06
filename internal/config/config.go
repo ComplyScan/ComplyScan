@@ -35,6 +35,7 @@ type Config struct {
 	Systems      []profile.System      `yaml:"systems,omitempty"`
 	Baseline     string                `yaml:"baseline,omitempty"`
 	Suppressions []Suppression         `yaml:"suppressions,omitempty"`
+	Verification *VerificationConfig   `yaml:"verification,omitempty"`
 }
 
 type ScanConfig struct {
@@ -59,6 +60,25 @@ type OllamaConfig struct {
 	Model          string `yaml:"model"`
 	TimeoutSeconds int    `yaml:"timeout-seconds"`
 	MaxFindings    int    `yaml:"max-findings"`
+}
+
+const DefaultVerificationTimeoutSeconds = 300
+
+// VerificationConfig stores reusable recipes but never enables execution by
+// itself. A scan must still opt in explicitly with --verify.
+type VerificationConfig struct {
+	Recipes []VerificationRecipe `yaml:"recipes"`
+}
+
+type VerificationRecipe struct {
+	ID             string   `yaml:"id"`
+	Runtime        string   `yaml:"runtime"`
+	Image          string   `yaml:"image"`
+	Command        string   `yaml:"command"`
+	Arguments      []string `yaml:"args,omitempty"`
+	Objectives     []string `yaml:"objectives"`
+	Systems        []string `yaml:"systems,omitempty"`
+	TimeoutSeconds int      `yaml:"timeout-seconds,omitempty"`
 }
 
 // Suppression accepts a finding as reviewed. A reason is mandatory so the
@@ -139,6 +159,9 @@ func (c Config) Validate() error {
 	if err := profile.ValidateSystems(c.Systems); err != nil {
 		return err
 	}
+	if err := c.validateVerification(); err != nil {
+		return err
+	}
 	known := make(map[string]struct{}, len(supportedRules))
 	for _, id := range supportedRules {
 		known[id] = struct{}{}
@@ -165,6 +188,91 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (c Config) validateVerification() error {
+	if c.Verification == nil {
+		return nil
+	}
+	if len(c.Verification.Recipes) == 0 {
+		return errors.New("verification.recipes must contain at least one recipe")
+	}
+	if len(c.Verification.Recipes) > 20 {
+		return errors.New("verification.recipes must not exceed 20 recipes")
+	}
+	seen := make(map[string]struct{}, len(c.Verification.Recipes))
+	for index, recipe := range c.Verification.Recipes {
+		prefix := fmt.Sprintf("verification.recipes[%d]", index)
+		if !validVerificationID(recipe.ID) {
+			return fmt.Errorf("%s.id must use 1-100 letters, numbers, dots, underscores, or hyphens", prefix)
+		}
+		if _, duplicate := seen[recipe.ID]; duplicate {
+			return fmt.Errorf("%s.id %q is duplicated", prefix, recipe.ID)
+		}
+		seen[recipe.ID] = struct{}{}
+		if recipe.Runtime != "docker" && recipe.Runtime != "podman" {
+			return fmt.Errorf("%s.runtime must be docker or podman", prefix)
+		}
+		if strings.TrimSpace(recipe.Image) == "" || strings.HasPrefix(recipe.Image, "-") || strings.ContainsAny(recipe.Image, "\r\n\x00") {
+			return fmt.Errorf("%s.image is invalid", prefix)
+		}
+		if strings.TrimSpace(recipe.Command) == "" || strings.ContainsRune(recipe.Command, '\x00') {
+			return fmt.Errorf("%s.command is invalid", prefix)
+		}
+		if len(recipe.Arguments) > 50 {
+			return fmt.Errorf("%s.args must not exceed 50 values", prefix)
+		}
+		for _, argument := range recipe.Arguments {
+			if len([]rune(argument)) > 500 || strings.ContainsRune(argument, '\x00') {
+				return fmt.Errorf("%s.args contains an invalid value", prefix)
+			}
+		}
+		if err := validateUniqueRecipeValues(prefix+".objectives", recipe.Objectives, 20); err != nil {
+			return err
+		}
+		if len(recipe.Systems) > 0 {
+			if err := validateUniqueRecipeValues(prefix+".systems", recipe.Systems, 20); err != nil {
+				return err
+			}
+		}
+		if recipe.TimeoutSeconds < 0 || recipe.TimeoutSeconds > 1800 {
+			return fmt.Errorf("%s.timeout-seconds must be between 1 and 1800 when set", prefix)
+		}
+	}
+	return nil
+}
+
+func validateUniqueRecipeValues(field string, values []string, limit int) error {
+	if len(values) == 0 {
+		return fmt.Errorf("%s must contain at least one value", field)
+	}
+	if len(values) > limit {
+		return fmt.Errorf("%s must not exceed %d values", field, limit)
+	}
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" || len([]rune(value)) > 200 {
+			return fmt.Errorf("%s contains an invalid value", field)
+		}
+		if _, duplicate := seen[value]; duplicate {
+			return fmt.Errorf("%s contains duplicate value %q", field, value)
+		}
+		seen[value] = struct{}{}
+	}
+	return nil
+}
+
+func validVerificationID(value string) bool {
+	if len(value) == 0 || len(value) > 100 {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || strings.ContainsRune("._-", character) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (c OllamaConfig) Validate() error {

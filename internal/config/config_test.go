@@ -101,6 +101,64 @@ ai:
 	}
 }
 
+func TestLoadParsesReusableVerificationRecipes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	content := `version: 1
+fail-on: high
+ai:
+  provider: none
+verification:
+  recipes:
+    - id: override-tests
+      runtime: docker
+      image: golang:1.25
+      command: go
+      args: [test, ./control/...]
+      objectives: [eu-aia-14-override-intervention]
+      systems: [ranking]
+      timeout-seconds: 120
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Verification == nil || len(cfg.Verification.Recipes) != 1 || cfg.Verification.Recipes[0].Arguments[1] != "./control/..." {
+		t.Fatalf("unexpected verification recipes: %#v", cfg.Verification)
+	}
+}
+
+func TestValidateRejectsUnsafeVerificationRecipes(t *testing.T) {
+	base := VerificationRecipe{
+		ID: "tests", Runtime: "docker", Image: "golang:1.25", Command: "go",
+		Objectives: []string{"objective"},
+	}
+	tests := []struct {
+		name   string
+		change func(*VerificationRecipe)
+	}{
+		{name: "invalid id", change: func(recipe *VerificationRecipe) { recipe.ID = "test command" }},
+		{name: "invalid runtime", change: func(recipe *VerificationRecipe) { recipe.Runtime = "shell" }},
+		{name: "option image", change: func(recipe *VerificationRecipe) { recipe.Image = "--privileged" }},
+		{name: "missing objective", change: func(recipe *VerificationRecipe) { recipe.Objectives = nil }},
+		{name: "duplicate objective", change: func(recipe *VerificationRecipe) { recipe.Objectives = []string{"objective", "objective"} }},
+		{name: "excessive timeout", change: func(recipe *VerificationRecipe) { recipe.TimeoutSeconds = 1801 }},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			recipe := base
+			testCase.change(&recipe)
+			cfg := Default()
+			cfg.Verification = &VerificationConfig{Recipes: []VerificationRecipe{recipe}}
+			if err := cfg.Validate(); err == nil {
+				t.Fatalf("expected invalid recipe: %#v", recipe)
+			}
+		})
+	}
+}
+
 func TestLoadParsesValidatedSystemProfiles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), FileName)
 	content := `version: 1
