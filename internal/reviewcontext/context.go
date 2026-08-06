@@ -54,14 +54,15 @@ func BuildInvestigations(evidence framework.TechnicalEvidenceReport, repository 
 		}
 	}
 
-	request := providers.TechnicalReviewRequest{Candidates: []providers.TechnicalCandidate{}}
+	perSystem := make([][]providers.TechnicalCandidate, 0, len(mapping.Systems))
 	for _, system := range mapping.Systems {
 		scopedRepository, scopeMode, ok := repositoryForSystem(repository, mapping, system.SystemID)
-		if !ok {
+		if !ok || len(scopedRepository.Files) == 0 {
 			continue
 		}
 		graph := codegraph.Build(scopedRepository)
 		digest := repositoryDigest(scopedRepository)
+		systemCandidates := make([]providers.TechnicalCandidate, 0)
 		for _, mapped := range system.Objectives {
 			objective, exists := objectiveByID[mapped.ObjectiveID]
 			if !exists {
@@ -73,7 +74,7 @@ func BuildInvestigations(evidence framework.TechnicalEvidenceReport, repository 
 					continue
 				}
 				context := graph.ContextForMatch(match.Path, match.StartLine, match.MatchedTerms, 20)
-				request.Candidates = append(request.Candidates, buildCandidate(
+				systemCandidates = append(systemCandidates, buildCandidate(
 					objective, match, scopedRepository, graph, context,
 					system.SystemID, system.SystemName, scopeMode, digest,
 				))
@@ -85,12 +86,29 @@ func BuildInvestigations(evidence framework.TechnicalEvidenceReport, repository 
 				objective.Status = mapped.Evidence
 			}
 			objective.Matches = nil
-			request.Candidates = append(request.Candidates, buildMissingEvidenceInvestigation(
+			systemCandidates = append(systemCandidates, buildMissingEvidenceInvestigation(
 				evidence.Pack, objective, scopedRepository, system.SystemID, system.SystemName, scopeMode,
 			))
 		}
+		perSystem = append(perSystem, systemCandidates)
 	}
-	return request
+	return providers.TechnicalReviewRequest{Candidates: interleaveSystemCandidates(perSystem)}
+}
+
+func interleaveSystemCandidates(groups [][]providers.TechnicalCandidate) []providers.TechnicalCandidate {
+	total := 0
+	for _, group := range groups {
+		total += len(group)
+	}
+	result := make([]providers.TechnicalCandidate, 0, total)
+	for index := 0; len(result) < total; index++ {
+		for _, group := range groups {
+			if index < len(group) {
+				result = append(result, group[index])
+			}
+		}
+	}
+	return result
 }
 
 func buildCandidate(objective framework.ObjectiveAssessment, match framework.EvidenceMatch, repository discovery.Repository, graph codegraph.Graph, context codegraph.ContextPackage, systemID, systemName, scopeMode, repositoryFingerprint string) providers.TechnicalCandidate {

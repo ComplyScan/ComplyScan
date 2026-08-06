@@ -329,6 +329,9 @@ func TestOllamaTechnicalReviewUsesBoundedUntrustedSourceAndExactBinding(t *testi
 		if strings.Contains(value, fingerprint) || strings.Contains(value, "evidence_fingerprint") {
 			t.Fatalf("technical fingerprint was sent to the model: %s", value)
 		}
+		if !strings.Contains(value, `\"system_id\":\"ranking\"`) || !strings.Contains(value, `\"ownership_scope\":\"explicit\"`) {
+			t.Fatalf("trusted system scope was not supplied: %s", value)
+		}
 		content, _ := json.Marshal(ollamaTechnicalPayload{Observation: ollamaTechnicalObservation{
 			Strength: StrengthPartial, Confidence: "medium",
 			Rationale:           "The route reaches the override handler, but production authorization remains unresolved.",
@@ -348,6 +351,7 @@ func TestOllamaTechnicalReviewUsesBoundedUntrustedSourceAndExactBinding(t *testi
 		t.Fatal(err)
 	}
 	result, err := provider.ReviewTechnical(context.Background(), TechnicalReviewRequest{Candidates: []TechnicalCandidate{{
+		SystemID: "ranking", SystemName: "Ranking", OwnershipScope: "explicit", RepositoryFiles: 42,
 		ObjectiveID: "eu-aia-14-override-intervention", EvidenceFingerprint: fingerprint,
 		Title: "Human override", Description: "An authorised person can override an AI decision.",
 		Path: "override.go", Anchor: "main.handleOverride", Reachability: "production-reachable",
@@ -359,7 +363,7 @@ func TestOllamaTechnicalReviewUsesBoundedUntrustedSourceAndExactBinding(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Reviewed != 1 || result.Observations[0].ObjectiveID != "eu-aia-14-override-intervention" || result.Observations[0].EvidenceFingerprint != fingerprint || result.Observations[0].Strength != StrengthPartial {
+	if result.Reviewed != 1 || result.Observations[0].SystemID != "ranking" || result.Observations[0].OwnershipScope != "explicit" || result.Observations[0].RepositoryFiles != 42 || result.Observations[0].ObjectiveID != "eu-aia-14-override-intervention" || result.Observations[0].EvidenceFingerprint != fingerprint || result.Observations[0].Strength != StrengthPartial {
 		t.Fatalf("unexpected technical review: %#v", result)
 	}
 }

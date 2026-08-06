@@ -48,7 +48,12 @@ func TestBuildInvestigationsUsesOnlyOwnedCandidatesInMultiSystemRepository(t *te
 		{Paths: []string{"ranking/**"}, Systems: []string{"ranking"}},
 		{Paths: []string{"support/**"}, Systems: []string{"support"}},
 	}}}
-	request := BuildInvestigations(evidence, discovery.Repository{}, mapping)
+	repository := discovery.Repository{Files: []discovery.File{
+		{Path: "ranking/review.go", Kind: discovery.KindSource, Content: []byte("package ranking")},
+		{Path: "support/client.go", Kind: discovery.KindSource, Content: []byte("package support")},
+		{Path: "misc/review.go", Kind: discovery.KindSource, Content: []byte("package misc")},
+	}}
+	request := BuildInvestigations(evidence, repository, mapping)
 	if len(request.Candidates) != 1 || request.Candidates[0].EvidenceFingerprint != "ranking" {
 		t.Fatalf("investigation candidates = %#v", request.Candidates)
 	}
