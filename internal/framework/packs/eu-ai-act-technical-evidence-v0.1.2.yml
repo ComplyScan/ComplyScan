@@ -2,8 +2,8 @@
 schema-version: 1
 id: eu-ai-act-technical-evidence
 name: EU AI Act technical code evidence
-version: 0.1.1
-released: "2026-08-04"
+version: 0.1.2
+released: "2026-08-06"
 source:
   title: Artificial Intelligence Act
   reference: Regulation (EU) 2024/1689
@@ -23,6 +23,10 @@ objectives:
     source-reference: Article 9
     description: Tests or automated evaluation hooks connect identified AI safety or risk conditions to validation activity.
     applicability-note: Article 9 applies to high-risk AI systems; the dashboard determines legal applicability from declared context.
+    applicability:
+      legal-scope: high-risk-system
+      activities-any-of: []
+      external-use-required: false
     file-kinds: [source, configuration, ci, github-actions]
     path-keywords: [risk, safety, evaluation, test]
     keyword-groups:
@@ -34,6 +38,10 @@ objectives:
     source-reference: Article 10
     description: Code validates training, validation, or test data for expected schema, completeness, or quality properties.
     applicability-note: Detailed Article 10 duties depend on the system and its use of training, validation, or test data.
+    applicability:
+      legal-scope: high-risk-system
+      activities-any-of: [training, fine-tuning, evaluation]
+      external-use-required: false
     file-kinds: [source, configuration, ci, github-actions]
     path-keywords: [data, dataset, validation, schema, schemas]
     keyword-groups:
@@ -45,6 +53,10 @@ objectives:
     source-reference: Article 10
     description: Automated tests or evaluation code measure bias, discrimination, or fairness-related behavior.
     applicability-note: A technical signal cannot establish which affected groups, metrics, or mitigations are legally appropriate.
+    applicability:
+      legal-scope: high-risk-system
+      activities-any-of: [training, fine-tuning, evaluation]
+      external-use-required: false
     file-kinds: [source, configuration, ci, github-actions]
     path-keywords: [bias, fairness, evaluation]
     keyword-groups:
@@ -56,6 +68,10 @@ objectives:
     source-reference: Article 12
     description: Code or configuration emits structured events for AI inference, prediction, response, or decision activity.
     applicability-note: A match does not prove that logging is enabled, complete, protected, or retained in production.
+    applicability:
+      legal-scope: high-risk-system
+      activities-any-of: []
+      external-use-required: false
     file-kinds: [source, configuration, terraform, dockerfile]
     path-keywords: [log, logging, audit, telemetry]
     keyword-groups:
@@ -67,6 +83,10 @@ objectives:
     source-reference: Article 12
     description: Configuration or infrastructure code defines retention or expiry behavior for AI-related logs or audit records.
     applicability-note: Repository configuration cannot prove the effective production retention period.
+    applicability:
+      legal-scope: high-risk-system
+      activities-any-of: []
+      external-use-required: false
     file-kinds: [source, configuration, terraform, dockerfile]
     path-keywords: [log, audit, retention, lifecycle]
     keyword-groups:
@@ -78,6 +98,10 @@ objectives:
     source-reference: Article 14
     description: Code routes an AI-assisted decision or output through an explicit human approval or rejection step.
     applicability-note: A match does not establish reviewer competence, authority, availability, or actual production use.
+    applicability:
+      legal-scope: high-risk-system
+      activities-any-of: []
+      external-use-required: false
     file-kinds: [source, configuration]
     path-keywords: [review, approval, decision]
     keyword-groups:
@@ -89,6 +113,10 @@ objectives:
     source-reference: Article 14
     description: Code allows an authorised person to override, disregard, or intervene in an AI output or decision.
     applicability-note: Static evidence cannot establish that the mechanism covers every relevant operating condition.
+    applicability:
+      legal-scope: high-risk-system
+      activities-any-of: []
+      external-use-required: false
     file-kinds: [source, configuration]
     path-keywords: [override, intervention, decision]
     keyword-groups:
@@ -100,6 +128,10 @@ objectives:
     source-reference: Article 14
     description: Code or configuration can stop, disable, or gate an AI model, inference path, or automated decision feature.
     applicability-note: A repository match cannot prove the control is reachable, authorised, timely, or enabled in production.
+    applicability:
+      legal-scope: high-risk-system
+      activities-any-of: []
+      external-use-required: false
     file-kinds: [source, configuration, terraform]
     path-keywords: [stop, shutdown, disable, feature]
     keyword-groups:
@@ -111,6 +143,10 @@ objectives:
     source-reference: Article 15
     description: Tests, CI, or configuration enforce measurable AI accuracy or performance acceptance thresholds.
     applicability-note: Technical thresholds require contextual review for suitability, representativeness, and continued validity.
+    applicability:
+      legal-scope: high-risk-system
+      activities-any-of: []
+      external-use-required: false
     file-kinds: [source, configuration, ci, github-actions]
     path-keywords: [evaluation, benchmark, performance, test]
     keyword-groups:
@@ -122,6 +158,10 @@ objectives:
     source-reference: Article 15
     description: Code or tests exercise faults or adversarial conditions and implement bounded fallback, retry, or fail-safe behavior.
     applicability-note: Static evidence cannot demonstrate effectiveness across the system's real operating environment.
+    applicability:
+      legal-scope: high-risk-system
+      activities-any-of: []
+      external-use-required: false
     file-kinds: [source, configuration, ci, github-actions, terraform]
     path-keywords: [robustness, adversarial, fault, fallback, test]
     keyword-groups:
@@ -133,6 +173,10 @@ objectives:
     source-reference: Article 15
     description: Code, tests, or configuration address AI-specific threats such as prompt injection, poisoning, evasion, or adversarial inputs.
     applicability-note: Detection does not replace a threat model, penetration test, or assessment of control effectiveness.
+    applicability:
+      legal-scope: high-risk-system
+      activities-any-of: []
+      external-use-required: false
     file-kinds: [source, configuration, ci, github-actions, terraform]
     path-keywords: [security, threat, adversarial, injection]
     keyword-groups:
@@ -144,6 +188,10 @@ objectives:
     source-reference: Article 50
     description: User-facing source or configuration contains a disclosure that a person is interacting with an AI system.
     applicability-note: Article 50 contains scope conditions and exceptions that require dashboard context and human review.
+    applicability:
+      legal-scope: transparency-obligation
+      activities-any-of: [inference, automated-decision, agent-tool-use]
+      external-use-required: true
     file-kinds: [source, configuration]
     path-keywords: [chat, assistant, disclosure, notice]
     keyword-groups:
@@ -155,6 +203,10 @@ objectives:
     source-reference: Article 50
     description: Code marks synthetic audio, image, video, or text output using labels, metadata, provenance, or watermarking.
     applicability-note: Applicability and technical feasibility depend on the system, content, role, and statutory exceptions.
+    applicability:
+      legal-scope: transparency-obligation
+      activities-any-of: [synthetic-content]
+      external-use-required: false
     file-kinds: [source, configuration]
     path-keywords: [synthetic, watermark, provenance, metadata]
     keyword-groups:

@@ -27,13 +27,25 @@ type Coverage struct {
 }
 
 type TechnicalObjective struct {
-	ID                string     `yaml:"id" json:"id"`
-	Title             string     `yaml:"title" json:"title"`
-	SourceReference   string     `yaml:"source-reference" json:"source_reference"`
-	Description       string     `yaml:"description" json:"description"`
-	ApplicabilityNote string     `yaml:"applicability-note,omitempty" json:"applicability_note,omitempty"`
-	FileKinds         []string   `yaml:"file-kinds" json:"file_kinds"`
-	PathKeywords      []string   `yaml:"path-keywords,omitempty" json:"path_keywords,omitempty"`
-	KeywordGroups     [][]string `yaml:"keyword-groups" json:"keyword_groups"`
-	Verification      string     `yaml:"verification" json:"verification"`
+	ID                string                 `yaml:"id" json:"id"`
+	Title             string                 `yaml:"title" json:"title"`
+	SourceReference   string                 `yaml:"source-reference" json:"source_reference"`
+	Description       string                 `yaml:"description" json:"description"`
+	ApplicabilityNote string                 `yaml:"applicability-note,omitempty" json:"applicability_note,omitempty"`
+	Applicability     ObjectiveApplicability `yaml:"applicability" json:"applicability"`
+	FileKinds         []string               `yaml:"file-kinds" json:"file_kinds"`
+	PathKeywords      []string               `yaml:"path-keywords,omitempty" json:"path_keywords,omitempty"`
+	KeywordGroups     [][]string             `yaml:"keyword-groups" json:"keyword_groups"`
+	Verification      string                 `yaml:"verification" json:"verification"`
 }
+
+type ObjectiveApplicability struct {
+	LegalScope          string   `yaml:"legal-scope" json:"legal_scope"`
+	ActivitiesAnyOf     []string `yaml:"activities-any-of" json:"activities_any_of"`
+	ExternalUseRequired bool     `yaml:"external-use-required" json:"external_use_required"`
+}
+
+const (
+	ApplicabilityHighRiskSystem         = "high-risk-system"
+	ApplicabilityTransparencyObligation = "transparency-obligation"
+)

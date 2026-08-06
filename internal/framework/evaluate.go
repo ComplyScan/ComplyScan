@@ -72,15 +72,16 @@ type ObjectiveSummary struct {
 }
 
 type ObjectiveAssessment struct {
-	ID                  string          `json:"id"`
-	Title               string          `json:"title"`
-	SourceReference     string          `json:"source_reference"`
-	Description         string          `json:"description"`
-	ApplicabilityNote   string          `json:"applicability_note,omitempty"`
-	Status              ObjectiveStatus `json:"status"`
-	Verification        string          `json:"verification"`
-	Matches             []EvidenceMatch `json:"matches"`
-	UnresolvedQuestions []string        `json:"unresolved_questions,omitempty"`
+	ID                  string                 `json:"id"`
+	Title               string                 `json:"title"`
+	SourceReference     string                 `json:"source_reference"`
+	Description         string                 `json:"description"`
+	ApplicabilityNote   string                 `json:"applicability_note,omitempty"`
+	Applicability       ObjectiveApplicability `json:"applicability"`
+	Status              ObjectiveStatus        `json:"status"`
+	Verification        string                 `json:"verification"`
+	Matches             []EvidenceMatch        `json:"matches"`
+	UnresolvedQuestions []string               `json:"unresolved_questions,omitempty"`
 }
 
 type EvidenceMatch struct {
@@ -135,7 +136,7 @@ func evaluateObjectives(pack Pack, repository discovery.Repository, graph codegr
 	for index, objective := range pack.Objectives {
 		assessments[index] = ObjectiveAssessment{
 			ID: objective.ID, Title: objective.Title, SourceReference: objective.SourceReference,
-			Description: objective.Description, ApplicabilityNote: objective.ApplicabilityNote,
+			Description: objective.Description, ApplicabilityNote: objective.ApplicabilityNote, Applicability: objective.Applicability,
 			Status: ObjectiveNotDetected, Verification: objective.Verification, Matches: []EvidenceMatch{},
 		}
 		for _, kind := range objective.FileKinds {

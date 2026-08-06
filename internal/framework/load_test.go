@@ -10,13 +10,16 @@ func TestBuiltinEUAIActPackContainsCodeObjectivesOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pack.Version != "0.1.1" || pack.Source.Reference != "Regulation (EU) 2024/1689" || pack.Coverage.EvidenceType != "code" {
+	if pack.Version != "0.1.2" || pack.Source.Reference != "Regulation (EU) 2024/1689" || pack.Coverage.EvidenceType != "code" {
 		t.Fatalf("unexpected pack metadata: %#v", pack)
 	}
 	if len(pack.Digest) != 64 || len(pack.Objectives) < 10 {
 		t.Fatalf("digest=%q objectives=%d", pack.Digest, len(pack.Objectives))
 	}
 	for _, objective := range pack.Objectives {
+		if objective.Applicability.LegalScope == "" {
+			t.Fatalf("objective %q has no inspectable applicability condition", objective.ID)
+		}
 		for _, kind := range objective.FileKinds {
 			if _, supported := supportedFileKinds[kind]; !supported {
 				t.Fatalf("objective %q uses non-code evidence kind %q", objective.ID, kind)
@@ -47,6 +50,22 @@ func TestPackParserRejectsUnknownFieldsDuplicateObjectivesAndDocuments(t *testin
 	pack.Objectives = pack.Objectives[:1]
 	pack.Objectives[0].FileKinds = []string{"documentation"}
 	if err := pack.Validate(); err == nil || !strings.Contains(err.Error(), "not a code evidence kind") {
+		t.Fatalf("got error %v", err)
+	}
+	pack, err = LoadBuiltin(EUAIActTechnicalEvidencePackID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack.Objectives[0].Applicability.LegalScope = ""
+	if err := pack.Validate(); err == nil || !strings.Contains(err.Error(), "legal-scope") {
+		t.Fatalf("got error %v", err)
+	}
+	pack.Objectives[0].Applicability = ObjectiveApplicability{LegalScope: ApplicabilityTransparencyObligation}
+	if err := pack.Validate(); err == nil || !strings.Contains(err.Error(), "activities-any-of") {
+		t.Fatalf("got error %v", err)
+	}
+	pack.Objectives[0].Applicability = ObjectiveApplicability{LegalScope: ApplicabilityHighRiskSystem, ActivitiesAnyOf: []string{"unknown"}}
+	if err := pack.Validate(); err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Fatalf("got error %v", err)
 	}
 }

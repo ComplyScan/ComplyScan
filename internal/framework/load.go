@@ -25,13 +25,18 @@ var identifierPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 var semanticVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 
 var builtinPaths = map[string]string{
-	EUAIActTechnicalEvidencePackID: "packs/eu-ai-act-technical-evidence-v0.1.1.yml",
+	EUAIActTechnicalEvidencePackID: "packs/eu-ai-act-technical-evidence-v0.1.2.yml",
 }
 
 var supportedFileKinds = map[string]struct{}{
 	string(discovery.KindSource): {}, string(discovery.KindManifest): {}, string(discovery.KindDockerfile): {},
 	string(discovery.KindGitHubAction): {}, string(discovery.KindCI): {}, string(discovery.KindTerraform): {},
 	string(discovery.KindEnvTemplate): {}, string(discovery.KindConfig): {},
+}
+
+var supportedAIActivities = map[string]struct{}{
+	"inference": {}, "training": {}, "fine-tuning": {}, "evaluation": {},
+	"automated-decision": {}, "agent-tool-use": {}, "synthetic-content": {},
 }
 
 func LoadBuiltin(id string) (Pack, error) {
@@ -113,6 +118,25 @@ func (pack Pack) Validate() error {
 		seenObjectives[objective.ID] = struct{}{}
 		if strings.TrimSpace(objective.Title) == "" || strings.TrimSpace(objective.SourceReference) == "" || strings.TrimSpace(objective.Description) == "" {
 			return fmt.Errorf("objectives[%d] must declare title, source-reference, and description", index)
+		}
+		if objective.Applicability.LegalScope != ApplicabilityHighRiskSystem && objective.Applicability.LegalScope != ApplicabilityTransparencyObligation {
+			return fmt.Errorf("objectives[%d].applicability.legal-scope %q is not supported", index, objective.Applicability.LegalScope)
+		}
+		seenActivities := make(map[string]struct{}, len(objective.Applicability.ActivitiesAnyOf))
+		for activityIndex, activity := range objective.Applicability.ActivitiesAnyOf {
+			if _, supported := supportedAIActivities[activity]; !supported {
+				return fmt.Errorf("objectives[%d].applicability.activities-any-of[%d] %q is not supported", index, activityIndex, activity)
+			}
+			if _, duplicate := seenActivities[activity]; duplicate {
+				return fmt.Errorf("objectives[%d].applicability.activities-any-of[%d] %q is duplicated", index, activityIndex, activity)
+			}
+			seenActivities[activity] = struct{}{}
+		}
+		if objective.Applicability.LegalScope == ApplicabilityTransparencyObligation && len(objective.Applicability.ActivitiesAnyOf) == 0 {
+			return fmt.Errorf("objectives[%d].applicability must declare activities-any-of for a transparency obligation", index)
+		}
+		if objective.Applicability.ExternalUseRequired && objective.Applicability.LegalScope != ApplicabilityTransparencyObligation {
+			return fmt.Errorf("objectives[%d].applicability.external-use-required is supported only for transparency obligations", index)
 		}
 		if len(objective.FileKinds) == 0 || strings.TrimSpace(objective.Verification) == "" {
 			return fmt.Errorf("objectives[%d] must declare file-kinds and verification", index)
