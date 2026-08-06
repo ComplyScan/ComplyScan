@@ -233,6 +233,55 @@ func TestOllamaReviewSkipsHTTPWhenThereAreNoFindings(t *testing.T) {
 	}
 }
 
+func TestOllamaPlansOneBoundedTechnicalFollowUp(t *testing.T) {
+	fingerprint := strings.Repeat("7", 64)
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		encoded, _ := json.Marshal(body)
+		if strings.Contains(string(encoded), fingerprint) || !strings.Contains(string(encoded), "literal substring") {
+			t.Fatalf("planner request leaked binding or omitted bounded-search instruction: %s", encoded)
+		}
+		content, _ := json.Marshal(ollamaTechnicalSearchPayload{Plan: TechnicalSearchPlan{
+			Needed: true, Reason: "The caller can establish whether the guard is reachable.",
+			Queries: []TechnicalSearchQuery{{Text: "handleOverride", PathHint: "routes", Reason: "Find a production caller."}},
+		}})
+		return testJSONResponse(http.StatusOK, map[string]any{
+			"message": map[string]string{"content": string(content)}, "done": true,
+			"prompt_eval_count": 50, "eval_count": 12,
+		}), nil
+	})}
+	provider, err := NewOllama(OllamaOptions{Endpoint: "http://127.0.0.1:11434", Model: "test", Timeout: time.Second, MaxFindings: 1, HTTPClient: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, usage, err := provider.PlanTechnicalSearch(context.Background(), TechnicalCandidate{
+		ObjectiveID: "objective", EvidenceFingerprint: fingerprint, Path: "control.go",
+		SourceContexts: []TechnicalSourceContext{{Path: "control.go", Source: "func handleOverride() {}"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Needed || len(plan.Queries) != 1 || plan.Queries[0].Text != "handleOverride" || usage.PromptTokens != 50 {
+		t.Fatalf("unexpected plan=%#v usage=%#v", plan, usage)
+	}
+}
+
+func TestTechnicalFollowUpPlanRejectsUnsafeSearches(t *testing.T) {
+	for _, query := range []TechnicalSearchQuery{
+		{Text: "*.go", Reason: "glob"},
+		{Text: "control", PathHint: "../../private", Reason: "traversal"},
+		{Text: "control", PathHint: "/etc", Reason: "absolute"},
+	} {
+		_, err := validateTechnicalSearchPlan(TechnicalSearchPlan{Needed: true, Reason: "search", Queries: []TechnicalSearchQuery{query}})
+		if err == nil {
+			t.Fatalf("unsafe query was accepted: %#v", query)
+		}
+	}
+}
+
 func TestOllamaTechnicalReviewUsesBoundedUntrustedSourceAndExactBinding(t *testing.T) {
 	fingerprint := strings.Repeat("c", 64)
 	secret := "sk-proj-" + strings.Repeat("z", 24)

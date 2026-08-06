@@ -176,7 +176,16 @@ func validateEntry(entry cacheEntry) error {
 	if strings.TrimSpace(observation.Rationale) == "" || len([]rune(observation.Rationale)) > 4_000 || len(observation.UnresolvedQuestions) > 10 || len(observation.MissingEvidence) > 10 {
 		return errors.New("observation rationale or questions exceed cache bounds")
 	}
+	if len(observation.FollowUpQueries) > 3 || observation.FollowUpExcerpts < 0 || observation.FollowUpExcerpts > 3 || !observation.FollowUpRequested && (len(observation.FollowUpQueries) > 0 || observation.FollowUpExcerpts > 0) {
+		return errors.New("observation follow-up metadata exceeds cache bounds")
+	}
 	totalText := len([]rune(observation.Rationale)) + len([]rune(observation.SuggestedReview)) + len([]rune(observation.GuardrailNote))
+	for _, query := range observation.FollowUpQueries {
+		if len([]rune(query)) > 500 {
+			return errors.New("observation follow-up query exceeds cache bounds")
+		}
+		totalText += len([]rune(query))
+	}
 	for _, question := range observation.UnresolvedQuestions {
 		questionLength := len([]rune(question))
 		if questionLength > 1_000 {

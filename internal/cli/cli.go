@@ -420,7 +420,7 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 					progressWriter = cmd.ErrOrStderr()
 				}
 				review, technicalReview, err := reviewWithOllama(
-					cmd.Context(), cfg.AI.Ollama, target, visible, technicalEvidence, investigationRequest,
+					cmd.Context(), cfg.AI.Ollama, target, visible, technicalEvidence, investigationRequest, result.FullRepository,
 					refreshReview, technicalReviewProgress(progressWriter),
 				)
 				if err != nil {
@@ -489,6 +489,7 @@ func reviewWithOllama(
 	findings []rules.Finding,
 	evidence framework.TechnicalEvidenceReport,
 	investigationRequest providers.TechnicalReviewRequest,
+	repository discovery.Repository,
 	refresh bool,
 	onProgress func(technicalreview.Progress) error,
 ) (providers.ReviewResult, providers.TechnicalReviewResult, error) {
@@ -525,6 +526,9 @@ func reviewWithOllama(
 			PackID: evidence.Pack.ID, PackVersion: evidence.Pack.Version, PackDigest: evidence.Pack.Digest,
 		},
 		Cache: cache, Refresh: refresh, MaxCandidates: settings.MaxFindings, OnProgress: onProgress,
+		RetrieveFollowUp: func(candidate providers.TechnicalCandidate, plan providers.TechnicalSearchPlan) (providers.TechnicalCandidate, int) {
+			return reviewcontext.ApplyFollowUp(candidate, plan, repository)
+		},
 	})
 	if err != nil {
 		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, fmt.Errorf("Ollama technical evidence investigation: %w", err)

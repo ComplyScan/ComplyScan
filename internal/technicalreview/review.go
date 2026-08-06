@@ -13,6 +13,12 @@ type Reviewer interface {
 	ReviewTechnical(context.Context, providers.TechnicalReviewRequest) (providers.TechnicalReviewResult, error)
 }
 
+type SearchPlanner interface {
+	PlanTechnicalSearch(context.Context, providers.TechnicalCandidate) (providers.TechnicalSearchPlan, providers.Usage, error)
+}
+
+type FollowUpRetriever func(providers.TechnicalCandidate, providers.TechnicalSearchPlan) (providers.TechnicalCandidate, int)
+
 type Progress struct {
 	Current   int
 	Total     int
@@ -21,11 +27,12 @@ type Progress struct {
 }
 
 type Options struct {
-	Identity      Identity
-	Cache         *Cache
-	Refresh       bool
-	MaxCandidates int
-	OnProgress    func(Progress) error
+	Identity         Identity
+	Cache            *Cache
+	Refresh          bool
+	MaxCandidates    int
+	OnProgress       func(Progress) error
+	RetrieveFollowUp FollowUpRetriever
 }
 
 // Run applies source-context-free cache reuse around one-candidate model requests.
@@ -72,6 +79,22 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 			base.Observations = append(base.Observations, observation)
 			continue
 		}
+		baseCandidate := candidate
+		plan := providers.TechnicalSearchPlan{Queries: []providers.TechnicalSearchQuery{}}
+		followUpExcerpts := 0
+		if planner, ok := reviewer.(SearchPlanner); ok && options.RetrieveFollowUp != nil {
+			var plannerUsage providers.Usage
+			plan, plannerUsage, err = planner.PlanTechnicalSearch(ctx, baseCandidate)
+			if err != nil {
+				return providers.TechnicalReviewResult{}, fmt.Errorf("plan bounded technical follow-up: %w", err)
+			}
+			base.Usage.PromptTokens += plannerUsage.PromptTokens
+			base.Usage.CompletionTokens += plannerUsage.CompletionTokens
+			base.Usage.TotalDurationNS += plannerUsage.TotalDurationNS
+			if plan.Needed {
+				candidate, followUpExcerpts = options.RetrieveFollowUp(baseCandidate, plan)
+			}
+		}
 		partial, err := reviewer.ReviewTechnical(ctx, providers.TechnicalReviewRequest{Candidates: []providers.TechnicalCandidate{candidate}})
 		if err != nil {
 			return providers.TechnicalReviewResult{}, err
@@ -80,13 +103,16 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 			return providers.TechnicalReviewResult{}, errors.New("technical reviewer did not return exactly one correctly bound observation")
 		}
 		observation = partial.Observations[0]
+		observation.FollowUpRequested = plan.Needed
+		observation.FollowUpQueries = searchQueryLabels(plan.Queries)
+		observation.FollowUpExcerpts = followUpExcerpts
 		base.Observations = append(base.Observations, observation)
 		base.Usage.PromptTokens += partial.Usage.PromptTokens
 		base.Usage.CompletionTokens += partial.Usage.CompletionTokens
 		base.Usage.TotalDurationNS += partial.Usage.TotalDurationNS
 		base.Notes = appendUnique(base.Notes, partial.Notes...)
 		if cacheEnabled {
-			if err := options.Cache.Store(options.Identity, candidate, observation); err != nil {
+			if err := options.Cache.Store(options.Identity, baseCandidate, observation); err != nil {
 				base.Notes = append(base.Notes, "Technical review cache could not be updated and was disabled: "+err.Error())
 				cacheEnabled = false
 			}
@@ -97,6 +123,18 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 		base.Notes = append(base.Notes, fmt.Sprintf("Reused %d of %d technical observation(s) from the local source-free review cache.", cacheHits, len(selected)))
 	}
 	return base, nil
+}
+
+func searchQueryLabels(queries []providers.TechnicalSearchQuery) []string {
+	labels := make([]string, 0, len(queries))
+	for _, query := range queries {
+		label := query.Text
+		if query.PathHint != "" {
+			label += " @ " + query.PathHint
+		}
+		labels = append(labels, label)
+	}
+	return labels
 }
 
 func withoutNoCandidatesNote(notes []string) []string {

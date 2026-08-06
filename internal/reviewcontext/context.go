@@ -24,17 +24,20 @@ const (
 // bounded connected source and repository-graph context.
 func Build(evidence framework.TechnicalEvidenceReport, repository discovery.Repository) providers.TechnicalReviewRequest {
 	graph := codegraph.Build(repository)
+	repositoryFingerprint := repositoryDigest(repository)
 	request := providers.TechnicalReviewRequest{Candidates: []providers.TechnicalCandidate{}}
 	for _, objective := range evidence.Objectives {
 		for _, match := range objective.Matches {
 			candidate := providers.TechnicalCandidate{
 				ObjectiveID: objective.ID, Title: objective.Title, SourceReference: objective.SourceReference,
 				Description: objective.Description, EvidenceStatus: string(objective.Status),
-				InvestigationMode: investigationModeCandidate, EvidenceFingerprint: match.Fingerprint,
-				Path: match.Path, StartLine: match.StartLine,
+				InvestigationMode: investigationModeCandidate, RepositoryDigest: repositoryFingerprint,
+				EvidenceFingerprint: match.Fingerprint,
+				Path:                match.Path, StartLine: match.StartLine,
 				Imports: []string{}, Relationships: []providers.TechnicalRelationship{},
 				UnresolvedQuestions: append([]string(nil), objective.UnresolvedQuestions...),
 				SearchTerms:         append([]string(nil), objective.InvestigationTerms...),
+				EligibleFileKinds:   append([]string(nil), objective.EligibleFileKinds...),
 				SourceContexts:      []providers.TechnicalSourceContext{},
 			}
 			for _, repositoryImport := range match.Context.Imports {
@@ -115,9 +118,11 @@ func buildMissingEvidenceInvestigation(pack framework.PackReference, objective f
 	candidate := providers.TechnicalCandidate{
 		ObjectiveID: objective.ID, Title: objective.Title, SourceReference: objective.SourceReference,
 		Description: objective.Description, EvidenceStatus: string(objective.Status), InvestigationMode: investigationModeSearch,
-		Path: "(repository-wide)", Imports: []string{}, Relationships: []providers.TechnicalRelationship{},
+		RepositoryDigest: repositoryDigest(repository),
+		Path:             "(repository-wide)", Imports: []string{}, Relationships: []providers.TechnicalRelationship{},
 		UnresolvedQuestions: append([]string(nil), objective.UnresolvedQuestions...),
-		SearchTerms:         append([]string(nil), objective.InvestigationTerms...), SourceContexts: []providers.TechnicalSourceContext{},
+		SearchTerms:         append([]string(nil), objective.InvestigationTerms...),
+		EligibleFileKinds:   append([]string(nil), objective.EligibleFileKinds...), SourceContexts: []providers.TechnicalSourceContext{},
 	}
 	candidate.UnresolvedQuestions = append(candidate.UnresolvedQuestions,
 		"The deterministic matcher found no candidate; determine whether the bounded wider search reveals an indirect implementation or whether more evidence is required.")
@@ -176,6 +181,112 @@ func buildMissingEvidenceInvestigation(pack framework.PackReference, objective f
 		candidate.EvidenceFingerprint = digest
 	}
 	return candidate
+}
+
+// ApplyFollowUp executes a model-proposed plan as bounded literal searches.
+// It never interprets queries as commands, globs, regular expressions, or
+// filesystem paths and returns at most three additional excerpts.
+func ApplyFollowUp(candidate providers.TechnicalCandidate, plan providers.TechnicalSearchPlan, repository discovery.Repository) (providers.TechnicalCandidate, int) {
+	if !plan.Needed || len(plan.Queries) == 0 {
+		return candidate, 0
+	}
+	eligibleKinds := make(map[string]struct{}, len(candidate.EligibleFileKinds))
+	for _, kind := range candidate.EligibleFileKinds {
+		eligibleKinds[kind] = struct{}{}
+	}
+	type followUpHit struct {
+		file  discovery.File
+		score int
+		line  int
+		query string
+	}
+	hits := make([]followUpHit, 0)
+	for _, file := range repository.Files {
+		if len(eligibleKinds) > 0 {
+			if _, eligible := eligibleKinds[string(file.Kind)]; !eligible {
+				continue
+			}
+		}
+		path := strings.ToLower(file.Path)
+		content := strings.ToLower(string(file.Content))
+		for _, query := range plan.Queries {
+			term := strings.ToLower(query.Text)
+			index := strings.Index(content, term)
+			pathMatch := strings.Contains(path, term)
+			if index < 0 && !pathMatch {
+				continue
+			}
+			score := strings.Count(content, term)
+			if pathMatch {
+				score += 4
+			}
+			if query.PathHint != "" && strings.Contains(path, strings.ToLower(query.PathHint)) {
+				score += 6
+			}
+			line := 1
+			if index >= 0 {
+				line += strings.Count(content[:index], "\n")
+			}
+			hits = append(hits, followUpHit{file: file, score: score, line: line, query: query.Text})
+		}
+	}
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].score != hits[j].score {
+			return hits[i].score > hits[j].score
+		}
+		if hits[i].file.Path != hits[j].file.Path {
+			return hits[i].file.Path < hits[j].file.Path
+		}
+		return hits[i].line < hits[j].line
+	})
+	removeRepositoryManifest(&candidate)
+	added := 0
+	seen := make(map[string]struct{})
+	for _, hit := range hits {
+		if added >= 3 {
+			break
+		}
+		key := fmt.Sprintf("%s:%d", hit.file.Path, hit.line)
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		excerpt := boundedRepositoryExcerpt(hit.file.Content, hit.line, 2_000)
+		if excerpt == "" {
+			continue
+		}
+		candidate.SourceContexts = append(candidate.SourceContexts, providers.TechnicalSourceContext{
+			Role: "model-directed-follow-up", Symbol: "search:" + hit.query, Path: hit.file.Path,
+			StartLine: hit.line, EndLine: hit.line, Source: excerpt,
+		})
+		added++
+	}
+	return candidate, added
+}
+
+func removeRepositoryManifest(candidate *providers.TechnicalCandidate) {
+	contexts := candidate.SourceContexts[:0]
+	for _, context := range candidate.SourceContexts {
+		if context.Role != "eligible-file-manifest" {
+			contexts = append(contexts, context)
+		}
+	}
+	candidate.SourceContexts = contexts
+}
+
+func repositoryDigest(repository discovery.Repository) string {
+	hash := sha256.New()
+	files := append([]discovery.File(nil), repository.Files...)
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	for _, file := range files {
+		_, _ = hash.Write([]byte(file.Path))
+		_, _ = hash.Write([]byte{0})
+		_, _ = hash.Write([]byte(file.Kind))
+		_, _ = hash.Write([]byte{0})
+		_, _ = hash.Write(file.Content)
+		_, _ = hash.Write([]byte{0})
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil))
 }
 
 func investigationRelevance(file discovery.File, terms []string) (int, int) {

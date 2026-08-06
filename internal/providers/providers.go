@@ -79,6 +79,7 @@ type TechnicalCandidate struct {
 	Description         string                   `json:"description"`
 	EvidenceStatus      string                   `json:"evidence_status,omitempty"`
 	InvestigationMode   string                   `json:"investigation_mode,omitempty"`
+	RepositoryDigest    string                   `json:"repository_digest,omitempty"`
 	EvidenceFingerprint string                   `json:"evidence_fingerprint,omitempty"`
 	Path                string                   `json:"path"`
 	StartLine           int                      `json:"start_line,omitempty"`
@@ -88,6 +89,7 @@ type TechnicalCandidate struct {
 	Relationships       []TechnicalRelationship  `json:"relationships,omitempty"`
 	UnresolvedQuestions []string                 `json:"unresolved_questions,omitempty"`
 	SearchTerms         []string                 `json:"search_terms,omitempty"`
+	EligibleFileKinds   []string                 `json:"eligible_file_kinds,omitempty"`
 	SearchCoverage      TechnicalSearchCoverage  `json:"search_coverage,omitempty"`
 	SourceContexts      []TechnicalSourceContext `json:"source_contexts"`
 }
@@ -96,6 +98,18 @@ type TechnicalSearchCoverage struct {
 	EligibleFiles int `json:"eligible_files"`
 	MatchingFiles int `json:"matching_files"`
 	Excerpts      int `json:"excerpts"`
+}
+
+type TechnicalSearchQuery struct {
+	Text     string `json:"text"`
+	PathHint string `json:"path_hint,omitempty"`
+	Reason   string `json:"reason"`
+}
+
+type TechnicalSearchPlan struct {
+	Needed  bool                   `json:"needed"`
+	Queries []TechnicalSearchQuery `json:"queries"`
+	Reason  string                 `json:"reason"`
 }
 
 type TechnicalRelationship struct {
@@ -165,6 +179,9 @@ type TechnicalObservation struct {
 	SupportingEvidence          []TechnicalEvidenceClaim `json:"supporting_evidence"`
 	ContradictoryEvidence       []TechnicalEvidenceClaim `json:"contradictory_evidence"`
 	MissingEvidence             []string                 `json:"missing_evidence,omitempty"`
+	FollowUpRequested           bool                     `json:"follow_up_requested"`
+	FollowUpQueries             []string                 `json:"follow_up_queries,omitempty"`
+	FollowUpExcerpts            int                      `json:"follow_up_excerpts,omitempty"`
 	UnresolvedQuestions         []string                 `json:"unresolved_questions,omitempty"`
 	SuggestedReview             string                   `json:"suggested_review,omitempty"`
 	GuardrailNote               string                   `json:"guardrail_note,omitempty"`

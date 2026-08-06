@@ -7,6 +7,7 @@ import (
 
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
+	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
 )
 
@@ -24,6 +25,44 @@ func TestBoundedRepositoryExcerptIncludesWiderMatchedFileContext(t *testing.T) {
 	}
 	if got := boundedRepositoryExcerpt([]byte(content.String()), 90, 80); len([]rune(got)) > 80 {
 		t.Fatalf("character cap was exceeded: %d", len([]rune(got)))
+	}
+}
+
+func TestRepositoryDigestCoversEveryDiscoveredFile(t *testing.T) {
+	base := discovery.Repository{Files: []discovery.File{{Path: "control.go", Kind: discovery.KindSource, Content: []byte("package control")}}}
+	changed := discovery.Repository{Files: []discovery.File{{Path: "control.go", Kind: discovery.KindSource, Content: []byte("package changed")}}}
+	first := Build(framework.TechnicalEvidenceReport{}, base)
+	second := Build(framework.TechnicalEvidenceReport{}, changed)
+	if repositoryDigest(base) == repositoryDigest(changed) {
+		t.Fatal("repository digest did not change with repository content")
+	}
+	if len(first.Candidates) != 0 || len(second.Candidates) != 0 {
+		t.Fatalf("unexpected candidates: %#v %#v", first, second)
+	}
+}
+
+func TestApplyFollowUpUsesLiteralEligibleSearchAndBoundsExcerpts(t *testing.T) {
+	repository := discovery.Repository{Files: []discovery.File{
+		{Path: "src/routes.go", Kind: discovery.KindSource, Content: []byte("package src\nfunc route() { handleOverride() }")},
+		{Path: "src/control.go", Kind: discovery.KindSource, Content: []byte("package src\nfunc handleOverride() {}")},
+		{Path: "src/second.go", Kind: discovery.KindSource, Content: []byte("package src\nvar handler = handleOverride")},
+		{Path: "src/fourth.go", Kind: discovery.KindSource, Content: []byte("package src\nvar fallback = handleOverride")},
+		{Path: "README.md", Kind: discovery.KindReadme, Content: []byte("handleOverride documentation")},
+	}}
+	candidate := providers.TechnicalCandidate{
+		EligibleFileKinds: []string{"source"},
+		SourceContexts:    []providers.TechnicalSourceContext{{Role: "eligible-file-manifest", Source: "src/routes.go"}},
+	}
+	updated, count := ApplyFollowUp(candidate, providers.TechnicalSearchPlan{
+		Needed: true, Queries: []providers.TechnicalSearchQuery{{Text: "handleOverride", PathHint: "routes", Reason: "find caller"}},
+	}, repository)
+	if count != 3 || len(updated.SourceContexts) != 3 {
+		t.Fatalf("follow-up count=%d contexts=%#v", count, updated.SourceContexts)
+	}
+	for _, context := range updated.SourceContexts {
+		if context.Role != "model-directed-follow-up" || context.Path == "README.md" || context.Role == "eligible-file-manifest" {
+			t.Fatalf("unbounded or ineligible follow-up context: %#v", context)
+		}
 	}
 }
 
