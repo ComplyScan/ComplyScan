@@ -8,6 +8,12 @@ After `qwen3:8b` is available, run from the repository root:
 ./scripts/validate-ollama.sh
 ```
 
+For the faster two-target evidence-investigation and follow-up-retrieval contract, run:
+
+```sh
+./scripts/smoke-ollama-investigation.sh
+```
+
 The harness builds the current source, confirms the configured model appears in `ollama list`, and scans the Go, Python, and TypeScript fixtures under `testdata/technical-context-*`. The fixtures contain:
 
 - a production-routed override handler connected to configuration, authorization, persistence, and audit calls;
@@ -55,5 +61,7 @@ On the same machine, commit `3cc5a7b` passed the TypeScript fixture:
 - loaded Ollama model allocation after the scan: 5.6 GB, reported as 100% GPU with a 4,096-token context.
 
 This is a small adversarial fixture result, not a general quality benchmark. Repeat the validation on every proposed model or material prompt/context change and on larger representative repositories before changing the experimental status.
+
+On 2026-08-06, prompt version 7 passed the two-target smoke fixture with `qwen3:8b`. The positive human-override target was `partial` with AI-substantiated assurance and three grounded references after one three-query follow-up. The likely-required risk-control-testing target was `not_supported` with investigation-no-evidence assurance. Its planner returned `needed=true` without a query; the bounded-plan guardrail skipped that malformed optional round and allowed the original investigation to complete. The source-free report was saved under `.complyscan/validation/ollama-smoke/`. This validates the small retrieval contract and fallback only, not general model accuracy.
 
 The validation harness always passes `--refresh-review`. This guarantees that reported classifications, duration, and resource measurements come from fresh Ollama inference rather than ComplyScan's local technical-observation cache.
