@@ -6,6 +6,7 @@ package reconciliation
 import (
 	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/inventory"
+	"github.com/ComplyScan/ComplyScan/internal/providers"
 )
 
 type RequirementStatus string
@@ -53,6 +54,18 @@ type ObjectiveResult struct {
 	Mapping            MappingStatus             `json:"mapping_status"`
 	Reasons            []Reason                  `json:"reasons"`
 	EvidenceReferences []EvidenceReference       `json:"evidence_references"`
+	Investigation      *ObjectiveInvestigation   `json:"evidence_investigation,omitempty"`
+}
+
+type ObjectiveInvestigation struct {
+	Conclusion                  providers.TechnicalConclusion `json:"conclusion"`
+	Assurance                   providers.AssuranceLevel      `json:"assurance_level"`
+	Confidence                  string                        `json:"confidence"`
+	Observations                int                           `json:"observations"`
+	SupportingEvidence          int                           `json:"supporting_evidence"`
+	ContradictoryEvidence       int                           `json:"contradictory_evidence"`
+	RuntimeVerificationRequired bool                          `json:"runtime_verification_required"`
+	LegalReviewRequired         bool                          `json:"legal_review_required"`
 }
 
 type ComponentResult struct {
@@ -87,6 +100,10 @@ type Summary struct {
 	EvidenceMismatches         int `json:"evidence_configuration_mismatches"`
 	Unresolved                 int `json:"unresolved"`
 	UnmappedEvidence           int `json:"unmapped_evidence"`
+	AISubstantiated            int `json:"ai_substantiated"`
+	StructurallyVerified       int `json:"structurally_verified"`
+	InvestigationNoEvidence    int `json:"investigation_no_evidence"`
+	InvestigationUnresolved    int `json:"investigation_unresolved"`
 }
 
 type Report struct {

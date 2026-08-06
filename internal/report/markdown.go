@@ -124,13 +124,31 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 		}
 	}
 	if report.TechnicalReview != nil {
-		if _, err := fmt.Fprintf(writer, "\n## Ollama technical-objective review\n\n- Model: %s\n- Candidates reviewed: %d of %d\n", inlineCode(report.TechnicalReview.Model), report.TechnicalReview.Reviewed, report.TechnicalReview.InputCandidates); err != nil {
+		if _, err := fmt.Fprintf(writer, "\n## Ollama technical evidence investigation\n\n- Model: %s\n- Targets investigated: %d of %d\n- Boundary: repository evidence only; runtime verification and legal acceptance remain separate\n", inlineCode(report.TechnicalReview.Model), report.TechnicalReview.Reviewed, report.TechnicalReview.InputCandidates); err != nil {
 			return err
 		}
 		for _, observation := range report.TechnicalReview.Observations {
-			if _, err := fmt.Fprintf(writer, "\n### %s\n\n- Evidence fingerprint: %s\n- Strength: %s\n- Confidence: %s\n\n%s\n",
-				inlineCode(observation.ObjectiveID), inlineCode(observation.EvidenceFingerprint), markdownText(string(observation.Strength)), markdownText(observation.Confidence), markdownText(observation.Rationale)); err != nil {
+			if _, err := fmt.Fprintf(writer, "\n### %s\n\n- Evidence fingerprint: %s\n- Investigation mode: %s\n- Prior evidence status: %s\n- Conclusion: %s\n- Assurance level: %s\n- Strength: %s\n- Confidence: %s\n- Runtime verification required: %t\n- Legal review required: %t\n\n%s\n",
+				inlineCode(observation.ObjectiveID), inlineCode(observation.EvidenceFingerprint), markdownText(observation.InvestigationMode),
+				markdownText(observation.EvidenceStatus), markdownText(string(observation.Conclusion)), markdownText(string(observation.Assurance)),
+				markdownText(string(observation.Strength)), markdownText(observation.Confidence), observation.RuntimeVerificationRequired,
+				observation.LegalReviewRequired, markdownText(observation.Rationale)); err != nil {
 				return err
+			}
+			for _, claim := range observation.SupportingEvidence {
+				if _, err := fmt.Fprintf(writer, "\n- Supporting evidence: %s — %s", inlineCode(locationText(claim.Path, claim.Line)), markdownText(claim.Summary)); err != nil {
+					return err
+				}
+			}
+			for _, claim := range observation.ContradictoryEvidence {
+				if _, err := fmt.Fprintf(writer, "\n- Contradictory evidence: %s — %s", inlineCode(locationText(claim.Path, claim.Line)), markdownText(claim.Summary)); err != nil {
+					return err
+				}
+			}
+			for _, missing := range observation.MissingEvidence {
+				if _, err := fmt.Fprintf(writer, "\n- Missing evidence: %s", markdownText(missing)); err != nil {
+					return err
+				}
 			}
 			if observation.GuardrailNote != "" {
 				if _, err := fmt.Fprintf(writer, "\nGuardrail: %s Original model strength: %s.\n", markdownText(observation.GuardrailNote), markdownText(string(observation.ModelStrength))); err != nil {
@@ -192,9 +210,10 @@ func writeAIInventoryMarkdown(writer io.Writer, value inventory.Report) error {
 }
 
 func writeReconciliationMarkdown(writer io.Writer, value reconciliation.Report) error {
-	if _, err := fmt.Fprintf(writer, "\n## Requirement-to-evidence reconciliation\n\n- Mapping version: %s\n- Likely required objectives: %d\n- With candidate evidence: %d\n- Without detected evidence: %d\n- Configuration/evidence mismatches: %d\n- Unresolved results: %d\n- Unassigned evidence: %d\n",
+	if _, err := fmt.Fprintf(writer, "\n## Requirement-to-evidence reconciliation\n\n- Mapping version: %s\n- Likely required objectives: %d\n- With candidate evidence: %d\n- Without detected evidence: %d\n- Configuration/evidence mismatches: %d\n- Unresolved results: %d\n- Unassigned evidence: %d\n- AI-substantiated objectives: %d\n- Structurally verified objectives: %d\n- Extended investigations with no evidence: %d\n- Unresolved investigations: %d\n",
 		inlineCode(value.MappingVersion), value.Summary.LikelyRequired, value.Summary.RequirementWithEvidence,
-		value.Summary.RequirementWithoutEvidence, value.Summary.EvidenceMismatches, value.Summary.Unresolved, value.Summary.UnmappedEvidence); err != nil {
+		value.Summary.RequirementWithoutEvidence, value.Summary.EvidenceMismatches, value.Summary.Unresolved, value.Summary.UnmappedEvidence,
+		value.Summary.AISubstantiated, value.Summary.StructurallyVerified, value.Summary.InvestigationNoEvidence, value.Summary.InvestigationUnresolved); err != nil {
 		return err
 	}
 	if len(value.Systems) == 0 {
@@ -203,14 +222,18 @@ func writeReconciliationMarkdown(writer io.Writer, value reconciliation.Report) 
 		}
 	}
 	for _, system := range value.Systems {
-		if _, err := fmt.Fprintf(writer, "\n### %s\n\nSystem ID: %s\n\n| Provision | Technical objective | Requirement | Evidence | Reconciliation |\n|---|---|---|---|---|\n",
+		if _, err := fmt.Fprintf(writer, "\n### %s\n\nSystem ID: %s\n\n| Provision | Technical objective | Requirement | Evidence | Reconciliation | AI assurance |\n|---|---|---|---|---|---|\n",
 			markdownText(system.SystemName), inlineCode(system.SystemID)); err != nil {
 			return err
 		}
 		for _, objective := range system.Objectives {
-			if _, err := fmt.Fprintf(writer, "| %s | %s | %s | %s | %s |\n",
+			assurance := "—"
+			if objective.Investigation != nil {
+				assurance = string(objective.Investigation.Assurance)
+			}
+			if _, err := fmt.Fprintf(writer, "| %s | %s | %s | %s | %s | %s |\n",
 				markdownText(objective.SourceReference), markdownText(objective.Title), markdownText(string(objective.Requirement)),
-				markdownText(string(objective.Evidence)), markdownText(string(objective.Mapping))); err != nil {
+				markdownText(string(objective.Evidence)), markdownText(string(objective.Mapping)), markdownText(assurance)); err != nil {
 				return err
 			}
 		}

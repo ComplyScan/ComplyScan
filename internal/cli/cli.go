@@ -428,6 +428,7 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				}
 				reportValue.Review = &review
 				reportValue.TechnicalReview = &technicalReview
+				reconciliation.AttachTechnicalInvestigations(&evidenceMapping, technicalReview)
 			}
 			var artifacts report.Artifacts
 			if resolvedReportDirectory != "" {

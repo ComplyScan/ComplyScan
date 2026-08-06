@@ -63,7 +63,7 @@ type Report struct {
 	AIInventory       *inventory.Report                  `json:"ai_inventory,omitempty"`
 	Reconciliation    *reconciliation.Report             `json:"reconciliation,omitempty"`
 	Review            *providers.ReviewResult            `json:"review,omitempty"`
-	TechnicalReview   *providers.TechnicalReviewResult   `json:"technical_review,omitempty"`
+	TechnicalReview   *providers.TechnicalReviewResult   `json:"evidence_investigation,omitempty"`
 }
 
 type TerminalOptions struct {
@@ -95,7 +95,7 @@ func NewWithMetadata(target string, tool Tool, scope ScanScope, createdAt time.T
 	created := createdAt.UTC().Format(time.RFC3339Nano)
 	identifier := sha256.Sum256([]byte(strings.Join([]string{target, tool.Version, tool.Commit, created}, "\x00")))
 	return Report{
-		SchemaVersion: 2,
+		SchemaVersion: 3,
 		Tool:          tool,
 		Scan: ScanMetadata{
 			ID: "scan-" + fmt.Sprintf("%x", identifier[:12]), CreatedAt: created, Scope: scope,
@@ -290,18 +290,33 @@ func WriteTerminalReview(w io.Writer, review providers.ReviewResult) error {
 	return err
 }
 
-// WriteTerminalTechnicalReview renders semantic objective observations without
-// merging them into deterministic evidence status.
+// WriteTerminalTechnicalReview renders bounded evidence investigations without
+// merging them into deterministic evidence or legal applicability status.
 func WriteTerminalTechnicalReview(w io.Writer, review providers.TechnicalReviewResult) error {
-	if _, err := fmt.Fprintf(w, "Ollama technical-objective review (%s): %d of %d candidate(s) reviewed\n", review.Model, review.Reviewed, review.InputCandidates); err != nil {
+	if _, err := fmt.Fprintf(w, "Ollama technical evidence investigation (%s): %d of %d target(s) reviewed\n", review.Model, review.Reviewed, review.InputCandidates); err != nil {
 		return err
 	}
 	for _, observation := range review.Observations {
-		if _, err := fmt.Fprintf(w, "TECH    %-13s %-6s %s\n", observation.Strength, strings.ToUpper(observation.Confidence), observation.ObjectiveID); err != nil {
+		if _, err := fmt.Fprintf(w, "EVIDENCE %-24s %-23s %s\n", observation.Conclusion, observation.Assurance, observation.ObjectiveID); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(w, "        Evidence: %s\n        %s\n", observation.EvidenceFingerprint, observation.Rationale); err != nil {
+		if _, err := fmt.Fprintf(w, "        Strength: %s; confidence: %s; evidence: %s\n        %s\n", observation.Strength, strings.ToUpper(observation.Confidence), observation.EvidenceFingerprint, observation.Rationale); err != nil {
 			return err
+		}
+		for _, claim := range observation.SupportingEvidence {
+			if _, err := fmt.Fprintf(w, "        Supports: %s — %s\n", locationText(claim.Path, claim.Line), claim.Summary); err != nil {
+				return err
+			}
+		}
+		for _, claim := range observation.ContradictoryEvidence {
+			if _, err := fmt.Fprintf(w, "        Contradicts: %s — %s\n", locationText(claim.Path, claim.Line), claim.Summary); err != nil {
+				return err
+			}
+		}
+		for _, missing := range observation.MissingEvidence {
+			if _, err := fmt.Fprintf(w, "        Missing: %s\n", missing); err != nil {
+				return err
+			}
 		}
 		if observation.GuardrailNote != "" {
 			if _, err := fmt.Fprintf(w, "        Guardrail: %s (model returned %s)\n", observation.GuardrailNote, observation.ModelStrength); err != nil {
@@ -320,7 +335,7 @@ func WriteTerminalTechnicalReview(w io.Writer, review providers.TechnicalReviewR
 		}
 	}
 	for _, note := range review.Notes {
-		if _, err := fmt.Fprintf(w, "Technical review note: %s\n", note); err != nil {
+		if _, err := fmt.Fprintf(w, "Evidence investigation note: %s\n", note); err != nil {
 			return err
 		}
 	}

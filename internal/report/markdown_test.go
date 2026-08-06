@@ -48,7 +48,10 @@ func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
 		Provider: providers.Ollama, Model: "gemma3", InputCandidates: 1, Reviewed: 1,
 		Observations: []providers.TechnicalObservation{{
 			ObjectiveID: "eu-aia-14-override-intervention", EvidenceFingerprint: strings.Repeat("b", 64),
-			Strength: providers.StrengthWeak, ModelStrength: providers.StrengthPartial, Confidence: "high", Rationale: "Only an exported candidate was found.",
+			EvidenceStatus: "candidate-evidence", InvestigationMode: "candidate-validation",
+			Strength: providers.StrengthWeak, ModelStrength: providers.StrengthPartial,
+			Conclusion: providers.ConclusionPartial, Assurance: providers.AssuranceSignalDetected,
+			Confidence: "high", Rationale: "Only an exported candidate was found.", RuntimeVerificationRequired: true, LegalReviewRequired: true,
 			GuardrailNote: "Test-only anchors cannot provide partial evidence.",
 		}},
 	}
@@ -75,7 +78,8 @@ func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
 		"`review/override.go:2`",
 		"No evidence detected",
 		"## Coverage boundary",
-		"## Ollama technical-objective review",
+		"## Ollama technical evidence investigation",
+		"Assurance level: signal-detected",
 		"Only an exported candidate was found.",
 		"Original model strength: partial.",
 	} {

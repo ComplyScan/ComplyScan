@@ -48,7 +48,7 @@ func TestWriteJSON(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 2 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
+	if decoded.SchemaVersion != 3 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
 		t.Fatalf("unexpected tool: %#v", decoded.Tool)
 	}
 	if !strings.HasPrefix(decoded.Scan.ID, "scan-") || decoded.Scan.CreatedAt != "2026-08-03T08:30:00Z" || decoded.Scan.Scope.Findings != "changed-files" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
@@ -123,7 +123,9 @@ func TestTerminalCompletionSeparatesTechnicalObjectiveReview(t *testing.T) {
 		Provider: providers.Ollama, Model: "gemma3", InputCandidates: 1, Reviewed: 1,
 		Observations: []providers.TechnicalObservation{{
 			ObjectiveID: "eu-aia-14-override-intervention", EvidenceFingerprint: strings.Repeat("a", 64),
-			Strength: providers.StrengthWeak, ModelStrength: providers.StrengthPartial, Confidence: "medium",
+			EvidenceStatus: "candidate-evidence", InvestigationMode: "candidate-validation",
+			Strength: providers.StrengthWeak, ModelStrength: providers.StrengthPartial,
+			Conclusion: providers.ConclusionTestOnly, Assurance: providers.AssuranceTestEvidenceObserved, Confidence: "medium",
 			Rationale:           "The handler is live but its authorization is unresolved.",
 			UnresolvedQuestions: []string{"Which role can invoke it?"}, SuggestedReview: "Trace middleware.",
 			GuardrailNote: "Test-only anchors cannot provide partial evidence.",
@@ -133,7 +135,7 @@ func TestTerminalCompletionSeparatesTechnicalObjectiveReview(t *testing.T) {
 	if err := WriteTerminalCompletion(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"Ollama technical-objective review", "TECH", "eu-aia-14-override-intervention", "Which role can invoke it?", "Guardrail:", "model returned partial", "Scan complete"} {
+	for _, expected := range []string{"Ollama technical evidence investigation", "EVIDENCE", "test-only-evidence", "test-evidence-observed", "eu-aia-14-override-intervention", "Which role can invoke it?", "Guardrail:", "model returned partial", "Scan complete"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("terminal output missing %q:\n%s", expected, output.String())
 		}

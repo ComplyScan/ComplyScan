@@ -57,6 +57,13 @@ func writeReconciliationTerminal(writer io.Writer, value reconciliation.Report) 
 					return err
 				}
 			}
+			if objective.Investigation != nil {
+				if _, err := fmt.Fprintf(writer, "             AI investigation: %s; assurance %s; %d supporting and %d contradictory reference(s)\n",
+					objective.Investigation.Conclusion, objective.Investigation.Assurance,
+					objective.Investigation.SupportingEvidence, objective.Investigation.ContradictoryEvidence); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	if len(value.Unmapped) > 0 {
