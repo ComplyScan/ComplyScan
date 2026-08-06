@@ -287,6 +287,16 @@ The loopback restriction controls where ComplyScan sends review records. Ollama 
 
 ComplyScan can run user-selected test commands in preloaded local Docker or Podman images and attach their bounded, redacted results to terminal, Markdown, and JSON reports. Reusable recipes live in `.complyscan.yml`, but configuration alone never executes them: every scan must opt in with `--verify`. The repository is mounted read-only; each container has no network, no added capabilities, a read-only root filesystem, bounded CPU, memory, processes, temporary storage, output, and time; and commands run directly without a shell. ComplyScan never pulls an image. The image itself remains a user-selected trust boundary.
 
+The recommended setup is interactive:
+
+```bash
+complyscan verify setup
+```
+
+The wizard uses the existing system profile to list only likely-required technical objectives for one selected system. It explains each objective in developer language, shows current repository signals, detects common native test commands (`go test`, pytest, npm/pnpm/yarn test scripts, and Make test targets), and asks which numbered objectives the exact command genuinely exercises. It then asks for the container runtime, preloaded local image, stable recipe ID, and timeout before showing a final summary. Detection is a suggestion, never proof: the user must confirm the executable, arguments, objective mapping, system ownership, and final save. The wizard never runs a test, builds an image, pulls software, or enables future automatic execution. If an argument itself contains a comma, save the recipe and edit its YAML argument list directly.
+
+For scripting or manual review, the equivalent configuration is:
+
 ```yaml
 verification:
   recipes:
@@ -305,6 +315,8 @@ complyscan scan . --verify
 ```
 
 When exactly one system is configured, `systems` may be omitted and is inferred. Repositories with multiple systems must name the systems covered by each recipe so ComplyScan does not guess evidence ownership. Objective and system association remain explicitly user-declared. A passing recipe adds a separate `test-evidence-observed` assurance to the matching reconciliation result. When Ollama is also enabled for a zero- or one-system repository, its objective investigation receives only the bounded redacted execution summary and is instructed to check whether the test output and repository context actually support the claimed mechanism. It still cannot turn a passing test into a production-effectiveness or compliance conclusion.
+
+`complyscan verify setup` requires an existing system profile because applicability and evidence ownership cannot be inferred safely without it. When exactly one system is configured, the wizard selects it automatically; with multiple systems, it explains why the user must choose one and creates a system-scoped recipe. Run the wizard again for a different system or test command. An existing recipe ID is replaced only after a separate confirmation that defaults to no.
 
 The existing ad-hoc `--verify-image`, `--verify-command`, repeatable `--verify-arg`, `--verify-objective`, and `--verify-system` flags remain available for a one-off run and cannot be mixed with `--verify`. Use `--verify-runtime podman` when preferred and set `--verify-timeout` up to 30 minutes. A test failure is recorded without changing the finding-threshold exit code; container, runtime, or configuration failures exit with code `2`.
 
