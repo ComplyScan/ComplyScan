@@ -48,6 +48,8 @@ The two observed disagreements are now explicit provider regression cases: discu
 
 That repeated benchmark completed on 2026-08-05 with three fresh prompt-version-3 runs. Effective ComplyScan decisions were identical across all runs and reached 100% precision, recall, specificity, and coverage over 17 candidates. Raw Qwen decisions were also stable but materially weaker: worst-case and per-run precision was 84.6%, recall 91.7%, and specificity 60%. Seven transparent guardrail adjustments occurred in every run, three of which changed candidate acceptance. Exact final strength and confidence were stable for every candidate; one candidate's rationale wording varied. Model-reported duration ranged from 7.6 to 8.8 minutes. See the source-free aggregate record at `testdata/technical-evaluation/external/semantic-consistency-2026-08-05.json`.
 
+That record validates the earlier candidate-review prompt, not the prompt-version-5 evidence-investigation schema. The new grounded-claim, assurance, and missing-evidence behavior must pass a fresh live-model evaluation before the historical figures can be applied to it.
+
 The distinction between raw inference and the final policy is intentional: this benchmark supports the combined bounded-model-plus-deterministic-guardrail architecture, not a claim that `qwen3:8b` independently achieved perfect classification. Broader representative studies remain required before Ollama review leaves experimental status.
 
 ## Adding a case
