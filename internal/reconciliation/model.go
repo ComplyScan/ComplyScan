@@ -8,8 +8,6 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/inventory"
 )
 
-const MappingVersion = "0.1.0"
-
 type RequirementStatus string
 type MappingStatus string
 type UnmappedEvidenceKind string

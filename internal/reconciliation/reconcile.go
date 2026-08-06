@@ -10,33 +10,15 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 )
 
-type objectiveRule struct {
-	Article  string
-	Activity []profile.AIActivity
-	Mode     string
-}
-
-var objectiveRules = map[string]objectiveRule{
-	"eu-aia-9-risk-control-testing":         {Article: "Article 9", Mode: "high-risk"},
-	"eu-aia-10-dataset-validation":          {Article: "Article 10", Mode: "high-risk-activity", Activity: []profile.AIActivity{profile.ActivityTraining, profile.ActivityFineTuning, profile.ActivityEvaluation}},
-	"eu-aia-10-bias-evaluation":             {Article: "Article 10", Mode: "high-risk-activity", Activity: []profile.AIActivity{profile.ActivityTraining, profile.ActivityFineTuning, profile.ActivityEvaluation}},
-	"eu-aia-12-automatic-event-logging":     {Article: "Article 12", Mode: "high-risk"},
-	"eu-aia-12-log-retention-configuration": {Article: "Article 12", Mode: "high-risk"},
-	"eu-aia-14-human-review-gate":           {Article: "Article 14", Mode: "high-risk"},
-	"eu-aia-14-override-intervention":       {Article: "Article 14", Mode: "high-risk"},
-	"eu-aia-14-safe-stop":                   {Article: "Article 14", Mode: "high-risk"},
-	"eu-aia-15-performance-thresholds":      {Article: "Article 15", Mode: "high-risk"},
-	"eu-aia-15-robustness-failure-handling": {Article: "Article 15", Mode: "high-risk"},
-	"eu-aia-15-ai-security-controls":        {Article: "Article 15", Mode: "high-risk"},
-	"eu-aia-50-ai-interaction-disclosure":   {Article: "Article 50", Mode: "interaction", Activity: []profile.AIActivity{profile.ActivityInference, profile.ActivityAutomatedDecision, profile.ActivityAgentToolUse}},
-	"eu-aia-50-synthetic-content-marking":   {Article: "Article 50", Mode: "transparency-activity", Activity: []profile.AIActivity{profile.ActivitySyntheticContent}},
-}
-
 // Build reconciles the applicability profile and technical evidence. Repository
 // evidence is attributed automatically only when exactly one system is declared.
 func Build(systems []profile.System, assessments profile.AssessmentReport, technical framework.TechnicalEvidenceReport, components inventory.Report) Report {
+	mappingVersion := technical.Pack.Version
+	if mappingVersion == "" {
+		mappingVersion = "unknown"
+	}
 	report := Report{
-		SchemaVersion: 1, MappingVersion: MappingVersion,
+		SchemaVersion: 1, MappingVersion: mappingVersion,
 		Systems: make([]SystemResult, 0, len(systems)), Unmapped: []UnmappedEvidence{},
 		Notes: []string{
 			"Requirement statuses are conservative screening results, not legal determinations.",
@@ -57,7 +39,7 @@ func Build(systems []profile.System, assessments profile.AssessmentReport, techn
 		}
 		assessment := assessmentBySystem[system.ID]
 		for _, objective := range technical.Objectives {
-			requirement, reasons := screenRequirement(system, assessment, objective.ID)
+			requirement, reasons := screenRequirement(system, assessment, objective)
 			mapped := mapObjective(requirement, objective, reasons, singleSystem)
 			result.Objectives = append(result.Objectives, mapped)
 			addObjectiveSummary(&report.Summary, mapped)
@@ -102,10 +84,10 @@ func Build(systems []profile.System, assessments profile.AssessmentReport, techn
 	return report
 }
 
-func screenRequirement(system profile.System, assessment profile.Assessment, objectiveID string) (RequirementStatus, []Reason) {
-	rule, supported := objectiveRules[objectiveID]
-	if !supported {
-		return RequirementUnresolved, []Reason{{Code: "objective-mapping-missing", Message: "This technical objective has no applicability mapping in reconciliation pack " + MappingVersion + "."}}
+func screenRequirement(system profile.System, assessment profile.Assessment, objective framework.ObjectiveAssessment) (RequirementStatus, []Reason) {
+	rule := objective.Applicability
+	if err := rule.Validate(); err != nil {
+		return RequirementUnresolved, []Reason{{Code: "objective-mapping-missing", Message: "This technical objective has no valid applicability conditions in its technical control pack."}}
 	}
 	if decision := euDecision(system); decision != nil {
 		switch decision.Status {
@@ -116,17 +98,16 @@ func screenRequirement(system profile.System, assessment profile.Assessment, obj
 		}
 	}
 
-	switch rule.Mode {
-	case "transparency-activity", "interaction":
+	if rule.LegalScope == framework.ApplicabilityTransparencyObligation {
 		if status, reasons, decided := screenActivity(system, rule); decided {
 			return status, reasons
 		}
 	}
-	highRiskStatus, reasons := screenHighRiskRequirement(assessment, rule)
+	highRiskStatus, reasons := screenHighRiskRequirement(assessment, objective.SourceReference)
 	if highRiskStatus != RequirementLikelyRequired {
 		return highRiskStatus, reasons
 	}
-	if rule.Mode == "high-risk-activity" {
+	if len(rule.ActivitiesAnyOf) > 0 {
 		if status, activityReasons, decided := screenActivity(system, rule); decided {
 			return status, append(reasons, activityReasons...)
 		}
@@ -134,9 +115,9 @@ func screenRequirement(system profile.System, assessment profile.Assessment, obj
 	return highRiskStatus, reasons
 }
 
-func screenApplicableActivity(system profile.System, rule objectiveRule) (RequirementStatus, []Reason) {
+func screenApplicableActivity(system profile.System, rule framework.ObjectiveApplicability) (RequirementStatus, []Reason) {
 	baseReason := Reason{Code: "human-decision-applicable", Message: "An attributed human decision records the EU AI Act as applicable."}
-	if rule.Mode == "high-risk" {
+	if len(rule.ActivitiesAnyOf) == 0 {
 		return RequirementLikelyRequired, []Reason{baseReason}
 	}
 	if status, reasons, decided := screenActivity(system, rule); decided {
@@ -145,17 +126,17 @@ func screenApplicableActivity(system profile.System, rule objectiveRule) (Requir
 	return RequirementLikelyRequired, []Reason{baseReason}
 }
 
-func screenActivity(system profile.System, rule objectiveRule) (RequirementStatus, []Reason, bool) {
-	if rule.Mode == "high-risk" {
+func screenActivity(system profile.System, rule framework.ObjectiveApplicability) (RequirementStatus, []Reason, bool) {
+	if len(rule.ActivitiesAnyOf) == 0 {
 		return "", nil, false
 	}
 	if len(system.AIActivities) == 0 || hasActivity(system.AIActivities, profile.ActivityUnknown) {
 		return RequirementUnresolved, []Reason{{Code: "ai-activities-not-established", Message: "The system's AI activities have not been established."}}, true
 	}
-	if !hasAnyActivity(system.AIActivities, rule.Activity) {
+	if !hasAnyActivity(system.AIActivities, rule.ActivitiesAnyOf) {
 		return RequirementNotCurrentlyIndicated, []Reason{{Code: "activity-not-declared", Message: "The declared AI activities do not currently indicate this objective."}}, true
 	}
-	if rule.Mode == "interaction" && !externallyUsed(system.DeploymentModels) {
+	if rule.ExternalUseRequired && !externallyUsed(system.DeploymentModels) {
 		if len(system.DeploymentModels) == 0 || containsDeployment(system.DeploymentModels, profile.DeploymentUnknown) {
 			return RequirementUnresolved, []Reason{{Code: "deployment-not-established", Message: "Deployment context is required to screen AI interaction disclosure."}}, true
 		}
@@ -164,9 +145,9 @@ func screenActivity(system profile.System, rule objectiveRule) (RequirementStatu
 	return RequirementLikelyRequired, []Reason{{Code: "matching-ai-activity", Message: "The declared AI activity indicates that this objective is likely relevant."}}, true
 }
 
-func screenHighRiskRequirement(assessment profile.Assessment, rule objectiveRule) (RequirementStatus, []Reason) {
+func screenHighRiskRequirement(assessment profile.Assessment, sourceReference string) (RequirementStatus, []Reason) {
 	if assessment.AutomatedScope == profile.ScopeNeedsContext || assessment.HighRiskScreening == profile.HighRiskUnknown {
-		return RequirementUnresolved, []Reason{{Code: "applicability-context-missing", Message: "Declared context is insufficient to screen " + rule.Article + "."}}
+		return RequirementUnresolved, []Reason{{Code: "applicability-context-missing", Message: "Declared context is insufficient to screen " + sourceReference + "."}}
 	}
 	if assessment.AutomatedScope == profile.ScopePotentiallyApplicable && assessment.HighRiskScreening == profile.HighRiskPotential {
 		return RequirementLikelyRequired, []Reason{{Code: "potential-high-risk-system", Message: "Declared EU/EEA/global operations and a potential high-risk use-case indicate that this technical objective is likely required."}}
@@ -287,9 +268,9 @@ func hasActivity(values []profile.AIActivity, wanted profile.AIActivity) bool {
 	return false
 }
 
-func hasAnyActivity(values, wanted []profile.AIActivity) bool {
+func hasAnyActivity(values []profile.AIActivity, wanted []string) bool {
 	for _, value := range wanted {
-		if hasActivity(values, value) {
+		if hasActivity(values, profile.AIActivity(value)) {
 			return true
 		}
 	}
@@ -320,13 +301,13 @@ func containsDeployment(values []profile.DeploymentModel, wanted profile.Deploym
 func ValidateCoverage(technical framework.TechnicalEvidenceReport) error {
 	var missing []string
 	for _, objective := range technical.Objectives {
-		if _, exists := objectiveRules[objective.ID]; !exists {
+		if err := objective.Applicability.Validate(); err != nil {
 			missing = append(missing, objective.ID)
 		}
 	}
 	if len(missing) > 0 {
 		sort.Strings(missing)
-		return fmt.Errorf("reconciliation mapping %s does not cover objectives: %s", MappingVersion, strings.Join(missing, ", "))
+		return fmt.Errorf("technical pack %s does not contain valid applicability conditions for objectives: %s", technical.Pack.Version, strings.Join(missing, ", "))
 	}
 	return nil
 }

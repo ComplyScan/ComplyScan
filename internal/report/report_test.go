@@ -186,7 +186,7 @@ func TestTerminalCompletionShowsInventoryAndReconciliation(t *testing.T) {
 	}}}
 	value.AIInventory = &aiInventory
 	mapping := reconciliation.Report{
-		MappingVersion: reconciliation.MappingVersion,
+		MappingVersion: "0.1.2",
 		Summary:        reconciliation.Summary{Systems: 1, LikelyRequired: 1, RequirementWithoutEvidence: 1},
 		Systems: []reconciliation.SystemResult{{SystemID: "assistant", SystemName: "Assistant", Objectives: []reconciliation.ObjectiveResult{{
 			ObjectiveID: "eu-aia-14-human-review-gate", Title: "Human review gate", SourceReference: "Article 14",

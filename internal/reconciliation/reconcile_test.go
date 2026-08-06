@@ -9,10 +9,10 @@ import (
 )
 
 func candidateTechnical() framework.TechnicalEvidenceReport {
-	return framework.TechnicalEvidenceReport{Objectives: []framework.ObjectiveAssessment{
-		{ID: "eu-aia-14-human-review-gate", Title: "Human review gate", SourceReference: "Article 14", Status: framework.ObjectiveCandidate, Matches: []framework.EvidenceMatch{{Fingerprint: "abc", Path: "review.go", StartLine: 12, Kind: "source"}}},
-		{ID: "eu-aia-15-performance-thresholds", Title: "Performance thresholds", SourceReference: "Article 15", Status: framework.ObjectiveNotDetected},
-		{ID: "eu-aia-50-synthetic-content-marking", Title: "Synthetic content marking", SourceReference: "Article 50", Status: framework.ObjectiveCandidate, Matches: []framework.EvidenceMatch{{Fingerprint: "def", Path: "watermark.go", StartLine: 7, Kind: "source"}}},
+	return framework.TechnicalEvidenceReport{Pack: framework.PackReference{ID: framework.EUAIActTechnicalEvidencePackID, Version: "0.1.2"}, Objectives: []framework.ObjectiveAssessment{
+		{ID: "eu-aia-14-human-review-gate", Title: "Human review gate", SourceReference: "Article 14", Applicability: framework.ObjectiveApplicability{LegalScope: framework.ApplicabilityHighRiskSystem}, Status: framework.ObjectiveCandidate, Matches: []framework.EvidenceMatch{{Fingerprint: "abc", Path: "review.go", StartLine: 12, Kind: "source"}}},
+		{ID: "eu-aia-15-performance-thresholds", Title: "Performance thresholds", SourceReference: "Article 15", Applicability: framework.ObjectiveApplicability{LegalScope: framework.ApplicabilityHighRiskSystem}, Status: framework.ObjectiveNotDetected},
+		{ID: "eu-aia-50-synthetic-content-marking", Title: "Synthetic content marking", SourceReference: "Article 50", Applicability: framework.ObjectiveApplicability{LegalScope: framework.ApplicabilityTransparencyObligation, ActivitiesAnyOf: []string{"synthetic-content"}}, Status: framework.ObjectiveCandidate, Matches: []framework.EvidenceMatch{{Fingerprint: "def", Path: "watermark.go", StartLine: 7, Kind: "source"}}},
 	}}
 }
 
@@ -91,7 +91,7 @@ func TestMappingCoversEmbeddedTechnicalPack(t *testing.T) {
 	}
 	report := framework.TechnicalEvidenceReport{Objectives: make([]framework.ObjectiveAssessment, 0, len(pack.Objectives))}
 	for _, objective := range pack.Objectives {
-		report.Objectives = append(report.Objectives, framework.ObjectiveAssessment{ID: objective.ID})
+		report.Objectives = append(report.Objectives, framework.ObjectiveAssessment{ID: objective.ID, Applicability: objective.Applicability})
 	}
 	if err := ValidateCoverage(report); err != nil {
 		t.Fatal(err)
