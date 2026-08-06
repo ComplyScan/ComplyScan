@@ -1,0 +1,38 @@
+version: 1
+
+ai:
+  provider: none
+  ollama:
+    endpoint: http://127.0.0.1:11434
+    model: qwen3:8b
+    timeout-seconds: 360
+    max-findings: 2
+
+systems:
+  - id: smoke-system
+    name: Investigation smoke system
+    intended-purpose: Exercise one implemented human override and one absent risk-control testing objective.
+    lifecycle-stage: testing
+    organization-roles: [provider]
+    operating-regions: [eu]
+    use-case-domains: [employment]
+    users: [test operators]
+    affected-groups: [test subjects]
+    decision-impact: significant
+    human-oversight: required
+    ai-activities: [inference, automated-decision]
+    data:
+      personal-data: yes
+      special-category-data: no
+      children-data: no
+    deployment-models: [internal]
+    profile-review:
+      status: confirmed
+      reviewed-by: ComplyScan smoke fixture maintainer
+      reviewed-at: 2026-08-06
+    applicability:
+      - framework: eu-ai-act
+        status: applicable
+        rationale: Synthetic fixture deliberately activates the technical objectives for validation only.
+        reviewed-by: ComplyScan smoke fixture maintainer
+        reviewed-at: 2026-08-06
