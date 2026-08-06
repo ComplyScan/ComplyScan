@@ -17,7 +17,7 @@ func AttachTechnicalInvestigations(report *Report, review providers.TechnicalRev
 	for systemIndex := range report.Systems {
 		for objectiveIndex := range report.Systems[systemIndex].Objectives {
 			objective := &report.Systems[systemIndex].Objectives[objectiveIndex]
-			observations := investigationsForObjective(*objective, byObjective[objective.ObjectiveID])
+			observations := investigationsForObjective(report.Systems[systemIndex].SystemID, len(report.Systems) == 1, *objective, byObjective[objective.ObjectiveID])
 			if len(observations) == 0 {
 				continue
 			}
@@ -31,6 +31,7 @@ func AttachTechnicalInvestigations(report *Report, review providers.TechnicalRev
 				}
 			}
 			objective.Investigation = &ObjectiveInvestigation{
+				SystemID: best.SystemID, OwnershipScope: best.OwnershipScope, RepositoryFiles: best.RepositoryFiles,
 				Conclusion: best.Conclusion, Assurance: best.Assurance, Confidence: best.Confidence,
 				Observations: len(observations), SupportingEvidence: supporting, ContradictoryEvidence: contradictory,
 				RuntimeVerificationRequired: best.RuntimeVerificationRequired, LegalReviewRequired: best.LegalReviewRequired,
@@ -40,7 +41,7 @@ func AttachTechnicalInvestigations(report *Report, review providers.TechnicalRev
 	}
 }
 
-func investigationsForObjective(objective ObjectiveResult, observations []providers.TechnicalObservation) []providers.TechnicalObservation {
+func investigationsForObjective(systemID string, allowUnscoped bool, objective ObjectiveResult, observations []providers.TechnicalObservation) []providers.TechnicalObservation {
 	fingerprints := make(map[string]struct{}, len(objective.EvidenceReferences))
 	for _, reference := range objective.EvidenceReferences {
 		if reference.Fingerprint != "" {
@@ -49,6 +50,9 @@ func investigationsForObjective(objective ObjectiveResult, observations []provid
 	}
 	result := make([]providers.TechnicalObservation, 0, len(observations))
 	for _, observation := range observations {
+		if observation.SystemID != "" && observation.SystemID != systemID || observation.SystemID == "" && !allowUnscoped {
+			continue
+		}
 		if observation.InvestigationMode == "candidate-validation" {
 			if _, belongs := fingerprints[observation.EvidenceFingerprint]; !belongs {
 				continue

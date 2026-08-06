@@ -38,8 +38,8 @@ func TestAttachTechnicalInvestigationsFollowsOwnedEvidenceFingerprint(t *testing
 		}}},
 	}}
 	review := providers.TechnicalReviewResult{Observations: []providers.TechnicalObservation{
-		{ObjectiveID: "objective", EvidenceFingerprint: "ranking-fingerprint", InvestigationMode: "candidate-validation", Assurance: providers.AssuranceStructurallyVerified},
-		{ObjectiveID: "objective", EvidenceFingerprint: "support-fingerprint", InvestigationMode: "candidate-validation", Assurance: providers.AssuranceSignalDetected},
+		{SystemID: "ranking", ObjectiveID: "objective", EvidenceFingerprint: "ranking-fingerprint", InvestigationMode: "candidate-validation", Assurance: providers.AssuranceStructurallyVerified},
+		{SystemID: "support", ObjectiveID: "objective", EvidenceFingerprint: "support-fingerprint", InvestigationMode: "candidate-validation", Assurance: providers.AssuranceSignalDetected},
 	}}
 	AttachTechnicalInvestigations(&report, review)
 	if got := report.Systems[0].Objectives[0].Investigation; got == nil || got.Assurance != providers.AssuranceStructurallyVerified || got.Observations != 1 {
@@ -47,5 +47,24 @@ func TestAttachTechnicalInvestigationsFollowsOwnedEvidenceFingerprint(t *testing
 	}
 	if got := report.Systems[1].Objectives[0].Investigation; got == nil || got.Assurance != providers.AssuranceSignalDetected || got.Observations != 1 {
 		t.Fatalf("support investigation = %#v", got)
+	}
+}
+
+func TestAttachExtendedInvestigationOnlyToItsSystem(t *testing.T) {
+	report := Report{Systems: []SystemResult{
+		{SystemID: "ranking", Objectives: []ObjectiveResult{{ObjectiveID: "objective"}}},
+		{SystemID: "support", Objectives: []ObjectiveResult{{ObjectiveID: "objective"}}},
+	}}
+	review := providers.TechnicalReviewResult{Observations: []providers.TechnicalObservation{{
+		SystemID: "ranking", OwnershipScope: "explicit", RepositoryFiles: 12,
+		ObjectiveID: "objective", EvidenceFingerprint: "search-fingerprint", InvestigationMode: "extended-search",
+		Assurance: providers.AssuranceInvestigationNoEvidence,
+	}}}
+	AttachTechnicalInvestigations(&report, review)
+	if got := report.Systems[0].Objectives[0].Investigation; got == nil || got.SystemID != "ranking" || got.RepositoryFiles != 12 {
+		t.Fatalf("ranking investigation = %#v", got)
+	}
+	if report.Systems[1].Objectives[0].Investigation != nil {
+		t.Fatalf("ranking investigation escaped into support: %#v", report.Systems[1].Objectives[0].Investigation)
 	}
 }

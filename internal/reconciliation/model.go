@@ -71,6 +71,9 @@ type ObjectiveVerification struct {
 }
 
 type ObjectiveInvestigation struct {
+	SystemID                    string                        `json:"system_id,omitempty"`
+	OwnershipScope              string                        `json:"ownership_scope,omitempty"`
+	RepositoryFiles             int                           `json:"repository_files,omitempty"`
 	Conclusion                  providers.TechnicalConclusion `json:"conclusion"`
 	Assurance                   providers.AssuranceLevel      `json:"assurance_level"`
 	Confidence                  string                        `json:"confidence"`
