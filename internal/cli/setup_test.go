@@ -33,12 +33,46 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 			t.Errorf("output missing %q:\n%s", expected, stdout.String())
 		}
 	}
+	for _, expected := range []string{
+		"A short, stable machine-readable identifier",
+		"provider — your organisation develops it",
+		"biometrics — identifies people",
+		"advisory — AI suggests or drafts",
+		"inference — sends inputs to a model",
+		"private-customer — a dedicated customer deployment",
+		"Most developers should keep needs-review",
+		"Ollama runs a selected language model locally",
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("guided setup output missing explanation %q:\n%s", expected, stdout.String())
+		}
+	}
 	ignored, err := os.ReadFile(filepath.Join(target, ".gitignore"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(ignored), reportGitIgnoreEntry) {
 		t.Fatalf("generated reports are not ignored:\n%s", ignored)
+	}
+}
+
+func TestEverySetupQuestionHasDeveloperGuidance(t *testing.T) {
+	keys := []string{
+		"system-id", "system-name", "intended-purpose", "lifecycle-stage", "organization-roles",
+		"operating-regions", "use-case-domains", "users", "affected-groups", "decision-impact",
+		"human-oversight", "ai-activities", "personal-data", "special-category-data", "children-data",
+		"deployment-models", "profile-reviewer", "applicability-decision", "decision-rationale",
+		"applicability-reviewer", "replace-profile", "ollama-review", "ollama-model", "install-ollama",
+		"download-model", "first-scan",
+	}
+	for _, key := range keys {
+		lines, exists := setupQuestionHelp[key]
+		if !exists || len(lines) < 2 {
+			t.Errorf("setup guidance %q is missing or too brief: %#v", key, lines)
+		}
+	}
+	if len(setupQuestionHelp) != len(keys) {
+		t.Fatalf("guidance catalog has %d entries, want %d; update the completeness test when adding a setup question", len(setupQuestionHelp), len(keys))
 	}
 }
 

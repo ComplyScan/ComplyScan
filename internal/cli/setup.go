@@ -109,6 +109,9 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		}
 		index := systemIndex(cfg.Systems, system.ID)
 		if index >= 0 {
+			if explainErr := explainSetupQuestion(prompt, "replace-profile"); explainErr != nil {
+				return explainErr
+			}
 			replace, confirmErr := prompt.confirm(fmt.Sprintf("Replace existing system profile %q", system.ID), true)
 			if confirmErr != nil {
 				return confirmErr
@@ -150,6 +153,9 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		_, err := fmt.Fprintf(stdout, "After Ollama is ready, run: ollama pull %s && complyscan scan %s\n", shellQuote(cfg.AI.Ollama.Model), shellQuote(target))
 		return err
 	}
+	if err := explainSetupQuestion(prompt, "first-scan"); err != nil {
+		return err
+	}
 	runFirst, err := prompt.confirm("Run the first scan now", true)
 	if err != nil {
 		return err
@@ -164,6 +170,9 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.Writer, cfg *config.Config, interactive bool, options setupOptions) (bool, error) {
 	provider := strings.ToLower(strings.TrimSpace(options.reviewProvider))
 	if provider == "" && interactive {
+		if err := explainSetupQuestion(prompt, "ollama-review"); err != nil {
+			return false, err
+		}
 		enable, err := prompt.confirm("Enable local AI review with Ollama", true)
 		if err != nil {
 			return false, err
@@ -202,6 +211,9 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 		if _, err := fmt.Fprintln(stdout, "\nLocal model setup\n  Recommended: qwen3:8b\n  Larger coding model: qwen3-coder:30b\n  You may enter any local Ollama model tag."); err != nil {
 			return false, err
 		}
+		if err := explainSetupQuestion(prompt, "ollama-model"); err != nil {
+			return false, err
+		}
 		var err error
 		model, err = prompt.text("Ollama model", setupModelDefault(cfg.AI.Ollama.Model))
 		if err != nil {
@@ -219,6 +231,9 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 		if interactive && !options.skipOllamaInstall && !options.installOllama {
 			if _, writeErr := fmt.Fprintln(stdout, "Ollama was not found on PATH. Installation may download software, change system packages, and request system privileges."); writeErr != nil {
 				return false, writeErr
+			}
+			if explainErr := explainSetupQuestion(prompt, "install-ollama"); explainErr != nil {
+				return false, explainErr
 			}
 			shouldInstall, err = prompt.confirm("Install and start Ollama now", true)
 			if err != nil {
@@ -249,6 +264,9 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 	}
 	shouldPull := options.pullModel
 	if interactive && !options.skipModelPull && !options.pullModel {
+		if explainErr := explainSetupQuestion(prompt, "download-model"); explainErr != nil {
+			return false, explainErr
+		}
 		var confirmErr error
 		shouldPull, confirmErr = prompt.confirm(fmt.Sprintf("Download Ollama model %q now", model), true)
 		if confirmErr != nil {

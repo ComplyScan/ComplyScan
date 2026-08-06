@@ -161,29 +161,56 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 	if _, err := fmt.Fprintln(output, "Answer factual questions. Use `unknown` when context has not been established; do not enter secrets or personal records."); err != nil {
 		return profile.System{}, err
 	}
+	if _, err := fmt.Fprintln(output, "The explanations translate EU AI Act screening concepts into developer language. They guide fact collection but are not legal advice."); err != nil {
+		return profile.System{}, err
+	}
+	if _, err := fmt.Fprintln(output, "Reference: Regulation (EU) 2024/1689, especially Article 3 and Annex III: https://eur-lex.europa.eu/eli/reg/2024/1689/oj/eng"); err != nil {
+		return profile.System{}, err
+	}
 	if _, err := fmt.Fprintln(output); err != nil {
 		return profile.System{}, err
 	}
 
+	if err := explainSetupQuestion(prompt, "system-id"); err != nil {
+		return profile.System{}, err
+	}
 	if value.ID, err = prompt.text("System ID", value.ID); err != nil {
+		return profile.System{}, err
+	}
+	if err := explainSetupQuestion(prompt, "system-name"); err != nil {
 		return profile.System{}, err
 	}
 	if value.Name, err = prompt.text("System name", value.Name); err != nil {
 		return profile.System{}, err
 	}
+	if err := explainSetupQuestion(prompt, "intended-purpose"); err != nil {
+		return profile.System{}, err
+	}
 	if value.IntendedPurpose, err = prompt.text("Intended purpose", "unknown"); err != nil {
+		return profile.System{}, err
+	}
+	if err := explainSetupQuestion(prompt, "lifecycle-stage"); err != nil {
 		return profile.System{}, err
 	}
 	if value.LifecycleStage, err = promptChoice(prompt, "Lifecycle stage", profile.LifecycleUnknown,
 		profile.LifecycleDevelopment, profile.LifecycleTesting, profile.LifecycleProduction, profile.LifecycleRetired, profile.LifecycleUnknown); err != nil {
 		return profile.System{}, err
 	}
+	if err := explainSetupQuestion(prompt, "organization-roles"); err != nil {
+		return profile.System{}, err
+	}
 	if value.OrganizationRoles, err = promptChoices(prompt, "Organization roles", []profile.OrganizationRole{profile.RoleUnknown},
 		profile.RoleProvider, profile.RoleDeployer, profile.RoleImporter, profile.RoleDistributor, profile.RoleProductManufacturer, profile.RoleUnknown); err != nil {
 		return profile.System{}, err
 	}
+	if err := explainSetupQuestion(prompt, "operating-regions"); err != nil {
+		return profile.System{}, err
+	}
 	if value.OperatingRegions, err = promptChoices(prompt, "Operating regions", []profile.OperatingRegion{profile.RegionUnknown},
 		profile.RegionEU, profile.RegionEEA, profile.RegionUK, profile.RegionUS, profile.RegionGlobal, profile.RegionOther, profile.RegionUnknown); err != nil {
+		return profile.System{}, err
+	}
+	if err := explainSetupQuestion(prompt, "use-case-domains"); err != nil {
 		return profile.System{}, err
 	}
 	if value.UseCaseDomains, err = promptChoices(prompt, "Use-case domains", []profile.UseCaseDomain{profile.DomainUnknown},
@@ -193,18 +220,33 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 		profile.DomainGeneralPurpose, profile.DomainOther, profile.DomainUnknown); err != nil {
 		return profile.System{}, err
 	}
+	if err := explainSetupQuestion(prompt, "users"); err != nil {
+		return profile.System{}, err
+	}
 	if value.Users, err = prompt.textList("Users", []string{"unknown"}); err != nil {
 		return profile.System{}, err
 	}
+	if err := explainSetupQuestion(prompt, "affected-groups"); err != nil {
+		return profile.System{}, err
+	}
 	if value.AffectedGroups, err = prompt.textList("Potentially affected groups", []string{"unknown"}); err != nil {
+		return profile.System{}, err
+	}
+	if err := explainSetupQuestion(prompt, "decision-impact"); err != nil {
 		return profile.System{}, err
 	}
 	if value.DecisionImpact, err = promptChoice(prompt, "Decision impact", profile.ImpactUnknown,
 		profile.ImpactAdvisory, profile.ImpactLow, profile.ImpactSignificant, profile.ImpactAutonomous, profile.ImpactUnknown); err != nil {
 		return profile.System{}, err
 	}
+	if err := explainSetupQuestion(prompt, "human-oversight"); err != nil {
+		return profile.System{}, err
+	}
 	if value.HumanOversight, err = promptChoice(prompt, "Human oversight", profile.OversightUnknown,
 		profile.OversightRequired, profile.OversightAvailable, profile.OversightLimited, profile.OversightNone, profile.OversightUnknown); err != nil {
+		return profile.System{}, err
+	}
+	if err := explainSetupQuestion(prompt, "ai-activities"); err != nil {
 		return profile.System{}, err
 	}
 	if value.AIActivities, err = promptChoices(prompt, "AI activities", []profile.AIActivity{profile.ActivityUnknown},
@@ -212,13 +254,25 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 		profile.ActivityAutomatedDecision, profile.ActivityAgentToolUse, profile.ActivitySyntheticContent, profile.ActivityUnknown); err != nil {
 		return profile.System{}, err
 	}
+	if err := explainSetupQuestion(prompt, "personal-data"); err != nil {
+		return profile.System{}, err
+	}
 	if value.Data.PersonalData, err = promptChoice(prompt, "Processes personal data", profile.TriUnknown, profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
+		return profile.System{}, err
+	}
+	if err := explainSetupQuestion(prompt, "special-category-data"); err != nil {
 		return profile.System{}, err
 	}
 	if value.Data.SpecialCategoryData, err = promptChoice(prompt, "Processes special-category or similarly sensitive data", profile.TriUnknown, profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
 		return profile.System{}, err
 	}
+	if err := explainSetupQuestion(prompt, "children-data"); err != nil {
+		return profile.System{}, err
+	}
 	if value.Data.ChildrenData, err = promptChoice(prompt, "Processes children's data", profile.TriUnknown, profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
+		return profile.System{}, err
+	}
+	if err := explainSetupQuestion(prompt, "deployment-models"); err != nil {
 		return profile.System{}, err
 	}
 	if value.DeploymentModels, err = promptChoices(prompt, "Deployment models", []profile.DeploymentModel{profile.DeploymentUnknown},
@@ -227,6 +281,9 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 		return profile.System{}, err
 	}
 
+	if err := explainSetupQuestion(prompt, "profile-reviewer"); err != nil {
+		return profile.System{}, err
+	}
 	reviewer, err := prompt.text("Profile reviewer (leave `unknown` to keep this draft)", "unknown")
 	if err != nil {
 		return profile.System{}, err
@@ -240,6 +297,9 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 	if err := profile.WriteTerminal(output, profile.AssessEUAIAct([]profile.System{value})); err != nil {
 		return profile.System{}, err
 	}
+	if err := explainSetupQuestion(prompt, "applicability-decision"); err != nil {
+		return profile.System{}, err
+	}
 	decisionStatus, err := promptChoice(prompt, "Human EU AI Act applicability decision", profile.ApplicabilityNeedsReview,
 		profile.ApplicabilityNeedsReview, profile.ApplicabilityApplicable, profile.ApplicabilityNotApplicable, profile.ApplicabilityUncertain)
 	if err != nil {
@@ -247,12 +307,18 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 	}
 	decision := profile.ApplicabilityDecision{Framework: profile.FrameworkEUAIAct, Status: decisionStatus}
 	if decisionStatus != profile.ApplicabilityNeedsReview {
+		if err := explainSetupQuestion(prompt, "decision-rationale"); err != nil {
+			return profile.System{}, err
+		}
 		if decision.Rationale, err = prompt.text("Decision rationale", ""); err != nil {
 			return profile.System{}, err
 		}
 		defaultReviewer := ""
 		if !strings.EqualFold(reviewer, "unknown") {
 			defaultReviewer = reviewer
+		}
+		if err := explainSetupQuestion(prompt, "applicability-reviewer"); err != nil {
+			return profile.System{}, err
 		}
 		if decision.ReviewedBy, err = prompt.text("Applicability reviewer", defaultReviewer); err != nil {
 			return profile.System{}, err
