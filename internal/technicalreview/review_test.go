@@ -15,7 +15,7 @@ type fakeReviewer struct {
 func (reviewer *fakeReviewer) ReviewTechnical(_ context.Context, request providers.TechnicalReviewRequest) (providers.TechnicalReviewResult, error) {
 	result := providers.TechnicalReviewResult{
 		Provider: providers.Ollama, Model: "qwen3:8b", InputCandidates: len(request.Candidates),
-		Observations: []providers.TechnicalObservation{}, Notes: []string{"advisory", "No technical-objective candidates were available for semantic review."},
+		Observations: []providers.TechnicalObservation{}, Notes: []string{"advisory", "No likely technical objectives or deterministic candidates were available for evidence investigation."},
 	}
 	if len(request.Candidates) == 0 {
 		return result, nil

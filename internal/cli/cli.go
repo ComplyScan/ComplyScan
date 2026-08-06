@@ -408,9 +408,10 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			evidenceMapping := reconciliation.Build(cfg.Systems, assessment, technicalEvidence, aiInventory)
 			reportValue.Reconciliation = &evidenceMapping
 			if cfg.AI.Provider == "ollama" {
-				candidateCount := technicalCandidateCount(technicalEvidence)
+				investigationRequest := reviewcontext.BuildInvestigations(technicalEvidence, result.FullRepository, evidenceMapping)
+				candidateCount := len(investigationRequest.Candidates)
 				if outputFormat == "terminal" {
-					if _, err := fmt.Fprintf(stdout, "Ollama advisory review requested for %d finding(s) and %d technical candidate(s) with %s...\n\n", len(visible), candidateCount, cfg.AI.Ollama.Model); err != nil {
+					if _, err := fmt.Fprintf(stdout, "Ollama advisory review requested for %d finding(s) and %d technical evidence investigation target(s) with %s...\n\n", len(visible), candidateCount, cfg.AI.Ollama.Model); err != nil {
 						return fmt.Errorf("write terminal report: %w", err)
 					}
 				}
@@ -419,7 +420,7 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 					progressWriter = cmd.ErrOrStderr()
 				}
 				review, technicalReview, err := reviewWithOllama(
-					cmd.Context(), cfg.AI.Ollama, target, visible, technicalEvidence, result.FullRepository,
+					cmd.Context(), cfg.AI.Ollama, target, visible, technicalEvidence, investigationRequest,
 					refreshReview, technicalReviewProgress(progressWriter),
 				)
 				if err != nil {
@@ -486,7 +487,7 @@ func reviewWithOllama(
 	target string,
 	findings []rules.Finding,
 	evidence framework.TechnicalEvidenceReport,
-	repository discovery.Repository,
+	investigationRequest providers.TechnicalReviewRequest,
 	refresh bool,
 	onProgress func(technicalreview.Progress) error,
 ) (providers.ReviewResult, providers.TechnicalReviewResult, error) {
@@ -517,7 +518,7 @@ func reviewWithOllama(
 	} else {
 		cacheUnavailable = true
 	}
-	technicalResult, err := technicalreview.Run(ctx, reviewer, reviewcontext.Build(evidence, repository), technicalreview.Options{
+	technicalResult, err := technicalreview.Run(ctx, reviewer, investigationRequest, technicalreview.Options{
 		Identity: technicalreview.Identity{
 			Provider: providers.Ollama, Model: settings.Model, PromptVersion: providers.TechnicalReviewPromptVersion,
 			PackID: evidence.Pack.ID, PackVersion: evidence.Pack.Version, PackDigest: evidence.Pack.Digest,
@@ -539,17 +540,9 @@ func technicalReviewProgress(output io.Writer) func(technicalreview.Progress) er
 		if progress.Cached {
 			status = "using cached observation"
 		}
-		_, err := fmt.Fprintf(output, "Technical review %d/%d: %s — %s (%s)\n", progress.Current, progress.Total, progress.Candidate.ObjectiveID, progress.Candidate.Path, status)
+		_, err := fmt.Fprintf(output, "Evidence investigation %d/%d: %s — %s (%s)\n", progress.Current, progress.Total, progress.Candidate.ObjectiveID, progress.Candidate.Path, status)
 		return err
 	}
-}
-
-func technicalCandidateCount(evidence framework.TechnicalEvidenceReport) int {
-	count := 0
-	for _, objective := range evidence.Objectives {
-		count += len(objective.Matches)
-	}
-	return count
 }
 
 func buildTechnicalReviewRequest(evidence framework.TechnicalEvidenceReport, repository discovery.Repository) providers.TechnicalReviewRequest {

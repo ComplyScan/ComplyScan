@@ -119,6 +119,8 @@ type TechnicalSourceContext struct {
 }
 
 type EvidenceStrength string
+type TechnicalConclusion string
+type AssuranceLevel string
 
 const (
 	StrengthStrong       EvidenceStrength = "strong"
@@ -126,18 +128,48 @@ const (
 	StrengthWeak         EvidenceStrength = "weak"
 	StrengthUncertain    EvidenceStrength = "uncertain"
 	StrengthNotSupported EvidenceStrength = "not_supported"
+
+	ConclusionSubstantiated              TechnicalConclusion = "technically-substantiated"
+	ConclusionPartial                    TechnicalConclusion = "partially-substantiated"
+	ConclusionTestOnly                   TechnicalConclusion = "test-only-evidence"
+	ConclusionUnreachable                TechnicalConclusion = "unreachable-evidence"
+	ConclusionNotSubstantiated           TechnicalConclusion = "not-substantiated"
+	ConclusionNotFoundAfterInvestigation TechnicalConclusion = "not-found-after-investigation"
+	ConclusionCannotDetermine            TechnicalConclusion = "cannot-determine"
+
+	AssuranceSignalDetected          AssuranceLevel = "signal-detected"
+	AssuranceAISubstantiated         AssuranceLevel = "ai-substantiated"
+	AssuranceStructurallyVerified    AssuranceLevel = "structurally-verified"
+	AssuranceTestEvidenceObserved    AssuranceLevel = "test-evidence-observed"
+	AssuranceInvestigationNoEvidence AssuranceLevel = "investigation-no-evidence"
+	AssuranceUnableToDetermine       AssuranceLevel = "unable-to-determine"
 )
 
+type TechnicalEvidenceClaim struct {
+	Path    string `json:"path"`
+	Line    int    `json:"line,omitempty"`
+	Summary string `json:"summary"`
+}
+
 type TechnicalObservation struct {
-	ObjectiveID         string           `json:"objective_id"`
-	EvidenceFingerprint string           `json:"evidence_fingerprint"`
-	Strength            EvidenceStrength `json:"strength"`
-	ModelStrength       EvidenceStrength `json:"model_strength,omitempty"`
-	Confidence          string           `json:"confidence"`
-	Rationale           string           `json:"rationale"`
-	UnresolvedQuestions []string         `json:"unresolved_questions,omitempty"`
-	SuggestedReview     string           `json:"suggested_review,omitempty"`
-	GuardrailNote       string           `json:"guardrail_note,omitempty"`
+	ObjectiveID                 string                   `json:"objective_id"`
+	EvidenceFingerprint         string                   `json:"evidence_fingerprint"`
+	EvidenceStatus              string                   `json:"evidence_status,omitempty"`
+	InvestigationMode           string                   `json:"investigation_mode,omitempty"`
+	Strength                    EvidenceStrength         `json:"strength"`
+	ModelStrength               EvidenceStrength         `json:"model_strength,omitempty"`
+	Conclusion                  TechnicalConclusion      `json:"conclusion"`
+	Assurance                   AssuranceLevel           `json:"assurance_level"`
+	Confidence                  string                   `json:"confidence"`
+	Rationale                   string                   `json:"rationale"`
+	SupportingEvidence          []TechnicalEvidenceClaim `json:"supporting_evidence"`
+	ContradictoryEvidence       []TechnicalEvidenceClaim `json:"contradictory_evidence"`
+	MissingEvidence             []string                 `json:"missing_evidence,omitempty"`
+	UnresolvedQuestions         []string                 `json:"unresolved_questions,omitempty"`
+	SuggestedReview             string                   `json:"suggested_review,omitempty"`
+	GuardrailNote               string                   `json:"guardrail_note,omitempty"`
+	RuntimeVerificationRequired bool                     `json:"runtime_verification_required"`
+	LegalReviewRequired         bool                     `json:"legal_review_required"`
 }
 
 type TechnicalReviewResult struct {

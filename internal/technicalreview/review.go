@@ -45,7 +45,7 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 	selected := request.Candidates
 	if options.MaxCandidates > 0 && len(selected) > options.MaxCandidates {
 		selected = selected[:options.MaxCandidates]
-		base.Notes = append(base.Notes, fmt.Sprintf("Technical review was limited to the first %d of %d candidates.", len(selected), len(request.Candidates)))
+		base.Notes = append(base.Notes, fmt.Sprintf("Technical evidence investigation was limited to the first %d of %d targets.", len(selected), len(request.Candidates)))
 	}
 	cacheEnabled := options.Cache != nil
 	cacheHits := 0
@@ -102,7 +102,7 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 func withoutNoCandidatesNote(notes []string) []string {
 	result := make([]string, 0, len(notes))
 	for _, note := range notes {
-		if !strings.Contains(note, "No technical-objective candidates were available") {
+		if !strings.Contains(note, "No likely technical objectives or deterministic candidates were available") {
 			result = append(result, note)
 		}
 	}

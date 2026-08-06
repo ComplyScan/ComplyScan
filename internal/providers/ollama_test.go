@@ -287,6 +287,71 @@ func TestOllamaTechnicalReviewUsesBoundedUntrustedSourceAndExactBinding(t *testi
 	}
 }
 
+func TestOllamaInvestigatesNotDetectedObjectiveWithGroundedClaims(t *testing.T) {
+	fingerprint := strings.Repeat("d", 64)
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		encoded, _ := json.Marshal(body)
+		if !strings.Contains(string(encoded), "extended-search") || !strings.Contains(string(encoded), "not-detected") {
+			t.Fatalf("missing extended-search input: %s", encoded)
+		}
+		content, _ := json.Marshal(ollamaTechnicalPayload{Observation: ollamaTechnicalObservation{
+			Strength: StrengthPartial, Conclusion: ConclusionPartial, Confidence: "medium",
+			Rationale:             "The wider search found an approval path, but its production caller and authorization remain unresolved.",
+			SupportingEvidence:    []TechnicalEvidenceClaim{{Path: "src/review.go", Line: 12, Summary: "An approval function gates a model result."}},
+			ContradictoryEvidence: []TechnicalEvidenceClaim{},
+			MissingEvidence:       []string{"Production route binding", "Reviewer authorization"},
+			UnresolvedQuestions:   []string{"Does every consequential path call the gate?"},
+			SuggestedReview:       "Trace production callers and verify permissions.",
+		}})
+		return testJSONResponse(http.StatusOK, map[string]any{"message": map[string]string{"content": string(content)}, "done": true}), nil
+	})}
+	provider, err := NewOllama(OllamaOptions{Endpoint: "http://127.0.0.1:11434", Model: "test", Timeout: time.Second, MaxFindings: 1, HTTPClient: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := provider.ReviewTechnical(context.Background(), TechnicalReviewRequest{Candidates: []TechnicalCandidate{{
+		ObjectiveID: "eu-aia-14-human-review-gate", EvidenceFingerprint: fingerprint,
+		EvidenceStatus: "not-detected", InvestigationMode: "extended-search", Path: "(repository-wide)",
+		SourceContexts: []TechnicalSourceContext{{Path: "src/review.go", StartLine: 1, EndLine: 30, Source: "func approve() {}"}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := result.Observations[0]
+	if observation.Conclusion != ConclusionPartial || observation.Assurance != AssuranceAISubstantiated || len(observation.SupportingEvidence) != 1 {
+		t.Fatalf("unexpected investigation result: %#v", observation)
+	}
+	if !observation.RuntimeVerificationRequired || !observation.LegalReviewRequired || len(observation.MissingEvidence) != 2 {
+		t.Fatalf("verification boundaries missing: %#v", observation)
+	}
+}
+
+func TestOllamaInvestigationRejectsEvidenceClaimOutsideSubmittedContext(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		content, _ := json.Marshal(ollamaTechnicalPayload{Observation: ollamaTechnicalObservation{
+			Strength: StrengthStrong, Conclusion: ConclusionSubstantiated, Confidence: "high", Rationale: "A control is connected.",
+			SupportingEvidence:    []TechnicalEvidenceClaim{{Path: "invented/control.go", Line: 1, Summary: "Invented path."}},
+			ContradictoryEvidence: []TechnicalEvidenceClaim{}, MissingEvidence: []string{}, UnresolvedQuestions: []string{}, SuggestedReview: "Verify runtime.",
+		}})
+		return testJSONResponse(http.StatusOK, map[string]any{"message": map[string]string{"content": string(content)}, "done": true}), nil
+	})}
+	provider, err := NewOllama(OllamaOptions{Endpoint: "http://127.0.0.1:11434", Model: "test", Timeout: time.Second, MaxFindings: 1, HTTPClient: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = provider.ReviewTechnical(context.Background(), TechnicalReviewRequest{Candidates: []TechnicalCandidate{{
+		ObjectiveID: "objective", EvidenceFingerprint: strings.Repeat("e", 64), Path: "src/control.go",
+		SourceContexts: []TechnicalSourceContext{{Path: "src/control.go", Source: "func control() {}"}},
+	}}})
+	if err == nil || !strings.Contains(err.Error(), "outside the submitted bounded context") {
+		t.Fatalf("got error %v", err)
+	}
+}
+
 func TestOllamaTechnicalReviewCapsTestOnlyCandidateWithSharedProductionCallee(t *testing.T) {
 	fingerprint := strings.Repeat("e", 64)
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {

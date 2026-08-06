@@ -98,6 +98,9 @@ func testCandidate(source string) providers.TechnicalCandidate {
 func testObservation(candidate providers.TechnicalCandidate) providers.TechnicalObservation {
 	return providers.TechnicalObservation{
 		ObjectiveID: candidate.ObjectiveID, EvidenceFingerprint: candidate.EvidenceFingerprint,
-		Strength: providers.StrengthPartial, Confidence: "medium", Rationale: "The evaluator checks model output for the stated behavior.",
+		Strength: providers.StrengthPartial, Conclusion: providers.ConclusionPartial, Assurance: providers.AssuranceAISubstantiated,
+		Confidence: "medium", Rationale: "The evaluator checks model output for the stated behavior.",
+		SupportingEvidence: []providers.TechnicalEvidenceClaim{}, ContradictoryEvidence: []providers.TechnicalEvidenceClaim{},
+		RuntimeVerificationRequired: true, LegalReviewRequired: true,
 	}
 }

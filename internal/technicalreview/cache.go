@@ -167,10 +167,13 @@ func validateEntry(entry cacheEntry) error {
 	if !validStrength(observation.Strength) || observation.ModelStrength != "" && !validStrength(observation.ModelStrength) {
 		return errors.New("observation has an invalid strength")
 	}
+	if !validConclusion(observation.Conclusion) || !validAssurance(observation.Assurance) {
+		return errors.New("observation has an invalid conclusion or assurance level")
+	}
 	if observation.Confidence != "low" && observation.Confidence != "medium" && observation.Confidence != "high" {
 		return errors.New("observation has an invalid confidence")
 	}
-	if strings.TrimSpace(observation.Rationale) == "" || len([]rune(observation.Rationale)) > 4_000 || len(observation.UnresolvedQuestions) > 10 {
+	if strings.TrimSpace(observation.Rationale) == "" || len([]rune(observation.Rationale)) > 4_000 || len(observation.UnresolvedQuestions) > 10 || len(observation.MissingEvidence) > 10 {
 		return errors.New("observation rationale or questions exceed cache bounds")
 	}
 	totalText := len([]rune(observation.Rationale)) + len([]rune(observation.SuggestedReview)) + len([]rune(observation.GuardrailNote))
@@ -181,6 +184,21 @@ func validateEntry(entry cacheEntry) error {
 		}
 		totalText += questionLength
 	}
+	for _, missing := range observation.MissingEvidence {
+		if len([]rune(missing)) > 1_000 {
+			return errors.New("observation missing-evidence item exceeds cache bounds")
+		}
+		totalText += len([]rune(missing))
+	}
+	if len(observation.SupportingEvidence) > 10 || len(observation.ContradictoryEvidence) > 10 {
+		return errors.New("observation evidence claims exceed cache bounds")
+	}
+	for _, claim := range append(append([]providers.TechnicalEvidenceClaim(nil), observation.SupportingEvidence...), observation.ContradictoryEvidence...) {
+		if strings.TrimSpace(claim.Path) == "" || strings.TrimSpace(claim.Summary) == "" || claim.Line < 0 || len([]rune(claim.Summary)) > 4_000 {
+			return errors.New("observation contains an invalid evidence claim")
+		}
+		totalText += len([]rune(claim.Path)) + len([]rune(claim.Summary))
+	}
 	if len([]rune(observation.SuggestedReview)) > 2_000 || len([]rune(observation.GuardrailNote)) > 4_000 {
 		return errors.New("observation action or guardrail note exceeds cache bounds")
 	}
@@ -188,6 +206,28 @@ func validateEntry(entry cacheEntry) error {
 		return errors.New("observation text exceeds aggregate cache bounds")
 	}
 	return nil
+}
+
+func validConclusion(value providers.TechnicalConclusion) bool {
+	switch value {
+	case providers.ConclusionSubstantiated, providers.ConclusionPartial, providers.ConclusionTestOnly,
+		providers.ConclusionUnreachable, providers.ConclusionNotSubstantiated,
+		providers.ConclusionNotFoundAfterInvestigation, providers.ConclusionCannotDetermine:
+		return true
+	default:
+		return false
+	}
+}
+
+func validAssurance(value providers.AssuranceLevel) bool {
+	switch value {
+	case providers.AssuranceSignalDetected, providers.AssuranceAISubstantiated,
+		providers.AssuranceStructurallyVerified, providers.AssuranceTestEvidenceObserved,
+		providers.AssuranceInvestigationNoEvidence, providers.AssuranceUnableToDetermine:
+		return true
+	default:
+		return false
+	}
 }
 
 func validStrength(strength providers.EvidenceStrength) bool {
