@@ -26,6 +26,9 @@ type setupOptions struct {
 	nonInteractive    bool
 	reviewProvider    string
 	ollamaModel       string
+	remoteModel       string
+	remoteAPIKeyEnv   string
+	allowRemoteReview bool
 	pullModel         bool
 	skipModelPull     bool
 	installOllama     bool
@@ -37,7 +40,7 @@ func newSetupCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	var options setupOptions
 	command := &cobra.Command{
 		Use:   "setup [path]",
-		Short: "Configure a repository, applicability context, and local AI review",
+		Short: "Configure a repository, applicability context, and optional AI review",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if options.forceInteractive && options.nonInteractive {
@@ -70,8 +73,11 @@ func newSetupCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().StringVar(&options.configPath, "config", "", "configuration file (defaults to <path>/.complyscan.yml)")
 	command.Flags().BoolVar(&options.forceInteractive, "interactive", false, "run the setup wizard even when input is redirected")
 	command.Flags().BoolVar(&options.nonInteractive, "non-interactive", false, "create or update configuration without asking questions")
-	command.Flags().StringVar(&options.reviewProvider, "review", "", "advisory review provider: none or ollama")
+	command.Flags().StringVar(&options.reviewProvider, "review", "", "advisory review provider: none, ollama, openai, anthropic, or gemini")
 	command.Flags().StringVar(&options.ollamaModel, "ollama-model", "", "Ollama model name")
+	command.Flags().StringVar(&options.remoteModel, "model", "", "remote-provider model name")
+	command.Flags().StringVar(&options.remoteAPIKeyEnv, "api-key-env", "", "environment-variable name containing the remote-provider API key")
+	command.Flags().BoolVar(&options.allowRemoteReview, "allow-remote-review", false, "confirm that bounded repository context may be sent to the selected remote provider")
 	command.Flags().BoolVar(&options.pullModel, "pull-model", false, "download the configured Ollama model (requires --review ollama in non-interactive mode)")
 	command.Flags().BoolVar(&options.skipModelPull, "skip-model-pull", false, "configure Ollama without offering to download the model")
 	command.Flags().BoolVar(&options.installOllama, "install-ollama", false, "install Ollama when it is missing (requires explicit use in non-interactive mode)")
@@ -170,24 +176,24 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.Writer, cfg *config.Config, interactive bool, options setupOptions) (bool, error) {
 	provider := strings.ToLower(strings.TrimSpace(options.reviewProvider))
 	if provider == "" && interactive {
-		if err := explainSetupQuestion(prompt, "ollama-review"); err != nil {
+		if err := explainSetupQuestion(prompt, "review-provider"); err != nil {
 			return false, err
 		}
-		enable, err := prompt.confirm("Enable local AI review with Ollama", true)
+		defaultProvider := cfg.AI.Provider
+		if defaultProvider == "none" || defaultProvider == "" {
+			defaultProvider = "ollama"
+		}
+		selected, err := promptChoice(prompt, "Advisory review provider", defaultProvider, "none", "ollama", "openai", "anthropic", "gemini")
 		if err != nil {
 			return false, err
 		}
-		if enable {
-			provider = "ollama"
-		} else {
-			provider = "none"
-		}
+		provider = selected
 	}
 	if provider == "" {
 		provider = cfg.AI.Provider
 	}
-	if provider != "none" && provider != "ollama" {
-		return false, fmt.Errorf("invalid review provider %q (want none or ollama)", provider)
+	if provider != "none" && provider != "ollama" && !isRemoteReviewProvider(provider) {
+		return false, fmt.Errorf("invalid review provider %q (want none, ollama, openai, anthropic, or gemini)", provider)
 	}
 	if options.ollamaModel != "" && provider != "ollama" {
 		return false, errors.New("--ollama-model requires --review ollama or an interactive Ollama selection")
@@ -198,12 +204,24 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 	if options.installOllama && provider != "ollama" {
 		return false, errors.New("--install-ollama requires --review ollama")
 	}
+	if options.remoteModel != "" && !isRemoteReviewProvider(provider) {
+		return false, errors.New("--model requires --review openai, anthropic, or gemini")
+	}
+	if options.remoteAPIKeyEnv != "" && !isRemoteReviewProvider(provider) {
+		return false, errors.New("--api-key-env requires --review openai, anthropic, or gemini")
+	}
+	if options.allowRemoteReview && !isRemoteReviewProvider(provider) {
+		return false, errors.New("--allow-remote-review requires --review openai, anthropic, or gemini")
+	}
 	cfg.AI.Provider = provider
 	if provider == "none" {
 		if _, err := fmt.Fprintln(stdout, "Local AI review disabled. Deterministic scanning remains available."); err != nil {
 			return false, err
 		}
 		return true, nil
+	}
+	if isRemoteReviewProvider(provider) {
+		return configureRemoteReview(prompt, stdout, cfg, interactive, options)
 	}
 
 	ollamaPath, _ := exec.LookPath("ollama")
@@ -297,6 +315,143 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 		return false, nil
 	}
 	return true, nil
+}
+
+func configureRemoteReview(prompt promptSession, stdout io.Writer, cfg *config.Config, interactive bool, options setupOptions) (bool, error) {
+	provider := cfg.AI.Provider
+	allowed := options.allowRemoteReview
+	if interactive {
+		if err := explainSetupQuestion(prompt, "remote-disclosure"); err != nil {
+			return false, err
+		}
+		if !allowed {
+			confirmed, err := prompt.confirm(fmt.Sprintf("Allow bounded repository context to be sent to %s", reviewProviderLabel(provider)), false)
+			if err != nil {
+				return false, err
+			}
+			allowed = confirmed
+		}
+	}
+	if !allowed {
+		if !interactive {
+			return false, errors.New("remote review requires --allow-remote-review in non-interactive setup")
+		}
+		cfg.AI.Provider = "none"
+		if _, err := fmt.Fprintln(stdout, "Remote review not enabled. Deterministic local scanning remains available."); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
+	model := strings.TrimSpace(options.remoteModel)
+	if model == "" && interactive {
+		if err := explainSetupQuestion(prompt, "remote-model"); err != nil {
+			return false, err
+		}
+		var err error
+		model, err = promptRemoteModel(prompt, provider)
+		if err != nil {
+			return false, err
+		}
+	}
+	if model == "" {
+		model = defaultRemoteModel(provider)
+	}
+	keyEnvironment := strings.TrimSpace(options.remoteAPIKeyEnv)
+	if keyEnvironment == "" && interactive {
+		if err := explainSetupQuestion(prompt, "api-key-env"); err != nil {
+			return false, err
+		}
+		var err error
+		keyEnvironment, err = prompt.text("API key environment-variable name", defaultRemoteAPIKeyEnvironment(provider))
+		if err != nil {
+			return false, err
+		}
+	}
+	if keyEnvironment == "" {
+		keyEnvironment = defaultRemoteAPIKeyEnvironment(provider)
+	}
+	cfg.AI.Remote = config.RemoteConfig{
+		Model: model, APIKeyEnv: keyEnvironment, TimeoutSeconds: 360, MaxFindings: 20,
+	}
+	if err := cfg.AI.Remote.Validate(); err != nil {
+		return false, fmt.Errorf("remote review configuration: %w", err)
+	}
+	if value, exists := os.LookupEnv(keyEnvironment); !exists || strings.TrimSpace(value) == "" {
+		if _, err := fmt.Fprintf(stdout, "%s is not currently set. Add it to your shell or CI secret store before scanning; the key itself is never written to .complyscan.yml.\n", keyEnvironment); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	if _, err := fmt.Fprintf(stdout, "%s review configured with model %q. The credential was found in %s and was not saved.\n", reviewProviderLabel(provider), model, keyEnvironment); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func promptRemoteModel(prompt promptSession, provider string) (string, error) {
+	models := remoteModelOptions(provider)
+	if _, err := fmt.Fprintf(prompt.output, "  Suggested %s models (you may also type another exact model ID):\n", reviewProviderLabel(provider)); err != nil {
+		return "", err
+	}
+	for index, model := range models {
+		if _, err := fmt.Fprintf(prompt.output, "    %d. %s\n", index+1, model); err != nil {
+			return "", err
+		}
+	}
+	for {
+		value, err := prompt.text("Remote model number or exact ID", "1")
+		if err != nil {
+			return "", err
+		}
+		var selected int
+		if _, scanErr := fmt.Sscanf(value, "%d", &selected); scanErr == nil {
+			if selected >= 1 && selected <= len(models) && value == fmt.Sprintf("%d", selected) {
+				return models[selected-1], nil
+			}
+			if _, writeErr := fmt.Fprintf(prompt.output, "  Enter a number from 1 to %d, or an exact model ID.\n", len(models)); writeErr != nil {
+				return "", writeErr
+			}
+			continue
+		}
+		if strings.TrimSpace(value) != "" && !strings.ContainsAny(value, "\r\n\x00") {
+			return strings.TrimSpace(value), nil
+		}
+	}
+}
+
+func remoteModelOptions(provider string) []string {
+	switch provider {
+	case "openai":
+		return []string{"gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna"}
+	case "anthropic":
+		return []string{"claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5"}
+	case "gemini":
+		return []string{"gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.5-flash"}
+	default:
+		return nil
+	}
+}
+
+func defaultRemoteModel(provider string) string {
+	models := remoteModelOptions(provider)
+	if len(models) == 0 {
+		return ""
+	}
+	return models[0]
+}
+
+func defaultRemoteAPIKeyEnvironment(provider string) string {
+	switch provider {
+	case "openai":
+		return "OPENAI_API_KEY"
+	case "anthropic":
+		return "ANTHROPIC_API_KEY"
+	case "gemini":
+		return "GEMINI_API_KEY"
+	default:
+		return ""
+	}
 }
 
 func installOllama(ctx context.Context, stdout io.Writer) (string, error) {

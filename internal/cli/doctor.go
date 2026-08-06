@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/config"
+	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/report"
+	"github.com/ComplyScan/ComplyScan/internal/rules"
 	"github.com/spf13/cobra"
 )
 
@@ -30,23 +32,25 @@ type doctorOutput struct {
 
 func newDoctorCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	var configPath string
+	var probeReview bool
 	command := &cobra.Command{
 		Use:   "doctor [path]",
-		Short: "Check whether ComplyScan and its optional local reviewer are ready",
+		Short: "Check whether ComplyScan and its optional reviewer are ready",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := "."
 			if len(args) == 1 {
 				target = args[0]
 			}
-			return runDoctor(cmd.Context(), stdout, build, target, configPath)
+			return runDoctor(cmd.Context(), stdout, build, target, configPath, probeReview)
 		},
 	}
 	command.Flags().StringVar(&configPath, "config", "", "configuration file (defaults to <path>/.complyscan.yml)")
+	command.Flags().BoolVar(&probeReview, "probe-review", false, "send a small synthetic structured-output request to the configured reviewer (remote providers may charge)")
 	return command
 }
 
-func runDoctor(ctx context.Context, stdout io.Writer, build BuildInfo, target, configPath string) error {
+func runDoctor(ctx context.Context, stdout io.Writer, build BuildInfo, target, configPath string, probeReview bool) error {
 	output := doctorOutput{writer: stdout}
 	if err := output.write("PASS", "version", fmt.Sprintf("ComplyScan %s (commit %s, built %s)", build.Version, build.Commit, build.BuildDate)); err != nil {
 		return err
@@ -121,7 +125,11 @@ func runDoctor(ctx context.Context, stdout io.Writer, build BuildInfo, target, c
 			return err
 		}
 	} else if cfg.AI.Provider != "ollama" {
-		if err := output.write("SKIP", "ollama service", "AI review is disabled in configuration"); err != nil {
+		detail := "AI review is disabled in configuration"
+		if cfg.AI.Provider != "none" {
+			detail = reviewProviderLabel(cfg.AI.Provider) + " review does not use Ollama"
+		}
+		if err := output.write("SKIP", "ollama service", detail); err != nil {
 			return err
 		}
 	} else {
@@ -147,7 +155,72 @@ func runDoctor(ctx context.Context, stdout io.Writer, build BuildInfo, target, c
 		}
 	}
 
+	if configErr != nil {
+		if err := output.write("SKIP", "remote credential", "configuration is invalid"); err != nil {
+			return err
+		}
+	} else if !isRemoteReviewProvider(cfg.AI.Provider) {
+		if err := output.write("SKIP", "remote credential", "no remote review provider is configured"); err != nil {
+			return err
+		}
+	} else {
+		value, exists := os.LookupEnv(cfg.AI.Remote.APIKeyEnv)
+		if !exists || strings.TrimSpace(value) == "" {
+			if err := output.write("FAIL", "remote credential", cfg.AI.Remote.APIKeyEnv+" is not set"); err != nil {
+				return err
+			}
+		} else if err := output.write("PASS", "remote credential", cfg.AI.Remote.APIKeyEnv+" is set (value hidden)"); err != nil {
+			return err
+		}
+		if err := output.write("PASS", "remote model", fmt.Sprintf("%s via %s (live compatibility not tested by doctor)", cfg.AI.Remote.Model, reviewProviderLabel(cfg.AI.Provider))); err != nil {
+			return err
+		}
+	}
+
+	if probeReview {
+		if configErr != nil {
+			if err := output.write("SKIP", "review compatibility", "configuration is invalid"); err != nil {
+				return err
+			}
+		} else if cfg.AI.Provider == "none" {
+			if err := output.write("FAIL", "review compatibility", "no advisory review provider is configured"); err != nil {
+				return err
+			}
+		} else {
+			if err := probeConfiguredReviewer(ctx, cfg.AI); err != nil {
+				if writeErr := output.write("FAIL", "review compatibility", err.Error()); writeErr != nil {
+					return writeErr
+				}
+			} else if err := output.write("PASS", "review compatibility", fmt.Sprintf("%s returned one correctly bound structured observation for synthetic input", reviewProviderLabel(cfg.AI.Provider))); err != nil {
+				return err
+			}
+		}
+	} else if err := output.write("SKIP", "review compatibility", "not requested; run doctor --probe-review to make a live synthetic request"); err != nil {
+		return err
+	}
+
 	return output.finish()
+}
+
+func probeConfiguredReviewer(ctx context.Context, settings config.AIConfig) error {
+	reviewer, timeout, _, _, _, err := configuredReviewer(settings)
+	if err != nil {
+		return err
+	}
+	probeContext, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	result, err := reviewer.Review(probeContext, providers.ReviewRequest{Findings: []rules.Finding{{
+		Fingerprint: strings.Repeat("a", 64), RuleID: "AI-DOC-001", Title: "Synthetic compatibility probe",
+		Severity: rules.SeverityInfo, Category: "compatibility", Message: "Synthetic input used only to validate structured advisory output.",
+		Remediation: "No repository action is required.", Confidence: "high",
+	}}})
+	if err != nil {
+		return err
+	}
+	if result.Reviewed != 1 || len(result.Observations) != 1 || result.Observations[0].Fingerprint != strings.Repeat("a", 64) {
+		return errors.New("provider did not return one correctly bound structured observation")
+	}
+	return nil
 }
 
 func (output *doctorOutput) write(status, name, detail string) error {

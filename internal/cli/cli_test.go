@@ -404,6 +404,7 @@ func TestScanPreservesGraphCoverageWarnings(t *testing.T) {
 }
 
 func TestScanRejectsUnsafeOrInactiveOllamaOverrides(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
 	for _, arguments := range [][]string{
 		{"scan", "--review", "openai"},
 		{"scan", "--ollama-model", "gemma3"},
@@ -552,6 +553,17 @@ func TestDoctorReportsOfflineRepositoryReadiness(t *testing.T) {
 	}
 }
 
+func TestDoctorReviewProbeRequiresConfiguredProvider(t *testing.T) {
+	target := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"doctor", "--probe-review", target}, &stdout, &stderr, testBuild); code != 1 {
+		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "[FAIL] review compatibility: no advisory review provider is configured") {
+		t.Fatalf("probe output:\n%s", stdout.String())
+	}
+}
+
 func TestDoctorChecksConfiguredOllamaModel(t *testing.T) {
 	target := t.TempDir()
 	useDoctorHTTPTransport(t, func(request *http.Request) (*http.Response, error) {
@@ -607,6 +619,36 @@ func TestDoctorFailsWhenConfiguredOllamaModelIsMissing(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "[FAIL] ollama model: qwen3:8b is not installed") {
 		t.Fatalf("missing model was not reported:\n%s", stdout.String())
+	}
+}
+
+func TestDoctorChecksRemoteCredentialWithoutPrintingValue(t *testing.T) {
+	target := t.TempDir()
+	cfg := config.Default()
+	cfg.AI.Provider = "anthropic"
+	cfg.AI.Remote = config.RemoteConfig{Model: "claude-sonnet-5", APIKeyEnv: "COMPLYSCAN_TEST_ANTHROPIC_KEY", TimeoutSeconds: 60, MaxFindings: 10}
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	secret := "credential-must-stay-hidden"
+	t.Setenv("COMPLYSCAN_TEST_ANTHROPIC_KEY", secret)
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"doctor", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "[PASS] remote credential: COMPLYSCAN_TEST_ANTHROPIC_KEY is set (value hidden)") ||
+		!strings.Contains(stdout.String(), "[PASS] remote model: claude-sonnet-5 via Anthropic") || strings.Contains(stdout.String(), secret) {
+		t.Fatalf("remote doctor output:\n%s", stdout.String())
+	}
+
+	t.Setenv("COMPLYSCAN_TEST_ANTHROPIC_KEY", "")
+	stdout.Reset()
+	stderr.Reset()
+	if code := Execute([]string{"doctor", target}, &stdout, &stderr, testBuild); code != 1 {
+		t.Fatalf("missing credential exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "[FAIL] remote credential: COMPLYSCAN_TEST_ANTHROPIC_KEY is not set") {
+		t.Fatalf("missing credential output:\n%s", stdout.String())
 	}
 }
 

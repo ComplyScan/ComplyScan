@@ -134,9 +134,9 @@ var setupQuestionHelp = map[string][]string{
 		"A profile with this system ID already exists. Replacing it updates that system's declared facts with the answers just collected.",
 		"Choose no if the existing record belongs to a different system; rerun setup with a different system ID instead.",
 	},
-	"ollama-review": {
-		"Ollama runs a selected language model locally to add advisory reasoning to deterministic findings and technical evidence.",
-		"It is optional, does not decide legal compliance, and does not change deterministic findings or the scan exit status. Choose no for deterministic-only scanning.",
+	"review-provider": {
+		"Choose none for deterministic-only scanning, Ollama to keep model context on this machine, or a supported remote provider using your own account and API key.",
+		"Every model result is advisory: it cannot decide legal compliance, change deterministic findings, or change the scan exit status.",
 	},
 	"ollama-model": {
 		"Choose the local Ollama model used for advisory code-context review. Setup lists installed models and a small set of recommendations; qwen3:8b is the tested default.",
@@ -149,6 +149,18 @@ var setupQuestionHelp = map[string][]string{
 	"download-model": {
 		"The selected model weights are separate from the small ComplyScan binary and may require several gigabytes of disk space and substantial download time.",
 		"Choose no to save the configuration without downloading; the exact manual command will be printed.",
+	},
+	"remote-disclosure": {
+		"Remote review sends bounded, secret-redacted finding records and selected source-code excerpts to the chosen provider. The complete repository and system profile are not uploaded.",
+		"The provider may charge for usage and processes data under your account settings and its terms. Confirm only if your organisation permits this external processing.",
+	},
+	"remote-model": {
+		"Choose the exact remote model used for advisory review. Suggested IDs are current starting points, not a guarantee of availability for your account or region.",
+		"Models differ in cost, latency, structured-output behavior, and review quality. ComplyScan applies the same bounded schema and guardrails to every provider.",
+	},
+	"api-key-env": {
+		"Enter only the name of the environment variable that contains the API key, such as OPENAI_API_KEY. Do not paste the credential itself.",
+		"The variable name is safe to save in .complyscan.yml; the secret value stays in the shell or CI secret store and is never written to reports.",
 	},
 	"first-scan": {
 		"The first scan reads eligible repository files locally, prints findings, and writes local Markdown and JSON reports under .complyscan/reports.",

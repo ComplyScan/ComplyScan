@@ -274,8 +274,15 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			previousReviewProvider := cfg.AI.Provider
 			if cmd.Flags().Changed("review") {
 				cfg.AI.Provider = strings.ToLower(strings.TrimSpace(reviewProvider))
+				if isRemoteReviewProvider(cfg.AI.Provider) && previousReviewProvider != cfg.AI.Provider {
+					cfg.AI.Remote = config.RemoteConfig{
+						Model: defaultRemoteModel(cfg.AI.Provider), APIKeyEnv: defaultRemoteAPIKeyEnvironment(cfg.AI.Provider),
+						TimeoutSeconds: 360, MaxFindings: 20,
+					}
+				}
 			}
 			if cmd.Flags().Changed("ollama-model") {
 				cfg.AI.Ollama.Model = strings.TrimSpace(ollamaModel)
