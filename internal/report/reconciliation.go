@@ -74,6 +74,12 @@ func writeReconciliationTerminal(writer io.Writer, value reconciliation.Report) 
 					objective.Investigation.SupportingEvidence, objective.Investigation.ContradictoryEvidence); err != nil {
 					return err
 				}
+				if objective.Investigation.SystemID != "" {
+					if _, err := fmt.Fprintf(writer, "             Investigation scope: %s ownership for system %s across %d repository file(s)\n",
+						objective.Investigation.OwnershipScope, objective.Investigation.SystemID, objective.Investigation.RepositoryFiles); err != nil {
+						return err
+					}
+				}
 			}
 			if objective.Verification != nil {
 				if _, err := fmt.Fprintf(writer, "             Isolated tests: %d passed, %d failed; assurance %s (%s)\n",

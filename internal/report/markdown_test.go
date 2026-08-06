@@ -47,6 +47,7 @@ func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
 	value.TechnicalReview = &providers.TechnicalReviewResult{
 		Provider: providers.Ollama, Model: "gemma3", InputCandidates: 1, Reviewed: 1,
 		Observations: []providers.TechnicalObservation{{
+			SystemID: "ranking", SystemName: "Ranking", OwnershipScope: "explicit", RepositoryFiles: 42,
 			ObjectiveID: "eu-aia-14-override-intervention", EvidenceFingerprint: strings.Repeat("b", 64),
 			EvidenceStatus: "candidate-evidence", InvestigationMode: "candidate-validation",
 			Strength: providers.StrengthWeak, ModelStrength: providers.StrengthPartial,
@@ -81,6 +82,8 @@ func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
 		"No evidence detected",
 		"## Coverage boundary",
 		"## Ollama technical evidence investigation",
+		"System: Ranking (`ranking`)",
+		"Repository files in scope: 42",
 		"Assurance level: signal-detected",
 		"Only an exported candidate was found.",
 		"Original model strength: partial.",

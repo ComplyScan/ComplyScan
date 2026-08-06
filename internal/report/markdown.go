@@ -7,6 +7,7 @@ import (
 
 	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/inventory"
+	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
 )
 
@@ -128,8 +129,9 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 			return err
 		}
 		for _, observation := range report.TechnicalReview.Observations {
-			if _, err := fmt.Fprintf(writer, "\n### %s\n\n- Evidence fingerprint: %s\n- Investigation mode: %s\n- Prior evidence status: %s\n- Conclusion: %s\n- Assurance level: %s\n- Strength: %s\n- Confidence: %s\n- Runtime verification required: %t\n- Legal review required: %t\n\n%s\n",
-				inlineCode(observation.ObjectiveID), inlineCode(observation.EvidenceFingerprint), markdownText(observation.InvestigationMode),
+			if _, err := fmt.Fprintf(writer, "\n### %s\n\n- System: %s\n- Ownership scope: %s\n- Repository files in scope: %d\n- Evidence fingerprint: %s\n- Investigation mode: %s\n- Prior evidence status: %s\n- Conclusion: %s\n- Assurance level: %s\n- Strength: %s\n- Confidence: %s\n- Runtime verification required: %t\n- Legal review required: %t\n\n%s\n",
+				inlineCode(observation.ObjectiveID), markdownTechnicalSystem(observation), markdownText(observation.OwnershipScope), observation.RepositoryFiles,
+				inlineCode(observation.EvidenceFingerprint), markdownText(observation.InvestigationMode),
 				markdownText(observation.EvidenceStatus), markdownText(string(observation.Conclusion)), markdownText(string(observation.Assurance)),
 				markdownText(string(observation.Strength)), markdownText(observation.Confidence), observation.RuntimeVerificationRequired,
 				observation.LegalReviewRequired, markdownText(observation.Rationale)); err != nil {
@@ -271,6 +273,16 @@ func writeReconciliationMarkdown(writer io.Writer, value reconciliation.Report) 
 				return err
 			}
 		}
+		for _, objective := range system.Objectives {
+			if objective.Investigation == nil || objective.Investigation.SystemID == "" {
+				continue
+			}
+			if _, err := fmt.Fprintf(writer, "\n- Investigation scope for %s: %s ownership for system %s across %d repository file(s).\n",
+				inlineCode(objective.ObjectiveID), markdownText(objective.Investigation.OwnershipScope),
+				inlineCode(objective.Investigation.SystemID), objective.Investigation.RepositoryFiles); err != nil {
+				return err
+			}
+		}
 		if hasSystemEvidenceReferences(system) {
 			if _, err := fmt.Fprintln(writer, "\nEvidence references attributed to this system:"); err != nil {
 				return err
@@ -359,6 +371,16 @@ func hasSystemEvidenceReferences(system reconciliation.SystemResult) bool {
 		}
 	}
 	return false
+}
+
+func markdownTechnicalSystem(observation providers.TechnicalObservation) string {
+	if observation.SystemID == "" {
+		return "repository-wide / unassigned"
+	}
+	if observation.SystemName == "" {
+		return inlineCode(observation.SystemID)
+	}
+	return markdownText(observation.SystemName) + " (" + inlineCode(observation.SystemID) + ")"
 }
 
 func writeTechnicalEvidenceMarkdown(writer io.Writer, evidence framework.TechnicalEvidenceReport) error {

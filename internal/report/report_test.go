@@ -72,6 +72,7 @@ func TestWriteJSONUsesSchemaFourEvidenceInvestigationContract(t *testing.T) {
 	value.TechnicalReview = &providers.TechnicalReviewResult{
 		Provider: providers.Ollama, Model: "qwen3:8b", InputCandidates: 1, Reviewed: 1,
 		Observations: []providers.TechnicalObservation{{
+			SystemID: "ranking", OwnershipScope: "explicit", RepositoryFiles: 42,
 			ObjectiveID: "objective", EvidenceFingerprint: strings.Repeat("a", 64),
 			Conclusion: providers.ConclusionNotFoundAfterInvestigation, Assurance: providers.AssuranceInvestigationNoEvidence,
 			Strength: providers.StrengthNotSupported, Confidence: "medium", Rationale: "No evidence in the bounded search.",
@@ -81,7 +82,7 @@ func TestWriteJSONUsesSchemaFourEvidenceInvestigationContract(t *testing.T) {
 	if err := WriteJSON(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), `"schema_version": 4`) || !strings.Contains(output.String(), `"evidence_investigation"`) || strings.Contains(output.String(), `"technical_review"`) {
+	if !strings.Contains(output.String(), `"schema_version": 4`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
 		t.Fatalf("unexpected schema-version-4 investigation JSON:\n%s", output.String())
 	}
 }
@@ -155,6 +156,7 @@ func TestWriteTerminalRendersEvidenceOwnership(t *testing.T) {
 				EvidenceReferences: []reconciliation.EvidenceReference{{
 					Path: "shared/review.go", Line: 7, Ownership: ownership.StatusShared, Systems: []string{"ranking", "support"},
 				}},
+				Investigation: &reconciliation.ObjectiveInvestigation{SystemID: "ranking", OwnershipScope: "explicit", RepositoryFiles: 42},
 			}},
 		}},
 		Unmapped: []reconciliation.UnmappedEvidence{{
@@ -169,6 +171,7 @@ func TestWriteTerminalRendersEvidenceOwnership(t *testing.T) {
 	for _, expected := range []string{
 		"Path ownership: configured (1 rule(s))",
 		"shared/review.go:7 [shared -> ranking, support]",
+		"Investigation scope: explicit ownership for system ranking across 42 repository file(s)",
 		"Repository evidence with unresolved ownership: 1",
 		"overlap/log.go:4 [conflicting -> ranking, support]",
 	} {
@@ -216,6 +219,7 @@ func TestTerminalCompletionSeparatesTechnicalObjectiveReview(t *testing.T) {
 	value.TechnicalReview = &providers.TechnicalReviewResult{
 		Provider: providers.Ollama, Model: "gemma3", InputCandidates: 1, Reviewed: 1,
 		Observations: []providers.TechnicalObservation{{
+			SystemID: "ranking", SystemName: "Ranking", OwnershipScope: "explicit", RepositoryFiles: 42,
 			ObjectiveID: "eu-aia-14-override-intervention", EvidenceFingerprint: strings.Repeat("a", 64),
 			EvidenceStatus: "candidate-evidence", InvestigationMode: "candidate-validation",
 			Strength: providers.StrengthWeak, ModelStrength: providers.StrengthPartial,
@@ -229,7 +233,7 @@ func TestTerminalCompletionSeparatesTechnicalObjectiveReview(t *testing.T) {
 	if err := WriteTerminalCompletion(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"Ollama technical evidence investigation", "EVIDENCE", "test-only-evidence", "test-evidence-observed", "eu-aia-14-override-intervention", "Which role can invoke it?", "Guardrail:", "model returned partial", "Scan complete"} {
+	for _, expected := range []string{"Ollama technical evidence investigation", "EVIDENCE", "test-only-evidence", "test-evidence-observed", "eu-aia-14-override-intervention", "explicit ownership for Ranking (ranking), 42 repository file(s)", "Which role can invoke it?", "Guardrail:", "model returned partial", "Scan complete"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("terminal output missing %q:\n%s", expected, output.String())
 		}

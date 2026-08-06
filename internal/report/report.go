@@ -315,6 +315,11 @@ func WriteTerminalTechnicalReview(w io.Writer, review providers.TechnicalReviewR
 		if _, err := fmt.Fprintf(w, "        Strength: %s; confidence: %s; evidence: %s\n        %s\n", observation.Strength, strings.ToUpper(observation.Confidence), observation.EvidenceFingerprint, observation.Rationale); err != nil {
 			return err
 		}
+		if observation.SystemID != "" {
+			if _, err := fmt.Fprintf(w, "        Scope: %s ownership for %s (%s), %d repository file(s)\n", observation.OwnershipScope, observation.SystemName, observation.SystemID, observation.RepositoryFiles); err != nil {
+				return err
+			}
+		}
 		for _, claim := range observation.SupportingEvidence {
 			if _, err := fmt.Fprintf(w, "        Supports: %s — %s\n", locationText(claim.Path, claim.Line), claim.Summary); err != nil {
 				return err

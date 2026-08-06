@@ -753,7 +753,11 @@ func technicalReviewProgress(output io.Writer) func(technicalreview.Progress) er
 		if progress.Cached {
 			status = "using cached observation"
 		}
-		_, err := fmt.Fprintf(output, "Evidence investigation %d/%d: %s — %s (%s)\n", progress.Current, progress.Total, progress.Candidate.ObjectiveID, progress.Candidate.Path, status)
+		scope := "repository-wide"
+		if progress.Candidate.SystemID != "" {
+			scope = fmt.Sprintf("system %s, %d owned file(s)", progress.Candidate.SystemID, progress.Candidate.RepositoryFiles)
+		}
+		_, err := fmt.Fprintf(output, "Evidence investigation %d/%d: %s — %s [%s] (%s)\n", progress.Current, progress.Total, progress.Candidate.ObjectiveID, progress.Candidate.Path, scope, status)
 		return err
 	}
 }
