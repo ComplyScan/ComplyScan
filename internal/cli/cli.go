@@ -18,6 +18,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/inventory"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
+	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
 	"github.com/ComplyScan/ComplyScan/internal/report"
 	"github.com/ComplyScan/ComplyScan/internal/reviewcontext"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
@@ -378,7 +379,7 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				target,
 				report.Tool{Name: "ComplyScan", Version: build.Version, Commit: build.Commit, BuiltAt: build.BuildDate},
 				report.ScanScope{
-					Findings: findingsScope, TechnicalEvidence: "full-repository", ChangedSince: changedSince,
+					Findings: findingsScope, TechnicalEvidence: "full-repository", AIInventory: "full-repository", Reconciliation: "full-repository", ChangedSince: changedSince,
 					TrackedOnly:               cfg.Scan.TrackedOnly || trackedOnly,
 					IncludeNestedRepositories: cfg.Scan.IncludeNestedRepositories || includeNestedRepositories,
 				},
@@ -387,8 +388,8 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				result.Warnings,
 				result.Suppressed,
 			)
+			assessment := profile.AssessEUAIAct(cfg.Systems)
 			if len(cfg.Systems) > 0 {
-				assessment := profile.AssessEUAIAct(cfg.Systems)
 				reportValue.Applicability = &assessment
 			}
 			pack, err := framework.LoadBuiltin(framework.EUAIActTechnicalEvidencePackID)
@@ -399,6 +400,13 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			technicalEvidence.Target = target
 			technicalEvidence.Warnings = append(technicalEvidence.Warnings, result.Warnings...)
 			reportValue.TechnicalEvidence = &technicalEvidence
+			if err := reconciliation.ValidateCoverage(technicalEvidence); err != nil {
+				return err
+			}
+			aiInventory := inventory.NewReport(target, build.Version, inventory.Analyze(result.FullRepository), result.Warnings)
+			reportValue.AIInventory = &aiInventory
+			evidenceMapping := reconciliation.Build(cfg.Systems, assessment, technicalEvidence, aiInventory)
+			reportValue.Reconciliation = &evidenceMapping
 			if cfg.AI.Provider == "ollama" {
 				candidateCount := technicalCandidateCount(technicalEvidence)
 				if outputFormat == "terminal" {

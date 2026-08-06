@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/ComplyScan/ComplyScan/internal/framework"
+	"github.com/ComplyScan/ComplyScan/internal/inventory"
+	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
 )
 
 // WriteMarkdown renders the same scan result as a human-readable local report.
@@ -24,7 +26,8 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 			return err
 		}
 	}
-	if _, err := fmt.Fprintf(writer, "- Finding scope: %s\n- Technical evidence scope: %s\n", markdownText(report.Scan.Scope.Findings), markdownText(report.Scan.Scope.TechnicalEvidence)); err != nil {
+	if _, err := fmt.Fprintf(writer, "- Finding scope: %s\n- Technical evidence scope: %s\n- AI inventory scope: %s\n- Reconciliation scope: %s\n",
+		markdownText(report.Scan.Scope.Findings), markdownText(report.Scan.Scope.TechnicalEvidence), markdownText(report.Scan.Scope.AIInventory), markdownText(report.Scan.Scope.Reconciliation)); err != nil {
 		return err
 	}
 	if report.Scan.Scope.ChangedSince != "" {
@@ -84,6 +87,18 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 					return err
 				}
 			}
+		}
+	}
+
+	if report.AIInventory != nil {
+		if err := writeAIInventoryMarkdown(writer, *report.AIInventory); err != nil {
+			return err
+		}
+	}
+
+	if report.Reconciliation != nil {
+		if err := writeReconciliationMarkdown(writer, *report.Reconciliation); err != nil {
+			return err
 		}
 	}
 
@@ -151,6 +166,113 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 
 	_, err := fmt.Fprintln(writer, "\n---\n\nGenerated from the versioned JSON evidence bundle. Candidate evidence requires technical and human verification.")
 	return err
+}
+
+func writeAIInventoryMarkdown(writer io.Writer, value inventory.Report) error {
+	if _, err := fmt.Fprintf(writer, "\n## Independently observed AI components\n\n- Components: %d\n- Technical signals: %d\n- Runtime signals: %d\n- Test signals: %d\n- Configuration signals: %d\n",
+		value.Summary.Components, value.Summary.Signals, value.Summary.RuntimeSignals, value.Summary.TestSignals, value.Summary.ConfigurationSignals); err != nil {
+		return err
+	}
+	if len(value.Components) == 0 {
+		_, err := fmt.Fprintln(writer, "\nNo configured AI provider or framework signal was detected in the bounded scan.")
+		return err
+	}
+	for _, component := range value.Components {
+		if _, err := fmt.Fprintf(writer, "\n### %s\n\n- Kind: %s\n- Confidence: %s\n- Occurrences: %d\n",
+			markdownText(component.Name), markdownText(string(component.Kind)), markdownText(component.Confidence), component.Occurrences); err != nil {
+			return err
+		}
+		for _, location := range component.Locations {
+			if _, err := fmt.Fprintf(writer, "- Location: %s — %s scope, %s\n", inlineCode(locationText(location.Path, location.Line)), markdownText(string(location.Scope)), markdownText(string(location.EvidenceType))); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func writeReconciliationMarkdown(writer io.Writer, value reconciliation.Report) error {
+	if _, err := fmt.Fprintf(writer, "\n## Requirement-to-evidence reconciliation\n\n- Mapping version: %s\n- Likely required objectives: %d\n- With candidate evidence: %d\n- Without detected evidence: %d\n- Configuration/evidence mismatches: %d\n- Unresolved results: %d\n- Unassigned evidence: %d\n",
+		inlineCode(value.MappingVersion), value.Summary.LikelyRequired, value.Summary.RequirementWithEvidence,
+		value.Summary.RequirementWithoutEvidence, value.Summary.EvidenceMismatches, value.Summary.Unresolved, value.Summary.UnmappedEvidence); err != nil {
+		return err
+	}
+	if len(value.Systems) == 0 {
+		if _, err := fmt.Fprintln(writer, "\nNo system profile was declared, so repository evidence cannot yet be reconciled with applicability requirements."); err != nil {
+			return err
+		}
+	}
+	for _, system := range value.Systems {
+		if _, err := fmt.Fprintf(writer, "\n### %s\n\nSystem ID: %s\n\n| Provision | Technical objective | Requirement | Evidence | Reconciliation |\n|---|---|---|---|---|\n",
+			markdownText(system.SystemName), inlineCode(system.SystemID)); err != nil {
+			return err
+		}
+		for _, objective := range system.Objectives {
+			if _, err := fmt.Fprintf(writer, "| %s | %s | %s | %s | %s |\n",
+				markdownText(objective.SourceReference), markdownText(objective.Title), markdownText(string(objective.Requirement)),
+				markdownText(string(objective.Evidence)), markdownText(string(objective.Mapping))); err != nil {
+				return err
+			}
+		}
+		if len(system.ObservedComponents) > 0 {
+			if _, err := fmt.Fprintln(writer, "\nProvisionally associated AI components:"); err != nil {
+				return err
+			}
+			for _, component := range system.ObservedComponents {
+				if _, err := fmt.Fprintf(writer, "\n- %s (%s): %s", markdownText(component.Name), markdownText(string(component.Kind)), markdownText(string(component.Mapping))); err != nil {
+					return err
+				}
+			}
+			if _, err := fmt.Fprintln(writer); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintln(writer, "\nResults requiring attention:"); err != nil {
+			return err
+		}
+		attention := 0
+		for _, objective := range system.Objectives {
+			if !showReconciliationReason(objective.Mapping) {
+				continue
+			}
+			attention++
+			if _, err := fmt.Fprintf(writer, "\n- %s — %s", inlineCode(objective.ObjectiveID), markdownText(string(objective.Mapping))); err != nil {
+				return err
+			}
+			for _, reason := range objective.Reasons {
+				if _, err := fmt.Fprintf(writer, "\n  - %s: %s", inlineCode(reason.Code), markdownText(reason.Message)); err != nil {
+					return err
+				}
+			}
+		}
+		if attention == 0 {
+			if _, err := fmt.Fprint(writer, " none"); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintln(writer); err != nil {
+			return err
+		}
+	}
+	if len(value.Unmapped) > 0 {
+		if _, err := fmt.Fprintln(writer, "\n### Unassigned repository evidence"); err != nil {
+			return err
+		}
+		for _, evidence := range value.Unmapped {
+			if _, err := fmt.Fprintf(writer, "\n- %s %s — %s (%s)", markdownText(string(evidence.Kind)), inlineCode(evidence.Title), markdownText(evidence.Reason.Message), inlineCode(evidence.Reason.Code)); err != nil {
+				return err
+			}
+			for _, reference := range evidence.References {
+				if _, err := fmt.Fprintf(writer, "\n  - %s", inlineCode(locationText(reference.Path, reference.Line))); err != nil {
+					return err
+				}
+			}
+		}
+		if _, err := fmt.Fprintln(writer); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func writeTechnicalEvidenceMarkdown(writer io.Writer, evidence framework.TechnicalEvidenceReport) error {

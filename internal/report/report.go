@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/framework"
+	"github.com/ComplyScan/ComplyScan/internal/inventory"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
+	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
 
@@ -31,6 +33,8 @@ type ScanMetadata struct {
 type ScanScope struct {
 	Findings                  string `json:"findings"`
 	TechnicalEvidence         string `json:"technical_evidence"`
+	AIInventory               string `json:"ai_inventory"`
+	Reconciliation            string `json:"reconciliation"`
 	ChangedSince              string `json:"changed_since,omitempty"`
 	TrackedOnly               bool   `json:"tracked_only"`
 	IncludeNestedRepositories bool   `json:"include_nested_repositories"`
@@ -56,6 +60,8 @@ type Report struct {
 	Suppressed        int                                `json:"suppressed"`
 	Applicability     *profile.AssessmentReport          `json:"applicability,omitempty"`
 	TechnicalEvidence *framework.TechnicalEvidenceReport `json:"technical_evidence,omitempty"`
+	AIInventory       *inventory.Report                  `json:"ai_inventory,omitempty"`
+	Reconciliation    *reconciliation.Report             `json:"reconciliation,omitempty"`
 	Review            *providers.ReviewResult            `json:"review,omitempty"`
 	TechnicalReview   *providers.TechnicalReviewResult   `json:"technical_review,omitempty"`
 }
@@ -68,7 +74,7 @@ func New(target, version string, findings []rules.Finding, warnings []string, su
 	return NewWithMetadata(
 		target,
 		Tool{Name: "ComplyScan", Version: version},
-		ScanScope{Findings: "full-repository", TechnicalEvidence: "full-repository"},
+		ScanScope{Findings: "full-repository", TechnicalEvidence: "full-repository", AIInventory: "full-repository", Reconciliation: "full-repository"},
 		time.Now(),
 		findings,
 		warnings,
@@ -80,10 +86,16 @@ func NewWithMetadata(target string, tool Tool, scope ScanScope, createdAt time.T
 	if findings == nil {
 		findings = []rules.Finding{}
 	}
+	if scope.AIInventory == "" {
+		scope.AIInventory = "full-repository"
+	}
+	if scope.Reconciliation == "" {
+		scope.Reconciliation = "full-repository"
+	}
 	created := createdAt.UTC().Format(time.RFC3339Nano)
 	identifier := sha256.Sum256([]byte(strings.Join([]string{target, tool.Version, tool.Commit, created}, "\x00")))
 	return Report{
-		SchemaVersion: 1,
+		SchemaVersion: 2,
 		Tool:          tool,
 		Scan: ScanMetadata{
 			ID: "scan-" + fmt.Sprintf("%x", identifier[:12]), CreatedAt: created, Scope: scope,
@@ -155,6 +167,16 @@ func WriteTerminal(w io.Writer, report Report, options TerminalOptions) error {
 			return err
 		}
 	}
+	if report.AIInventory != nil {
+		if err := writeAIInventoryTerminal(w, *report.AIInventory); err != nil {
+			return err
+		}
+	}
+	if report.Reconciliation != nil {
+		if err := writeReconciliationTerminal(w, *report.Reconciliation); err != nil {
+			return err
+		}
+	}
 	if report.TechnicalEvidence != nil {
 		if err := framework.WriteTechnicalEvidenceTerminal(w, *report.TechnicalEvidence); err != nil {
 			return err
@@ -207,6 +229,16 @@ func WriteTerminalFinding(w io.Writer, finding rules.Finding, options TerminalOp
 func WriteTerminalCompletion(w io.Writer, report Report) error {
 	if report.Applicability != nil {
 		if err := profile.WriteTerminal(w, *report.Applicability); err != nil {
+			return err
+		}
+	}
+	if report.AIInventory != nil {
+		if err := writeAIInventoryTerminal(w, *report.AIInventory); err != nil {
+			return err
+		}
+	}
+	if report.Reconciliation != nil {
+		if err := writeReconciliationTerminal(w, *report.Reconciliation); err != nil {
 			return err
 		}
 	}

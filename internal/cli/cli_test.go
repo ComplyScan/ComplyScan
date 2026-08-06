@@ -58,7 +58,7 @@ func TestScanJSONOutputAndSeverityFilter(t *testing.T) {
 	if decoded.Summary.High == 0 || decoded.Summary.Medium != 0 || decoded.Summary.Info != 0 {
 		t.Fatalf("severity filter not reflected in summary: %#v", decoded.Summary)
 	}
-	if decoded.SchemaVersion != 1 || decoded.Tool.Commit != "test" || decoded.Scan.ID == "" || decoded.Scan.Scope.Findings != "full-repository" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
+	if decoded.SchemaVersion != 2 || decoded.Tool.Commit != "test" || decoded.Scan.ID == "" || decoded.Scan.Scope.Findings != "full-repository" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
 		t.Fatalf("missing evidence-bundle metadata: %#v", decoded)
 	}
 }
@@ -863,6 +863,9 @@ func TestScanJSONIncludesApplicabilityWithoutChangingFindings(t *testing.T) {
 	}
 	if decoded.TechnicalEvidence == nil || len(decoded.TechnicalEvidence.Systems) != 1 || decoded.TechnicalEvidence.Summary.Total == 0 {
 		t.Fatalf("missing technical evidence: %#v", decoded.TechnicalEvidence)
+	}
+	if decoded.AIInventory == nil || decoded.Reconciliation == nil || len(decoded.Reconciliation.Systems) != 1 {
+		t.Fatalf("missing inventory or reconciliation: inventory=%#v reconciliation=%#v", decoded.AIInventory, decoded.Reconciliation)
 	}
 	if decoded.Summary.Total != 0 {
 		t.Fatalf("applicability changed findings: %#v", decoded.Summary)

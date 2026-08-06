@@ -9,7 +9,10 @@ import (
 
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
+	"github.com/ComplyScan/ComplyScan/internal/inventory"
+	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
+	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
 
@@ -34,6 +37,13 @@ func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
 		}}, nil, 0,
 	)
 	value.TechnicalEvidence = &evidence
+	aiInventory := inventory.NewReport(".", "0.2.0-dev", []inventory.Signal{{
+		Name: "OpenAI", Kind: inventory.KindProvider, EvidenceType: inventory.EvidenceImport,
+		Scope: inventory.ScopeRuntime, Confidence: "high", Path: "client.go", Line: 2, Evidence: "import openai",
+	}}, nil)
+	value.AIInventory = &aiInventory
+	mapping := reconciliation.Build(nil, profile.AssessEUAIAct(nil), evidence, aiInventory)
+	value.Reconciliation = &mapping
 	value.TechnicalReview = &providers.TechnicalReviewResult{
 		Provider: providers.Ollama, Model: "gemma3", InputCandidates: 1, Reviewed: 1,
 		Observations: []providers.TechnicalObservation{{
@@ -54,6 +64,9 @@ func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
 		"**1 finding:**",
 		"Review \\*logging\\*",
 		"## EU AI Act technical evidence",
+		"## Independently observed AI components",
+		"## Requirement-to-evidence reconciliation",
+		"no-declared-system",
 		"### Repository analysis",
 		"exported-entry-candidate",
 		"Unresolved:",

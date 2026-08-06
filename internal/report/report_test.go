@@ -9,8 +9,10 @@ import (
 
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
+	"github.com/ComplyScan/ComplyScan/internal/inventory"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
+	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
 
@@ -46,7 +48,7 @@ func TestWriteJSON(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 1 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
+	if decoded.SchemaVersion != 2 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
 		t.Fatalf("unexpected tool: %#v", decoded.Tool)
 	}
 	if !strings.HasPrefix(decoded.Scan.ID, "scan-") || decoded.Scan.CreatedAt != "2026-08-03T08:30:00Z" || decoded.Scan.Scope.Findings != "changed-files" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
@@ -170,6 +172,34 @@ func TestTerminalCompletionShowsTechnicalEvidenceSeparatelyFromFindings(t *testi
 		t.Fatal(err)
 	}
 	for _, expected := range []string{"Technical evidence", "NOT DETECTED", "Technical summary:", "Scan complete: 0 potential issues"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("terminal output missing %q:\n%s", expected, output.String())
+		}
+	}
+}
+
+func TestTerminalCompletionShowsInventoryAndReconciliation(t *testing.T) {
+	value := New(".", "0.2.0-dev", nil, nil, 0)
+	aiInventory := inventory.Report{Summary: inventory.Summary{Components: 1, Signals: 1}, Components: []inventory.Component{{
+		Name: "OpenAI", Kind: inventory.KindProvider, Confidence: "high",
+		Locations: []inventory.Location{{Path: "client.go", Line: 4}},
+	}}}
+	value.AIInventory = &aiInventory
+	mapping := reconciliation.Report{
+		MappingVersion: reconciliation.MappingVersion,
+		Summary:        reconciliation.Summary{Systems: 1, LikelyRequired: 1, RequirementWithoutEvidence: 1},
+		Systems: []reconciliation.SystemResult{{SystemID: "assistant", SystemName: "Assistant", Objectives: []reconciliation.ObjectiveResult{{
+			ObjectiveID: "eu-aia-14-human-review-gate", Title: "Human review gate", SourceReference: "Article 14",
+			Mapping: reconciliation.MappingRequirementWithoutEvidence,
+			Reasons: []reconciliation.Reason{{Code: "candidate-evidence-not-detected", Message: "The bounded scan did not detect evidence."}},
+		}}}},
+	}
+	value.Reconciliation = &mapping
+	var output bytes.Buffer
+	if err := WriteTerminalCompletion(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"AI component inventory", "OpenAI", "Requirement/evidence reconciliation", "NOT FOUND", "candidate-evidence-not-detected"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("terminal output missing %q:\n%s", expected, output.String())
 		}
