@@ -124,7 +124,7 @@ func runVerifySetup(cmd *cobra.Command, stdout io.Writer, target, configPath str
 	technical := framework.Evaluate(pack, cfg.Systems, discovered.Repository)
 	assessment := profile.AssessEUAIAct(cfg.Systems)
 	components := inventory.NewReport(target, "setup", inventory.Analyze(discovered.Repository), discovered.Warnings)
-	mapping := reconciliation.Build(cfg.Systems, assessment, technical, components)
+	mapping := reconciliation.Build(cfg.Systems, assessment, technical, components, cfg.Ownership)
 	objectives, err := verificationObjectivesForSystem(mapping, technical, selectedSystem.ID)
 	if err != nil {
 		return err

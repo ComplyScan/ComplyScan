@@ -6,6 +6,7 @@ package reconciliation
 import (
 	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/inventory"
+	"github.com/ComplyScan/ComplyScan/internal/ownership"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 )
 
@@ -26,7 +27,7 @@ const (
 	MappingApplicabilityUnresolved    MappingStatus = "applicability-unresolved"
 	MappingNotCurrentlyIndicated      MappingStatus = "not-currently-indicated"
 	MappingUnableToEvaluate           MappingStatus = "unable-to-evaluate"
-	MappingAssociated                 MappingStatus = "associated-by-single-system-inference"
+	MappingAssociated                 MappingStatus = "associated-with-system"
 	MappingUnassigned                 MappingStatus = "unassigned"
 
 	UnmappedTechnicalObjective UnmappedEvidenceKind = "technical-objective"
@@ -39,10 +40,12 @@ type Reason struct {
 }
 
 type EvidenceReference struct {
-	Fingerprint string `json:"fingerprint,omitempty"`
-	Path        string `json:"path"`
-	Line        int    `json:"line,omitempty"`
-	Kind        string `json:"kind,omitempty"`
+	Fingerprint string           `json:"fingerprint,omitempty"`
+	Path        string           `json:"path"`
+	Line        int              `json:"line,omitempty"`
+	Kind        string           `json:"kind,omitempty"`
+	Ownership   ownership.Status `json:"ownership"`
+	Systems     []string         `json:"systems"`
 }
 
 type ObjectiveResult struct {
@@ -115,11 +118,22 @@ type Summary struct {
 	InvestigationNoEvidence    int `json:"investigation_no_evidence"`
 	InvestigationUnresolved    int `json:"investigation_unresolved"`
 	TestEvidenceObserved       int `json:"test_evidence_observed"`
+	AssignedReferences         int `json:"assigned_references"`
+	SharedReferences           int `json:"shared_references"`
+	ConflictingReferences      int `json:"conflicting_references"`
+	UnassignedReferences       int `json:"unassigned_references"`
+	InferredReferences         int `json:"single_system_inferred_references"`
+}
+
+type OwnershipReport struct {
+	Configured bool             `json:"configured"`
+	Rules      []ownership.Rule `json:"rules"`
 }
 
 type Report struct {
 	SchemaVersion  int                `json:"schema_version"`
 	MappingVersion string             `json:"mapping_version"`
+	Ownership      OwnershipReport    `json:"ownership"`
 	Systems        []SystemResult     `json:"systems"`
 	Unmapped       []UnmappedEvidence `json:"unmapped_evidence"`
 	Summary        Summary            `json:"summary"`

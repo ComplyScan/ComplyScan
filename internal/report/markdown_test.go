@@ -42,7 +42,7 @@ func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
 		Scope: inventory.ScopeRuntime, Confidence: "high", Path: "client.go", Line: 2, Evidence: "import openai",
 	}}, nil)
 	value.AIInventory = &aiInventory
-	mapping := reconciliation.Build(nil, profile.AssessEUAIAct(nil), evidence, aiInventory)
+	mapping := reconciliation.Build(nil, profile.AssessEUAIAct(nil), evidence, aiInventory, nil)
 	value.Reconciliation = &mapping
 	value.TechnicalReview = &providers.TechnicalReviewResult{
 		Provider: providers.Ollama, Model: "gemma3", InputCandidates: 1, Reviewed: 1,

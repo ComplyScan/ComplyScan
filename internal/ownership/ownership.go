@@ -20,6 +20,7 @@ const (
 	StatusShared      Status = "shared"
 	StatusConflicting Status = "conflicting"
 	StatusUnassigned  Status = "unassigned"
+	StatusInferred    Status = "single-system-inference"
 )
 
 // Rule explicitly assigns matching repository paths to one or more declared

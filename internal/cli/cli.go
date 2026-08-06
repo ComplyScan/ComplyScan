@@ -452,7 +452,7 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			}
 			aiInventory := inventory.NewReport(target, build.Version, inventory.Analyze(result.FullRepository), result.Warnings)
 			reportValue.AIInventory = &aiInventory
-			evidenceMapping := reconciliation.Build(cfg.Systems, assessment, technicalEvidence, aiInventory)
+			evidenceMapping := reconciliation.Build(cfg.Systems, assessment, technicalEvidence, aiInventory, cfg.Ownership)
 			reportValue.Reconciliation = &evidenceMapping
 			verificationResults := []verification.Report{}
 			if len(verificationPlans) > 0 {
