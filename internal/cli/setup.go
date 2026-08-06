@@ -206,16 +206,21 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 		return true, nil
 	}
 
+	ollamaPath, _ := exec.LookPath("ollama")
 	model := strings.TrimSpace(options.ollamaModel)
 	if model == "" && interactive {
-		if _, err := fmt.Fprintln(stdout, "\nLocal model setup\n  Recommended: qwen3:8b\n  Larger coding model: qwen3-coder:30b\n  You may enter any local Ollama model tag."); err != nil {
+		installed := []string{}
+		if ollamaPath != "" {
+			installed = ollamaInstalledModels(ctx, ollamaPath)
+		}
+		if _, err := fmt.Fprintln(stdout, "\nLocal model setup"); err != nil {
 			return false, err
 		}
 		if err := explainSetupQuestion(prompt, "ollama-model"); err != nil {
 			return false, err
 		}
 		var err error
-		model, err = prompt.text("Ollama model", setupModelDefault(cfg.AI.Ollama.Model))
+		model, err = promptOllamaModel(prompt, setupModelDefault(cfg.AI.Ollama.Model), installed)
 		if err != nil {
 			return false, err
 		}
@@ -225,8 +230,8 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 	}
 	cfg.AI.Ollama.Model = model
 
-	ollamaPath, err := exec.LookPath("ollama")
-	if err != nil {
+	var err error
+	if ollamaPath == "" {
 		shouldInstall := options.installOllama
 		if interactive && !options.skipOllamaInstall && !options.installOllama {
 			if _, writeErr := fmt.Fprintln(stdout, "Ollama was not found on PATH. Installation may download software, change system packages, and request system privileges."); writeErr != nil {
@@ -355,19 +360,122 @@ func runSetupCommand(ctx context.Context, output io.Writer, executable string, a
 }
 
 func ollamaModelInstalled(ctx context.Context, executable, model string) bool {
-	command := exec.CommandContext(ctx, executable, "list")
-	output, err := command.Output()
-	if err != nil {
-		return false
-	}
-	wanted := strings.ToLower(strings.TrimSpace(model))
-	for _, line := range strings.Split(string(output), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) > 0 && strings.ToLower(fields[0]) == wanted {
+	for _, installed := range ollamaInstalledModels(ctx, executable) {
+		if strings.EqualFold(installed, strings.TrimSpace(model)) {
 			return true
 		}
 	}
 	return false
+}
+
+func ollamaInstalledModels(ctx context.Context, executable string) []string {
+	command := exec.CommandContext(ctx, executable, "list")
+	output, err := command.Output()
+	if err != nil {
+		return nil
+	}
+	lines := strings.Split(string(output), "\n")
+	models := make([]string, 0, len(lines))
+	seen := map[string]struct{}{}
+	for index, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || index == 0 && strings.EqualFold(fields[0], "name") {
+			continue
+		}
+		key := strings.ToLower(fields[0])
+		if _, duplicate := seen[key]; !duplicate {
+			seen[key] = struct{}{}
+			models = append(models, fields[0])
+		}
+	}
+	return models
+}
+
+type setupModelOption struct {
+	tag    string
+	detail string
+}
+
+func promptOllamaModel(prompt promptSession, current string, installed []string) (string, error) {
+	options := []setupModelOption{
+		{tag: defaultSetupModel, detail: "tested default; balanced local review"},
+		{tag: "qwen3-coder:30b", detail: "larger coding model; substantially more memory; unvalidated"},
+	}
+	if current = strings.TrimSpace(current); current != "" {
+		options = prependUniqueModel(options, setupModelOption{tag: current, detail: modelStatus(current, installed)})
+	}
+	for _, model := range installed {
+		options = appendUniqueModel(options, setupModelOption{tag: model, detail: modelStatus(model, installed)})
+	}
+	if _, err := fmt.Fprintln(prompt.output, "  Select an installed or recommended model, or type any Ollama model tag:"); err != nil {
+		return "", err
+	}
+	defaultIndex := 1
+	for index, option := range options {
+		if strings.EqualFold(option.tag, current) {
+			defaultIndex = index + 1
+		}
+		if _, err := fmt.Fprintf(prompt.output, "    %d. %s — %s\n", index+1, option.tag, option.detail); err != nil {
+			return "", err
+		}
+	}
+	for {
+		value, err := prompt.text("Ollama model number or tag", fmt.Sprintf("%d", defaultIndex))
+		if err != nil {
+			return "", err
+		}
+		var selected int
+		if _, scanErr := fmt.Sscanf(value, "%d", &selected); scanErr == nil {
+			if selected >= 1 && selected <= len(options) && value == fmt.Sprintf("%d", selected) {
+				return options[selected-1].tag, nil
+			}
+			if _, writeErr := fmt.Fprintf(prompt.output, "  Enter a number from 1 to %d, or an exact Ollama model tag.\n", len(options)); writeErr != nil {
+				return "", writeErr
+			}
+			continue
+		}
+		if strings.ContainsAny(value, "\r\n\x00") || strings.TrimSpace(value) == "" {
+			if _, writeErr := fmt.Fprintln(prompt.output, "  Enter a valid Ollama model tag."); writeErr != nil {
+				return "", writeErr
+			}
+			continue
+		}
+		return strings.TrimSpace(value), nil
+	}
+}
+
+func prependUniqueModel(options []setupModelOption, option setupModelOption) []setupModelOption {
+	result := []setupModelOption{option}
+	for _, existing := range options {
+		if !strings.EqualFold(existing.tag, option.tag) {
+			result = append(result, existing)
+		}
+	}
+	return result
+}
+
+func appendUniqueModel(options []setupModelOption, option setupModelOption) []setupModelOption {
+	for _, existing := range options {
+		if strings.EqualFold(existing.tag, option.tag) {
+			return options
+		}
+	}
+	return append(options, option)
+}
+
+func modelStatus(model string, installed []string) string {
+	for _, candidate := range installed {
+		if strings.EqualFold(candidate, model) {
+			if strings.EqualFold(model, defaultSetupModel) {
+				return "installed; tested default"
+			}
+			return "installed; compatibility not yet validated by ComplyScan"
+		}
+	}
+	if strings.EqualFold(model, defaultSetupModel) {
+		return "tested default; not currently installed"
+	}
+	return "configured; not currently installed or validated"
 }
 
 func setupModelDefault(value string) string {

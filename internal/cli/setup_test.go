@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +11,44 @@ import (
 
 	"github.com/ComplyScan/ComplyScan/internal/config"
 )
+
+func TestPromptOllamaModelListsInstalledModelsAndAcceptsCustomTag(t *testing.T) {
+	var output bytes.Buffer
+	prompt := promptSession{reader: bufio.NewReader(strings.NewReader("3\n")), output: &output}
+	model, err := promptOllamaModel(prompt, defaultSetupModel, []string{"codestral:22b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model != "codestral:22b" {
+		t.Fatalf("model = %q", model)
+	}
+	for _, expected := range []string{"qwen3:8b", "qwen3-coder:30b", "codestral:22b", "installed; compatibility not yet validated"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("picker output missing %q:\n%s", expected, output.String())
+		}
+	}
+
+	output.Reset()
+	prompt = promptSession{reader: bufio.NewReader(strings.NewReader("my-model:latest\n")), output: &output}
+	model, err = promptOllamaModel(prompt, defaultSetupModel, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model != "my-model:latest" {
+		t.Fatalf("custom model = %q", model)
+	}
+}
+
+func TestOllamaInstalledModelsParsesListOutput(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "ollama")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\nprintf 'NAME ID SIZE MODIFIED\\nqwen3:8b abc 5GB now\\nQWEN3:8B duplicate 5GB now\\ncodestral:22b def 12GB now\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	models := ollamaInstalledModels(context.Background(), executable)
+	if strings.Join(models, ",") != "qwen3:8b,codestral:22b" {
+		t.Fatalf("models = %#v", models)
+	}
+}
 
 func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 	target := t.TempDir()

@@ -139,8 +139,8 @@ var setupQuestionHelp = map[string][]string{
 		"It is optional, does not decide legal compliance, and does not change deterministic findings or the scan exit status. Choose no for deterministic-only scanning.",
 	},
 	"ollama-model": {
-		"Choose the local Ollama model used for advisory code-context review. qwen3:8b is the tested default and requires a separate model download.",
-		"A different tag may use more memory, run more slowly, and has not necessarily passed ComplyScan's validation benchmark.",
+		"Choose the local Ollama model used for advisory code-context review. Setup lists installed models and a small set of recommendations; qwen3:8b is the tested default.",
+		"You may enter any exact Ollama tag. A different model may use more memory, run more slowly, or fail ComplyScan's structured-output contract until independently validated.",
 	},
 	"install-ollama": {
 		"Ollama is a separate local runtime needed only for optional model review. Installation downloads third-party software and may change system packages or start a service.",
