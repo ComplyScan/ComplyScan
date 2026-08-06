@@ -63,6 +63,11 @@ func TestCacheReusesOnlyIdenticalModelPackPromptAndCandidateContext(t *testing.T
 	if _, found, err := reopened.Lookup(changedPack, candidate); err != nil || found {
 		t.Fatalf("changed pack cache hit=%t err=%v", found, err)
 	}
+	changedSystem := candidate
+	changedSystem.SystemID = "support"
+	if _, found, err := reopened.Lookup(identity, changedSystem); err != nil || found {
+		t.Fatalf("changed system cache hit=%t err=%v", found, err)
+	}
 }
 
 func TestCacheRejectsSymlinkDestination(t *testing.T) {
@@ -89,6 +94,7 @@ func testIdentity() Identity {
 
 func testCandidate(source string) providers.TechnicalCandidate {
 	return providers.TechnicalCandidate{
+		SystemID: "ranking", SystemName: "Ranking", OwnershipScope: "explicit", RepositoryFiles: 12,
 		ObjectiveID: "eu-aia-10-bias-evaluation", EvidenceFingerprint: strings.Repeat("b", 64),
 		Title: "Bias evaluation", Path: "evaluator.go", Anchor: "evaluate", Reachability: "production-reachable",
 		SourceContexts: []providers.TechnicalSourceContext{{Role: "anchor", Path: "evaluator.go", Symbol: "evaluate", Source: source}},
@@ -97,6 +103,7 @@ func testCandidate(source string) providers.TechnicalCandidate {
 
 func testObservation(candidate providers.TechnicalCandidate) providers.TechnicalObservation {
 	return providers.TechnicalObservation{
+		SystemID: candidate.SystemID, SystemName: candidate.SystemName, OwnershipScope: candidate.OwnershipScope, RepositoryFiles: candidate.RepositoryFiles,
 		ObjectiveID: candidate.ObjectiveID, EvidenceFingerprint: candidate.EvidenceFingerprint,
 		Strength: providers.StrengthPartial, Conclusion: providers.ConclusionPartial, Assurance: providers.AssuranceAISubstantiated,
 		Confidence: "medium", Rationale: "The evaluator checks model output for the stated behavior.",

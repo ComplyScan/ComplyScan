@@ -15,7 +15,7 @@ import (
 const (
 	// TechnicalReviewPromptVersion invalidates cached observations whenever the
 	// technical prompt, schema, sanitization, or deterministic guardrails change.
-	TechnicalReviewPromptVersion = "8"
+	TechnicalReviewPromptVersion = "9"
 
 	maxTechnicalContexts           = 10
 	maxTechnicalRelationships      = 20
@@ -76,15 +76,16 @@ func (provider *OllamaProvider) ReviewTechnical(ctx context.Context, request Tec
 		selected = selected[:provider.maxFindings]
 		result.Notes = append(result.Notes, fmt.Sprintf("Technical evidence investigation was limited to the first %d of %d targets.", len(selected), len(request.Candidates)))
 	}
-	seenFingerprints := make(map[string]struct{}, len(selected))
+	seenCandidates := make(map[string]struct{}, len(selected))
 	for _, candidate := range selected {
 		if candidate.ObjectiveID == "" || candidate.EvidenceFingerprint == "" {
 			return TechnicalReviewResult{}, errors.New("technical review candidate must include objective ID and evidence fingerprint")
 		}
-		if _, duplicate := seenFingerprints[candidate.EvidenceFingerprint]; duplicate {
-			return TechnicalReviewResult{}, fmt.Errorf("duplicate technical evidence fingerprint %q", candidate.EvidenceFingerprint)
+		key := candidate.SystemID + "\x00" + candidate.EvidenceFingerprint
+		if _, duplicate := seenCandidates[key]; duplicate {
+			return TechnicalReviewResult{}, fmt.Errorf("duplicate technical evidence fingerprint %q for system %q", candidate.EvidenceFingerprint, candidate.SystemID)
 		}
-		seenFingerprints[candidate.EvidenceFingerprint] = struct{}{}
+		seenCandidates[key] = struct{}{}
 		observation, usage, guarded, err := provider.reviewTechnicalCandidate(ctx, candidate)
 		if err != nil {
 			return TechnicalReviewResult{}, err
@@ -132,6 +133,12 @@ func (provider *OllamaProvider) reviewTechnicalCandidate(ctx context.Context, ca
 }
 
 func sanitizeTechnicalCandidate(candidate TechnicalCandidate) TechnicalCandidate {
+	candidate.SystemID = cleanReviewText(candidate.SystemID, 200)
+	candidate.SystemName = cleanReviewText(candidate.SystemName, maxReviewMessageChars)
+	candidate.OwnershipScope = cleanReviewText(candidate.OwnershipScope, 100)
+	if candidate.RepositoryFiles < 0 {
+		candidate.RepositoryFiles = 0
+	}
 	candidate.ObjectiveID = cleanReviewText(candidate.ObjectiveID, 200)
 	candidate.Title = cleanReviewText(candidate.Title, maxReviewMessageChars)
 	candidate.SourceReference = cleanReviewText(candidate.SourceReference, 300)
@@ -231,6 +238,8 @@ func validateTechnicalObservation(value ollamaTechnicalObservation, candidate Te
 		questions[index] = cleanReviewText(questions[index], maxReviewMessageChars)
 	}
 	observation := TechnicalObservation{
+		SystemID: candidate.SystemID, SystemName: candidate.SystemName,
+		OwnershipScope: candidate.OwnershipScope, RepositoryFiles: candidate.RepositoryFiles,
 		ObjectiveID: candidate.ObjectiveID, EvidenceFingerprint: evidenceFingerprint,
 		EvidenceStatus: candidate.EvidenceStatus, InvestigationMode: candidate.InvestigationMode,
 		Strength: value.Strength, Confidence: value.Confidence, Rationale: rationale,

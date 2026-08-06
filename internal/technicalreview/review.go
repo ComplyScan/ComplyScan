@@ -102,7 +102,7 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 		if err != nil {
 			return providers.TechnicalReviewResult{}, err
 		}
-		if len(partial.Observations) != 1 || partial.Observations[0].ObjectiveID != candidate.ObjectiveID || partial.Observations[0].EvidenceFingerprint != candidate.EvidenceFingerprint {
+		if len(partial.Observations) != 1 || partial.Observations[0].SystemID != candidate.SystemID || partial.Observations[0].ObjectiveID != candidate.ObjectiveID || partial.Observations[0].EvidenceFingerprint != candidate.EvidenceFingerprint {
 			return providers.TechnicalReviewResult{}, errors.New("technical reviewer did not return exactly one correctly bound observation")
 		}
 		observation = partial.Observations[0]

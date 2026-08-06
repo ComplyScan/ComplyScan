@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	cacheSchemaVersion = 1
-	cacheFileName      = "technical-review-v1.json"
+	cacheSchemaVersion = 2
+	cacheFileName      = "technical-review-v2.json"
 	maxCacheBytes      = 8 << 20
 	maxCacheEntries    = 200
 )
@@ -32,6 +32,7 @@ type Identity struct {
 
 type cacheEntry struct {
 	Identity        Identity                       `json:"identity"`
+	SystemID        string                         `json:"system_id,omitempty"`
 	ObjectiveID     string                         `json:"objective_id"`
 	Fingerprint     string                         `json:"evidence_fingerprint"`
 	CandidateDigest string                         `json:"candidate_digest"`
@@ -95,7 +96,7 @@ func Open(path string) (*Cache, error) {
 		return nil, fmt.Errorf("technical review cache exceeds %d entries", maxCacheEntries)
 	}
 	for key, entry := range stored.Entries {
-		if key != entryKey(entry.Identity, entry.ObjectiveID, entry.Fingerprint, entry.CandidateDigest) {
+		if key != entryKey(entry.Identity, entry.SystemID, entry.ObjectiveID, entry.Fingerprint, entry.CandidateDigest) {
 			return nil, fmt.Errorf("technical review cache entry %q has an invalid key", key)
 		}
 		if err := validateEntry(entry); err != nil {
@@ -114,7 +115,7 @@ func (cache *Cache) Lookup(identity Identity, candidate providers.TechnicalCandi
 	if err != nil {
 		return providers.TechnicalObservation{}, false, err
 	}
-	key := entryKey(identity, candidate.ObjectiveID, candidate.EvidenceFingerprint, digest)
+	key := entryKey(identity, candidate.SystemID, candidate.ObjectiveID, candidate.EvidenceFingerprint, digest)
 	entry, found := cache.entries[key]
 	if !found {
 		return providers.TechnicalObservation{}, false, nil
@@ -131,23 +132,23 @@ func (cache *Cache) Store(identity Identity, candidate providers.TechnicalCandid
 		return err
 	}
 	entry := cacheEntry{
-		Identity: identity, ObjectiveID: candidate.ObjectiveID, Fingerprint: candidate.EvidenceFingerprint,
+		Identity: identity, SystemID: candidate.SystemID, ObjectiveID: candidate.ObjectiveID, Fingerprint: candidate.EvidenceFingerprint,
 		CandidateDigest: digest, Observation: observation,
 	}
 	if err := validateEntry(entry); err != nil {
 		return err
 	}
-	key := entryKey(identity, entry.ObjectiveID, entry.Fingerprint, digest)
+	key := entryKey(identity, entry.SystemID, entry.ObjectiveID, entry.Fingerprint, digest)
 	cache.entries[key] = entry
 	cache.prune()
 	return cache.write()
 }
 
-func entryKey(identity Identity, objectiveID, fingerprint, candidateDigest string) string {
+func entryKey(identity Identity, systemID, objectiveID, fingerprint, candidateDigest string) string {
 	value := strings.Join([]string{
 		string(identity.Provider), identity.Model, identity.PromptVersion,
 		identity.PackID, identity.PackVersion, identity.PackDigest,
-		objectiveID, fingerprint, candidateDigest,
+		systemID, objectiveID, fingerprint, candidateDigest,
 	}, "\x00")
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(value)))
 }
@@ -161,7 +162,7 @@ func validateEntry(entry cacheEntry) error {
 		return errors.New("candidate identity is incomplete")
 	}
 	observation := entry.Observation
-	if observation.ObjectiveID != entry.ObjectiveID || observation.EvidenceFingerprint != entry.Fingerprint {
+	if observation.SystemID != entry.SystemID || observation.ObjectiveID != entry.ObjectiveID || observation.EvidenceFingerprint != entry.Fingerprint {
 		return errors.New("observation binding does not match its candidate")
 	}
 	if !validStrength(observation.Strength) || observation.ModelStrength != "" && !validStrength(observation.ModelStrength) {

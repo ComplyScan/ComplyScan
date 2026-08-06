@@ -73,6 +73,10 @@ type TechnicalReviewRequest struct {
 }
 
 type TechnicalCandidate struct {
+	SystemID            string                   `json:"system_id,omitempty"`
+	SystemName          string                   `json:"system_name,omitempty"`
+	OwnershipScope      string                   `json:"ownership_scope,omitempty"`
+	RepositoryFiles     int                      `json:"repository_files,omitempty"`
 	ObjectiveID         string                   `json:"objective_id"`
 	Title               string                   `json:"title"`
 	SourceReference     string                   `json:"source_reference"`
@@ -92,6 +96,7 @@ type TechnicalCandidate struct {
 	EligibleFileKinds   []string                 `json:"eligible_file_kinds,omitempty"`
 	SearchCoverage      TechnicalSearchCoverage  `json:"search_coverage,omitempty"`
 	SourceContexts      []TechnicalSourceContext `json:"source_contexts"`
+	AllowedPaths        []string                 `json:"-"`
 }
 
 type TechnicalSearchCoverage struct {
@@ -166,6 +171,10 @@ type TechnicalEvidenceClaim struct {
 }
 
 type TechnicalObservation struct {
+	SystemID                    string                   `json:"system_id,omitempty"`
+	SystemName                  string                   `json:"system_name,omitempty"`
+	OwnershipScope              string                   `json:"ownership_scope,omitempty"`
+	RepositoryFiles             int                      `json:"repository_files,omitempty"`
 	ObjectiveID                 string                   `json:"objective_id"`
 	EvidenceFingerprint         string                   `json:"evidence_fingerprint"`
 	EvidenceStatus              string                   `json:"evidence_status,omitempty"`
