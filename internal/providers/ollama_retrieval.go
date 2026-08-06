@@ -41,11 +41,15 @@ func (provider *OllamaProvider) PlanTechnicalSearch(ctx context.Context, candida
 	if err := json.Unmarshal([]byte(response.Message.Content), &payload); err != nil {
 		return TechnicalSearchPlan{}, Usage{}, fmt.Errorf("decode Ollama structured technical search plan: %w", err)
 	}
+	usage := Usage{PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount, TotalDurationNS: response.TotalDuration}
 	plan, err := validateTechnicalSearchPlan(payload.Plan)
 	if err != nil {
-		return TechnicalSearchPlan{}, Usage{}, err
+		return TechnicalSearchPlan{
+			Needed: false, Queries: []TechnicalSearchQuery{},
+			Reason: "Follow-up skipped because the model plan did not pass bounded literal-search validation: " + err.Error(),
+		}, usage, nil
 	}
-	return plan, Usage{PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount, TotalDurationNS: response.TotalDuration}, nil
+	return plan, usage, nil
 }
 
 func validateTechnicalSearchPlan(plan TechnicalSearchPlan) (TechnicalSearchPlan, error) {

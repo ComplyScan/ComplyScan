@@ -91,6 +91,9 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 			base.Usage.PromptTokens += plannerUsage.PromptTokens
 			base.Usage.CompletionTokens += plannerUsage.CompletionTokens
 			base.Usage.TotalDurationNS += plannerUsage.TotalDurationNS
+			if strings.HasPrefix(plan.Reason, "Follow-up skipped") {
+				base.Notes = append(base.Notes, plan.Reason)
+			}
 			if plan.Needed {
 				candidate, followUpExcerpts = options.RetrieveFollowUp(baseCandidate, plan)
 			}

@@ -282,6 +282,26 @@ func TestTechnicalFollowUpPlanRejectsUnsafeSearches(t *testing.T) {
 	}
 }
 
+func TestOllamaSkipsMalformedOptionalFollowUpPlan(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		content, _ := json.Marshal(ollamaTechnicalSearchPayload{Plan: TechnicalSearchPlan{
+			Needed: true, Queries: []TechnicalSearchQuery{}, Reason: "A caller may help.",
+		}})
+		return testJSONResponse(http.StatusOK, map[string]any{"message": map[string]string{"content": string(content)}, "done": true}), nil
+	})}
+	provider, err := NewOllama(OllamaOptions{Endpoint: "http://127.0.0.1:11434", Model: "test", Timeout: time.Second, MaxFindings: 1, HTTPClient: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, _, err := provider.PlanTechnicalSearch(context.Background(), TechnicalCandidate{ObjectiveID: "objective"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Needed || !strings.HasPrefix(plan.Reason, "Follow-up skipped") {
+		t.Fatalf("malformed optional plan was not safely skipped: %#v", plan)
+	}
+}
+
 func TestOllamaTechnicalReviewUsesBoundedUntrustedSourceAndExactBinding(t *testing.T) {
 	fingerprint := strings.Repeat("c", 64)
 	secret := "sk-proj-" + strings.Repeat("z", 24)
