@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/ComplyScan/ComplyScan/internal/ownership"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
 	ignore "github.com/sabhiram/go-gitignore"
@@ -34,6 +35,7 @@ type Config struct {
 	Rules        map[string]RuleConfig `yaml:"rules"`
 	AI           AIConfig              `yaml:"ai"`
 	Systems      []profile.System      `yaml:"systems,omitempty"`
+	Ownership    []ownership.Rule      `yaml:"ownership,omitempty"`
 	Baseline     string                `yaml:"baseline,omitempty"`
 	Suppressions []Suppression         `yaml:"suppressions,omitempty"`
 	Verification *VerificationConfig   `yaml:"verification,omitempty"`
@@ -174,6 +176,13 @@ func (c Config) Validate() error {
 		}
 	}
 	if err := profile.ValidateSystems(c.Systems); err != nil {
+		return err
+	}
+	systemIDs := make([]string, 0, len(c.Systems))
+	for _, system := range c.Systems {
+		systemIDs = append(systemIDs, system.ID)
+	}
+	if err := ownership.Validate(c.Ownership, systemIDs); err != nil {
 		return err
 	}
 	if err := c.validateVerification(); err != nil {

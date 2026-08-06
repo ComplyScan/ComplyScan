@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ComplyScan/ComplyScan/internal/ownership"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
@@ -101,6 +102,37 @@ ai:
 	}
 	if strings.Contains(content, "sk-") {
 		t.Fatal("test fixture unexpectedly contains a credential value")
+	}
+}
+
+func TestLoadAcceptsExplicitPathOwnership(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	cfg := Default()
+	first := profile.NewDraftSystem("ranking", "Ranking")
+	second := profile.NewDraftSystem("support", "Support")
+	cfg.Systems = []profile.System{first, second}
+	cfg.Ownership = []ownership.Rule{
+		{Paths: []string{"services/ranking/**"}, Systems: []string{"ranking"}},
+		{Paths: []string{"shared/models/**"}, Systems: []string{"ranking", "support"}},
+	}
+	if err := Write(path, cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Ownership) != 2 || len(loaded.Ownership[1].Systems) != 2 {
+		t.Fatalf("ownership = %#v", loaded.Ownership)
+	}
+}
+
+func TestValidateRejectsOwnershipForUndeclaredSystem(t *testing.T) {
+	cfg := Default()
+	cfg.Systems = []profile.System{profile.NewDraftSystem("ranking", "Ranking")}
+	cfg.Ownership = []ownership.Rule{{Paths: []string{"services/**"}, Systems: []string{"missing"}}}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "undeclared system") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
