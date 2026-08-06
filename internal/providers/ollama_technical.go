@@ -214,14 +214,14 @@ func cleanTechnicalSource(value string, limit int) string {
 
 func validateTechnicalObservation(value ollamaTechnicalObservation, candidate TechnicalCandidate, evidenceFingerprint string) (TechnicalObservation, bool, error) {
 	if !validEvidenceStrength(value.Strength) {
-		return TechnicalObservation{}, false, fmt.Errorf("Ollama structured technical review returned invalid strength %q", value.Strength)
+		return TechnicalObservation{}, false, fmt.Errorf("model structured technical review returned invalid strength %q", value.Strength)
 	}
 	if value.Confidence != "low" && value.Confidence != "medium" && value.Confidence != "high" {
-		return TechnicalObservation{}, false, fmt.Errorf("Ollama structured technical review returned invalid confidence %q", value.Confidence)
+		return TechnicalObservation{}, false, fmt.Errorf("model structured technical review returned invalid confidence %q", value.Confidence)
 	}
 	rationale := cleanReviewText(value.Rationale, maxReviewMessageChars)
 	if rationale == "" {
-		return TechnicalObservation{}, false, errors.New("Ollama structured technical review omitted rationale")
+		return TechnicalObservation{}, false, errors.New("model structured technical review omitted rationale")
 	}
 	questions := value.UnresolvedQuestions
 	if len(questions) > maxTechnicalQuestions {
@@ -241,7 +241,7 @@ func validateTechnicalObservation(value ollamaTechnicalObservation, candidate Te
 	}
 	modelConclusion := value.Conclusion
 	if modelConclusion != "" && !validTechnicalConclusion(modelConclusion) {
-		return TechnicalObservation{}, false, fmt.Errorf("Ollama structured technical review returned invalid conclusion %q", modelConclusion)
+		return TechnicalObservation{}, false, fmt.Errorf("model structured technical review returned invalid conclusion %q", modelConclusion)
 	}
 	supportingEvidence, err := validateTechnicalClaims(value.SupportingEvidence, candidate)
 	if err != nil {

@@ -242,31 +242,31 @@ func (provider *OllamaProvider) chat(ctx context.Context, requestBody ollamaChat
 
 func validateOllamaObservations(values []ollamaObservation, wanted map[string]string) ([]Observation, error) {
 	if len(values) == 0 {
-		return nil, errors.New("Ollama structured review returned no observations")
+		return nil, errors.New("model structured review returned no observations")
 	}
 	seen := make(map[string]struct{}, len(values))
 	observations := make([]Observation, 0, len(values))
 	for _, value := range values {
 		ruleID, ok := wanted[value.Fingerprint]
 		if !ok {
-			return nil, fmt.Errorf("Ollama structured review returned unknown fingerprint %q", value.Fingerprint)
+			return nil, fmt.Errorf("model structured review returned unknown fingerprint %q", value.Fingerprint)
 		}
 		if _, duplicate := seen[value.Fingerprint]; duplicate {
-			return nil, fmt.Errorf("Ollama structured review returned duplicate fingerprint %q", value.Fingerprint)
+			return nil, fmt.Errorf("model structured review returned duplicate fingerprint %q", value.Fingerprint)
 		}
 		seen[value.Fingerprint] = struct{}{}
 		if value.RuleID != ruleID {
-			return nil, fmt.Errorf("Ollama structured review changed rule ID for fingerprint %q", value.Fingerprint)
+			return nil, fmt.Errorf("model structured review changed rule ID for fingerprint %q", value.Fingerprint)
 		}
 		if value.Verdict != VerdictConfirmed && value.Verdict != VerdictUncertain && value.Verdict != VerdictNotSupported {
-			return nil, fmt.Errorf("Ollama structured review returned invalid verdict %q", value.Verdict)
+			return nil, fmt.Errorf("model structured review returned invalid verdict %q", value.Verdict)
 		}
 		if value.Confidence != "low" && value.Confidence != "medium" && value.Confidence != "high" {
-			return nil, fmt.Errorf("Ollama structured review returned invalid confidence %q", value.Confidence)
+			return nil, fmt.Errorf("model structured review returned invalid confidence %q", value.Confidence)
 		}
 		rationale := cleanReviewText(value.Rationale, maxReviewMessageChars)
 		if rationale == "" {
-			return nil, fmt.Errorf("Ollama structured review omitted rationale for fingerprint %q", value.Fingerprint)
+			return nil, fmt.Errorf("model structured review omitted rationale for fingerprint %q", value.Fingerprint)
 		}
 		observations = append(observations, Observation{
 			Fingerprint: value.Fingerprint, RuleID: ruleID, Verdict: value.Verdict,

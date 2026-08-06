@@ -55,17 +55,17 @@ func (provider *OllamaProvider) PlanTechnicalSearch(ctx context.Context, candida
 func validateTechnicalSearchPlan(plan TechnicalSearchPlan) (TechnicalSearchPlan, error) {
 	plan.Reason = cleanReviewText(plan.Reason, maxReviewMessageChars)
 	if plan.Reason == "" {
-		return TechnicalSearchPlan{}, errors.New("Ollama technical search plan omitted reason")
+		return TechnicalSearchPlan{}, errors.New("model technical search plan omitted reason")
 	}
 	if len(plan.Queries) > maxTechnicalFollowUpQueries {
-		return TechnicalSearchPlan{}, fmt.Errorf("Ollama technical search plan exceeded %d queries", maxTechnicalFollowUpQueries)
+		return TechnicalSearchPlan{}, fmt.Errorf("model technical search plan exceeded %d queries", maxTechnicalFollowUpQueries)
 	}
 	if !plan.Needed {
 		plan.Queries = []TechnicalSearchQuery{}
 		return plan, nil
 	}
 	if len(plan.Queries) == 0 {
-		return TechnicalSearchPlan{}, errors.New("Ollama technical search plan requested follow-up without a query")
+		return TechnicalSearchPlan{}, errors.New("model technical search plan requested follow-up without a query")
 	}
 	seen := make(map[string]struct{}, len(plan.Queries))
 	queries := make([]TechnicalSearchQuery, 0, len(plan.Queries))
@@ -74,10 +74,10 @@ func validateTechnicalSearchPlan(plan TechnicalSearchPlan) (TechnicalSearchPlan,
 		query.PathHint = cleanReviewText(query.PathHint, 200)
 		query.Reason = cleanReviewText(query.Reason, 500)
 		if len([]rune(query.Text)) < 3 || query.Reason == "" {
-			return TechnicalSearchPlan{}, errors.New("Ollama technical search query must contain a literal term and reason")
+			return TechnicalSearchPlan{}, errors.New("model technical search query must contain a literal term and reason")
 		}
 		if strings.ContainsAny(query.Text, "*?[]") || strings.ContainsAny(query.PathHint, "*?[]") || filepath.IsAbs(query.PathHint) || strings.Contains(filepath.ToSlash(query.PathHint), "../") {
-			return TechnicalSearchPlan{}, errors.New("Ollama technical search query must use bounded literal terms and a repository-relative path hint")
+			return TechnicalSearchPlan{}, errors.New("model technical search query must use bounded literal terms and a repository-relative path hint")
 		}
 		key := strings.ToLower(query.Text + "\x00" + query.PathHint)
 		if _, duplicate := seen[key]; duplicate {
@@ -87,7 +87,7 @@ func validateTechnicalSearchPlan(plan TechnicalSearchPlan) (TechnicalSearchPlan,
 		queries = append(queries, query)
 	}
 	if len(queries) == 0 {
-		return TechnicalSearchPlan{}, errors.New("Ollama technical search plan contained no unique query")
+		return TechnicalSearchPlan{}, errors.New("model technical search plan contained no unique query")
 	}
 	plan.Queries = queries
 	return plan, nil
