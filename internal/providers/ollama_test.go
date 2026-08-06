@@ -352,6 +352,25 @@ func TestOllamaInvestigationRejectsEvidenceClaimOutsideSubmittedContext(t *testi
 	}
 }
 
+func TestExtendedSearchNotSupportedBecomesBoundedNoEvidenceConclusion(t *testing.T) {
+	candidate := TechnicalCandidate{
+		ObjectiveID: "objective", EvidenceStatus: "not-detected", InvestigationMode: "extended-search",
+		EvidenceFingerprint: strings.Repeat("f", 64), Path: "(repository-wide)",
+	}
+	observation, guarded, err := validateTechnicalObservation(ollamaTechnicalObservation{
+		Strength: StrengthNotSupported, Conclusion: ConclusionNotFoundAfterInvestigation,
+		Confidence: "medium", Rationale: "The submitted bounded search did not provide implementation evidence.",
+		SupportingEvidence: []TechnicalEvidenceClaim{}, ContradictoryEvidence: []TechnicalEvidenceClaim{},
+		MissingEvidence: []string{"Runtime configuration"}, UnresolvedQuestions: []string{}, SuggestedReview: "Review external services.",
+	}, candidate, candidate.EvidenceFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if guarded || observation.Conclusion != ConclusionNotFoundAfterInvestigation || observation.Assurance != AssuranceInvestigationNoEvidence {
+		t.Fatalf("unexpected bounded negative result: guarded=%t observation=%#v", guarded, observation)
+	}
+}
+
 func TestOllamaTechnicalReviewCapsTestOnlyCandidateWithSharedProductionCallee(t *testing.T) {
 	fingerprint := strings.Repeat("e", 64)
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {

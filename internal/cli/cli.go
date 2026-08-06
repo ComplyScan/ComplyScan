@@ -527,7 +527,7 @@ func reviewWithOllama(
 		Cache: cache, Refresh: refresh, MaxCandidates: settings.MaxFindings, OnProgress: onProgress,
 	})
 	if err != nil {
-		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, fmt.Errorf("Ollama technical-objective review: %w", err)
+		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, fmt.Errorf("Ollama technical evidence investigation: %w", err)
 	}
 	if cacheUnavailable {
 		technicalResult.Notes = append(technicalResult.Notes, "The local technical review cache was unavailable; review continued without cache reuse.")

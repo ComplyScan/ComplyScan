@@ -65,6 +65,25 @@ func TestWriteJSON(t *testing.T) {
 	}
 }
 
+func TestWriteJSONUsesSchemaThreeEvidenceInvestigationContract(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	value.TechnicalReview = &providers.TechnicalReviewResult{
+		Provider: providers.Ollama, Model: "qwen3:8b", InputCandidates: 1, Reviewed: 1,
+		Observations: []providers.TechnicalObservation{{
+			ObjectiveID: "objective", EvidenceFingerprint: strings.Repeat("a", 64),
+			Conclusion: providers.ConclusionNotFoundAfterInvestigation, Assurance: providers.AssuranceInvestigationNoEvidence,
+			Strength: providers.StrengthNotSupported, Confidence: "medium", Rationale: "No evidence in the bounded search.",
+		}},
+	}
+	var output bytes.Buffer
+	if err := WriteJSON(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), `"schema_version": 3`) || !strings.Contains(output.String(), `"evidence_investigation"`) || strings.Contains(output.String(), `"technical_review"`) {
+		t.Fatalf("unexpected schema-version-3 investigation JSON:\n%s", output.String())
+	}
+}
+
 func TestWriteTerminalDoesNotAddColorWhenDisabled(t *testing.T) {
 	value := New(".", "0.1.0", []rules.Finding{{
 		RuleID: "AI-LOG-001", Title: "Logged prompt", Severity: rules.SeverityHigh,
