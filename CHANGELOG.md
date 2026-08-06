@@ -11,7 +11,8 @@
 ### Changed
 
 - Reconciliation now maps objective evidence and observed AI components only to systems that own the matching repository path; conflicting and unmatched paths remain explicitly unresolved.
-- Advisory candidate investigations follow exact owned evidence fingerprints. Repository-wide missing-evidence investigation is conservatively skipped for multi-system repositories until it can be system-scoped.
+- Advisory candidate and missing-evidence investigations are now scoped per system. Graph construction, initial retrieval, model-directed follow-up, cache entries, observations, isolated-test context, and reconciliation use only assigned or intentionally shared paths.
+- The technical-review prompt contract is version 9 and the source-free cache uses schema version 2 so earlier unscoped observations cannot be reused.
 
 ## 0.1.3 - 2026-08-06
 
