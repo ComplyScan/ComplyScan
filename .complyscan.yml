@@ -47,6 +47,7 @@ systems:
     affected-groups: [developers and repository owners whose systems are assessed]
     decision-impact: advisory
     human-oversight: required
+    ai-activities: [inference, evaluation]
     data:
       personal-data: unknown
       special-category-data: unknown
@@ -67,3 +68,6 @@ suppressions:
   - rule: AI-SEC-001
     path: internal/rules/secrets_test.go
     reason: Unit tests contain unmistakably synthetic credentials to verify redaction.
+  - rule: AI-LOG-001
+    path: internal/codegraph/javascript_test.go
+    reason: Parser tests intentionally embed synthetic JavaScript logging calls inside Go string fixtures.
