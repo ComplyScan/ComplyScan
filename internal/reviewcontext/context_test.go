@@ -44,24 +44,58 @@ func TestBuildInvestigationsUsesOnlyOwnedCandidatesInMultiSystemRepository(t *te
 			}},
 		}}},
 		{SystemID: "support", Objectives: []reconciliation.ObjectiveResult{{ObjectiveID: "objective"}}},
-	}}
+	}, Ownership: reconciliation.OwnershipReport{Configured: true, Rules: []ownership.Rule{
+		{Paths: []string{"ranking/**"}, Systems: []string{"ranking"}},
+		{Paths: []string{"support/**"}, Systems: []string{"support"}},
+	}}}
 	request := BuildInvestigations(evidence, discovery.Repository{}, mapping)
 	if len(request.Candidates) != 1 || request.Candidates[0].EvidenceFingerprint != "ranking" {
 		t.Fatalf("investigation candidates = %#v", request.Candidates)
 	}
 }
 
-func TestBuildInvestigationsSkipsRepositoryWideSearchAcrossMultipleSystems(t *testing.T) {
+func TestBuildInvestigationsScopesMissingEvidenceSearchPerSystem(t *testing.T) {
+	repository := discovery.Repository{Files: []discovery.File{
+		{Path: "ranking/control.go", Kind: discovery.KindSource, Content: []byte("package ranking\nfunc approveRanking() bool { return true }")},
+		{Path: "support/control.go", Kind: discovery.KindSource, Content: []byte("package support\nfunc approveSupport() bool { return true }")},
+		{Path: "shared/audit.go", Kind: discovery.KindSource, Content: []byte("package shared\nfunc auditApproval() {}")},
+		{Path: "misc/unowned.go", Kind: discovery.KindSource, Content: []byte("package misc\nfunc approveEverything() {}")},
+	}}
 	evidence := framework.TechnicalEvidenceReport{Objectives: []framework.ObjectiveAssessment{{
-		ID: "objective", Status: framework.ObjectiveNotDetected, EligibleFileKinds: []string{"source"},
+		ID: "objective", Status: framework.ObjectiveNotDetected, EligibleFileKinds: []string{"source"}, InvestigationTerms: []string{"approve"},
 	}}}
 	mapping := reconciliation.Report{Systems: []reconciliation.SystemResult{
-		{SystemID: "ranking", Objectives: []reconciliation.ObjectiveResult{{ObjectiveID: "objective", Requirement: reconciliation.RequirementLikelyRequired}}},
-		{SystemID: "support", Objectives: []reconciliation.ObjectiveResult{{ObjectiveID: "objective", Requirement: reconciliation.RequirementLikelyRequired}}},
-	}}
-	request := BuildInvestigations(evidence, discovery.Repository{}, mapping)
-	if len(request.Candidates) != 0 {
-		t.Fatalf("multi-system repository-wide investigation was not bounded: %#v", request.Candidates)
+		{SystemID: "ranking", SystemName: "Ranking", Objectives: []reconciliation.ObjectiveResult{{ObjectiveID: "objective", Requirement: reconciliation.RequirementLikelyRequired, Evidence: framework.ObjectiveNotDetected}}},
+		{SystemID: "support", SystemName: "Support", Objectives: []reconciliation.ObjectiveResult{{ObjectiveID: "objective", Requirement: reconciliation.RequirementLikelyRequired, Evidence: framework.ObjectiveNotDetected}}},
+	}, Ownership: reconciliation.OwnershipReport{Configured: true, Rules: []ownership.Rule{
+		{Paths: []string{"ranking/**"}, Systems: []string{"ranking"}},
+		{Paths: []string{"support/**"}, Systems: []string{"support"}},
+		{Paths: []string{"shared/**"}, Systems: []string{"ranking", "support"}},
+	}}}
+	request := BuildInvestigations(evidence, repository, mapping)
+	if len(request.Candidates) != 2 {
+		t.Fatalf("system-scoped target count = %d: %#v", len(request.Candidates), request.Candidates)
+	}
+	for _, candidate := range request.Candidates {
+		if candidate.OwnershipScope != "explicit" || candidate.RepositoryFiles != 2 || candidate.Path != "(system-owned repository)" {
+			t.Fatalf("unexpected scope for %s: %#v", candidate.SystemID, candidate)
+		}
+		for _, context := range candidate.SourceContexts {
+			if strings.Contains(context.Path, "misc/") || candidate.SystemID == "ranking" && strings.Contains(context.Path, "support/") || candidate.SystemID == "support" && strings.Contains(context.Path, "ranking/") {
+				t.Fatalf("%s received another ownership scope: %#v", candidate.SystemID, candidate.SourceContexts)
+			}
+		}
+	}
+	updated, count := ApplyFollowUp(request.Candidates[0], providers.TechnicalSearchPlan{
+		Needed: true, Reason: "Find approvals.", Queries: []providers.TechnicalSearchQuery{{Text: "approve", Reason: "Find implementation."}},
+	}, repository)
+	if count == 0 {
+		t.Fatal("owned follow-up returned no excerpts")
+	}
+	for _, context := range updated.SourceContexts {
+		if context.Role == "model-directed-follow-up" && (strings.Contains(context.Path, "support/") || strings.Contains(context.Path, "misc/")) {
+			t.Fatalf("follow-up escaped ranking ownership: %#v", context)
+		}
 	}
 }
 
@@ -116,7 +150,7 @@ func TestBuildInvestigationsSearchesLikelyRequiredObjectiveWithoutCandidate(t *t
 			EligibleFileKinds: []string{"source"}, InvestigationTerms: []string{"human approval", "approve", "model result"},
 		}},
 	}
-	mapping := reconciliation.Report{Systems: []reconciliation.SystemResult{{Objectives: []reconciliation.ObjectiveResult{{
+	mapping := reconciliation.Report{Systems: []reconciliation.SystemResult{{SystemID: "ranking", SystemName: "Ranking", Objectives: []reconciliation.ObjectiveResult{{
 		ObjectiveID: "eu-aia-14-human-review-gate", Requirement: reconciliation.RequirementLikelyRequired,
 	}}}}}
 
@@ -125,7 +159,7 @@ func TestBuildInvestigationsSearchesLikelyRequiredObjectiveWithoutCandidate(t *t
 		t.Fatalf("investigation target count = %d, want 1: %#v", len(request.Candidates), request)
 	}
 	candidate := request.Candidates[0]
-	if candidate.InvestigationMode != investigationModeSearch || candidate.EvidenceStatus != string(framework.ObjectiveNotDetected) {
+	if candidate.InvestigationMode != investigationModeSearch || candidate.EvidenceStatus != string(framework.ObjectiveNotDetected) || candidate.SystemID != "ranking" {
 		t.Fatalf("unexpected investigation identity: %#v", candidate)
 	}
 	if len(candidate.EvidenceFingerprint) != 64 || candidate.SearchCoverage.EligibleFiles != 1 || candidate.SearchCoverage.MatchingFiles != 1 {

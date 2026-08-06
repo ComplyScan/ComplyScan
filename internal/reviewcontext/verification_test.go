@@ -10,7 +10,8 @@ import (
 
 func TestAttachVerificationsAddsOnlyMatchingBoundedObjectiveEvidence(t *testing.T) {
 	request := providers.TechnicalReviewRequest{Candidates: []providers.TechnicalCandidate{
-		{ObjectiveID: "matching", SourceContexts: []providers.TechnicalSourceContext{}},
+		{SystemID: "system", ObjectiveID: "matching", SourceContexts: []providers.TechnicalSourceContext{}},
+		{SystemID: "other-system", ObjectiveID: "matching", SourceContexts: []providers.TechnicalSourceContext{}},
 		{ObjectiveID: "other", SourceContexts: []providers.TechnicalSourceContext{}},
 	}}
 	request = AttachVerifications(request, []verification.Report{{
@@ -23,7 +24,7 @@ func TestAttachVerificationsAddsOnlyMatchingBoundedObjectiveEvidence(t *testing.
 	if len([]rune(request.Candidates[0].SourceContexts[0].Source)) > maxVerificationContextChars {
 		t.Fatal("verification context exceeded its bound")
 	}
-	if len(request.Candidates[1].SourceContexts) != 0 {
-		t.Fatalf("verification escaped objective scope: %#v", request.Candidates[1])
+	if len(request.Candidates[1].SourceContexts) != 0 || len(request.Candidates[2].SourceContexts) != 0 {
+		t.Fatalf("verification escaped objective or system scope: %#v", request.Candidates)
 	}
 }

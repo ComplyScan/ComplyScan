@@ -18,7 +18,7 @@ func AttachVerifications(request providers.TechnicalReviewRequest, results []ver
 		candidate := &request.Candidates[candidateIndex]
 		var source strings.Builder
 		for _, result := range results {
-			if !verificationCoversObjective(result, candidate.ObjectiveID) {
+			if !verificationCoversObjective(result, candidate.ObjectiveID) || !verificationCoversSystem(result, candidate.SystemID) {
 				continue
 			}
 			if source.Len() > 0 {
@@ -46,6 +46,18 @@ func AttachVerifications(request providers.TechnicalReviewRequest, results []ver
 		})
 	}
 	return request
+}
+
+func verificationCoversSystem(result verification.Report, systemID string) bool {
+	if systemID == "" {
+		return true
+	}
+	for _, system := range result.Systems {
+		if system == systemID {
+			return true
+		}
+	}
+	return false
 }
 
 func verificationCoversObjective(result verification.Report, objectiveID string) bool {

@@ -480,9 +480,7 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			}
 			if cfg.AI.Provider != "none" {
 				investigationRequest := reviewcontext.BuildInvestigations(technicalEvidence, result.FullRepository, evidenceMapping)
-				if len(cfg.Systems) <= 1 {
-					investigationRequest = reviewcontext.AttachVerifications(investigationRequest, verificationResults)
-				}
+				investigationRequest = reviewcontext.AttachVerifications(investigationRequest, verificationResults)
 				candidateCount := len(investigationRequest.Candidates)
 				if outputFormat == "terminal" {
 					if _, err := fmt.Fprintf(stdout, "%s advisory review requested for %d finding(s) and %d technical evidence investigation target(s) with %s...\n\n", reviewProviderLabel(cfg.AI.Provider), len(visible), candidateCount, configuredReviewModel(cfg.AI)); err != nil {

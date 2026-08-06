@@ -11,6 +11,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/codegraph"
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
+	"github.com/ComplyScan/ComplyScan/internal/ownership"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
 )
@@ -28,53 +29,9 @@ func Build(evidence framework.TechnicalEvidenceReport, repository discovery.Repo
 	request := providers.TechnicalReviewRequest{Candidates: []providers.TechnicalCandidate{}}
 	for _, objective := range evidence.Objectives {
 		for _, match := range objective.Matches {
-			candidate := providers.TechnicalCandidate{
-				ObjectiveID: objective.ID, Title: objective.Title, SourceReference: objective.SourceReference,
-				Description: objective.Description, EvidenceStatus: string(objective.Status),
-				InvestigationMode: investigationModeCandidate, RepositoryDigest: repositoryFingerprint,
-				EvidenceFingerprint: match.Fingerprint,
-				Path:                match.Path, StartLine: match.StartLine,
-				Imports: []string{}, Relationships: []providers.TechnicalRelationship{},
-				UnresolvedQuestions: append([]string(nil), objective.UnresolvedQuestions...),
-				SearchTerms:         append([]string(nil), objective.InvestigationTerms...),
-				EligibleFileKinds:   append([]string(nil), objective.EligibleFileKinds...),
-				SourceContexts:      []providers.TechnicalSourceContext{},
-			}
-			for _, repositoryImport := range match.Context.Imports {
-				value := repositoryImport.ImportedPath
-				if repositoryImport.Alias != "" {
-					value = repositoryImport.Alias + "=" + value
-				}
-				candidate.Imports = append(candidate.Imports, value)
-			}
-			for _, relationship := range match.Context.Relationships {
-				candidate.Relationships = append(candidate.Relationships, providers.TechnicalRelationship{
-					Kind: string(relationship.Kind), From: relationship.From, To: relationship.To,
-					Label: relationship.Label, Resolved: relationship.Resolved,
-				})
-			}
-			candidate.UnresolvedQuestions = append(candidate.UnresolvedQuestions, match.Context.UnresolvedQuestions...)
-
-			remainingSource := 12_000
-			remainingSource = appendMatchedEvidenceSource(&candidate, repository, match.Path, match.StartLine, match.Context.Anchor != nil, remainingSource)
-			if match.Context.Anchor != nil {
-				candidate.Anchor = match.Context.Anchor.QualifiedName
-				candidate.Reachability = string(match.Context.Anchor.Reachability)
-				remainingSource = appendTechnicalSource(&candidate, graph, *match.Context.Anchor, "anchor", remainingSource)
-				for _, relationship := range match.Context.Relationships {
-					if relationship.Kind != codegraph.EdgeRoute || remainingSource <= 0 || len(candidate.SourceContexts) >= 6 {
-						continue
-					}
-					remainingSource = appendTechnicalRelationshipSource(&candidate, repository, relationship, remainingSource)
-				}
-				for _, related := range match.Context.RelatedSymbols {
-					if remainingSource <= 0 || len(candidate.SourceContexts) >= 6 {
-						break
-					}
-					remainingSource = appendTechnicalSource(&candidate, graph, related, "related", remainingSource)
-				}
-			}
-			request.Candidates = append(request.Candidates, candidate)
+			request.Candidates = append(request.Candidates, buildCandidate(
+				objective, match, repository, graph, match.Context, "", "", "repository-wide", repositoryFingerprint,
+			))
 		}
 	}
 	return request
@@ -84,62 +41,146 @@ func Build(evidence framework.TechnicalEvidenceReport, repository discovery.Repo
 // likely-required objective that had no deterministic candidate. Existing
 // candidates keep their exact fingerprints and candidate-level context.
 func BuildInvestigations(evidence framework.TechnicalEvidenceReport, repository discovery.Repository, mapping reconciliation.Report) providers.TechnicalReviewRequest {
-	request := Build(evidence, repository)
-	if len(mapping.Systems) > 0 {
-		owned := ownedEvidenceFingerprints(mapping)
-		filtered := make([]providers.TechnicalCandidate, 0, len(request.Candidates))
-		for _, candidate := range request.Candidates {
-			if owned[candidate.ObjectiveID][candidate.EvidenceFingerprint] {
-				filtered = append(filtered, candidate)
-			}
-		}
-		request.Candidates = filtered
+	if len(mapping.Systems) == 0 {
+		return Build(evidence, repository)
 	}
-	// Repository-wide missing-evidence investigations are not yet system-bound.
-	// Running one across a multi-system repository could use code owned by a
-	// different system, so keep that question unresolved instead of guessing.
-	if len(mapping.Systems) > 1 {
-		return request
-	}
-	likely := likelyRequiredObjectives(mapping)
+	objectiveByID := make(map[string]framework.ObjectiveAssessment, len(evidence.Objectives))
+	matchByObjective := make(map[string]map[string]framework.EvidenceMatch, len(evidence.Objectives))
 	for _, objective := range evidence.Objectives {
-		if objective.Status == framework.ObjectiveCandidate || !likely[objective.ID] {
+		objectiveByID[objective.ID] = objective
+		matchByObjective[objective.ID] = make(map[string]framework.EvidenceMatch, len(objective.Matches))
+		for _, match := range objective.Matches {
+			matchByObjective[objective.ID][match.Fingerprint] = match
+		}
+	}
+
+	request := providers.TechnicalReviewRequest{Candidates: []providers.TechnicalCandidate{}}
+	for _, system := range mapping.Systems {
+		scopedRepository, scopeMode, ok := repositoryForSystem(repository, mapping, system.SystemID)
+		if !ok {
 			continue
 		}
-		candidate := buildMissingEvidenceInvestigation(evidence.Pack, objective, repository)
-		request.Candidates = append(request.Candidates, candidate)
+		graph := codegraph.Build(scopedRepository)
+		digest := repositoryDigest(scopedRepository)
+		for _, mapped := range system.Objectives {
+			objective, exists := objectiveByID[mapped.ObjectiveID]
+			if !exists {
+				continue
+			}
+			for _, reference := range mapped.EvidenceReferences {
+				match, exists := matchByObjective[mapped.ObjectiveID][reference.Fingerprint]
+				if !exists {
+					continue
+				}
+				context := graph.ContextForMatch(match.Path, match.StartLine, match.MatchedTerms, 20)
+				request.Candidates = append(request.Candidates, buildCandidate(
+					objective, match, scopedRepository, graph, context,
+					system.SystemID, system.SystemName, scopeMode, digest,
+				))
+			}
+			if mapped.Requirement != reconciliation.RequirementLikelyRequired || len(mapped.EvidenceReferences) > 0 {
+				continue
+			}
+			if mapped.Evidence != "" {
+				objective.Status = mapped.Evidence
+			}
+			objective.Matches = nil
+			request.Candidates = append(request.Candidates, buildMissingEvidenceInvestigation(
+				evidence.Pack, objective, scopedRepository, system.SystemID, system.SystemName, scopeMode,
+			))
+		}
 	}
 	return request
 }
 
-func ownedEvidenceFingerprints(mapping reconciliation.Report) map[string]map[string]bool {
-	result := make(map[string]map[string]bool)
-	for _, system := range mapping.Systems {
-		for _, objective := range system.Objectives {
-			for _, reference := range objective.EvidenceReferences {
-				if reference.Fingerprint == "" {
-					continue
-				}
-				if result[objective.ObjectiveID] == nil {
-					result[objective.ObjectiveID] = make(map[string]bool)
-				}
-				result[objective.ObjectiveID][reference.Fingerprint] = true
+func buildCandidate(objective framework.ObjectiveAssessment, match framework.EvidenceMatch, repository discovery.Repository, graph codegraph.Graph, context codegraph.ContextPackage, systemID, systemName, scopeMode, repositoryFingerprint string) providers.TechnicalCandidate {
+	candidate := providers.TechnicalCandidate{
+		SystemID: systemID, SystemName: systemName, OwnershipScope: scopeMode, RepositoryFiles: len(repository.Files),
+		ObjectiveID: objective.ID, Title: objective.Title, SourceReference: objective.SourceReference,
+		Description: objective.Description, EvidenceStatus: string(objective.Status),
+		InvestigationMode: investigationModeCandidate, RepositoryDigest: repositoryFingerprint,
+		EvidenceFingerprint: match.Fingerprint,
+		Path:                match.Path, StartLine: match.StartLine,
+		Imports: []string{}, Relationships: []providers.TechnicalRelationship{},
+		UnresolvedQuestions: append([]string(nil), objective.UnresolvedQuestions...),
+		SearchTerms:         append([]string(nil), objective.InvestigationTerms...),
+		EligibleFileKinds:   append([]string(nil), objective.EligibleFileKinds...),
+		SourceContexts:      []providers.TechnicalSourceContext{},
+		AllowedPaths:        repositoryPaths(repository),
+	}
+	for _, repositoryImport := range context.Imports {
+		value := repositoryImport.ImportedPath
+		if repositoryImport.Alias != "" {
+			value = repositoryImport.Alias + "=" + value
+		}
+		candidate.Imports = append(candidate.Imports, value)
+	}
+	for _, relationship := range context.Relationships {
+		candidate.Relationships = append(candidate.Relationships, providers.TechnicalRelationship{
+			Kind: string(relationship.Kind), From: relationship.From, To: relationship.To,
+			Label: relationship.Label, Resolved: relationship.Resolved,
+		})
+	}
+	candidate.UnresolvedQuestions = append(candidate.UnresolvedQuestions, context.UnresolvedQuestions...)
+
+	remainingSource := 12_000
+	remainingSource = appendMatchedEvidenceSource(&candidate, repository, match.Path, match.StartLine, context.Anchor != nil, remainingSource)
+	if context.Anchor != nil {
+		candidate.Anchor = context.Anchor.QualifiedName
+		candidate.Reachability = string(context.Anchor.Reachability)
+		remainingSource = appendTechnicalSource(&candidate, graph, *context.Anchor, "anchor", remainingSource)
+		for _, relationship := range context.Relationships {
+			if relationship.Kind != codegraph.EdgeRoute || remainingSource <= 0 || len(candidate.SourceContexts) >= 6 {
+				continue
 			}
+			remainingSource = appendTechnicalRelationshipSource(&candidate, repository, relationship, remainingSource)
+		}
+		for _, related := range context.RelatedSymbols {
+			if remainingSource <= 0 || len(candidate.SourceContexts) >= 6 {
+				break
+			}
+			remainingSource = appendTechnicalSource(&candidate, graph, related, "related", remainingSource)
 		}
 	}
-	return result
+	return candidate
 }
 
-func likelyRequiredObjectives(mapping reconciliation.Report) map[string]bool {
-	result := make(map[string]bool)
-	for _, system := range mapping.Systems {
-		for _, objective := range system.Objectives {
-			if objective.Requirement == reconciliation.RequirementLikelyRequired {
-				result[objective.ObjectiveID] = true
-			}
+func repositoryForSystem(repository discovery.Repository, mapping reconciliation.Report, systemID string) (discovery.Repository, string, bool) {
+	if !mapping.Ownership.Configured {
+		if len(mapping.Systems) == 1 {
+			return repository, string(ownership.StatusInferred), true
+		}
+		return discovery.Repository{Root: repository.Root, Files: []discovery.File{}}, "unassigned", false
+	}
+	resolver := ownership.New(mapping.Ownership.Rules)
+	result := discovery.Repository{Root: repository.Root, Files: make([]discovery.File, 0, len(repository.Files))}
+	for _, file := range repository.Files {
+		resolution := resolver.Resolve(file.Path)
+		if resolution.Status != ownership.StatusAssigned && resolution.Status != ownership.StatusShared {
+			continue
+		}
+		if containsValue(resolution.Systems, systemID) {
+			result.Files = append(result.Files, file)
 		}
 	}
-	return result
+	return result, "explicit", true
+}
+
+func repositoryPaths(repository discovery.Repository) []string {
+	paths := make([]string, 0, len(repository.Files))
+	for _, file := range repository.Files {
+		paths = append(paths, file.Path)
+	}
+	return paths
+}
+
+func containsValue(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 type investigationHit struct {
@@ -148,15 +189,17 @@ type investigationHit struct {
 	line  int
 }
 
-func buildMissingEvidenceInvestigation(pack framework.PackReference, objective framework.ObjectiveAssessment, repository discovery.Repository) providers.TechnicalCandidate {
+func buildMissingEvidenceInvestigation(pack framework.PackReference, objective framework.ObjectiveAssessment, repository discovery.Repository, systemID, systemName, scopeMode string) providers.TechnicalCandidate {
 	candidate := providers.TechnicalCandidate{
+		SystemID: systemID, SystemName: systemName, OwnershipScope: scopeMode, RepositoryFiles: len(repository.Files),
 		ObjectiveID: objective.ID, Title: objective.Title, SourceReference: objective.SourceReference,
 		Description: objective.Description, EvidenceStatus: string(objective.Status), InvestigationMode: investigationModeSearch,
 		RepositoryDigest: repositoryDigest(repository),
-		Path:             "(repository-wide)", Imports: []string{}, Relationships: []providers.TechnicalRelationship{},
+		Path:             "(system-owned repository)", Imports: []string{}, Relationships: []providers.TechnicalRelationship{},
 		UnresolvedQuestions: append([]string(nil), objective.UnresolvedQuestions...),
 		SearchTerms:         append([]string(nil), objective.InvestigationTerms...),
 		EligibleFileKinds:   append([]string(nil), objective.EligibleFileKinds...), SourceContexts: []providers.TechnicalSourceContext{},
+		AllowedPaths: repositoryPaths(repository),
 	}
 	candidate.UnresolvedQuestions = append(candidate.UnresolvedQuestions,
 		"The deterministic matcher found no candidate; determine whether the bounded wider search reveals an indirect implementation or whether more evidence is required.")
@@ -203,13 +246,13 @@ func buildMissingEvidenceInvestigation(pack framework.PackReference, objective f
 	candidate.SearchCoverage.Excerpts = len(candidate.SourceContexts)
 	if len(manifest) > 0 && len(candidate.SourceContexts) < 8 {
 		candidate.SourceContexts = append(candidate.SourceContexts, providers.TechnicalSourceContext{
-			Role: "eligible-file-manifest", Symbol: "repository-manifest", Path: "(repository-wide)",
+			Role: "eligible-file-manifest", Symbol: "repository-manifest", Path: "(system-owned repository)",
 			Source: strings.Join(manifest, "\n"),
 		})
 	}
 	digest, err := providers.TechnicalCandidateDigest(candidate)
 	if err != nil {
-		fallback := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s", pack.Digest, objective.ID, objective.Status)))
+		fallback := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s", pack.Digest, objective.ID, objective.Status, systemID, repositoryDigest(repository))))
 		candidate.EvidenceFingerprint = fmt.Sprintf("%x", fallback)
 	} else {
 		candidate.EvidenceFingerprint = digest
@@ -235,7 +278,16 @@ func ApplyFollowUp(candidate providers.TechnicalCandidate, plan providers.Techni
 		query string
 	}
 	hits := make([]followUpHit, 0)
+	allowedPaths := make(map[string]struct{}, len(candidate.AllowedPaths))
+	for _, path := range candidate.AllowedPaths {
+		allowedPaths[path] = struct{}{}
+	}
 	for _, file := range repository.Files {
+		if len(allowedPaths) > 0 {
+			if _, allowed := allowedPaths[file.Path]; !allowed {
+				continue
+			}
+		}
 		if len(eligibleKinds) > 0 {
 			if _, eligible := eligibleKinds[string(file.Kind)]; !eligible {
 				continue
