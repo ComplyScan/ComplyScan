@@ -24,6 +24,7 @@ coverage:
     - Detected code is candidate technical evidence, not proof that a mechanism is reachable, enabled, effective, legally applicable, or compliant.
     - No evidence detected means only that the bounded scan did not locate a configured technical signal; it does not prove that an implementation is absent.
 objectives:
+  # Article 9: for a potentially high-risk system, look for executable tests or evaluations that connect identified AI risks to a technical control check.
   - id: eu-aia-9-risk-control-testing
     title: Risk-control testing hooks
     source-reference: Article 9
@@ -39,6 +40,7 @@ objectives:
       - [ai risk, model risk, risk control, ai safety, model safety, safety evaluation, hazard analysis]
       - [test, evaluation, validation]
     verification: technical-semantic-and-human
+  # Article 10: when the system trains, fine-tunes, or evaluates models, look for code that rejects incomplete, malformed, or low-quality datasets.
   - id: eu-aia-10-dataset-validation
     title: Dataset validation controls
     source-reference: Article 10
@@ -54,6 +56,7 @@ objectives:
       - [training data, validation data, test data, dataset]
       - [validate training data, validate training dataset, validate validation data, validate validation dataset, validate test data, validate test dataset, validate dataset, validates dataset, dataset validation, schema validation, quality check, completeness, missing value, missing field]
     verification: technical-semantic-and-human
+  # Article 10: when data is used for training or evaluation, look for executable fairness or discrimination measurements rather than policy statements alone.
   - id: eu-aia-10-bias-evaluation
     title: Bias and fairness evaluation
     source-reference: Article 10
@@ -69,6 +72,7 @@ objectives:
       - [fairness, discrimination, demographic parity, equalized odds, political bias, anchoring bias, gender bias, racial bias]
       - [test, evaluation, metric, threshold]
     verification: technical-semantic-and-human
+  # Article 12: for a potentially high-risk system, look for automatic technical records of inference, prediction, response, or decision events.
   - id: eu-aia-12-automatic-event-logging
     title: Automatic AI event logging
     source-reference: Article 12
@@ -84,6 +88,7 @@ objectives:
       - [audit log, event log, telemetry, logger, logging]
       - [inference, prediction, automated decision, model output, model response, ai response]
     verification: technical-semantic-and-human
+  # Article 12: look for repository-controlled retention or expiry settings for AI event logs; production enforcement still requires operational verification.
   - id: eu-aia-12-log-retention-configuration
     title: AI log retention configuration
     source-reference: Article 12
@@ -99,6 +104,7 @@ objectives:
       - [audit log, event log, telemetry log, inference log, model log]
       - [retention, ttl, lifecycle, expiry, expiration]
     verification: technical-semantic-and-human
+  # Article 14: look for a real workflow gate where an authorised person must approve or reject an AI-assisted output before the consequential action continues.
   - id: eu-aia-14-human-review-gate
     title: Human review gate
     source-reference: Article 14
@@ -114,6 +120,7 @@ objectives:
       - [human review, manual review, reviewer, approval]
       - [approve, reject, pending, decision]
     verification: technical-semantic-and-human
+  # Article 14: look for an implemented path that lets an authorised person override, disregard, or intervene in an AI output or decision.
   - id: eu-aia-14-override-intervention
     title: Human override or intervention mechanism
     source-reference: Article 14
@@ -129,6 +136,7 @@ objectives:
       - [override, intervene, intervention, disregard]
       - [decision, output, prediction, result]
     verification: technical-semantic-and-human
+  # Article 14: look for a reachable mechanism that can stop, disable, or gate the relevant model, inference path, or automated-decision feature.
   - id: eu-aia-14-safe-stop
     title: Safe stop or disable mechanism
     source-reference: Article 14
@@ -144,6 +152,7 @@ objectives:
       - [stop, shutdown, disable, kill switch, feature flag]
       - [model, ai, inference, decision]
     verification: technical-semantic-and-human
+  # Article 15: look for measurable model-performance criteria that tests or CI actually enforce, not metrics that are merely displayed or documented.
   - id: eu-aia-15-performance-thresholds
     title: Performance metrics and acceptance thresholds
     source-reference: Article 15
@@ -159,6 +168,7 @@ objectives:
       - [model accuracy, evaluation accuracy, accuracy metric, precision, recall, f1, model performance, inference performance]
       - [threshold, acceptance criteria, minimum]
     verification: technical-semantic-and-human
+  # Article 15: look for tests of faults or adversarial conditions together with bounded retry, fallback, recovery, or fail-safe behavior.
   - id: eu-aia-15-robustness-failure-handling
     title: Robustness and failure handling
     source-reference: Article 15
@@ -174,6 +184,7 @@ objectives:
       - [robustness, adversarial, fuzz, model fault, inference fault, inference timeout]
       - [model fallback, inference fallback, fail-safe, circuit breaker, retry, recovery test]
     verification: technical-semantic-and-human
+  # Article 15: look for implemented checks or tests addressing AI-specific attacks such as prompt injection, data poisoning, evasion, or adversarial input.
   - id: eu-aia-15-ai-security-controls
     title: AI-specific security controls
     source-reference: Article 15
@@ -189,6 +200,7 @@ objectives:
       - [prompt injection, data poisoning, model poisoning, adversarial input, model evasion]
       - [sanitize, validate, detect, filter, test]
     verification: technical-semantic-and-human
+  # Article 50: when people externally interact with AI-driven behavior, look for user-facing code or configuration that clearly discloses the AI interaction.
   - id: eu-aia-50-ai-interaction-disclosure
     title: AI interaction disclosure
     source-reference: Article 50
@@ -204,6 +216,7 @@ objectives:
       - [ai assistant, artificial intelligence, chatbot, automated system]
       - [disclosure, powered by, generated by, interacting with]
     verification: technical-semantic-and-human
+  # Article 50: when the system generates synthetic content, look for machine-readable labels, provenance metadata, or watermarking added to the output.
   - id: eu-aia-50-synthetic-content-marking
     title: Machine-readable synthetic-content marking
     source-reference: Article 50

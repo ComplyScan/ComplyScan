@@ -31,6 +31,30 @@ func TestBuiltinEUAIActPackContainsCodeObjectivesOnly(t *testing.T) {
 	}
 }
 
+func TestBuiltinObjectivesHaveAdjacentPlainLanguageComments(t *testing.T) {
+	data, err := builtins.ReadFile(builtinPaths[EUAIActTechnicalEvidencePackID])
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack, err := LoadBuiltin(EUAIActTechnicalEvidencePackID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	for _, objective := range pack.Objectives {
+		marker := "  - id: " + objective.ID
+		position := strings.Index(content, marker)
+		if position < 0 {
+			t.Fatalf("objective %q is missing from the embedded YAML", objective.ID)
+		}
+		before := strings.TrimSpace(content[:position])
+		lines := strings.Split(before, "\n")
+		if len(lines) == 0 || !strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "# ") {
+			t.Errorf("objective %q needs a plain-language comment immediately above it", objective.ID)
+		}
+	}
+}
+
 func TestPackParserRejectsUnknownFieldsDuplicateObjectivesAndDocuments(t *testing.T) {
 	valid, err := builtins.ReadFile(builtinPaths[EUAIActTechnicalEvidencePackID])
 	if err != nil {
