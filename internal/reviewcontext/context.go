@@ -3,12 +3,21 @@
 package reviewcontext
 
 import (
+	"crypto/sha256"
+	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/ComplyScan/ComplyScan/internal/codegraph"
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
+	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
+)
+
+const (
+	investigationModeCandidate = "candidate-validation"
+	investigationModeSearch    = "extended-search"
 )
 
 // Build preserves deterministic objective and evidence bindings while adding
@@ -20,10 +29,12 @@ func Build(evidence framework.TechnicalEvidenceReport, repository discovery.Repo
 		for _, match := range objective.Matches {
 			candidate := providers.TechnicalCandidate{
 				ObjectiveID: objective.ID, Title: objective.Title, SourceReference: objective.SourceReference,
-				Description: objective.Description, EvidenceFingerprint: match.Fingerprint,
+				Description: objective.Description, EvidenceStatus: string(objective.Status),
+				InvestigationMode: investigationModeCandidate, EvidenceFingerprint: match.Fingerprint,
 				Path: match.Path, StartLine: match.StartLine,
 				Imports: []string{}, Relationships: []providers.TechnicalRelationship{},
 				UnresolvedQuestions: append([]string(nil), objective.UnresolvedQuestions...),
+				SearchTerms:         append([]string(nil), objective.InvestigationTerms...),
 				SourceContexts:      []providers.TechnicalSourceContext{},
 			}
 			for _, repositoryImport := range match.Context.Imports {
@@ -64,6 +75,134 @@ func Build(evidence framework.TechnicalEvidenceReport, repository discovery.Repo
 		}
 	}
 	return request
+}
+
+// BuildInvestigations adds one bounded repository-search target for every
+// likely-required objective that had no deterministic candidate. Existing
+// candidates keep their exact fingerprints and candidate-level context.
+func BuildInvestigations(evidence framework.TechnicalEvidenceReport, repository discovery.Repository, mapping reconciliation.Report) providers.TechnicalReviewRequest {
+	request := Build(evidence, repository)
+	likely := likelyRequiredObjectives(mapping)
+	for _, objective := range evidence.Objectives {
+		if objective.Status == framework.ObjectiveCandidate || !likely[objective.ID] {
+			continue
+		}
+		candidate := buildMissingEvidenceInvestigation(evidence.Pack, objective, repository)
+		request.Candidates = append(request.Candidates, candidate)
+	}
+	return request
+}
+
+func likelyRequiredObjectives(mapping reconciliation.Report) map[string]bool {
+	result := make(map[string]bool)
+	for _, system := range mapping.Systems {
+		for _, objective := range system.Objectives {
+			if objective.Requirement == reconciliation.RequirementLikelyRequired {
+				result[objective.ObjectiveID] = true
+			}
+		}
+	}
+	return result
+}
+
+type investigationHit struct {
+	file  discovery.File
+	score int
+	line  int
+}
+
+func buildMissingEvidenceInvestigation(pack framework.PackReference, objective framework.ObjectiveAssessment, repository discovery.Repository) providers.TechnicalCandidate {
+	candidate := providers.TechnicalCandidate{
+		ObjectiveID: objective.ID, Title: objective.Title, SourceReference: objective.SourceReference,
+		Description: objective.Description, EvidenceStatus: string(objective.Status), InvestigationMode: investigationModeSearch,
+		Path: "(repository-wide)", Imports: []string{}, Relationships: []providers.TechnicalRelationship{},
+		UnresolvedQuestions: append([]string(nil), objective.UnresolvedQuestions...),
+		SearchTerms:         append([]string(nil), objective.InvestigationTerms...), SourceContexts: []providers.TechnicalSourceContext{},
+	}
+	candidate.UnresolvedQuestions = append(candidate.UnresolvedQuestions,
+		"The deterministic matcher found no candidate; determine whether the bounded wider search reveals an indirect implementation or whether more evidence is required.")
+
+	eligibleKinds := make(map[string]struct{}, len(objective.EligibleFileKinds))
+	for _, kind := range objective.EligibleFileKinds {
+		eligibleKinds[kind] = struct{}{}
+	}
+	hits := make([]investigationHit, 0)
+	manifest := make([]string, 0)
+	for _, file := range repository.Files {
+		if _, eligible := eligibleKinds[string(file.Kind)]; !eligible {
+			continue
+		}
+		candidate.SearchCoverage.EligibleFiles++
+		if len(manifest) < 200 {
+			manifest = append(manifest, file.Path)
+		}
+		score, line := investigationRelevance(file, objective.InvestigationTerms)
+		if score > 0 {
+			hits = append(hits, investigationHit{file: file, score: score, line: line})
+		}
+	}
+	candidate.SearchCoverage.MatchingFiles = len(hits)
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].score != hits[j].score {
+			return hits[i].score > hits[j].score
+		}
+		return hits[i].file.Path < hits[j].file.Path
+	})
+	for _, hit := range hits {
+		if len(candidate.SourceContexts) >= 6 {
+			break
+		}
+		excerpt := boundedRepositoryExcerpt(hit.file.Content, hit.line, 2_000)
+		if excerpt == "" {
+			continue
+		}
+		candidate.SourceContexts = append(candidate.SourceContexts, providers.TechnicalSourceContext{
+			Role: "extended-search-hit", Symbol: "file:" + hit.file.Path, Path: hit.file.Path,
+			StartLine: hit.line, EndLine: hit.line, Source: excerpt,
+		})
+	}
+	candidate.SearchCoverage.Excerpts = len(candidate.SourceContexts)
+	if len(manifest) > 0 && len(candidate.SourceContexts) < 8 {
+		candidate.SourceContexts = append(candidate.SourceContexts, providers.TechnicalSourceContext{
+			Role: "eligible-file-manifest", Symbol: "repository-manifest", Path: "(repository-wide)",
+			Source: strings.Join(manifest, "\n"),
+		})
+	}
+	digest, err := providers.TechnicalCandidateDigest(candidate)
+	if err != nil {
+		fallback := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s", pack.Digest, objective.ID, objective.Status)))
+		candidate.EvidenceFingerprint = fmt.Sprintf("%x", fallback)
+	} else {
+		candidate.EvidenceFingerprint = digest
+	}
+	return candidate
+}
+
+func investigationRelevance(file discovery.File, terms []string) (int, int) {
+	path := strings.ToLower(file.Path)
+	content := strings.ToLower(string(file.Content))
+	score, firstLine := 0, 0
+	for _, term := range terms {
+		term = strings.ToLower(strings.TrimSpace(term))
+		if term == "" {
+			continue
+		}
+		if strings.Contains(path, term) {
+			score += 4
+		}
+		index := strings.Index(content, term)
+		if index < 0 {
+			continue
+		}
+		score += 1 + strings.Count(content, term)
+		if firstLine == 0 {
+			firstLine = 1 + strings.Count(content[:index], "\n")
+		}
+	}
+	if firstLine == 0 {
+		firstLine = 1
+	}
+	return score, firstLine
 }
 
 func appendMatchedEvidenceSource(candidate *providers.TechnicalCandidate, repository discovery.Repository, path string, line int, hasAnchor bool, remaining int) int {

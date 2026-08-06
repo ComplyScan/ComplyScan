@@ -80,6 +80,8 @@ type ObjectiveAssessment struct {
 	Applicability       ObjectiveApplicability `json:"applicability"`
 	Status              ObjectiveStatus        `json:"status"`
 	Verification        string                 `json:"verification"`
+	EligibleFileKinds   []string               `json:"eligible_file_kinds,omitempty"`
+	InvestigationTerms  []string               `json:"investigation_terms,omitempty"`
 	Matches             []EvidenceMatch        `json:"matches"`
 	UnresolvedQuestions []string               `json:"unresolved_questions,omitempty"`
 }
@@ -137,7 +139,9 @@ func evaluateObjectives(pack Pack, repository discovery.Repository, graph codegr
 		assessments[index] = ObjectiveAssessment{
 			ID: objective.ID, Title: objective.Title, SourceReference: objective.SourceReference,
 			Description: objective.Description, ApplicabilityNote: objective.ApplicabilityNote, Applicability: objective.Applicability,
-			Status: ObjectiveNotDetected, Verification: objective.Verification, Matches: []EvidenceMatch{},
+			Status: ObjectiveNotDetected, Verification: objective.Verification,
+			EligibleFileKinds:  append([]string(nil), objective.FileKinds...),
+			InvestigationTerms: objectiveInvestigationTerms(objective), Matches: []EvidenceMatch{},
 		}
 		for _, kind := range objective.FileKinds {
 			usedKinds[kind] = struct{}{}
@@ -200,6 +204,32 @@ func evaluateObjectives(pack Pack, repository discovery.Repository, graph codegr
 		}
 	}
 	return assessments
+}
+
+func objectiveInvestigationTerms(objective TechnicalObjective) []string {
+	seen := make(map[string]struct{})
+	terms := make([]string, 0, len(objective.PathKeywords)+len(objective.KeywordGroups)*2)
+	appendTerm := func(value string) {
+		value = strings.TrimSpace(strings.ToLower(value))
+		if len(value) < 3 {
+			return
+		}
+		if _, exists := seen[value]; exists {
+			return
+		}
+		seen[value] = struct{}{}
+		terms = append(terms, value)
+	}
+	for _, value := range objective.PathKeywords {
+		appendTerm(value)
+	}
+	for _, group := range objective.KeywordGroups {
+		for _, value := range group {
+			appendTerm(value)
+		}
+	}
+	sort.Strings(terms)
+	return terms
 }
 
 // candidatePassesStaticScope rejects bounded categories that satisfy lexical

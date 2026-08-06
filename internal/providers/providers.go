@@ -77,6 +77,8 @@ type TechnicalCandidate struct {
 	Title               string                   `json:"title"`
 	SourceReference     string                   `json:"source_reference"`
 	Description         string                   `json:"description"`
+	EvidenceStatus      string                   `json:"evidence_status,omitempty"`
+	InvestigationMode   string                   `json:"investigation_mode,omitempty"`
 	EvidenceFingerprint string                   `json:"evidence_fingerprint,omitempty"`
 	Path                string                   `json:"path"`
 	StartLine           int                      `json:"start_line,omitempty"`
@@ -85,7 +87,15 @@ type TechnicalCandidate struct {
 	Imports             []string                 `json:"imports,omitempty"`
 	Relationships       []TechnicalRelationship  `json:"relationships,omitempty"`
 	UnresolvedQuestions []string                 `json:"unresolved_questions,omitempty"`
+	SearchTerms         []string                 `json:"search_terms,omitempty"`
+	SearchCoverage      TechnicalSearchCoverage  `json:"search_coverage,omitempty"`
 	SourceContexts      []TechnicalSourceContext `json:"source_contexts"`
+}
+
+type TechnicalSearchCoverage struct {
+	EligibleFiles int `json:"eligible_files"`
+	MatchingFiles int `json:"matching_files"`
+	Excerpts      int `json:"excerpts"`
 }
 
 type TechnicalRelationship struct {
