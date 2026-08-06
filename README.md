@@ -2,13 +2,13 @@
 
 > ComplyScan is a developer-first scanner that identifies potential AI compliance risks and missing governance evidence before code reaches production.
 
-ComplyScan is an open-source, offline-by-default CLI for finding technical signals that deserve review during EU AI Act readiness work. Guided setup records factual system context and attributable human applicability decisions; a versioned technical pack maps code and configuration signals to EU AI Act technical objectives; and scans inventory likely AI providers and frameworks, look for risky logging and hardcoded credentials, and check whether repository-level AI-system and risk-classification evidence is present. An explicitly enabled Ollama layer can add a local, bounded evidence investigation of deterministic candidates and likely-required objectives for which no candidate was detected, without changing deterministic evidence or legal applicability.
+ComplyScan is an open-source, offline-by-default CLI for finding technical signals that deserve review during EU AI Act readiness work. Guided setup records factual system context and attributable human applicability decisions; a versioned technical pack maps code and configuration signals to EU AI Act technical objectives; and scans inventory likely AI providers and frameworks, look for risky logging and hardcoded credentials, and check whether repository-level AI-system and risk-classification evidence is present. An explicitly enabled model layer can add a bounded evidence investigation of deterministic candidates and likely-required objectives for which no candidate was detected, without changing deterministic evidence or legal applicability. Ollama keeps that context local; optional OpenAI, Anthropic, and Gemini adapters send only the bounded redacted context after explicit consent using the operator's own API key.
 
 ComplyScan does **not** interpret a complete system, determine an EU AI Act classification, certify compliance, or replace legal and compliance professionals. A finding is a review prompt—not a claim that a system violates the law.
 
 ## Install
 
-> Current release: v0.1.2. Ollama review is optional and experimental; deterministic scanning remains the default.
+> Current release: v0.1.2. Model review is optional and experimental; deterministic scanning remains the default.
 
 Starting with v0.1.2, macOS and Linux users can install ComplyScan and immediately start guided setup with one command:
 
@@ -71,13 +71,13 @@ complyscan doctor .
 complyscan version
 ```
 
-`setup` is the recommended first command. It creates or updates `.complyscan.yml`, runs the factual system and human-applicability questionnaire, recommends local Ollama review, lets the user choose any Ollama model, offers to install and start Ollama when it is missing, offers to pull the selected model, and can run the first scan. Every interactive question first explains why the fact matters, defines each controlled option in developer language, and provides examples where useful. The wizard recommends `needs-review` rather than asking developers to invent a legal conclusion. Each software installation and model download requires a separate confirmation. If setup cannot finish an external installation or download, it still saves the collected repository configuration and prints the exact recovery command.
+`setup` is the recommended first command. It creates or updates `.complyscan.yml`, runs the factual system and human-applicability questionnaire, and lets the user choose deterministic-only scanning, local Ollama, or an explicitly consented BYOK OpenAI, Anthropic, or Gemini reviewer. Ollama setup lists installed models plus recommendations, accepts any exact tag, and offers installation or model download separately. Remote setup explains external processing and possible cost, asks for the model, and saves only the API-key environment-variable name. Every interactive question first explains why the fact matters, defines each controlled option in developer language, and provides examples where useful. The wizard recommends `needs-review` rather than asking developers to invent a legal conclusion.
 
-`doctor` performs an offline readiness check for the installed build, repository configuration, Git detection, report-directory permissions, the Ollama executable, its loopback service, and the configured model. Missing optional tools are warnings; a required but unavailable Ollama service or model is a blocking failure.
+`doctor` checks the installed build, repository configuration, Git detection, report-directory permissions, local Ollama readiness, and the presence—not the value—of a configured remote credential. `complyscan doctor --probe-review` makes a separate live synthetic structured-output request; remote probes may incur a small provider charge and never contain repository data.
 
 Maintainers can run the repeatable live-model quality and resource gate with `./scripts/validate-ollama.sh` after `qwen3:8b` is available. See [Ollama live-model validation](docs/ollama-validation.md) for the enforced production/test-only expectations and saved artifacts.
 
-Interactive setup selects `qwen3:8b` by default, but the user can enter another local model or decline Ollama and keep deterministic scanning. Automation never installs software or downloads a model unless `--install-ollama` or `--pull-model` is explicitly passed. Use `--non-interactive --review none` for a network-free starter configuration, or `--skip-ollama-install`, `--skip-model-pull`, and `--skip-scan` to control individual interactive steps.
+Interactive setup selects `qwen3:8b` as the tested local default, lists other installed models, and accepts any Ollama tag. Automation never installs software or downloads a model unless `--install-ollama` or `--pull-model` is explicitly passed. Non-interactive remote setup additionally requires `--allow-remote-review`; use `--non-interactive --review none` for a network-free starter configuration.
 
 `scan` defaults to the current directory, so `complyscan scan` and `complyscan scan .` are equivalent. In a terminal, `init` guides you through factual questions about each system's purpose, operating regions, value-chain role, use-case domain, users, affected groups, decision impact, AI activities, data, human oversight, and deployment. AI activities distinguish inference, training, fine-tuning, evaluation, automated decisions, agent tool use, and synthetic-content generation. Use `unknown` rather than guessing. Redirected or CI initialization is non-interactive and can be made explicit with `--non-interactive`.
 
@@ -257,9 +257,9 @@ Every finding has a stable SHA-256 fingerprint in structured output. Reviewed fi
 
 For an existing repository, `complyscan baseline .` records the current findings in `.complyscan-baseline.json` without storing source evidence. Commit that deterministic file and future scans will report only findings whose fingerprints are new. Use `--baseline path/to/file` to select another baseline for a scan or `--no-baseline` to inspect every finding.
 
-## Optional Ollama review
+## Optional model review
 
-The built-in scan default remains deterministic, but interactive `complyscan setup` recommends local Ollama review and performs each installation step only after confirmation. Manual setup remains available:
+The built-in scan default remains deterministic. Interactive `complyscan setup` offers local Ollama first and performs each installation step only after confirmation. It lists models already installed by Ollama, labels `qwen3:8b` as the tested default, shows a small recommendation set, and accepts any exact Ollama tag. Manual setup remains available:
 
 ```bash
 ollama serve
@@ -269,15 +269,38 @@ complyscan scan . --review ollama --ollama-model qwen3:8b
 
 You can instead set `ai.provider: ollama` in `.complyscan.yml`. `--review none` disables a configured reviewer for one scan. If explicitly enabled review cannot connect, times out, cannot find the model, or returns invalid structured output, the scan exits with code `2` rather than silently omitting the requested review.
 
-Technical investigations are cached in the operating system's private user-cache directory, not in the scanned repository. The cache stores the same bounded, redacted observation used in reports plus hashes of submitted context; it does not store the submitted source-context records. Model rationales and evidence summaries are instructed not to quote code, but may still describe repository details and should be treated as potentially sensitive local data. Reuse requires the same provider, model tag, prompt version, control-pack ID/version/digest, objective, evidence fingerprint, complete bounded input digest, and full discovered-repository digest. Any repository code, context, pack, prompt, or model-name change therefore triggers a new request. Use `--refresh-review` to deliberately bypass existing technical observations. Each scan prints whether an investigation target is being reviewed by Ollama or reused from cache; completed responses are saved individually so an interrupted long scan can resume.
+### BYOK remote providers
+
+OpenAI, Anthropic, and Gemini use fixed official HTTPS endpoints and the same bounded prompts, schemas, binding checks, redaction, caching identity, and advisory-only result model as Ollama. The API key value is read from an environment variable at request time; it is never accepted as a configuration field, CLI value, report field, or cache field. Example:
+
+```yaml
+ai:
+  provider: openai
+  remote:
+    model: gpt-5.6-terra
+    api-key-env: OPENAI_API_KEY
+    timeout-seconds: 360
+    max-findings: 20
+```
+
+```bash
+export OPENAI_API_KEY="your-key-from-your-secret-store"
+complyscan scan .
+```
+
+The guided equivalent is `complyscan setup`. Non-interactive setup must explicitly include `--allow-remote-review`. The current starting choices are `gpt-5.6-terra` for OpenAI, `claude-sonnet-5` for Anthropic, and `gemini-3.6-flash` for Gemini; users may enter another exact model ID supported by their account. These defaults are configuration starting points, not proof of availability or quality. Run `complyscan doctor --probe-review` for a small live structured-output check before scanning sensitive repositories. See the official [OpenAI Responses and model documentation](https://developers.openai.com/api/docs/models), [Anthropic Messages API and authentication documentation](https://platform.claude.com/docs/en/api/messages/create), and [Gemini Interactions structured-output documentation](https://ai.google.dev/gemini-api/docs/structured-output).
+
+Remote review sends bounded secret-redacted finding records and selected source excerpts outside the machine, may incur cost, and is governed by the provider account's processing and retention settings. ComplyScan sets `store: false` for OpenAI and Gemini requests, refuses redirects, and does not expose configurable remote endpoints. Those controls do not replace an organisational review of provider terms, region, retention, proxies, contracts, and permitted source-code processing.
+
+Technical investigations are cached in the operating system's private user-cache directory, not in the scanned repository. The cache stores the same bounded, redacted observation used in reports plus hashes of submitted context; it does not store the submitted source-context records. Model rationales and evidence summaries are instructed not to quote code, but may still describe repository details and should be treated as potentially sensitive data. Reuse requires the same provider, model tag, prompt version, control-pack ID/version/digest, objective, evidence fingerprint, complete bounded input digest, and full discovered-repository digest. Any repository code, context, pack, prompt, provider, or model-name change therefore triggers a new request. Use `--refresh-review` to deliberately bypass existing technical observations.
 
 The experimental default is the official Ollama `qwen3:8b` model. Ollama does not currently publish a `qwen3-coder:8b` tag; its official Qwen3-Coder family starts at `30b`, which has a substantially larger installation footprint. The model remains configurable. Setup may install Ollama, start its Homebrew service, or pull the selected model only after explicit confirmation; normal scans never install software or models. Fake-transport tests enforce the structured-output, redaction, injection, identifier-binding, grounded-path, bounded-retrieval, and isolated-test interpretation contracts. A two-target prompt-version-8 smoke run passed on 2026-08-06, including one successful three-excerpt follow-up and one malformed optional plan safely skipped before the expected bounded-negative result. Broader representative evaluation and the maintained applicability reassessment remain open before Ollama investigation can leave experimental status.
 
-ComplyScan uses two separate review flows, both bounded by `max-findings`. The finding flow sends visible, unsuppressed deterministic finding records with re-redacted metadata such as the rule ID, fingerprint, title, message, relative path, line, short evidence, remediation, severity, and confidence. The technical flow can make a search-planning request followed by one final decision request per existing candidate or likely-required missing-evidence investigation target. Candidate targets include reachability, imports, graph relationships, unresolved questions, a bounded match window, and connected symbol excerpts. Extended-search targets include deterministic search terms, coverage counts, up to six ranked excerpts, and at most 200 eligible repository paths. A requested follow-up can add at most three 2,000-character excerpts. The evidence fingerprint is withheld. ComplyScan never sends a complete repository or an unbounded file. Input excerpts are re-redacted and are not copied into the saved report. Investigating many objectives can therefore take materially longer than one batched model call.
+ComplyScan uses two separate review flows, both bounded by `max-findings`, regardless of provider. The finding flow sends visible, unsuppressed deterministic finding records with re-redacted metadata such as the rule ID, fingerprint, title, message, relative path, line, short evidence, remediation, severity, and confidence. The technical flow can make a search-planning request followed by one final decision request per existing candidate or likely-required missing-evidence investigation target. Candidate targets include reachability, imports, graph relationships, unresolved questions, a bounded match window, and connected symbol excerpts. Extended-search targets include deterministic search terms, coverage counts, up to six ranked excerpts, and at most 200 eligible repository paths. A requested follow-up can add at most three 2,000-character excerpts. The evidence fingerprint is withheld. ComplyScan never sends a complete repository or an unbounded file. Input excerpts are re-redacted and are not copied into the saved report. Remote investigation may therefore produce multiple billable API calls per objective.
 
-The endpoint must be `localhost` or a loopback IP; ComplyScan bypasses HTTP proxies and refuses redirects. Repository strings, code, and comments are explicitly labelled untrusted in the fixed prompts. Finding output must preserve submitted identifiers; unknown, changed, duplicate, or malformed bindings fail that review. Technical output contains only decision and evidence-summary fields, so the model cannot choose which objective receives its response. Any cited path outside the submitted bounded context fails the requested investigation.
+Ollama endpoints must be `localhost` or a loopback IP; ComplyScan bypasses HTTP proxies for that local route. Remote adapters use fixed official HTTPS endpoints, may respect an operator-configured HTTPS proxy, and refuse redirects. Repository strings, code, and comments are explicitly labelled untrusted in the fixed prompts. Finding output must preserve submitted identifiers; unknown, changed, duplicate, or malformed bindings fail that review. Technical output contains only decision and evidence-summary fields, so the model cannot choose which objective receives its response. Any cited path outside the submitted bounded context fails the requested investigation.
 
-Finding observations are attached to existing fingerprints as `confirmed`, `uncertain`, or `not_supported`. Technical investigations remain attached to the exact objective/evidence target. Both are advisory: they cannot create or remove findings, change objective status or severity, update baselines or suppressions, or affect the failure threshold. Terminal, Markdown, and schema-version 3 JSON keep review separate from deterministic results; SARIF carries finding review only. ComplyScan requests non-streaming schema-constrained output with temperature zero, but model output can still vary. See Ollama's [local API](https://docs.ollama.com/api/introduction) and [structured-output documentation](https://docs.ollama.com/capabilities/structured-outputs).
+Finding observations are attached to existing fingerprints as `confirmed`, `uncertain`, or `not_supported`. Technical investigations remain attached to the exact objective/evidence target. Both are advisory: they cannot create or remove findings, change objective status or severity, update baselines or suppressions, or affect the failure threshold. Terminal, Markdown, and schema-version 3 JSON keep review separate from deterministic results; SARIF carries finding review only. ComplyScan requests non-streaming schema-constrained output; Ollama additionally receives temperature zero, while modern remote models use their provider defaults where sampling parameters are unsupported or deprecated. Model output can still vary.
 
 Deterministic, transparent guardrails constrain two recurring reasoning failures: discussion-only blog, documentation, FAQ, example, and quiz components cannot become implementation evidence, while executable graders, rubric renderers, assertions, and evaluation templates remain reviewable evidence even when static analysis cannot resolve dynamic registration. The report preserves the model's original strength in `model_strength` whenever a guardrail changes it.
 
@@ -343,7 +366,17 @@ The `changed-since` input is optional. For pull requests, pass the base commit a
 
 By default the action fails after uploading when findings meet `fail-on`. Set `fail-on-findings: false` to publish alerts without failing the job, or `upload-results: false` when code-scanning upload is not available.
 
-The action also accepts `review`, `ollama-model`, and `ollama-endpoint`. Ollama must already be installed, running, and loaded with the selected model inside the job. Hosted GitHub runners cannot access an Ollama service running on a developer's laptop.
+The action also accepts `review`, `ollama-model`, `ollama-endpoint`, `model`, and `api-key-env`. Ollama must already be installed, running, and loaded with the selected model inside the job. For BYOK review, place the credential value in a GitHub Actions secret exposed under the configured environment-variable name—never in an action input or committed YAML.
+
+```yaml
+- uses: ComplyScan/ComplyScan@<release-tag>
+  env:
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  with:
+    review: openai
+    model: gpt-5.6-terra
+    api-key-env: OPENAI_API_KEY
+```
 
 ## Privacy and security guarantees
 
@@ -360,9 +393,9 @@ In the default deterministic mode, the ComplyScan v0.1.2 CLI:
 
 Permission errors are reported as warnings where scanning can safely continue. Source excerpts are short and pass through credential redaction before appearing as evidence.
 
-When Ollama review is explicitly enabled, ComplyScan makes HTTP requests only to the validated loopback endpoint and sends the bounded finding and technical-context records described above. Submitted technical source-context records exist only in the local request and are not stored in the evidence bundle or OS user-cache. Model rationales, questions, and suggested actions may describe repository details; they are re-redacted and length-limited before reporting or caching. Profiles are not sent to Ollama. The generated Markdown and JSON reports and cached observations remain local unless a future dashboard connection is explicitly enabled.
+When model review is explicitly enabled, ComplyScan sends only the bounded finding and technical-context records described above. Ollama requests use a validated loopback endpoint; BYOK requests use the fixed official endpoint for the selected provider after setup disclosure and consent. Submitted source-context records are not stored in the evidence bundle or OS user-cache. Model rationales, questions, and suggested actions may describe repository details; they are re-redacted and length-limited before reporting or caching. System profiles are not sent to any reviewer. Generated reports and cached observations remain local unless a future dashboard connection is explicitly enabled.
 
-The optional GitHub Action uploads SARIF metadata to GitHub code scanning when `upload-results` is enabled. That SARIF contains finding messages, repository-relative paths, line numbers, and fingerprints, but not source excerpts or detected credentials. When a job explicitly enables Ollama, SARIF also contains the advisory verdict, confidence, rationale, suggested action, provider, and model for reviewed findings.
+The optional GitHub Action uploads SARIF metadata to GitHub code scanning when `upload-results` is enabled. That SARIF contains finding messages, repository-relative paths, line numbers, and fingerprints, but not source excerpts or detected credentials. When a job explicitly enables any model reviewer, SARIF also contains the advisory verdict, confidence, rationale, suggested action, provider, and model for reviewed findings.
 
 ## Development
 
@@ -373,13 +406,13 @@ go vet ./...
 go build ./cmd/complyscan
 ```
 
-The pipeline has two independent inputs: declared system configuration determines which technical objectives are likely relevant, while repository discovery builds the AI inventory and technical evidence without trusting that configuration. A deterministic reconciliation layer then combines them, preserves mismatches and uncertainty, and refuses to guess evidence ownership when a repository declares multiple systems. Optional Ollama review annotates existing evidence afterward and cannot alter applicability, deterministic evidence, or reconciliation status. See [the architecture notes](docs/architecture.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+The pipeline has two independent inputs: declared system configuration determines which technical objectives are likely relevant, while repository discovery builds the AI inventory and technical evidence without trusting that configuration. A deterministic reconciliation layer then combines them, preserves mismatches and uncertainty, and refuses to guess evidence ownership when a repository declares multiple systems. Optional model review annotates existing evidence afterward and cannot alter applicability, deterministic evidence, or reconciliation status. See [the architecture notes](docs/architecture.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 The labelled detector corpus lives under `testdata/evaluation`. Its test reports precision, recall, true positives, false positives, false negatives, and negative cases; the build fails if precision drops below 95% or recall below 90%.
 
 The separate technical-evidence benchmark lives under `testdata/technical-evaluation`. It labels complete objective candidates plus their expected anchor, production/test reachability, required or forbidden graph relationships, and indexed language. Run `./scripts/evaluate-technical-evidence.sh` for a human summary or add `--format json` for a machine-readable result. CI enforces the versioned synthetic thresholds. A manual `./scripts/evaluate-external-repositories.sh` study fetches exact commits of three permissively licensed public AI repositories and checks source-free human labels without committing third-party code. Add `--review ollama` for the slower `qwen3:8b` semantic gate over those candidates. These are regression gates and tuning evidence, not claims of general real-world accuracy. See [the benchmark guide](docs/technical-evidence-benchmark.md).
 
-ComplyScan applies the same evidence discipline to itself. Its maintained [AI applicability assessment](docs/AI_SYSTEM.md) distinguishes the default deterministic mode from the inference-enabled Ollama configuration and records the required pre-release reassessment. The companion [technical risk assessment](docs/risk-assessment.md) records foreseeable harms, controls, residual risks, and review expectations. These documents support governance; they are not self-certification.
+ComplyScan applies the same evidence discipline to itself. Its maintained [AI applicability assessment](docs/AI_SYSTEM.md) distinguishes the default deterministic mode from local and remote inference-enabled configurations and records the required pre-release reassessment. The companion [technical risk assessment](docs/risk-assessment.md) records foreseeable harms, controls, residual risks, and review expectations. These documents support governance; they are not self-certification.
 
 ## Roadmap
 
@@ -393,10 +426,9 @@ Future releases may add:
 - graph indexers for additional source languages and framework-specific route/call resolution;
 - iterative, still-bounded local context retrieval for unresolved technical questions;
 - richer, rule-specific local review prompts and measured live-model evaluation corpora;
-- bring-your-own API keys for optional review providers; and
 - optional ComplyScan Cloud integrations.
 
-Ollama is the only implemented review provider. The built-in scan default remains `none`; interactive setup recommends Ollama but requires user confirmation before selecting or provisioning it. Paid and remote providers remain placeholders behind the provider interface.
+Ollama, OpenAI, Anthropic, and Gemini are implemented review providers. The built-in scan default remains `none`; interactive setup presents Ollama first because it can keep bounded context on the local machine. Every remote provider requires an explicit external-processing confirmation, an environment-only API key, and a user-selected model.
 
 ## Disclaimer
 
