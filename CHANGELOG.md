@@ -12,6 +12,8 @@
 - An opt-in `qwen3:8b` semantic benchmark over the pinned public-repository candidates, with source-free decision output, explicit acceptance policy, quality thresholds, and focused candidate debugging.
 - A private, source-context-free technical-review cache in the operating system's user-cache directory, with content-aware invalidation, atomic writes, and `--refresh-review` bypass support.
 - Live per-candidate technical-review progress that distinguishes Ollama inference from cache reuse.
+- Explicit system activity declarations for inference, training, fine-tuning, evaluation, automated decisions, agent tool use, and synthetic-content generation.
+- Versioned deterministic reconciliation between screened EU AI Act technical objectives and independently discovered repository evidence, including visible non-detections, mismatches, and unassigned evidence.
 
 ### Changed
 
@@ -21,6 +23,7 @@
 - Technical review now evaluates one candidate per model request and binds the returned decision to the objective and evidence fingerprint in trusted code instead of asking the model to reproduce identifiers.
 - Technical review context includes a wider bounded window around the actual match before connected graph context, improving evidence available for mechanisms whose implementation spans nearby helpers.
 - Transparent semantic guardrails retain executable grader and rubric implementations while rejecting discussion-only website, documentation, FAQ, and quiz components.
+- Scan evidence bundles now use schema version 2 and include the AI component inventory plus requirement-to-evidence reconciliation in JSON, Markdown, and terminal output.
 
 ### Testing
 

@@ -26,7 +26,9 @@ ComplyScan 0.1.2 consists of:
 - optional Git changed-file scope that preserves repository-wide governance checks;
 - an optional Ollama provider that generates separate advisory observations for existing findings and technical-objective candidates through a loopback-only local API;
 - validated, version-controlled multi-system profiles with provisional EU AI Act scope screening and attributable human applicability decisions;
+- explicit configured AI activities covering inference, training, fine-tuning, evaluation, automated decisions, agent tool use, synthetic-content generation, and unknown context;
 - a deterministic, versioned EU AI Act technical pack with code-only objectives and no documentary or control-level compliance assessment;
+- deterministic reconciliation between screened technical requirements and independently discovered repository evidence, including visible mismatches and unresolved system ownership;
 - a language-neutral repository graph with a Go indexer for symbols, imports, calls, routes, configuration, tests, and conservative reachability;
 - automatic local Markdown reports and versioned JSON evidence bundles; and
 - a verified release installer and guided setup orchestrator that can provision a separately distributed Ollama runtime and user-selected model after explicit confirmation; and
@@ -34,7 +36,7 @@ ComplyScan 0.1.2 consists of:
 
 Ollama review is disabled by the built-in scan default. Interactive setup recommends it, but the user must confirm the selection and separately confirm any runtime installation or model pull. The default scan remains deterministic and makes no model call. When explicitly enabled, ComplyScan calls a configured model through Ollama's loopback API. The experimental configuration selects `qwen3:8b`. Three fresh prompt-version-3 runs passed the narrow public-repository effective-policy gate consistently, while raw-model results remained dependent on seven transparent deterministic adjustments per run. Broader representative evaluation and the applicability reassessment remain open before promotion to stable status. OpenAI, Anthropic, Gemini, and ComplyScan Cloud remain inactive extension types.
 
-The technical pack, keyword-group evidence matcher, repository graph, and context selection remain deterministic in both configurations. With Ollama disabled, no technical-objective context leaves the CLI process. With Ollama enabled, existing technical candidates are reviewed in a second request using bounded graph metadata and connected excerpts; profiles are not sent. The pack's `technical-semantic-and-human` verification labels still require human review and never mean that a model established compliance. Generated Markdown and JSON reports remain local unless a future dashboard connection is explicitly enabled.
+The technical pack, keyword-group evidence matcher, repository graph, activity-sensitive requirement mapping, reconciliation, and context selection remain deterministic in both configurations. With Ollama disabled, no technical-objective context leaves the CLI process. With Ollama enabled, existing technical candidates are reviewed in a second request using bounded graph metadata and connected excerpts; profiles are not sent. Model observations cannot change the deterministic reconciliation result. The pack's `technical-semantic-and-human` verification labels still require human review and never mean that a model established compliance. Generated Markdown and JSON reports remain local unless a future dashboard connection is explicitly enabled.
 
 ## AI Act applicability assessment
 
