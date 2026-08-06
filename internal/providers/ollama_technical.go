@@ -15,7 +15,7 @@ import (
 const (
 	// TechnicalReviewPromptVersion invalidates cached observations whenever the
 	// technical prompt, schema, sanitization, or deterministic guardrails change.
-	TechnicalReviewPromptVersion = "5"
+	TechnicalReviewPromptVersion = "6"
 
 	maxTechnicalContexts           = 8
 	maxTechnicalRelationships      = 20
@@ -248,6 +248,13 @@ func validateTechnicalObservation(value ollamaTechnicalObservation, candidate Te
 	observation.ContradictoryEvidence = contradictoryEvidence
 	observation.MissingEvidence = cleanTechnicalList(value.MissingEvidence, maxTechnicalQuestions)
 	guarded := false
+	filteredContradictions, removedContradictions := filterNonExecutableContradictions(observation.ContradictoryEvidence)
+	if removedContradictions > 0 {
+		observation.ContradictoryEvidence = filteredContradictions
+		observation.GuardrailNote = "Non-executable negative-claim guardrail: repository comments or documentation cannot prove that an implementation is absent."
+		guarded = true
+	}
+	observation.MissingEvidence = normalizeAuthorizationMissingEvidence(observation.MissingEvidence, candidate)
 	if discussionOnlyCandidate(candidate, rationale) && (value.Strength == StrengthPartial || value.Strength == StrengthStrong) {
 		observation.ModelStrength = value.Strength
 		observation.Strength = StrengthNotSupported
@@ -282,6 +289,58 @@ func validateTechnicalObservation(value ollamaTechnicalObservation, candidate Te
 	observation.Conclusion = deriveTechnicalConclusion(observation.Strength, candidate, modelConclusion)
 	observation.Assurance = deriveAssuranceLevel(observation.Strength, candidate)
 	return observation, guarded, nil
+}
+
+func filterNonExecutableContradictions(values []TechnicalEvidenceClaim) ([]TechnicalEvidenceClaim, int) {
+	result := make([]TechnicalEvidenceClaim, 0, len(values))
+	removed := 0
+	for _, value := range values {
+		summary := strings.ToLower(value.Summary)
+		nonExecutableAssertion := containsAny(summary,
+			"comment says", "comment states", "comment notes", "explicitly stated", "explicitly noted",
+			"documentation says", "documentation states", "described as a fixture", "noted as a fixture",
+		)
+		negativeClaim := containsAny(summary, " no ", "not contain", "without", "lacks", "absent", "missing")
+		if nonExecutableAssertion && negativeClaim {
+			removed++
+			continue
+		}
+		result = append(result, value)
+	}
+	return result, removed
+}
+
+func normalizeAuthorizationMissingEvidence(values []string, candidate TechnicalCandidate) []string {
+	code := strings.ToLower(codeFromCandidate(candidate))
+	if !containsAny(code, "authoriz", "authoris", "permission", "allowed role", "reviewer role") {
+		return values
+	}
+	const boundary = "Verify how reviewer identity, role, and authority are established upstream; the supplied code contains an authorization-shaped guard but repository evidence does not establish its source or effectiveness."
+	replaced := false
+	for index, value := range values {
+		lower := strings.ToLower(value)
+		if containsAny(lower, "authorization check", "authorisation check", "access control mechanism") {
+			values[index] = boundary
+			replaced = true
+		}
+	}
+	if replaced {
+		return uniqueTechnicalStrings(values)
+	}
+	return values
+}
+
+func uniqueTechnicalStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func validateTechnicalClaims(values []TechnicalEvidenceClaim, candidate TechnicalCandidate) ([]TechnicalEvidenceClaim, error) {
@@ -548,6 +607,8 @@ For the single supplied objective:
 - treat evidence_status=not-detected as a search starting point, not as proof of absence;
 - for investigation_mode=extended-search, decide whether the wider retrieved context reveals an indirect implementation; use not-found-after-investigation only when the submitted bounded search provides no support, and use cannot-determine when coverage is too weak to support that narrower statement;
 - cite supporting and contradictory evidence only with an exact path supplied in source_contexts; summarize its relevance without quoting code;
+- comments, documentation, fixture labels, and a developer's statement that something is absent are never contradictory proof of absence; negative evidence must come from executable behavior, configuration, tests, or bounded search coverage;
+- distinguish an authorization-shaped guard from proof of authorization: when code checks an authorised/authorized reviewer, role, or permission, acknowledge that technical signal and ask how identity and authority are established upstream rather than claiming that no authorization check exists;
 - list missing evidence needed to move from repository evidence to structural, executable, or operational verification;
 - strength refers exclusively to support for that objective, never general code quality, correctness, maintainability, framework usage, or whether the component works as designed;
 - a well-written UI or documentation component that only discusses the objective's topic is not_supported;

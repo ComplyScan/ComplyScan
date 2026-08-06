@@ -371,6 +371,29 @@ func TestExtendedSearchNotSupportedBecomesBoundedNoEvidenceConclusion(t *testing
 	}
 }
 
+func TestTechnicalObservationDropsCommentOnlyNegativeAndPreservesAuthorizationBoundary(t *testing.T) {
+	candidate := TechnicalCandidate{
+		ObjectiveID: "eu-aia-14-override-intervention", EvidenceFingerprint: strings.Repeat("9", 64),
+		Path: "control.go", SourceContexts: []TechnicalSourceContext{{Path: "control.go", Source: "if !reviewerAuthorised { return }"}},
+	}
+	observation, guarded, err := validateTechnicalObservation(ollamaTechnicalObservation{
+		Strength: StrengthPartial, Conclusion: ConclusionPartial, Confidence: "medium", Rationale: "An authorization-shaped guard is present but its upstream identity source is unresolved.",
+		SupportingEvidence:    []TechnicalEvidenceClaim{{Path: "control.go", Line: 1, Summary: "A reviewer guard controls the override."}},
+		ContradictoryEvidence: []TechnicalEvidenceClaim{{Path: "control.go", Line: 1, Summary: "A comment explicitly stated that no complete control exists."}},
+		MissingEvidence:       []string{"Authorization checks or access control mechanisms that enforce who can invoke it."},
+		UnresolvedQuestions:   []string{}, SuggestedReview: "Trace identity.",
+	}, candidate, candidate.EvidenceFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !guarded || len(observation.ContradictoryEvidence) != 0 || !strings.Contains(observation.GuardrailNote, "Non-executable") {
+		t.Fatalf("comment-only negative was not guarded: %#v", observation)
+	}
+	if len(observation.MissingEvidence) != 1 || !strings.Contains(observation.MissingEvidence[0], "authorization-shaped guard") {
+		t.Fatalf("authorization boundary was not normalized: %#v", observation.MissingEvidence)
+	}
+}
+
 func TestOllamaTechnicalReviewCapsTestOnlyCandidateWithSharedProductionCallee(t *testing.T) {
 	fingerprint := strings.Repeat("e", 64)
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {

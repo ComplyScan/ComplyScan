@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/report"
@@ -71,6 +72,18 @@ func validateOllamaSmoke(value report.Report) ([]string, error) {
 	}
 	if len(negative.SupportingEvidence) != 0 {
 		return nil, errors.New("negative objective invented supporting evidence")
+	}
+	for _, claim := range negative.ContradictoryEvidence {
+		lower := strings.ToLower(claim.Summary)
+		if strings.Contains(lower, "comment") || strings.Contains(lower, "explicitly stated") || strings.Contains(lower, "explicitly noted") {
+			return nil, errors.New("negative objective treated a repository comment as contradictory proof")
+		}
+	}
+	for _, missing := range positive.MissingEvidence {
+		lower := strings.ToLower(missing)
+		if strings.Contains(lower, "authorization checks") || strings.Contains(lower, "authorisation checks") {
+			return nil, errors.New("positive objective overlooked the submitted authorization-shaped guard")
+		}
 	}
 	return []string{
 		fmt.Sprintf("PASS positive override: %s, %s, %d grounded reference(s)", positive.Strength, positive.Assurance, len(positive.SupportingEvidence)),
