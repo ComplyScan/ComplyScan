@@ -85,6 +85,9 @@ func findSecrets(value string) []secretMatch {
 				continue
 			}
 			secret := value[indexes[groupStart]:indexes[groupStart+1]]
+			if candidate.Provider == "AI provider" && isObviousCredentialPlaceholder(secret) {
+				continue
+			}
 			if _, ok := seen[secret]; ok {
 				continue
 			}
@@ -94,6 +97,40 @@ func findSecrets(value string) []secretMatch {
 	}
 	sort.Slice(matches, func(i, j int) bool { return matches[i].Secret < matches[j].Secret })
 	return matches
+}
+
+func isObviousCredentialPlaceholder(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.Trim(value, "<>[]{}()")
+	for _, marker := range []string{
+		"your-api-key",
+		"your_api_key",
+		"your-key",
+		"your_key",
+		"replace-me",
+		"replace_me",
+		"example-key",
+		"example_key",
+		"example-token",
+		"example_token",
+		"example-placeholder",
+		"dummy-key",
+		"dummy_key",
+		"fake-key",
+		"fake_key",
+		"sample-key",
+		"sample_key",
+		"insert-key",
+		"insert_key",
+		"paste-key",
+		"paste_key",
+		"changeme",
+	} {
+		if strings.Contains(value, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // RedactSecrets removes complete credentials from evidence before reporting it.

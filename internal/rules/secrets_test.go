@@ -51,3 +51,30 @@ func TestHardcodedSecretRuleRequiresTokenBoundary(t *testing.T) {
 		t.Fatalf("ordinary hyphenated text produced secret findings: %#v", findings)
 	}
 }
+
+func TestHardcodedSecretRuleIgnoresExplicitDocumentationPlaceholders(t *testing.T) {
+	repo := repositoryWithFile("README.md", discovery.KindDocumentation, `
+export OPENAI_API_KEY="your-key-from-your-secret-store"
+ANTHROPIC_API_KEY="replace-me-with-your-key"
+GEMINI_API_KEY="<your-api-key>"
+MISTRAL_API_KEY="example-placeholder-value"
+`)
+	findings, err := (HardcodedSecretRule{}).Run(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("documentation placeholders produced secret findings: %#v", findings)
+	}
+}
+
+func TestHardcodedSecretRuleStillReportsGenericHighEntropyAssignments(t *testing.T) {
+	repo := repositoryWithFile("config.py", discovery.KindSource, `OPENAI_API_KEY="k3J9vQ7mN2xR8sT4wY6pL1cB"`)
+	findings, err := (HardcodedSecretRule{}).Run(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1: %#v", len(findings), findings)
+	}
+}
