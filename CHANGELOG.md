@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.3 - 2026-08-06
+
 ### Added
 
 - `complyscan doctor` for offline build, repository, configuration, report-permission, Git, and optional Ollama readiness checks.
@@ -16,6 +18,14 @@
 - Versioned deterministic reconciliation between screened EU AI Act technical objectives and independently discovered repository evidence, including visible non-detections, mismatches, and unassigned evidence.
 - Developer-focused explanations, category definitions, and examples before every interactive setup question, including a safe `needs-review` default for human applicability.
 - EU AI Act technical pack `0.1.2` with strictly validated, inspectable applicability scope, activity, and external-use conditions beside every code-evidence objective.
+- Bounded model investigation of technical candidates and likely-required objectives where deterministic evidence was not detected, including one validated follow-up retrieval round over eligible repository files.
+- Source-grounded model conclusions, supporting and contradicting evidence, unresolved questions, deterministic semantic guardrails, and separately reported evidence assurance.
+- Opt-in isolated Docker or Podman verification that runs explicitly configured tests without a shell, network, writable repository mount, or elevated container privileges.
+- Reusable verification recipes and guided setup that connect bounded test results to selected technical objectives without turning those results into legal conclusions.
+- An Ollama model picker that lists installed and recommended models while accepting any exact local model tag.
+- BYOK OpenAI, Anthropic, and Gemini model review through fixed official endpoints, schema-constrained output, explicit remote-processing consent, and environment-only credentials.
+- Remote-provider readiness checks and an explicit `doctor --probe-review` synthetic compatibility request.
+- GitHub Action inputs for local or BYOK model review without accepting API-key values as action inputs.
 
 ### Changed
 
@@ -26,7 +36,15 @@
 - Technical review now evaluates one candidate per model request and binds the returned decision to the objective and evidence fingerprint in trusted code instead of asking the model to reproduce identifiers.
 - Technical review context includes a wider bounded window around the actual match before connected graph context, improving evidence available for mechanisms whose implementation spans nearby helpers.
 - Transparent semantic guardrails retain executable grader and rubric implementations while rejecting discussion-only website, documentation, FAQ, and quiz components.
-- Scan evidence bundles now use schema version 2 and include the AI component inventory plus requirement-to-evidence reconciliation in JSON, Markdown, and terminal output.
+- Scan evidence bundles now use schema version 3 and include the AI component inventory, requirement-to-evidence reconciliation, isolated verification assurance, and advisory model observations in JSON, Markdown, and terminal output.
+- Interactive setup now offers deterministic-only, local Ollama, or explicitly consented BYOK review and stores only the selected remote credential's environment-variable name.
+- All review providers share the same bounded context, identifier binding, redaction, cache identity, and advisory-only result contract.
+
+### Fixed
+
+- Documentation values explicitly labelled as example, replacement, dummy, fake, or sample credentials no longer fail self-scans, while generic high-entropy assignments remain reportable.
+- Malformed optional model search plans are safely skipped instead of aborting an otherwise valid bounded investigation.
+- Negative technical conclusions require grounded context and cannot infer missing authorization or implementation evidence from an isolated excerpt.
 
 ### Testing
 

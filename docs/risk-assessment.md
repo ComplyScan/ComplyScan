@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Product | ComplyScan |
-| Version assessed | 0.1.2 |
+| Version assessed | 0.1.3 |
 | Assessment date | 2026-08-06 |
 | Owner | ComplyScan maintainers |
 | Status | Updated for local and BYOK model review, bounded retrieval, and opt-in isolated execution; representative-repository and applicability review remain open |
@@ -50,7 +50,7 @@ Likelihood and impact are qualitative: low, medium, or high. Residual risk refle
 
 ## Accepted limitations
 
-ComplyScan 0.1.2 combines self-declared profile facts with repository evidence rather than observing a complete deployed system. It cannot verify that profile answers match real operations, runtime configuration, actual data subjects, organisational controls, intended use outside the repository, or downstream decisions. Any reviewer sees only bounded findings or connected technical context and therefore cannot resolve most missing system context. The relationship graph currently indexes Go and conservatively structured Python, JavaScript, and TypeScript; dynamic dispatch, runtime framework registration, metaprogramming, and other languages remain incomplete coverage. BYOK adapters have transport-contract tests but not representative live-model baselines. These limitations are not defects that can be eliminated solely through more rules or prompts.
+ComplyScan 0.1.3 combines self-declared profile facts with repository evidence rather than observing a complete deployed system. It cannot verify that profile answers match real operations, runtime configuration, actual data subjects, organisational controls, intended use outside the repository, or downstream decisions. Any reviewer sees only bounded findings or connected technical context and therefore cannot resolve most missing system context. The relationship graph currently indexes Go and conservatively structured Python, JavaScript, and TypeScript; dynamic dispatch, runtime framework registration, metaprogramming, and other languages remain incomplete coverage. BYOK adapters have transport-contract tests but not representative live-model baselines. These limitations are not defects that can be eliminated solely through more rules or prompts.
 
 ## Verification evidence
 
