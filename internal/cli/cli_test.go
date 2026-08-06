@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/config"
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
@@ -406,6 +407,8 @@ func TestScanRejectsUnsafeOrInactiveOllamaOverrides(t *testing.T) {
 	for _, arguments := range [][]string{
 		{"scan", "--review", "openai"},
 		{"scan", "--ollama-model", "gemma3"},
+		{"scan", "--model", "gpt-test"},
+		{"scan", "--api-key-env", "OPENAI_API_KEY"},
 		{"scan", "--refresh-review"},
 		{"scan", "--review", "ollama", "--ollama-endpoint", "https://example.com"},
 	} {
@@ -413,6 +416,28 @@ func TestScanRejectsUnsafeOrInactiveOllamaOverrides(t *testing.T) {
 		if code := Execute(arguments, &stdout, &stderr, testBuild); code != 2 {
 			t.Fatalf("Execute(%v) code = %d, want 2; stderr=%q", arguments, code, stderr.String())
 		}
+	}
+}
+
+func TestConfiguredRemoteReviewerReadsOnlyNamedEnvironmentVariable(t *testing.T) {
+	settings := config.Default().AI
+	settings.Provider = "openai"
+	settings.Remote = config.RemoteConfig{
+		Model: "gpt-test", APIKeyEnv: "COMPLYSCAN_TEST_OPENAI_KEY", TimeoutSeconds: 30, MaxFindings: 3,
+	}
+	t.Setenv("COMPLYSCAN_TEST_OPENAI_KEY", "secret-in-process-only")
+	provider, timeout, maximum, model, kind, err := configuredReviewer(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider == nil || timeout != 30*time.Second || maximum != 3 || model != "gpt-test" || kind != providers.OpenAI {
+		t.Fatalf("configured reviewer = %#v, %s, %d, %q, %q", provider, timeout, maximum, model, kind)
+	}
+
+	settings.Remote.APIKeyEnv = "COMPLYSCAN_TEST_MISSING_KEY"
+	_, _, _, _, _, err = configuredReviewer(settings)
+	if err == nil || !strings.Contains(err.Error(), "COMPLYSCAN_TEST_MISSING_KEY is not set") {
+		t.Fatalf("missing-key error = %v", err)
 	}
 }
 

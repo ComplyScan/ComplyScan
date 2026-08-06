@@ -58,11 +58,11 @@ type ollamaTechnicalPayload struct {
 // technical-objective candidates. It cannot create or change objective status.
 func (provider *OllamaProvider) ReviewTechnical(ctx context.Context, request TechnicalReviewRequest) (TechnicalReviewResult, error) {
 	result := TechnicalReviewResult{
-		Provider: Ollama, Model: provider.model, InputCandidates: len(request.Candidates),
+		Provider: provider.kind, Model: provider.model, InputCandidates: len(request.Candidates),
 		Observations: []TechnicalObservation{},
 		Notes: []string{
 			"Technical evidence investigations are advisory and cannot change objective status, legal applicability, findings, or exit status.",
-			"Investigations contain only bounded repository excerpts, search coverage, and structural relationships sent to the configured local Ollama endpoint.",
+			fmt.Sprintf("Investigations contain only bounded repository excerpts, search coverage, and structural relationships sent to the configured %s endpoint.", provider.label),
 			"Operational effectiveness and legal sufficiency always require evidence outside the model response.",
 		},
 	}
@@ -106,7 +106,7 @@ func (provider *OllamaProvider) reviewTechnicalCandidate(ctx context.Context, ca
 	sanitized.EvidenceFingerprint = ""
 	promptData, err := json.Marshal(sanitized)
 	if err != nil {
-		return TechnicalObservation{}, Usage{}, false, fmt.Errorf("encode Ollama technical review input: %w", err)
+		return TechnicalObservation{}, Usage{}, false, fmt.Errorf("encode %s technical review input: %w", provider.label, err)
 	}
 	response, err := provider.chat(ctx, ollamaChatRequest{
 		Model: provider.model,
@@ -122,7 +122,7 @@ func (provider *OllamaProvider) reviewTechnicalCandidate(ctx context.Context, ca
 	}
 	var payload ollamaTechnicalPayload
 	if err := json.Unmarshal([]byte(response.Message.Content), &payload); err != nil {
-		return TechnicalObservation{}, Usage{}, false, fmt.Errorf("decode Ollama structured technical review: %w", err)
+		return TechnicalObservation{}, Usage{}, false, fmt.Errorf("decode %s structured technical review: %w", provider.label, err)
 	}
 	observation, guarded, err := validateTechnicalObservation(payload.Observation, sanitized, candidate.EvidenceFingerprint)
 	if err != nil {

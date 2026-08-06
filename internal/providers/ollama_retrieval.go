@@ -23,7 +23,7 @@ func (provider *OllamaProvider) PlanTechnicalSearch(ctx context.Context, candida
 	sanitized.EvidenceFingerprint = ""
 	promptData, err := json.Marshal(sanitized)
 	if err != nil {
-		return TechnicalSearchPlan{}, Usage{}, fmt.Errorf("encode Ollama technical search input: %w", err)
+		return TechnicalSearchPlan{}, Usage{}, fmt.Errorf("encode %s technical search input: %w", provider.label, err)
 	}
 	response, err := provider.chat(ctx, ollamaChatRequest{
 		Model: provider.model,
@@ -39,7 +39,7 @@ func (provider *OllamaProvider) PlanTechnicalSearch(ctx context.Context, candida
 	}
 	var payload ollamaTechnicalSearchPayload
 	if err := json.Unmarshal([]byte(response.Message.Content), &payload); err != nil {
-		return TechnicalSearchPlan{}, Usage{}, fmt.Errorf("decode Ollama structured technical search plan: %w", err)
+		return TechnicalSearchPlan{}, Usage{}, fmt.Errorf("decode %s structured technical search plan: %w", provider.label, err)
 	}
 	usage := Usage{PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount, TotalDurationNS: response.TotalDuration}
 	plan, err := validateTechnicalSearchPlan(payload.Plan)

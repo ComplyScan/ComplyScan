@@ -239,6 +239,8 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 		reviewProvider            string
 		ollamaModel               string
 		ollamaEndpoint            string
+		remoteModel               string
+		remoteAPIKeyEnv           string
 		reportDirectory           string
 		noReport                  bool
 		refreshReview             bool
@@ -281,11 +283,20 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			if cmd.Flags().Changed("ollama-endpoint") {
 				cfg.AI.Ollama.Endpoint = strings.TrimSpace(ollamaEndpoint)
 			}
+			if cmd.Flags().Changed("model") {
+				cfg.AI.Remote.Model = strings.TrimSpace(remoteModel)
+			}
+			if cmd.Flags().Changed("api-key-env") {
+				cfg.AI.Remote.APIKeyEnv = strings.TrimSpace(remoteAPIKeyEnv)
+			}
 			if (cmd.Flags().Changed("ollama-model") || cmd.Flags().Changed("ollama-endpoint")) && cfg.AI.Provider != "ollama" {
 				return errors.New("--ollama-model and --ollama-endpoint require --review ollama or ai.provider: ollama")
 			}
-			if refreshReview && cfg.AI.Provider != "ollama" {
-				return errors.New("--refresh-review requires --review ollama or ai.provider: ollama")
+			if (cmd.Flags().Changed("model") || cmd.Flags().Changed("api-key-env")) && !isRemoteReviewProvider(cfg.AI.Provider) {
+				return errors.New("--model and --api-key-env require --review openai, anthropic, or gemini")
+			}
+			if refreshReview && cfg.AI.Provider == "none" {
+				return errors.New("--refresh-review requires an enabled advisory review provider")
 			}
 			if err := cfg.Validate(); err != nil {
 				return fmt.Errorf("validate review configuration: %w", err)
@@ -459,23 +470,28 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				reportValue.ExecutionVerifications = verificationResults
 				reconciliation.AttachExecutionVerifications(&evidenceMapping, verificationResults)
 			}
-			if cfg.AI.Provider == "ollama" {
+			if cfg.AI.Provider != "none" {
 				investigationRequest := reviewcontext.BuildInvestigations(technicalEvidence, result.FullRepository, evidenceMapping)
 				if len(cfg.Systems) <= 1 {
 					investigationRequest = reviewcontext.AttachVerifications(investigationRequest, verificationResults)
 				}
 				candidateCount := len(investigationRequest.Candidates)
 				if outputFormat == "terminal" {
-					if _, err := fmt.Fprintf(stdout, "Ollama advisory review requested for %d finding(s) and %d technical evidence investigation target(s) with %s...\n\n", len(visible), candidateCount, cfg.AI.Ollama.Model); err != nil {
+					if _, err := fmt.Fprintf(stdout, "%s advisory review requested for %d finding(s) and %d technical evidence investigation target(s) with %s...\n\n", reviewProviderLabel(cfg.AI.Provider), len(visible), candidateCount, configuredReviewModel(cfg.AI)); err != nil {
 						return fmt.Errorf("write terminal report: %w", err)
+					}
+					if isRemoteReviewProvider(cfg.AI.Provider) {
+						if _, err := fmt.Fprintln(stdout, "Remote review sends only bounded, redacted finding and source-context records to the selected provider; usage may incur cost."); err != nil {
+							return fmt.Errorf("write remote review disclosure: %w", err)
+						}
 					}
 				}
 				progressWriter := io.Writer(stdout)
 				if outputFormat != "terminal" {
 					progressWriter = cmd.ErrOrStderr()
 				}
-				review, technicalReview, err := reviewWithOllama(
-					cmd.Context(), cfg.AI.Ollama, target, visible, technicalEvidence, investigationRequest, result.FullRepository,
+				review, technicalReview, err := reviewWithProvider(
+					cmd.Context(), cfg.AI, target, visible, technicalEvidence, investigationRequest, result.FullRepository,
 					refreshReview, technicalReviewProgress(progressWriter),
 				)
 				if err != nil {
@@ -528,12 +544,14 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().StringVar(&baselinePath, "baseline", "", "baseline file (relative to the scan target)")
 	command.Flags().BoolVar(&noBaseline, "no-baseline", false, "do not apply a configured baseline")
 	command.Flags().StringVar(&changedSince, "changed-since", "", "scan code files changed since a Git reference; governance checks remain repository-wide")
-	command.Flags().StringVar(&reviewProvider, "review", "", "advisory review provider: none or ollama (defaults to configuration)")
+	command.Flags().StringVar(&reviewProvider, "review", "", "advisory review provider: none, ollama, openai, anthropic, or gemini (defaults to configuration)")
 	command.Flags().StringVar(&ollamaModel, "ollama-model", "", "Ollama model name (overrides ai.ollama.model)")
 	command.Flags().StringVar(&ollamaEndpoint, "ollama-endpoint", "", "local Ollama base URL (overrides ai.ollama.endpoint)")
+	command.Flags().StringVar(&remoteModel, "model", "", "remote-provider model name (overrides ai.remote.model)")
+	command.Flags().StringVar(&remoteAPIKeyEnv, "api-key-env", "", "environment-variable name containing the remote-provider API key")
 	command.Flags().StringVar(&reportDirectory, "report-dir", report.DefaultDirectory, "directory for latest.md and latest.json (relative to the scan target)")
 	command.Flags().BoolVar(&noReport, "no-report", false, "do not save local Markdown and JSON reports")
-	command.Flags().BoolVar(&refreshReview, "refresh-review", false, "ignore cached technical observations and run Ollama again")
+	command.Flags().BoolVar(&refreshReview, "refresh-review", false, "ignore cached technical observations and run the configured provider again")
 	command.Flags().BoolVar(&verifyConfigured, "verify", false, "run verification recipes from .complyscan.yml in isolated containers")
 	command.Flags().StringVar(&verifyRuntime, "verify-runtime", "docker", "local container runtime for opt-in execution: docker or podman")
 	command.Flags().StringVar(&verifyImage, "verify-image", "", "preloaded local container image for opt-in execution")
@@ -610,9 +628,9 @@ func validateVerificationPlans(plans []verification.Options, evidence framework.
 	return plans, nil
 }
 
-func reviewWithOllama(
+func reviewWithProvider(
 	ctx context.Context,
-	settings config.OllamaConfig,
+	settings config.AIConfig,
 	target string,
 	findings []rules.Finding,
 	evidence framework.TechnicalEvidenceReport,
@@ -621,20 +639,17 @@ func reviewWithOllama(
 	refresh bool,
 	onProgress func(technicalreview.Progress) error,
 ) (providers.ReviewResult, providers.TechnicalReviewResult, error) {
-	reviewer, err := providers.NewOllama(providers.OllamaOptions{
-		Endpoint: settings.Endpoint, Model: settings.Model,
-		Timeout: time.Duration(settings.TimeoutSeconds) * time.Second, MaxFindings: settings.MaxFindings,
-	})
+	reviewer, timeout, maxFindings, model, kind, err := configuredReviewer(settings)
 	if err != nil {
 		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, err
 	}
-	findingContext, cancelFindings := context.WithTimeout(ctx, time.Duration(settings.TimeoutSeconds)*time.Second)
+	findingContext, cancelFindings := context.WithTimeout(ctx, timeout)
 	findingResult, err := reviewer.Review(findingContext, providers.ReviewRequest{
 		RepositoryRoot: target, Findings: findings,
 	})
 	cancelFindings()
 	if err != nil {
-		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, fmt.Errorf("Ollama advisory review: %w", err)
+		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, fmt.Errorf("%s advisory review: %w", reviewProviderLabel(settings.Provider), err)
 	}
 	var cache *technicalreview.Cache
 	cacheUnavailable := false
@@ -650,21 +665,80 @@ func reviewWithOllama(
 	}
 	technicalResult, err := technicalreview.Run(ctx, reviewer, investigationRequest, technicalreview.Options{
 		Identity: technicalreview.Identity{
-			Provider: providers.Ollama, Model: settings.Model, PromptVersion: providers.TechnicalReviewPromptVersion,
+			Provider: kind, Model: model, PromptVersion: providers.TechnicalReviewPromptVersion,
 			PackID: evidence.Pack.ID, PackVersion: evidence.Pack.Version, PackDigest: evidence.Pack.Digest,
 		},
-		Cache: cache, Refresh: refresh, MaxCandidates: settings.MaxFindings, OnProgress: onProgress,
+		Cache: cache, Refresh: refresh, MaxCandidates: maxFindings, OnProgress: onProgress,
 		RetrieveFollowUp: func(candidate providers.TechnicalCandidate, plan providers.TechnicalSearchPlan) (providers.TechnicalCandidate, int) {
 			return reviewcontext.ApplyFollowUp(candidate, plan, repository)
 		},
 	})
 	if err != nil {
-		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, fmt.Errorf("Ollama technical evidence investigation: %w", err)
+		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, fmt.Errorf("%s technical evidence investigation: %w", reviewProviderLabel(settings.Provider), err)
 	}
 	if cacheUnavailable {
 		technicalResult.Notes = append(technicalResult.Notes, "The local technical review cache was unavailable; review continued without cache reuse.")
 	}
 	return findingResult, technicalResult, nil
+}
+
+func configuredReviewer(settings config.AIConfig) (*providers.OllamaProvider, time.Duration, int, string, providers.Kind, error) {
+	if settings.Provider == "ollama" {
+		timeout := time.Duration(settings.Ollama.TimeoutSeconds) * time.Second
+		reviewer, err := providers.NewOllama(providers.OllamaOptions{
+			Endpoint: settings.Ollama.Endpoint, Model: settings.Ollama.Model,
+			Timeout: timeout, MaxFindings: settings.Ollama.MaxFindings,
+		})
+		return reviewer, timeout, settings.Ollama.MaxFindings, settings.Ollama.Model, providers.Ollama, err
+	}
+	key, exists := os.LookupEnv(settings.Remote.APIKeyEnv)
+	if !exists || strings.TrimSpace(key) == "" {
+		return nil, 0, 0, "", providers.None, fmt.Errorf("%s is not set; export it before using %s review", settings.Remote.APIKeyEnv, reviewProviderLabel(settings.Provider))
+	}
+	options := providers.RemoteOptions{
+		APIKey: key, Model: settings.Remote.Model,
+		Timeout: time.Duration(settings.Remote.TimeoutSeconds) * time.Second, MaxFindings: settings.Remote.MaxFindings,
+	}
+	var reviewer *providers.OllamaProvider
+	var err error
+	kind := providers.Kind(settings.Provider)
+	switch kind {
+	case providers.OpenAI:
+		reviewer, err = providers.NewOpenAI(options)
+	case providers.Anthropic:
+		reviewer, err = providers.NewAnthropic(options)
+	case providers.Gemini:
+		reviewer, err = providers.NewGemini(options)
+	default:
+		return nil, 0, 0, "", providers.None, fmt.Errorf("unsupported review provider %q", settings.Provider)
+	}
+	return reviewer, options.Timeout, options.MaxFindings, options.Model, kind, err
+}
+
+func isRemoteReviewProvider(value string) bool {
+	return value == "openai" || value == "anthropic" || value == "gemini"
+}
+
+func configuredReviewModel(settings config.AIConfig) string {
+	if settings.Provider == "ollama" {
+		return settings.Ollama.Model
+	}
+	return settings.Remote.Model
+}
+
+func reviewProviderLabel(value string) string {
+	switch value {
+	case "ollama":
+		return "Ollama"
+	case "openai":
+		return "OpenAI"
+	case "anthropic":
+		return "Anthropic"
+	case "gemini":
+		return "Gemini"
+	default:
+		return value
+	}
 }
 
 func technicalReviewProgress(output io.Writer) func(technicalreview.Progress) error {

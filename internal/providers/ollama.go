@@ -33,9 +33,12 @@ type OllamaOptions struct {
 
 type OllamaProvider struct {
 	chatURL     string
+	kind        Kind
+	label       string
 	model       string
 	maxFindings int
 	client      *http.Client
+	completion  func(context.Context, ollamaChatRequest) (ollamaChatResponse, error)
 }
 
 type ollamaMessage struct {
@@ -118,12 +121,12 @@ func NewOllama(options OllamaOptions) (*OllamaProvider, error) {
 			},
 		}
 	}
-	return &OllamaProvider{chatURL: chatURL, model: model, maxFindings: options.MaxFindings, client: client}, nil
+	return &OllamaProvider{chatURL: chatURL, kind: Ollama, label: "Ollama", model: model, maxFindings: options.MaxFindings, client: client}, nil
 }
 
 func (provider *OllamaProvider) Review(ctx context.Context, request ReviewRequest) (ReviewResult, error) {
 	result := ReviewResult{
-		Provider: Ollama, Model: provider.model, InputFindings: len(request.Findings),
+		Provider: provider.kind, Model: provider.model, InputFindings: len(request.Findings),
 		Observations: []Observation{},
 		Notes:        []string{"Model observations are advisory and do not alter deterministic findings, severity, suppressions, baselines, or exit status."},
 	}
@@ -161,7 +164,7 @@ func (provider *OllamaProvider) Review(ctx context.Context, request ReviewReques
 	}
 	promptData, err := json.Marshal(inputs)
 	if err != nil {
-		return ReviewResult{}, fmt.Errorf("encode Ollama review input: %w", err)
+		return ReviewResult{}, fmt.Errorf("encode %s review input: %w", provider.label, err)
 	}
 	requestBody := ollamaChatRequest{
 		Model: provider.model,
@@ -178,7 +181,7 @@ func (provider *OllamaProvider) Review(ctx context.Context, request ReviewReques
 	}
 	var payload ollamaReviewPayload
 	if err := json.Unmarshal([]byte(response.Message.Content), &payload); err != nil {
-		return ReviewResult{}, fmt.Errorf("decode Ollama structured review: %w", err)
+		return ReviewResult{}, fmt.Errorf("decode %s structured review: %w", provider.label, err)
 	}
 	observations, err := validateOllamaObservations(payload.Observations, wanted)
 	if err != nil {
@@ -191,12 +194,15 @@ func (provider *OllamaProvider) Review(ctx context.Context, request ReviewReques
 		TotalDurationNS: response.TotalDuration,
 	}
 	if result.Reviewed < len(selected) {
-		result.Notes = append(result.Notes, fmt.Sprintf("Ollama returned %d valid observation(s) for %d submitted findings.", result.Reviewed, len(selected)))
+		result.Notes = append(result.Notes, fmt.Sprintf("%s returned %d valid observation(s) for %d submitted findings.", provider.label, result.Reviewed, len(selected)))
 	}
 	return result, nil
 }
 
 func (provider *OllamaProvider) chat(ctx context.Context, requestBody ollamaChatRequest) (ollamaChatResponse, error) {
+	if provider.completion != nil {
+		return provider.completion(ctx, requestBody)
+	}
 	body, err := json.Marshal(requestBody)
 	if err != nil {
 		return ollamaChatResponse{}, fmt.Errorf("encode Ollama request: %w", err)
