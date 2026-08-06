@@ -71,7 +71,7 @@ complyscan doctor .
 complyscan version
 ```
 
-`setup` is the recommended first command. It creates or updates `.complyscan.yml`, runs the factual system and human-applicability questionnaire, recommends local Ollama review, lets the user choose any Ollama model, offers to install and start Ollama when it is missing, offers to pull the selected model, and can run the first scan. Each software installation and model download requires a separate confirmation. If setup cannot finish an external installation or download, it still saves the collected repository configuration and prints the exact recovery command.
+`setup` is the recommended first command. It creates or updates `.complyscan.yml`, runs the factual system and human-applicability questionnaire, recommends local Ollama review, lets the user choose any Ollama model, offers to install and start Ollama when it is missing, offers to pull the selected model, and can run the first scan. Every interactive question first explains why the fact matters, defines each controlled option in developer language, and provides examples where useful. The wizard recommends `needs-review` rather than asking developers to invent a legal conclusion. Each software installation and model download requires a separate confirmation. If setup cannot finish an external installation or download, it still saves the collected repository configuration and prints the exact recovery command.
 
 `doctor` performs an offline readiness check for the installed build, repository configuration, Git detection, report-directory permissions, the Ollama executable, its loopback service, and the configured model. Missing optional tools are warnings; a required but unavailable Ollama service or model is a blocking failure.
 

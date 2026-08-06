@@ -14,6 +14,7 @@
 - Live per-candidate technical-review progress that distinguishes Ollama inference from cache reuse.
 - Explicit system activity declarations for inference, training, fine-tuning, evaluation, automated decisions, agent tool use, and synthetic-content generation.
 - Versioned deterministic reconciliation between screened EU AI Act technical objectives and independently discovered repository evidence, including visible non-detections, mismatches, and unassigned evidence.
+- Developer-focused explanations, category definitions, and examples before every interactive setup question, including a safe `needs-review` default for human applicability.
 
 ### Changed
 
