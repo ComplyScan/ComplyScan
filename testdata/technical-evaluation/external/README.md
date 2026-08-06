@@ -28,7 +28,7 @@ The semantic policy in `semantic.json` sends one candidate per request, rejects 
 
 ## Initial three-repository baseline
 
-For technical pack `0.1.1`, the reviewed deterministic baseline has 12 true-positive candidates, five false-positive candidates, and no false negatives: 70.6% candidate precision and 100% recall across the labelled paths. All eight expected per-repository language detections are present. Context anchors and relationships are not labelled in this external study; those are enforced by the checked-in synthetic benchmark.
+For technical pack `0.1.2`, the reviewed deterministic baseline has 12 true-positive candidates, five false-positive candidates, and no false negatives: 70.6% candidate precision and 100% recall across the labelled paths. Version 0.1.2 adds applicability metadata without changing the evidence-match terms. All eight expected per-repository language detections are present. Context anchors and relationships are not labelled in this external study; those are enforced by the checked-in synthetic benchmark.
 
 The five deliberately unlabelled results include a LocalAI test of model-load log messaging plus Promptfoo documentation or generic-test signals: two interactive website pages about AI safety/security and two source/test references whose nearby words resemble a technical control without implementing that control. They remain visible as false positives instead of being hidden by broad path exclusions, because tests and user-facing source can themselves be valid evidence for other objectives. Optional semantic review is the intended filtering layer.
 

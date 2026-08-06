@@ -15,12 +15,14 @@
 - Explicit system activity declarations for inference, training, fine-tuning, evaluation, automated decisions, agent tool use, and synthetic-content generation.
 - Versioned deterministic reconciliation between screened EU AI Act technical objectives and independently discovered repository evidence, including visible non-detections, mismatches, and unassigned evidence.
 - Developer-focused explanations, category definitions, and examples before every interactive setup question, including a safe `needs-review` default for human applicability.
+- EU AI Act technical pack `0.1.2` with strictly validated, inspectable applicability scope, activity, and external-use conditions beside every code-evidence objective.
 
 ### Changed
 
 - The public Go module and source references now use `github.com/ComplyScan/ComplyScan`.
 - CI now verifies the documented Go 1.22 minimum.
-- Technical evidence now uses bounded keyword boundaries and local line context, preserves camel-case path signals, and applies the refined EU AI Act technical pack `0.1.1` terms derived from public-repository false-positive review.
+- Technical evidence now uses bounded keyword boundaries and local line context, preserves camel-case path signals, and applies the refined EU AI Act technical pack `0.1.2` terms derived from public-repository false-positive review.
+- Reconciliation now consumes applicability conditions directly from the versioned technical pack instead of maintaining a second hard-coded Go mapping.
 - Technical review now evaluates one candidate per model request and binds the returned decision to the objective and evidence fingerprint in trusted code instead of asking the model to reproduce identifiers.
 - Technical review context includes a wider bounded window around the actual match before connected graph context, improving evidence available for mechanisms whose implementation spans nearby helpers.
 - Transparent semantic guardrails retain executable grader and rubric implementations while rejecting discussion-only website, documentation, FAQ, and quiz components.
