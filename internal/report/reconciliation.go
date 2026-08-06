@@ -64,6 +64,13 @@ func writeReconciliationTerminal(writer io.Writer, value reconciliation.Report) 
 					return err
 				}
 			}
+			if objective.Verification != nil {
+				if _, err := fmt.Fprintf(writer, "             Isolated tests: %d passed, %d failed; assurance %s (%s)\n",
+					objective.Verification.Passed, objective.Verification.Failed, objective.Verification.Assurance,
+					strings.Join(objective.Verification.Recipes, ", ")); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	if len(value.Unmapped) > 0 {

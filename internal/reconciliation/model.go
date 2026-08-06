@@ -55,6 +55,16 @@ type ObjectiveResult struct {
 	Reasons            []Reason                  `json:"reasons"`
 	EvidenceReferences []EvidenceReference       `json:"evidence_references"`
 	Investigation      *ObjectiveInvestigation   `json:"evidence_investigation,omitempty"`
+	Verification       *ObjectiveVerification    `json:"execution_verification,omitempty"`
+}
+
+type ObjectiveVerification struct {
+	Assurance providers.AssuranceLevel `json:"assurance_level"`
+	Runs      int                      `json:"runs"`
+	Passed    int                      `json:"passed"`
+	Failed    int                      `json:"failed"`
+	Recipes   []string                 `json:"recipes"`
+	Boundary  string                   `json:"boundary"`
 }
 
 type ObjectiveInvestigation struct {
@@ -104,6 +114,7 @@ type Summary struct {
 	StructurallyVerified       int `json:"structurally_verified"`
 	InvestigationNoEvidence    int `json:"investigation_no_evidence"`
 	InvestigationUnresolved    int `json:"investigation_unresolved"`
+	TestEvidenceObserved       int `json:"test_evidence_observed"`
 }
 
 type Report struct {

@@ -19,6 +19,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/report"
 	"github.com/ComplyScan/ComplyScan/internal/technicalreview"
+	"github.com/ComplyScan/ComplyScan/internal/verification"
 )
 
 var testBuild = BuildInfo{Version: "0.1.0", Commit: "test", BuildDate: "today"}
@@ -44,16 +45,37 @@ func TestScanExitCodes(t *testing.T) {
 	}
 }
 
-func TestValidateVerificationObjectivesRejectsUnknownAndDuplicateIDs(t *testing.T) {
+func TestValidateVerificationPlansRejectsUnknownAndDuplicateIDs(t *testing.T) {
 	evidence := framework.TechnicalEvidenceReport{Objectives: []framework.ObjectiveAssessment{{ID: "known"}}}
-	if err := validateVerificationObjectives([]string{"known"}, evidence); err != nil {
+	base := verification.Options{RecipeID: "tests", Objectives: []string{"known"}}
+	if _, err := validateVerificationPlans([]verification.Options{base}, evidence, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateVerificationObjectives([]string{"unknown"}, evidence); err == nil || !strings.Contains(err.Error(), "unknown --verify-objective") {
+	unknown := base
+	unknown.Objectives = []string{"unknown"}
+	if _, err := validateVerificationPlans([]verification.Options{unknown}, evidence, nil); err == nil || !strings.Contains(err.Error(), "unknown objective") {
 		t.Fatalf("unexpected unknown-objective error: %v", err)
 	}
-	if err := validateVerificationObjectives([]string{"known", "known"}, evidence); err == nil || !strings.Contains(err.Error(), "duplicate") {
+	duplicate := base
+	duplicate.Objectives = []string{"known", "known"}
+	if _, err := validateVerificationPlans([]verification.Options{duplicate}, evidence, nil); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("unexpected duplicate-objective error: %v", err)
+	}
+}
+
+func TestValidateVerificationPlansInfersOneSystemButRequiresMultipleSystemOwnership(t *testing.T) {
+	evidence := framework.TechnicalEvidenceReport{Objectives: []framework.ObjectiveAssessment{{ID: "objective"}}}
+	plan := verification.Options{RecipeID: "tests", Objectives: []string{"objective"}}
+	validated, err := validateVerificationPlans([]verification.Options{plan}, evidence, []profile.System{{ID: "one"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(validated[0].Systems) != 1 || validated[0].Systems[0] != "one" {
+		t.Fatalf("single system was not inferred: %#v", validated)
+	}
+	_, err = validateVerificationPlans([]verification.Options{plan}, evidence, []profile.System{{ID: "one"}, {ID: "two"}})
+	if err == nil || !strings.Contains(err.Error(), "must declare systems") {
+		t.Fatalf("unexpected multi-system error: %v", err)
 	}
 }
 

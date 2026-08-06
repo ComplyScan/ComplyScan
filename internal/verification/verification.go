@@ -26,21 +26,25 @@ const (
 )
 
 type Options struct {
+	RecipeID   string
 	Target     string
 	Runtime    string
 	Image      string
 	Command    string
 	Arguments  []string
 	Objectives []string
+	Systems    []string
 	Timeout    time.Duration
 }
 
 type Report struct {
+	RecipeID     string   `json:"recipe_id"`
 	Status       Status   `json:"status"`
 	Runtime      string   `json:"runtime"`
 	Image        string   `json:"image"`
 	Command      []string `json:"command"`
 	Objectives   []string `json:"objectives"`
+	Systems      []string `json:"systems,omitempty"`
 	ExitCode     int      `json:"exit_code"`
 	DurationMS   int64    `json:"duration_ms"`
 	OutputDigest string   `json:"output_digest"`
@@ -65,13 +69,14 @@ func Execute(ctx context.Context, options Options) (Report, error) {
 
 func execute(ctx context.Context, options Options, lookPath func(string) (string, error), run commandExecutor) (Report, error) {
 	options.Runtime = strings.TrimSpace(options.Runtime)
+	options.RecipeID = strings.TrimSpace(options.RecipeID)
 	options.Image = strings.TrimSpace(options.Image)
 	options.Command = strings.TrimSpace(options.Command)
 	if options.Runtime != "docker" && options.Runtime != "podman" {
 		return Report{}, errors.New("verification runtime must be docker or podman")
 	}
-	if options.Image == "" || options.Command == "" || len(options.Objectives) == 0 {
-		return Report{}, errors.New("verification requires an image, command, and at least one technical objective")
+	if options.RecipeID == "" || options.Image == "" || options.Command == "" || len(options.Objectives) == 0 {
+		return Report{}, errors.New("verification requires a recipe ID, image, command, and at least one technical objective")
 	}
 	if strings.ContainsAny(options.Image, "\r\n\x00") || strings.HasPrefix(options.Image, "-") {
 		return Report{}, errors.New("verification image is invalid")
@@ -104,6 +109,7 @@ func execute(ctx context.Context, options Options, lookPath func(string) (string
 		"run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL",
 		"--security-opt", "no-new-privileges", "--pids-limit", "256", "--memory", "1g", "--cpus", "1",
 		"--tmpfs", "/tmp:rw,nosuid,nodev,size=512m",
+		"--env", "HOME=/tmp/home", "--env", "TMPDIR=/tmp", "--env", "XDG_CACHE_HOME=/tmp/cache", "--env", "GOCACHE=/tmp/go-build",
 		"--mount", "type=bind,source=" + target + ",target=/workspace,readonly", "--workdir", "/workspace",
 		options.Image, options.Command,
 	}
@@ -129,8 +135,9 @@ func execute(ctx context.Context, options Options, lookPath func(string) (string
 		command[index] = rules.RedactSecrets(command[index])
 	}
 	return Report{
-		Status: status, Runtime: options.Runtime, Image: options.Image, Command: command,
+		RecipeID: options.RecipeID, Status: status, Runtime: options.Runtime, Image: options.Image, Command: command,
 		Objectives: append([]string(nil), options.Objectives...), ExitCode: result.exitCode,
+		Systems:    append([]string(nil), options.Systems...),
 		DurationMS: duration.Milliseconds(), OutputDigest: fmt.Sprintf("%x", outputDigest),
 		Output:   strings.TrimSpace(rules.RedactSecrets(result.output)),
 		Boundary: "The command ran in a read-only, network-disabled container. A passing result supports only the user-declared objective association and does not establish compliance or operational effectiveness.",

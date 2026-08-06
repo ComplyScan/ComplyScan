@@ -51,21 +51,21 @@ type Summary struct {
 }
 
 type Report struct {
-	SchemaVersion         int                                `json:"schema_version"`
-	Tool                  Tool                               `json:"tool"`
-	Scan                  ScanMetadata                       `json:"scan"`
-	Target                string                             `json:"target"`
-	Summary               Summary                            `json:"summary"`
-	Findings              []rules.Finding                    `json:"findings"`
-	Warnings              []string                           `json:"warnings,omitempty"`
-	Suppressed            int                                `json:"suppressed"`
-	Applicability         *profile.AssessmentReport          `json:"applicability,omitempty"`
-	TechnicalEvidence     *framework.TechnicalEvidenceReport `json:"technical_evidence,omitempty"`
-	AIInventory           *inventory.Report                  `json:"ai_inventory,omitempty"`
-	Reconciliation        *reconciliation.Report             `json:"reconciliation,omitempty"`
-	Review                *providers.ReviewResult            `json:"review,omitempty"`
-	TechnicalReview       *providers.TechnicalReviewResult   `json:"evidence_investigation,omitempty"`
-	ExecutionVerification *verification.Report               `json:"execution_verification,omitempty"`
+	SchemaVersion          int                                `json:"schema_version"`
+	Tool                   Tool                               `json:"tool"`
+	Scan                   ScanMetadata                       `json:"scan"`
+	Target                 string                             `json:"target"`
+	Summary                Summary                            `json:"summary"`
+	Findings               []rules.Finding                    `json:"findings"`
+	Warnings               []string                           `json:"warnings,omitempty"`
+	Suppressed             int                                `json:"suppressed"`
+	Applicability          *profile.AssessmentReport          `json:"applicability,omitempty"`
+	TechnicalEvidence      *framework.TechnicalEvidenceReport `json:"technical_evidence,omitempty"`
+	AIInventory            *inventory.Report                  `json:"ai_inventory,omitempty"`
+	Reconciliation         *reconciliation.Report             `json:"reconciliation,omitempty"`
+	Review                 *providers.ReviewResult            `json:"review,omitempty"`
+	TechnicalReview        *providers.TechnicalReviewResult   `json:"evidence_investigation,omitempty"`
+	ExecutionVerifications []verification.Report              `json:"execution_verification,omitempty"`
 }
 
 type TerminalOptions struct {
@@ -194,8 +194,8 @@ func WriteTerminal(w io.Writer, report Report, options TerminalOptions) error {
 			return err
 		}
 	}
-	if report.ExecutionVerification != nil {
-		if err := WriteTerminalExecutionVerification(w, *report.ExecutionVerification); err != nil {
+	for _, executionVerification := range report.ExecutionVerifications {
+		if err := WriteTerminalExecutionVerification(w, executionVerification); err != nil {
 			return err
 		}
 	}
@@ -264,8 +264,8 @@ func WriteTerminalCompletion(w io.Writer, report Report) error {
 			return err
 		}
 	}
-	if report.ExecutionVerification != nil {
-		if err := WriteTerminalExecutionVerification(w, *report.ExecutionVerification); err != nil {
+	for _, executionVerification := range report.ExecutionVerifications {
+		if err := WriteTerminalExecutionVerification(w, executionVerification); err != nil {
 			return err
 		}
 	}
@@ -363,7 +363,7 @@ func WriteTerminalTechnicalReview(w io.Writer, review providers.TechnicalReviewR
 // WriteTerminalExecutionVerification renders the isolated command result as
 // supporting evidence without treating it as a compliance decision.
 func WriteTerminalExecutionVerification(w io.Writer, verification verification.Report) error {
-	if _, err := fmt.Fprintf(w, "Isolated execution verification: %s (exit %d, %d ms)\n", strings.ToUpper(string(verification.Status)), verification.ExitCode, verification.DurationMS); err != nil {
+	if _, err := fmt.Fprintf(w, "Isolated execution verification %s: %s (exit %d, %d ms)\n", verification.RecipeID, strings.ToUpper(string(verification.Status)), verification.ExitCode, verification.DurationMS); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "        Container: %s / %s; command: %s\n", verification.Runtime, verification.Image, strings.Join(verification.Command, " ")); err != nil {
@@ -371,6 +371,11 @@ func WriteTerminalExecutionVerification(w io.Writer, verification verification.R
 	}
 	if _, err := fmt.Fprintf(w, "        Declared objectives: %s\n        Boundary: %s\n", strings.Join(verification.Objectives, ", "), verification.Boundary); err != nil {
 		return err
+	}
+	if len(verification.Systems) > 0 {
+		if _, err := fmt.Fprintf(w, "        Declared systems: %s\n", strings.Join(verification.Systems, ", ")); err != nil {
+			return err
+		}
 	}
 	if verification.Output != "" {
 		if _, err := fmt.Fprintf(w, "        Output:\n%s\n", verification.Output); err != nil {

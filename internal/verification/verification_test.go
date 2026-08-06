@@ -18,7 +18,7 @@ func TestExecuteUsesReadOnlyNetworkDisabledContainerWithoutShell(t *testing.T) {
 		return commandResult{output: "PASS", exitCode: 0}
 	}
 	report, err := execute(context.Background(), Options{
-		Target: t.TempDir(), Runtime: "docker", Image: "golang:local", Command: "go",
+		RecipeID: "go-tests", Target: t.TempDir(), Runtime: "docker", Image: "golang:local", Command: "go",
 		Arguments: []string{"test", "./..."}, Objectives: []string{"eu-aia-15-robustness-failure-handling"}, Timeout: time.Minute,
 	}, func(name string) (string, error) { return "/usr/bin/" + name, nil }, run)
 	if err != nil {
@@ -28,7 +28,7 @@ func TestExecuteUsesReadOnlyNetworkDisabledContainerWithoutShell(t *testing.T) {
 		t.Fatalf("unexpected result: report=%#v calls=%#v", report, calls)
 	}
 	joined := strings.Join(calls[1], " ")
-	for _, required := range []string{"--network none", "--read-only", "--cap-drop ALL", "no-new-privileges", "readonly", "golang:local go test ./..."} {
+	for _, required := range []string{"--network none", "--read-only", "--cap-drop ALL", "no-new-privileges", "readonly", "GOCACHE=/tmp/go-build", "golang:local go test ./..."} {
 		if !strings.Contains(joined, required) {
 			t.Errorf("container invocation missing %q: %s", required, joined)
 		}
@@ -41,7 +41,7 @@ func TestExecuteUsesReadOnlyNetworkDisabledContainerWithoutShell(t *testing.T) {
 func TestExecuteRecordsTestFailureWithoutTreatingItAsInfrastructureError(t *testing.T) {
 	calls := 0
 	report, err := execute(context.Background(), Options{
-		Target: t.TempDir(), Runtime: "podman", Image: "test:local", Command: "pytest",
+		RecipeID: "python-tests", Target: t.TempDir(), Runtime: "podman", Image: "test:local", Command: "pytest",
 		Objectives: []string{"objective"}, Timeout: time.Minute,
 	}, func(string) (string, error) { return "/usr/bin/podman", nil }, func(_ context.Context, _ string, _ ...string) commandResult {
 		calls++
@@ -60,7 +60,7 @@ func TestExecuteRecordsTestFailureWithoutTreatingItAsInfrastructureError(t *test
 
 func TestExecuteRequiresPreloadedImage(t *testing.T) {
 	_, err := execute(context.Background(), Options{
-		Target: t.TempDir(), Runtime: "docker", Image: "missing:local", Command: "go",
+		RecipeID: "missing-test", Target: t.TempDir(), Runtime: "docker", Image: "missing:local", Command: "go",
 		Objectives: []string{"objective"}, Timeout: time.Minute,
 	}, func(string) (string, error) { return "/usr/bin/docker", nil }, func(_ context.Context, _ string, _ ...string) commandResult {
 		return commandResult{output: "not found", exitCode: 1, err: errors.New("exit status 1")}

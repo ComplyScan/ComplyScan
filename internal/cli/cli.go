@@ -247,6 +247,8 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 		verifyArguments           []string
 		verifyObjectives          []string
 		verifyTimeout             time.Duration
+		verifyConfigured          bool
+		verifySystems             []string
 	)
 	command := &cobra.Command{
 		Use:   "scan [path]",
@@ -299,9 +301,24 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			if noReport && cmd.Flags().Changed("report-dir") {
 				return errors.New("--report-dir and --no-report cannot be used together")
 			}
-			verificationRequested := cmd.Flags().Changed("verify-runtime") || cmd.Flags().Changed("verify-image") || cmd.Flags().Changed("verify-command") || cmd.Flags().Changed("verify-arg") || cmd.Flags().Changed("verify-objective") || cmd.Flags().Changed("verify-timeout")
-			if verificationRequested && (strings.TrimSpace(verifyImage) == "" || strings.TrimSpace(verifyCommand) == "" || len(verifyObjectives) == 0) {
+			adHocVerification := cmd.Flags().Changed("verify-runtime") || cmd.Flags().Changed("verify-image") || cmd.Flags().Changed("verify-command") || cmd.Flags().Changed("verify-arg") || cmd.Flags().Changed("verify-objective") || cmd.Flags().Changed("verify-system") || cmd.Flags().Changed("verify-timeout")
+			if verifyConfigured && adHocVerification {
+				return errors.New("--verify runs configured recipes and cannot be combined with ad-hoc --verify-* options")
+			}
+			if adHocVerification && (strings.TrimSpace(verifyImage) == "" || strings.TrimSpace(verifyCommand) == "" || len(verifyObjectives) == 0) {
 				return errors.New("isolated verification requires --verify-image, --verify-command, and at least one --verify-objective")
+			}
+			verificationPlans := []verification.Options{}
+			if verifyConfigured {
+				if cfg.Verification == nil || len(cfg.Verification.Recipes) == 0 {
+					return errors.New("--verify requires at least one verification recipe in .complyscan.yml")
+				}
+				verificationPlans = configuredVerificationOptions(target, cfg.Verification.Recipes)
+			} else if adHocVerification {
+				verificationPlans = append(verificationPlans, verification.Options{
+					RecipeID: "cli-verification", Target: target, Runtime: verifyRuntime, Image: verifyImage, Command: verifyCommand,
+					Arguments: verifyArguments, Objectives: verifyObjectives, Systems: verifySystems, Timeout: verifyTimeout,
+				})
 			}
 			resolvedReportDirectory := ""
 			if !noReport {
@@ -418,8 +435,34 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			reportValue.AIInventory = &aiInventory
 			evidenceMapping := reconciliation.Build(cfg.Systems, assessment, technicalEvidence, aiInventory)
 			reportValue.Reconciliation = &evidenceMapping
+			verificationResults := []verification.Report{}
+			if len(verificationPlans) > 0 {
+				verificationPlans, err = validateVerificationPlans(verificationPlans, technicalEvidence, cfg.Systems)
+				if err != nil {
+					return err
+				}
+				progressWriter := cmd.ErrOrStderr()
+				if outputFormat == "terminal" {
+					progressWriter = stdout
+				}
+				for index, plan := range verificationPlans {
+					if _, err := fmt.Fprintf(progressWriter, "Running isolated verification %d/%d: %s in local image %s with network disabled...\n", index+1, len(verificationPlans), plan.RecipeID, plan.Image); err != nil {
+						return fmt.Errorf("write verification progress: %w", err)
+					}
+					verificationResult, err := verification.Execute(cmd.Context(), plan)
+					if err != nil {
+						return fmt.Errorf("isolated verification %s: %w", plan.RecipeID, err)
+					}
+					verificationResults = append(verificationResults, verificationResult)
+				}
+				reportValue.ExecutionVerifications = verificationResults
+				reconciliation.AttachExecutionVerifications(&evidenceMapping, verificationResults)
+			}
 			if cfg.AI.Provider == "ollama" {
 				investigationRequest := reviewcontext.BuildInvestigations(technicalEvidence, result.FullRepository, evidenceMapping)
+				if len(cfg.Systems) <= 1 {
+					investigationRequest = reviewcontext.AttachVerifications(investigationRequest, verificationResults)
+				}
 				candidateCount := len(investigationRequest.Candidates)
 				if outputFormat == "terminal" {
 					if _, err := fmt.Fprintf(stdout, "Ollama advisory review requested for %d finding(s) and %d technical evidence investigation target(s) with %s...\n\n", len(visible), candidateCount, cfg.AI.Ollama.Model); err != nil {
@@ -440,26 +483,6 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				reportValue.Review = &review
 				reportValue.TechnicalReview = &technicalReview
 				reconciliation.AttachTechnicalInvestigations(&evidenceMapping, technicalReview)
-			}
-			if verificationRequested {
-				if err := validateVerificationObjectives(verifyObjectives, technicalEvidence); err != nil {
-					return err
-				}
-				progressWriter := cmd.ErrOrStderr()
-				if outputFormat == "terminal" {
-					progressWriter = stdout
-				}
-				if _, err := fmt.Fprintf(progressWriter, "Running opt-in isolated verification in local image %s with network disabled...\n", verifyImage); err != nil {
-					return fmt.Errorf("write verification progress: %w", err)
-				}
-				verificationResult, err := verification.Execute(cmd.Context(), verification.Options{
-					Target: target, Runtime: verifyRuntime, Image: verifyImage, Command: verifyCommand,
-					Arguments: verifyArguments, Objectives: verifyObjectives, Timeout: verifyTimeout,
-				})
-				if err != nil {
-					return fmt.Errorf("isolated verification: %w", err)
-				}
-				reportValue.ExecutionVerification = &verificationResult
 			}
 			var artifacts report.Artifacts
 			if resolvedReportDirectory != "" {
@@ -510,35 +533,80 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().StringVar(&reportDirectory, "report-dir", report.DefaultDirectory, "directory for latest.md and latest.json (relative to the scan target)")
 	command.Flags().BoolVar(&noReport, "no-report", false, "do not save local Markdown and JSON reports")
 	command.Flags().BoolVar(&refreshReview, "refresh-review", false, "ignore cached technical observations and run Ollama again")
+	command.Flags().BoolVar(&verifyConfigured, "verify", false, "run verification recipes from .complyscan.yml in isolated containers")
 	command.Flags().StringVar(&verifyRuntime, "verify-runtime", "docker", "local container runtime for opt-in execution: docker or podman")
 	command.Flags().StringVar(&verifyImage, "verify-image", "", "preloaded local container image for opt-in execution")
 	command.Flags().StringVar(&verifyCommand, "verify-command", "", "test executable to run without a shell inside the container")
 	command.Flags().StringArrayVar(&verifyArguments, "verify-arg", nil, "argument for the isolated test command (repeatable)")
 	command.Flags().StringArrayVar(&verifyObjectives, "verify-objective", nil, "technical objective the test supports (repeatable)")
+	command.Flags().StringArrayVar(&verifySystems, "verify-system", nil, "configured system the test supports (repeatable; required when multiple systems exist)")
 	command.Flags().DurationVar(&verifyTimeout, "verify-timeout", 5*time.Minute, "timeout for opt-in isolated execution (maximum 30m)")
 	return command
 }
 
-func validateVerificationObjectives(objectives []string, evidence framework.TechnicalEvidenceReport) error {
+func configuredVerificationOptions(target string, recipes []config.VerificationRecipe) []verification.Options {
+	result := make([]verification.Options, 0, len(recipes))
+	for _, recipe := range recipes {
+		timeoutSeconds := recipe.TimeoutSeconds
+		if timeoutSeconds == 0 {
+			timeoutSeconds = config.DefaultVerificationTimeoutSeconds
+		}
+		result = append(result, verification.Options{
+			RecipeID: recipe.ID, Target: target, Runtime: recipe.Runtime, Image: recipe.Image, Command: recipe.Command,
+			Arguments: append([]string(nil), recipe.Arguments...), Objectives: append([]string(nil), recipe.Objectives...),
+			Systems: append([]string(nil), recipe.Systems...), Timeout: time.Duration(timeoutSeconds) * time.Second,
+		})
+	}
+	return result
+}
+
+func validateVerificationPlans(plans []verification.Options, evidence framework.TechnicalEvidenceReport, systems []profile.System) ([]verification.Options, error) {
 	available := make(map[string]struct{}, len(evidence.Objectives))
 	for _, objective := range evidence.Objectives {
 		available[objective.ID] = struct{}{}
 	}
-	seen := make(map[string]struct{}, len(objectives))
-	for _, objective := range objectives {
-		objective = strings.TrimSpace(objective)
-		if objective == "" {
-			return errors.New("--verify-objective cannot be empty")
-		}
-		if _, found := available[objective]; !found {
-			return fmt.Errorf("unknown --verify-objective %q; inspect available IDs with complyscan framework show", objective)
-		}
-		if _, duplicate := seen[objective]; duplicate {
-			return fmt.Errorf("duplicate --verify-objective %q", objective)
-		}
-		seen[objective] = struct{}{}
+	availableSystems := make(map[string]struct{}, len(systems))
+	for _, system := range systems {
+		availableSystems[system.ID] = struct{}{}
 	}
-	return nil
+	seenRecipes := make(map[string]struct{}, len(plans))
+	for index := range plans {
+		plan := &plans[index]
+		if _, duplicate := seenRecipes[plan.RecipeID]; duplicate {
+			return nil, fmt.Errorf("duplicate verification recipe %q", plan.RecipeID)
+		}
+		seenRecipes[plan.RecipeID] = struct{}{}
+		seenObjectives := make(map[string]struct{}, len(plan.Objectives))
+		for objectiveIndex, objective := range plan.Objectives {
+			objective = strings.TrimSpace(objective)
+			if _, found := available[objective]; !found {
+				return nil, fmt.Errorf("verification recipe %q has unknown objective %q; inspect available IDs with complyscan framework show", plan.RecipeID, objective)
+			}
+			if _, duplicate := seenObjectives[objective]; duplicate {
+				return nil, fmt.Errorf("verification recipe %q has duplicate objective %q", plan.RecipeID, objective)
+			}
+			seenObjectives[objective] = struct{}{}
+			plan.Objectives[objectiveIndex] = objective
+		}
+		if len(plan.Systems) == 0 && len(systems) == 1 {
+			plan.Systems = []string{systems[0].ID}
+		} else if len(plan.Systems) == 0 && len(systems) > 1 {
+			return nil, fmt.Errorf("verification recipe %q must declare systems because this repository configures multiple systems", plan.RecipeID)
+		}
+		seenSystems := make(map[string]struct{}, len(plan.Systems))
+		for systemIndex, system := range plan.Systems {
+			system = strings.TrimSpace(system)
+			if _, found := availableSystems[system]; !found {
+				return nil, fmt.Errorf("verification recipe %q has unknown system %q", plan.RecipeID, system)
+			}
+			if _, duplicate := seenSystems[system]; duplicate {
+				return nil, fmt.Errorf("verification recipe %q has duplicate system %q", plan.RecipeID, system)
+			}
+			seenSystems[system] = struct{}{}
+			plan.Systems[systemIndex] = system
+		}
+	}
+	return plans, nil
 }
 
 func reviewWithOllama(

@@ -282,6 +282,14 @@ func TestTechnicalFollowUpPlanRejectsUnsafeSearches(t *testing.T) {
 	}
 }
 
+func TestTechnicalPromptKeepsIsolatedVerificationAdvisory(t *testing.T) {
+	for _, boundary := range []string{"user rather than proven", "does not prove production deployment", "does not prove that the mechanism is absent"} {
+		if !strings.Contains(ollamaTechnicalSystemPrompt, boundary) {
+			t.Fatalf("technical prompt omitted isolated-verification boundary %q", boundary)
+		}
+	}
+}
+
 func TestOllamaSkipsMalformedOptionalFollowUpPlan(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		content, _ := json.Marshal(ollamaTechnicalSearchPayload{Plan: TechnicalSearchPlan{

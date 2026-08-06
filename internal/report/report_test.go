@@ -87,17 +87,17 @@ func TestWriteJSONUsesSchemaThreeEvidenceInvestigationContract(t *testing.T) {
 
 func TestExecutionVerificationIsRenderedWithoutComplianceClaim(t *testing.T) {
 	value := New(".", "dev", nil, nil, 0)
-	value.ExecutionVerification = &verification.Report{
-		Status: verification.StatusPassed, Runtime: "docker", Image: "golang:local",
+	value.ExecutionVerifications = []verification.Report{{
+		RecipeID: "go-tests", Status: verification.StatusPassed, Runtime: "docker", Image: "golang:local",
 		Command: []string{"go", "test", "./..."}, Objectives: []string{"objective"},
 		ExitCode: 0, DurationMS: 123, OutputDigest: strings.Repeat("d", 64), Output: "ok",
 		Boundary: "Passing does not establish compliance.",
-	}
+	}}
 	var terminal bytes.Buffer
 	if err := WriteTerminalCompletion(&terminal, value); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Isolated execution verification: PASSED", "Passing does not establish compliance."} {
+	for _, want := range []string{"Isolated execution verification go-tests: PASSED", "Passing does not establish compliance."} {
 		if !strings.Contains(terminal.String(), want) {
 			t.Errorf("terminal output missing %q:\n%s", want, terminal.String())
 		}

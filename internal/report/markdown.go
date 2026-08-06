@@ -172,11 +172,16 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 			}
 		}
 	}
-	if report.ExecutionVerification != nil {
-		verification := report.ExecutionVerification
-		if _, err := fmt.Fprintf(writer, "\n## Isolated execution verification\n\n- Result: %s (exit %d)\n- Runtime and image: %s / %s\n- Command: %s\n- Declared objectives: %s\n- Duration: %d ms\n- Output digest: %s\n- Boundary: %s\n",
+	if len(report.ExecutionVerifications) > 0 {
+		if _, err := fmt.Fprintln(writer, "\n## Isolated execution verification"); err != nil {
+			return err
+		}
+	}
+	for _, verification := range report.ExecutionVerifications {
+		if _, err := fmt.Fprintf(writer, "\n### %s\n\n- Result: %s (exit %d)\n- Runtime and image: %s / %s\n- Command: %s\n- Declared objectives: %s\n- Declared systems: %s\n- Duration: %d ms\n- Output digest: %s\n- Boundary: %s\n",
+			inlineCode(verification.RecipeID),
 			markdownText(string(verification.Status)), verification.ExitCode, inlineCode(verification.Runtime), inlineCode(verification.Image),
-			inlineCode(strings.Join(verification.Command, " ")), markdownText(strings.Join(verification.Objectives, ", ")), verification.DurationMS,
+			inlineCode(strings.Join(verification.Command, " ")), markdownText(strings.Join(verification.Objectives, ", ")), markdownText(strings.Join(verification.Systems, ", ")), verification.DurationMS,
 			inlineCode(verification.OutputDigest), markdownText(verification.Boundary)); err != nil {
 			return err
 		}
@@ -229,10 +234,10 @@ func writeAIInventoryMarkdown(writer io.Writer, value inventory.Report) error {
 }
 
 func writeReconciliationMarkdown(writer io.Writer, value reconciliation.Report) error {
-	if _, err := fmt.Fprintf(writer, "\n## Requirement-to-evidence reconciliation\n\n- Mapping version: %s\n- Likely required objectives: %d\n- With candidate evidence: %d\n- Without detected evidence: %d\n- Configuration/evidence mismatches: %d\n- Unresolved results: %d\n- Unassigned evidence: %d\n- AI-substantiated objectives: %d\n- Structurally verified objectives: %d\n- Extended investigations with no evidence: %d\n- Unresolved investigations: %d\n",
+	if _, err := fmt.Fprintf(writer, "\n## Requirement-to-evidence reconciliation\n\n- Mapping version: %s\n- Likely required objectives: %d\n- With candidate evidence: %d\n- Without detected evidence: %d\n- Configuration/evidence mismatches: %d\n- Unresolved results: %d\n- Unassigned evidence: %d\n- AI-substantiated objectives: %d\n- Structurally verified objectives: %d\n- Objectives with isolated test evidence: %d\n- Extended investigations with no evidence: %d\n- Unresolved investigations: %d\n",
 		inlineCode(value.MappingVersion), value.Summary.LikelyRequired, value.Summary.RequirementWithEvidence,
 		value.Summary.RequirementWithoutEvidence, value.Summary.EvidenceMismatches, value.Summary.Unresolved, value.Summary.UnmappedEvidence,
-		value.Summary.AISubstantiated, value.Summary.StructurallyVerified, value.Summary.InvestigationNoEvidence, value.Summary.InvestigationUnresolved); err != nil {
+		value.Summary.AISubstantiated, value.Summary.StructurallyVerified, value.Summary.TestEvidenceObserved, value.Summary.InvestigationNoEvidence, value.Summary.InvestigationUnresolved); err != nil {
 		return err
 	}
 	if len(value.Systems) == 0 {
@@ -241,7 +246,7 @@ func writeReconciliationMarkdown(writer io.Writer, value reconciliation.Report) 
 		}
 	}
 	for _, system := range value.Systems {
-		if _, err := fmt.Fprintf(writer, "\n### %s\n\nSystem ID: %s\n\n| Provision | Technical objective | Requirement | Evidence | Reconciliation | AI assurance |\n|---|---|---|---|---|---|\n",
+		if _, err := fmt.Fprintf(writer, "\n### %s\n\nSystem ID: %s\n\n| Provision | Technical objective | Requirement | Evidence | Reconciliation | AI assurance | Test assurance |\n|---|---|---|---|---|---|---|\n",
 			markdownText(system.SystemName), inlineCode(system.SystemID)); err != nil {
 			return err
 		}
@@ -250,9 +255,13 @@ func writeReconciliationMarkdown(writer io.Writer, value reconciliation.Report) 
 			if objective.Investigation != nil {
 				assurance = string(objective.Investigation.Assurance)
 			}
-			if _, err := fmt.Fprintf(writer, "| %s | %s | %s | %s | %s | %s |\n",
+			testAssurance := "—"
+			if objective.Verification != nil {
+				testAssurance = fmt.Sprintf("%s (%d passed, %d failed)", objective.Verification.Assurance, objective.Verification.Passed, objective.Verification.Failed)
+			}
+			if _, err := fmt.Fprintf(writer, "| %s | %s | %s | %s | %s | %s | %s |\n",
 				markdownText(objective.SourceReference), markdownText(objective.Title), markdownText(string(objective.Requirement)),
-				markdownText(string(objective.Evidence)), markdownText(string(objective.Mapping)), markdownText(assurance)); err != nil {
+				markdownText(string(objective.Evidence)), markdownText(string(objective.Mapping)), markdownText(assurance), markdownText(testAssurance)); err != nil {
 				return err
 			}
 		}
