@@ -12,7 +12,7 @@ import (
 
 func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 	target := t.TempDir()
-	input := strings.NewReader(strings.Repeat("\n", 19))
+	input := strings.NewReader(strings.Repeat("\n", 20))
 	var stdout, stderr bytes.Buffer
 	code := executeWithInput([]string{"setup", "--interactive", "--skip-ollama-install", "--skip-model-pull", "--skip-scan", target}, input, &stdout, &stderr, testBuild)
 	if code != 0 {

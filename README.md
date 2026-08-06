@@ -215,6 +215,7 @@ systems:
     affected-groups: [job applicants]
     decision-impact: advisory
     human-oversight: required
+    ai-activities: [inference, automated-decision]
     data:
       personal-data: yes
       special-category-data: unknown

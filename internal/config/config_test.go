@@ -119,6 +119,7 @@ systems:
     affected-groups: [job applicants]
     decision-impact: advisory
     human-oversight: required
+    ai-activities: [inference, automated-decision]
     data:
       personal-data: yes
       special-category-data: unknown
@@ -137,7 +138,7 @@ systems:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Systems) != 1 || cfg.Systems[0].UseCaseDomains[0] != profile.DomainEmployment {
+	if len(cfg.Systems) != 1 || cfg.Systems[0].UseCaseDomains[0] != profile.DomainEmployment || len(cfg.Systems[0].AIActivities) != 2 {
 		t.Fatalf("unexpected systems: %#v", cfg.Systems)
 	}
 }

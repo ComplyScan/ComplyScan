@@ -207,6 +207,11 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 		profile.OversightRequired, profile.OversightAvailable, profile.OversightLimited, profile.OversightNone, profile.OversightUnknown); err != nil {
 		return profile.System{}, err
 	}
+	if value.AIActivities, err = promptChoices(prompt, "AI activities", []profile.AIActivity{profile.ActivityUnknown},
+		profile.ActivityInference, profile.ActivityTraining, profile.ActivityFineTuning, profile.ActivityEvaluation,
+		profile.ActivityAutomatedDecision, profile.ActivityAgentToolUse, profile.ActivitySyntheticContent, profile.ActivityUnknown); err != nil {
+		return profile.System{}, err
+	}
 	if value.Data.PersonalData, err = promptChoice(prompt, "Processes personal data", profile.TriUnknown, profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
 		return profile.System{}, err
 	}

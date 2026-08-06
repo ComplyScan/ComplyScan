@@ -15,6 +15,7 @@ type OperatingRegion string
 type UseCaseDomain string
 type DecisionImpact string
 type HumanOversight string
+type AIActivity string
 type TriState string
 type DeploymentModel string
 type ReviewStatus string
@@ -68,6 +69,15 @@ const (
 	OversightNone      HumanOversight = "none"
 	OversightUnknown   HumanOversight = "unknown"
 
+	ActivityInference         AIActivity = "inference"
+	ActivityTraining          AIActivity = "training"
+	ActivityFineTuning        AIActivity = "fine-tuning"
+	ActivityEvaluation        AIActivity = "evaluation"
+	ActivityAutomatedDecision AIActivity = "automated-decision"
+	ActivityAgentToolUse      AIActivity = "agent-tool-use"
+	ActivitySyntheticContent  AIActivity = "synthetic-content"
+	ActivityUnknown           AIActivity = "unknown"
+
 	TriYes     TriState = "yes"
 	TriNo      TriState = "no"
 	TriUnknown TriState = "unknown"
@@ -100,7 +110,7 @@ func NewDraftSystem(id, name string) System {
 		ID: id, Name: name, IntendedPurpose: "unknown", LifecycleStage: LifecycleUnknown,
 		OrganizationRoles: []OrganizationRole{RoleUnknown}, OperatingRegions: []OperatingRegion{RegionUnknown},
 		UseCaseDomains: []UseCaseDomain{DomainUnknown}, Users: []string{"unknown"}, AffectedGroups: []string{"unknown"},
-		DecisionImpact: ImpactUnknown, HumanOversight: OversightUnknown,
+		DecisionImpact: ImpactUnknown, HumanOversight: OversightUnknown, AIActivities: []AIActivity{ActivityUnknown},
 		Data:             DataProfile{PersonalData: TriUnknown, SpecialCategoryData: TriUnknown, ChildrenData: TriUnknown},
 		DeploymentModels: []DeploymentModel{DeploymentUnknown}, ProfileReview: ProfileReview{Status: ReviewDraft},
 		Applicability: []ApplicabilityDecision{{Framework: FrameworkEUAIAct, Status: ApplicabilityNeedsReview}},
@@ -140,6 +150,7 @@ type System struct {
 	AffectedGroups    []string                `yaml:"affected-groups" json:"affected_groups"`
 	DecisionImpact    DecisionImpact          `yaml:"decision-impact" json:"decision_impact"`
 	HumanOversight    HumanOversight          `yaml:"human-oversight" json:"human_oversight"`
+	AIActivities      []AIActivity            `yaml:"ai-activities,omitempty" json:"ai_activities,omitempty"`
 	Data              DataProfile             `yaml:"data" json:"data"`
 	DeploymentModels  []DeploymentModel       `yaml:"deployment-models" json:"deployment_models"`
 	ProfileReview     ProfileReview           `yaml:"profile-review" json:"profile_review"`
@@ -228,6 +239,19 @@ func (system System) Validate() error {
 	}
 	if !oneOf(system.HumanOversight, OversightRequired, OversightAvailable, OversightLimited, OversightNone, OversightUnknown) {
 		return fmt.Errorf("human-oversight %q is not supported", system.HumanOversight)
+	}
+	// The field is optional so configurations created before it was introduced
+	// remain valid. Setup-created profiles always record an explicit value.
+	if len(system.AIActivities) > 0 {
+		if err := validateList("ai-activities", system.AIActivities, []AIActivity{
+			ActivityInference, ActivityTraining, ActivityFineTuning, ActivityEvaluation,
+			ActivityAutomatedDecision, ActivityAgentToolUse, ActivitySyntheticContent, ActivityUnknown,
+		}); err != nil {
+			return err
+		}
+		if len(system.AIActivities) > 1 && oneOf(ActivityUnknown, system.AIActivities...) {
+			return errors.New("ai-activities cannot combine unknown with established activities")
+		}
 	}
 	for name, value := range map[string]TriState{
 		"data.personal-data": system.Data.PersonalData, "data.special-category-data": system.Data.SpecialCategoryData, "data.children-data": system.Data.ChildrenData,

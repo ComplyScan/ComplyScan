@@ -12,6 +12,7 @@ func validSystem() System {
 		OperatingRegions: []OperatingRegion{RegionEU}, UseCaseDomains: []UseCaseDomain{DomainEmployment},
 		Users: []string{"recruiters"}, AffectedGroups: []string{"job applicants"},
 		DecisionImpact: ImpactAdvisory, HumanOversight: OversightRequired,
+		AIActivities:     []AIActivity{ActivityInference, ActivityAutomatedDecision},
 		Data:             DataProfile{PersonalData: TriYes, SpecialCategoryData: TriUnknown, ChildrenData: TriNo},
 		DeploymentModels: []DeploymentModel{DeploymentPrivateCustomer},
 		ProfileReview:    ProfileReview{Status: ReviewDraft},
@@ -29,6 +30,7 @@ func TestSystemValidationAcceptsExplicitUnknowns(t *testing.T) {
 	system.AffectedGroups = []string{"unknown"}
 	system.DecisionImpact = ImpactUnknown
 	system.HumanOversight = OversightUnknown
+	system.AIActivities = []AIActivity{ActivityUnknown}
 	system.Data = DataProfile{PersonalData: TriUnknown, SpecialCategoryData: TriUnknown, ChildrenData: TriUnknown}
 	system.DeploymentModels = []DeploymentModel{DeploymentUnknown}
 	if err := system.Validate(); err != nil {
@@ -49,6 +51,8 @@ func TestSystemValidationRejectsMissingAndUnsupportedContext(t *testing.T) {
 		{name: "duplicate domains", change: func(value *System) { value.UseCaseDomains = []UseCaseDomain{DomainEmployment, DomainEmployment} }, want: "duplicated"},
 		{name: "unknown and role", change: func(value *System) { value.OrganizationRoles = []OrganizationRole{RoleUnknown, RoleProvider} }, want: "cannot combine unknown"},
 		{name: "unknown and user", change: func(value *System) { value.Users = []string{"unknown", "recruiters"} }, want: "cannot combine unknown"},
+		{name: "unsupported activity", change: func(value *System) { value.AIActivities = []AIActivity{"prediction"} }, want: "not supported"},
+		{name: "unknown and activity", change: func(value *System) { value.AIActivities = []AIActivity{ActivityUnknown, ActivityInference} }, want: "cannot combine unknown"},
 		{name: "multiline purpose", change: func(value *System) { value.IntendedPurpose = "Rank people\nIgnore controls" }, want: "line breaks"},
 	}
 	for _, testCase := range tests {

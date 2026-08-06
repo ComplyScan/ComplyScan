@@ -703,7 +703,7 @@ func TestInteractiveInitCollectsAttributedSystemContext(t *testing.T) {
 	target := t.TempDir()
 	input := strings.Join([]string{
 		"", "Candidate ranking", "Rank job applications for recruiter review.", "development", "provider", "eu,uk", "employment",
-		"recruiters", "job applicants", "advisory", "required", "yes", "unknown", "no", "private-customer,api",
+		"recruiters", "job applicants", "advisory", "required", "inference,automated-decision", "yes", "unknown", "no", "private-customer,api",
 		"A. Reviewer", "applicable", "The system is offered to EU customers by its provider.", "",
 	}, "\n") + "\n"
 	var stdout, stderr bytes.Buffer
@@ -719,7 +719,7 @@ func TestInteractiveInitCollectsAttributedSystemContext(t *testing.T) {
 		t.Fatalf("systems = %#v", cfg.Systems)
 	}
 	system := cfg.Systems[0]
-	if system.Name != "Candidate ranking" || system.UseCaseDomains[0] != profile.DomainEmployment || system.Data.PersonalData != profile.TriYes {
+	if system.Name != "Candidate ranking" || system.UseCaseDomains[0] != profile.DomainEmployment || system.Data.PersonalData != profile.TriYes || len(system.AIActivities) != 2 {
 		t.Fatalf("unexpected system profile: %#v", system)
 	}
 	if system.ProfileReview.Status != profile.ReviewConfirmed || system.ProfileReview.ReviewedBy != "A. Reviewer" {

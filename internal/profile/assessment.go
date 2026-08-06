@@ -114,6 +114,9 @@ func assessSystem(system System) Assessment {
 	if system.HumanOversight == OversightUnknown {
 		assessment.MissingContext = append(assessment.MissingContext, "Human oversight has not been established.")
 	}
+	if len(system.AIActivities) == 0 || contains(system.AIActivities, ActivityUnknown) {
+		assessment.MissingContext = append(assessment.MissingContext, "AI activities such as inference, training, evaluation, automated decisions, agent tool use, or synthetic-content generation have not been established.")
+	}
 	if system.Data.PersonalData == TriUnknown || system.Data.SpecialCategoryData == TriUnknown || system.Data.ChildrenData == TriUnknown {
 		assessment.MissingContext = append(assessment.MissingContext, "One or more data categories have not been established.")
 	}
