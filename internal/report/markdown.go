@@ -150,6 +150,11 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 					return err
 				}
 			}
+			if observation.FollowUpRequested {
+				if _, err := fmt.Fprintf(writer, "\n- Bounded follow-up: %d excerpt(s) retrieved from %s", observation.FollowUpExcerpts, markdownText(strings.Join(observation.FollowUpQueries, ", "))); err != nil {
+					return err
+				}
+			}
 			if observation.GuardrailNote != "" {
 				if _, err := fmt.Fprintf(writer, "\nGuardrail: %s Original model strength: %s.\n", markdownText(observation.GuardrailNote), markdownText(string(observation.ModelStrength))); err != nil {
 					return err
@@ -164,6 +169,20 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 				if _, err := fmt.Fprintf(writer, "\n\nSuggested review: %s\n", markdownText(observation.SuggestedReview)); err != nil {
 					return err
 				}
+			}
+		}
+	}
+	if report.ExecutionVerification != nil {
+		verification := report.ExecutionVerification
+		if _, err := fmt.Fprintf(writer, "\n## Isolated execution verification\n\n- Result: %s (exit %d)\n- Runtime and image: %s / %s\n- Command: %s\n- Declared objectives: %s\n- Duration: %d ms\n- Output digest: %s\n- Boundary: %s\n",
+			markdownText(string(verification.Status)), verification.ExitCode, inlineCode(verification.Runtime), inlineCode(verification.Image),
+			inlineCode(strings.Join(verification.Command, " ")), markdownText(strings.Join(verification.Objectives, ", ")), verification.DurationMS,
+			inlineCode(verification.OutputDigest), markdownText(verification.Boundary)); err != nil {
+			return err
+		}
+		if verification.Output != "" {
+			if _, err := fmt.Fprintf(writer, "\nBounded, redacted output:\n\n    %s\n", strings.ReplaceAll(verification.Output, "\n", "\n    ")); err != nil {
+				return err
 			}
 		}
 	}

@@ -44,6 +44,19 @@ func TestScanExitCodes(t *testing.T) {
 	}
 }
 
+func TestValidateVerificationObjectivesRejectsUnknownAndDuplicateIDs(t *testing.T) {
+	evidence := framework.TechnicalEvidenceReport{Objectives: []framework.ObjectiveAssessment{{ID: "known"}}}
+	if err := validateVerificationObjectives([]string{"known"}, evidence); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateVerificationObjectives([]string{"unknown"}, evidence); err == nil || !strings.Contains(err.Error(), "unknown --verify-objective") {
+		t.Fatalf("unexpected unknown-objective error: %v", err)
+	}
+	if err := validateVerificationObjectives([]string{"known", "known"}, evidence); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("unexpected duplicate-objective error: %v", err)
+	}
+}
+
 func TestScanJSONOutputAndSeverityFilter(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	target := filepath.Join("..", "..", "testdata", "vulnerable-python-ai-app")

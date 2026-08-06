@@ -14,6 +14,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
+	"github.com/ComplyScan/ComplyScan/internal/verification"
 )
 
 func TestSeverityFilteringAndThreshold(t *testing.T) {
@@ -81,6 +82,39 @@ func TestWriteJSONUsesSchemaThreeEvidenceInvestigationContract(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), `"schema_version": 3`) || !strings.Contains(output.String(), `"evidence_investigation"`) || strings.Contains(output.String(), `"technical_review"`) {
 		t.Fatalf("unexpected schema-version-3 investigation JSON:\n%s", output.String())
+	}
+}
+
+func TestExecutionVerificationIsRenderedWithoutComplianceClaim(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	value.ExecutionVerification = &verification.Report{
+		Status: verification.StatusPassed, Runtime: "docker", Image: "golang:local",
+		Command: []string{"go", "test", "./..."}, Objectives: []string{"objective"},
+		ExitCode: 0, DurationMS: 123, OutputDigest: strings.Repeat("d", 64), Output: "ok",
+		Boundary: "Passing does not establish compliance.",
+	}
+	var terminal bytes.Buffer
+	if err := WriteTerminalCompletion(&terminal, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Isolated execution verification: PASSED", "Passing does not establish compliance."} {
+		if !strings.Contains(terminal.String(), want) {
+			t.Errorf("terminal output missing %q:\n%s", want, terminal.String())
+		}
+	}
+	var markdown bytes.Buffer
+	if err := WriteMarkdown(&markdown, value); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(markdown.String(), "## Isolated execution verification") || !strings.Contains(markdown.String(), "Passing does not establish compliance") {
+		t.Fatalf("verification missing from Markdown:\n%s", markdown.String())
+	}
+	var jsonOutput bytes.Buffer
+	if err := WriteJSON(&jsonOutput, value); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(jsonOutput.String(), `"execution_verification"`) || !strings.Contains(jsonOutput.String(), `"status": "passed"`) {
+		t.Fatalf("verification missing from JSON:\n%s", jsonOutput.String())
 	}
 }
 

@@ -24,6 +24,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/rules"
 	"github.com/ComplyScan/ComplyScan/internal/scanner"
 	"github.com/ComplyScan/ComplyScan/internal/technicalreview"
+	"github.com/ComplyScan/ComplyScan/internal/verification"
 	"github.com/spf13/cobra"
 )
 
@@ -240,6 +241,12 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 		reportDirectory           string
 		noReport                  bool
 		refreshReview             bool
+		verifyRuntime             string
+		verifyImage               string
+		verifyCommand             string
+		verifyArguments           []string
+		verifyObjectives          []string
+		verifyTimeout             time.Duration
 	)
 	command := &cobra.Command{
 		Use:   "scan [path]",
@@ -291,6 +298,10 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			}
 			if noReport && cmd.Flags().Changed("report-dir") {
 				return errors.New("--report-dir and --no-report cannot be used together")
+			}
+			verificationRequested := cmd.Flags().Changed("verify-runtime") || cmd.Flags().Changed("verify-image") || cmd.Flags().Changed("verify-command") || cmd.Flags().Changed("verify-arg") || cmd.Flags().Changed("verify-objective") || cmd.Flags().Changed("verify-timeout")
+			if verificationRequested && (strings.TrimSpace(verifyImage) == "" || strings.TrimSpace(verifyCommand) == "" || len(verifyObjectives) == 0) {
+				return errors.New("isolated verification requires --verify-image, --verify-command, and at least one --verify-objective")
 			}
 			resolvedReportDirectory := ""
 			if !noReport {
@@ -430,6 +441,26 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				reportValue.TechnicalReview = &technicalReview
 				reconciliation.AttachTechnicalInvestigations(&evidenceMapping, technicalReview)
 			}
+			if verificationRequested {
+				if err := validateVerificationObjectives(verifyObjectives, technicalEvidence); err != nil {
+					return err
+				}
+				progressWriter := cmd.ErrOrStderr()
+				if outputFormat == "terminal" {
+					progressWriter = stdout
+				}
+				if _, err := fmt.Fprintf(progressWriter, "Running opt-in isolated verification in local image %s with network disabled...\n", verifyImage); err != nil {
+					return fmt.Errorf("write verification progress: %w", err)
+				}
+				verificationResult, err := verification.Execute(cmd.Context(), verification.Options{
+					Target: target, Runtime: verifyRuntime, Image: verifyImage, Command: verifyCommand,
+					Arguments: verifyArguments, Objectives: verifyObjectives, Timeout: verifyTimeout,
+				})
+				if err != nil {
+					return fmt.Errorf("isolated verification: %w", err)
+				}
+				reportValue.ExecutionVerification = &verificationResult
+			}
 			var artifacts report.Artifacts
 			if resolvedReportDirectory != "" {
 				artifacts, err = report.WriteArtifacts(resolvedReportDirectory, reportValue)
@@ -479,7 +510,35 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().StringVar(&reportDirectory, "report-dir", report.DefaultDirectory, "directory for latest.md and latest.json (relative to the scan target)")
 	command.Flags().BoolVar(&noReport, "no-report", false, "do not save local Markdown and JSON reports")
 	command.Flags().BoolVar(&refreshReview, "refresh-review", false, "ignore cached technical observations and run Ollama again")
+	command.Flags().StringVar(&verifyRuntime, "verify-runtime", "docker", "local container runtime for opt-in execution: docker or podman")
+	command.Flags().StringVar(&verifyImage, "verify-image", "", "preloaded local container image for opt-in execution")
+	command.Flags().StringVar(&verifyCommand, "verify-command", "", "test executable to run without a shell inside the container")
+	command.Flags().StringArrayVar(&verifyArguments, "verify-arg", nil, "argument for the isolated test command (repeatable)")
+	command.Flags().StringArrayVar(&verifyObjectives, "verify-objective", nil, "technical objective the test supports (repeatable)")
+	command.Flags().DurationVar(&verifyTimeout, "verify-timeout", 5*time.Minute, "timeout for opt-in isolated execution (maximum 30m)")
 	return command
+}
+
+func validateVerificationObjectives(objectives []string, evidence framework.TechnicalEvidenceReport) error {
+	available := make(map[string]struct{}, len(evidence.Objectives))
+	for _, objective := range evidence.Objectives {
+		available[objective.ID] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(objectives))
+	for _, objective := range objectives {
+		objective = strings.TrimSpace(objective)
+		if objective == "" {
+			return errors.New("--verify-objective cannot be empty")
+		}
+		if _, found := available[objective]; !found {
+			return fmt.Errorf("unknown --verify-objective %q; inspect available IDs with complyscan framework show", objective)
+		}
+		if _, duplicate := seen[objective]; duplicate {
+			return fmt.Errorf("duplicate --verify-objective %q", objective)
+		}
+		seen[objective] = struct{}{}
+	}
+	return nil
 }
 
 func reviewWithOllama(
