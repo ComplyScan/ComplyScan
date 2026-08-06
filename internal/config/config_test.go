@@ -142,6 +142,7 @@ func TestValidateRejectsUnsafeVerificationRecipes(t *testing.T) {
 		{name: "invalid id", change: func(recipe *VerificationRecipe) { recipe.ID = "test command" }},
 		{name: "invalid runtime", change: func(recipe *VerificationRecipe) { recipe.Runtime = "shell" }},
 		{name: "option image", change: func(recipe *VerificationRecipe) { recipe.Image = "--privileged" }},
+		{name: "shell-like command", change: func(recipe *VerificationRecipe) { recipe.Command = "go test" }},
 		{name: "missing objective", change: func(recipe *VerificationRecipe) { recipe.Objectives = nil }},
 		{name: "duplicate objective", change: func(recipe *VerificationRecipe) { recipe.Objectives = []string{"objective", "objective"} }},
 		{name: "excessive timeout", change: func(recipe *VerificationRecipe) { recipe.TimeoutSeconds = 1801 }},

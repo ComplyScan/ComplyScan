@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
@@ -216,7 +217,7 @@ func (c Config) validateVerification() error {
 		if strings.TrimSpace(recipe.Image) == "" || strings.HasPrefix(recipe.Image, "-") || strings.ContainsAny(recipe.Image, "\r\n\x00") {
 			return fmt.Errorf("%s.image is invalid", prefix)
 		}
-		if strings.TrimSpace(recipe.Command) == "" || strings.ContainsRune(recipe.Command, '\x00') {
+		if strings.TrimSpace(recipe.Command) == "" || strings.HasPrefix(recipe.Command, "-") || strings.ContainsRune(recipe.Command, '\x00') || strings.IndexFunc(recipe.Command, unicode.IsSpace) >= 0 {
 			return fmt.Errorf("%s.command is invalid", prefix)
 		}
 		if len(recipe.Arguments) > 50 {
