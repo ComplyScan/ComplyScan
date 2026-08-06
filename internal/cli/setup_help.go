@@ -134,6 +134,22 @@ var setupQuestionHelp = map[string][]string{
 		"A profile with this system ID already exists. Replacing it updates that system's declared facts with the answers just collected.",
 		"Choose no if the existing record belongs to a different system; rerun setup with a different system ID instead.",
 	},
+	"path-ownership": {
+		"When a repository contains more than one declared AI system, ComplyScan needs repository path rules before it can attach code evidence to the correct system.",
+		"Without these rules, detected AI code remains visible but unassigned. This avoids guessing that one system implemented another system's controls.",
+	},
+	"ownership-paths": {
+		"Enter one or more repository-relative patterns for code owned by the same system or systems. Patterns use gitignore-style matching.",
+		"Examples: services/ranking/**, apps/support/**, or shared/models/**. Do not use absolute paths; unmatched code remains explicitly unassigned.",
+	},
+	"ownership-systems": {
+		"Choose the declared system IDs that own the matching paths. Choose one ID for dedicated code or multiple IDs only when the code is intentionally shared.",
+		"Separate overlapping rules with different owners are treated as a conflict and will not be assigned automatically.",
+	},
+	"replace-ownership": {
+		"Replacing ownership removes the current path mappings and saves the new set after validation.",
+		"Choose no if you only wanted to inspect the rules; use `complyscan ownership show` to review them without changing configuration.",
+	},
 	"review-provider": {
 		"Choose none for deterministic-only scanning, Ollama to keep model context on this machine, or a supported remote provider using your own account and API key.",
 		"Every model result is advisory: it cannot decide legal compliance, change deterministic findings, or change the scan exit status.",

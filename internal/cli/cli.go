@@ -75,6 +75,7 @@ func newRootCommand(stdout, stderr io.Writer, build BuildInfo) *cobra.Command {
 	root.AddCommand(newInitCommand(stdout))
 	root.AddCommand(newSetupCommand(stdout, build))
 	root.AddCommand(newProfileCommand(stdout))
+	root.AddCommand(newOwnershipCommand(stdout))
 	root.AddCommand(newFrameworkCommand(stdout))
 	root.AddCommand(newDoctorCommand(stdout, build))
 	root.AddCommand(newVerifyCommand(stdout))

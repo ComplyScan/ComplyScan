@@ -128,6 +128,9 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		} else {
 			cfg.Systems = append(cfg.Systems, system)
 		}
+		if err := offerOwnershipSetup(prompt, &cfg); err != nil {
+			return err
+		}
 	} else if !existed {
 		if _, err := fmt.Fprintln(stdout, "Non-interactive setup: no system profile was collected."); err != nil {
 			return err

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -82,7 +83,8 @@ func newProfileSetupCommand(stdout io.Writer) *cobra.Command {
 			if !forceInteractive && !isInteractiveReader(cmd.InOrStdin()) {
 				return errors.New("profile setup requires a terminal; use --interactive when piping answers or edit .complyscan.yml directly")
 			}
-			system, err := collectSystemProfile(cmd.InOrStdin(), stdout, target, time.Now())
+			prompt := promptSession{reader: bufio.NewReader(cmd.InOrStdin()), output: stdout}
+			system, err := collectSystemProfileWithPrompt(prompt, target, time.Now())
 			if err != nil {
 				return err
 			}
@@ -100,6 +102,9 @@ func newProfileSetupCommand(stdout io.Writer) *cobra.Command {
 				cfg.Systems[index] = system
 			} else {
 				cfg.Systems = append(cfg.Systems, system)
+			}
+			if err := offerOwnershipSetup(prompt, &cfg); err != nil {
+				return err
 			}
 			if err := config.Write(path, cfg, true); err != nil {
 				return err

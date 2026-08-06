@@ -103,7 +103,8 @@ func TestEverySetupQuestionHasDeveloperGuidance(t *testing.T) {
 		"human-oversight", "ai-activities", "personal-data", "special-category-data", "children-data",
 		"deployment-models", "profile-reviewer", "applicability-decision", "decision-rationale",
 		"applicability-reviewer", "replace-profile", "review-provider", "ollama-model", "install-ollama",
-		"download-model", "remote-disclosure", "remote-model", "api-key-env", "first-scan",
+		"path-ownership", "ownership-paths", "ownership-systems", "replace-ownership", "download-model",
+		"remote-disclosure", "remote-model", "api-key-env", "first-scan",
 	}
 	for _, key := range keys {
 		lines, exists := setupQuestionHelp[key]
