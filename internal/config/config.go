@@ -54,11 +54,22 @@ type RuleConfig struct {
 type AIConfig struct {
 	Provider string       `yaml:"provider"`
 	Ollama   OllamaConfig `yaml:"ollama"`
+	Remote   RemoteConfig `yaml:"remote,omitempty"`
 }
 
 type OllamaConfig struct {
 	Endpoint       string `yaml:"endpoint"`
 	Model          string `yaml:"model"`
+	TimeoutSeconds int    `yaml:"timeout-seconds"`
+	MaxFindings    int    `yaml:"max-findings"`
+}
+
+// RemoteConfig contains no credential value. APIKeyEnv is only the name of an
+// environment variable read at request time, so repository configuration can
+// be committed without embedding a provider secret.
+type RemoteConfig struct {
+	Model          string `yaml:"model"`
+	APIKeyEnv      string `yaml:"api-key-env"`
 	TimeoutSeconds int    `yaml:"timeout-seconds"`
 	MaxFindings    int    `yaml:"max-findings"`
 }
@@ -151,11 +162,16 @@ func (c Config) Validate() error {
 	if c.AI.Provider == "" {
 		return errors.New("ai.provider must not be empty")
 	}
-	if c.AI.Provider != "none" && c.AI.Provider != "ollama" {
-		return fmt.Errorf("ai.provider %q is not available; use none or ollama", c.AI.Provider)
+	if !validAIProvider(c.AI.Provider) {
+		return fmt.Errorf("ai.provider %q is not available; use none, ollama, openai, anthropic, or gemini", c.AI.Provider)
 	}
 	if err := c.AI.Ollama.Validate(); err != nil {
 		return fmt.Errorf("ai.ollama: %w", err)
+	}
+	if isRemoteProvider(c.AI.Provider) {
+		if err := c.AI.Remote.Validate(); err != nil {
+			return fmt.Errorf("ai.remote: %w", err)
+		}
 	}
 	if err := profile.ValidateSystems(c.Systems); err != nil {
 		return err
@@ -306,6 +322,48 @@ func (c OllamaConfig) Validate() error {
 		return errors.New("endpoint must use localhost or a loopback IP address")
 	}
 	return nil
+}
+
+func (c RemoteConfig) Validate() error {
+	if strings.TrimSpace(c.Model) == "" {
+		return errors.New("model must not be empty")
+	}
+	if !validEnvironmentName(c.APIKeyEnv) {
+		return errors.New("api-key-env must be a valid environment-variable name")
+	}
+	if c.TimeoutSeconds <= 0 || c.TimeoutSeconds > 3600 {
+		return errors.New("timeout-seconds must be between 1 and 3600")
+	}
+	if c.MaxFindings <= 0 || c.MaxFindings > 100 {
+		return errors.New("max-findings must be between 1 and 100")
+	}
+	return nil
+}
+
+func validAIProvider(value string) bool {
+	switch value {
+	case "none", "ollama", "openai", "anthropic", "gemini":
+		return true
+	default:
+		return false
+	}
+}
+
+func isRemoteProvider(value string) bool {
+	return value == "openai" || value == "anthropic" || value == "gemini"
+}
+
+func validEnvironmentName(value string) bool {
+	if value == "" {
+		return false
+	}
+	for index, character := range value {
+		if character == '_' || character >= 'A' && character <= 'Z' || character >= 'a' && character <= 'z' || index > 0 && character >= '0' && character <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (c Config) RuleEnabled(id string) bool {

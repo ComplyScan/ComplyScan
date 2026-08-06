@@ -64,7 +64,7 @@ func TestLoadRejectsUnknownFieldsRulesAndProviders(t *testing.T) {
 	tests := []string{
 		"version: 1\nfail-on: high\ntyop: true\nai:\n  provider: none\n",
 		"version: 1\nfail-on: high\nrules:\n  AI-TYPO-001:\n    enabled: true\nai:\n  provider: none\n",
-		"version: 1\nfail-on: high\nai:\n  provider: openai\n",
+		"version: 1\nfail-on: high\nai:\n  provider: unsupported\n",
 	}
 	for _, content := range tests {
 		path := filepath.Join(t.TempDir(), FileName)
@@ -74,6 +74,57 @@ func TestLoadRejectsUnknownFieldsRulesAndProviders(t *testing.T) {
 		if _, err := Load(path); err == nil {
 			t.Fatalf("expected invalid config error for:\n%s", content)
 		}
+	}
+}
+
+func TestLoadAcceptsRemoteProviderWithoutCredentialValue(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	content := `version: 1
+fail-on: high
+ai:
+  provider: openai
+  remote:
+    model: gpt-5.6-terra
+    api-key-env: OPENAI_API_KEY
+    timeout-seconds: 120
+    max-findings: 10
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AI.Provider != "openai" || cfg.AI.Remote.Model != "gpt-5.6-terra" || cfg.AI.Remote.APIKeyEnv != "OPENAI_API_KEY" {
+		t.Fatalf("unexpected remote config: %#v", cfg.AI)
+	}
+	if strings.Contains(content, "sk-") {
+		t.Fatal("test fixture unexpectedly contains a credential value")
+	}
+}
+
+func TestValidateRejectsUnsafeRemoteConfiguration(t *testing.T) {
+	tests := []struct {
+		name   string
+		change func(*RemoteConfig)
+	}{
+		{name: "missing model", change: func(cfg *RemoteConfig) { cfg.Model = "" }},
+		{name: "missing key environment", change: func(cfg *RemoteConfig) { cfg.APIKeyEnv = "" }},
+		{name: "credential instead of environment", change: func(cfg *RemoteConfig) { cfg.APIKeyEnv = "sk-secret-value" }},
+		{name: "invalid timeout", change: func(cfg *RemoteConfig) { cfg.TimeoutSeconds = 0 }},
+		{name: "too many findings", change: func(cfg *RemoteConfig) { cfg.MaxFindings = 101 }},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.AI.Provider = "openai"
+			cfg.AI.Remote = RemoteConfig{Model: "gpt-5.6-terra", APIKeyEnv: "OPENAI_API_KEY", TimeoutSeconds: 120, MaxFindings: 20}
+			testCase.change(&cfg.AI.Remote)
+			if err := cfg.Validate(); err == nil {
+				t.Fatalf("expected invalid remote configuration: %#v", cfg.AI.Remote)
+			}
+		})
 	}
 }
 
