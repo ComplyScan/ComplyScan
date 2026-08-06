@@ -40,7 +40,7 @@ inputs:
     required: false
     default: ""
   review:
-    description: Optional advisory review provider. Set to ollama only after starting Ollama in the job; leave empty to use repository configuration.
+    description: Optional advisory review provider (ollama, openai, anthropic, or gemini); leave empty to use repository configuration.
     required: false
     default: ""
   ollama-model:
@@ -49,6 +49,14 @@ inputs:
     default: ""
   ollama-endpoint:
     description: Optional loopback Ollama base URL override.
+    required: false
+    default: ""
+  model:
+    description: Optional remote-provider model override.
+    required: false
+    default: ""
+  api-key-env:
+    description: Optional environment-variable name containing the remote-provider API key; never pass the key value here.
     required: false
     default: ""
 
@@ -74,7 +82,9 @@ runs:
       shell: bash
       env:
         INPUT_CHANGED_SINCE: ${{ inputs.changed-since }}
+        INPUT_API_KEY_ENV: ${{ inputs.api-key-env }}
         INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_MODEL: ${{ inputs.model }}
         INPUT_OLLAMA_ENDPOINT: ${{ inputs.ollama-endpoint }}
         INPUT_OLLAMA_MODEL: ${{ inputs.ollama-model }}
         INPUT_PATH: ${{ inputs.path }}
@@ -108,6 +118,12 @@ runs:
         fi
         if [[ -n "$INPUT_OLLAMA_ENDPOINT" ]]; then
           arguments+=(--ollama-endpoint "$INPUT_OLLAMA_ENDPOINT")
+        fi
+        if [[ -n "$INPUT_MODEL" ]]; then
+          arguments+=(--model "$INPUT_MODEL")
+        fi
+        if [[ -n "$INPUT_API_KEY_ENV" ]]; then
+          arguments+=(--api-key-env "$INPUT_API_KEY_ENV")
         fi
         if [[ -n "$INPUT_CONFIG" ]]; then
           config="$INPUT_CONFIG"
