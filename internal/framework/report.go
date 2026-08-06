@@ -111,6 +111,9 @@ func WriteTechnicalEvidenceTerminal(writer io.Writer, report TechnicalEvidenceRe
 		if _, err := fmt.Fprintf(writer, "  %-18s %s — %s (%s)\n", label, objective.ID, objective.Title, objective.SourceReference); err != nil {
 			return err
 		}
+		if _, err := fmt.Fprintf(writer, "                       Applicability: %s\n", DescribeApplicability(objective.Applicability)); err != nil {
+			return err
+		}
 		for _, match := range objective.Matches {
 			location := match.Path
 			if match.StartLine > 0 {
@@ -168,4 +171,15 @@ func WriteTechnicalEvidenceTerminal(writer io.Writer, report TechnicalEvidenceRe
 		}
 	}
 	return nil
+}
+
+func DescribeApplicability(applicability ObjectiveApplicability) string {
+	parts := []string{"legal scope " + applicability.LegalScope}
+	if len(applicability.ActivitiesAnyOf) > 0 {
+		parts = append(parts, "activities any of "+strings.Join(applicability.ActivitiesAnyOf, ", "))
+	}
+	if applicability.ExternalUseRequired {
+		parts = append(parts, "external use required")
+	}
+	return strings.Join(parts, "; ")
 }

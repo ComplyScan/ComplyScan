@@ -31,6 +31,9 @@ func TestEvaluateMapsCodeEvidenceWithoutControlOrComplianceClaims(t *testing.T) 
 		t.Fatalf("unexpected summary: %#v", report.Summary)
 	}
 	for _, objective := range report.Objectives {
+		if err := objective.Applicability.Validate(); err != nil {
+			t.Fatalf("evaluated objective lost applicability conditions: %s: %v", objective.ID, err)
+		}
 		if strings.Contains(string(objective.Status), "compliant") || strings.Contains(string(objective.Status), "satisfied") {
 			t.Fatalf("objective made an unsupported conclusion: %#v", objective)
 		}

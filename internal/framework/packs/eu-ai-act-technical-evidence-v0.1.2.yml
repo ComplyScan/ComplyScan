@@ -1,4 +1,10 @@
 # complyscan:ignore-technical-evidence
+# Each objective contains both its repository evidence matcher and the
+# deterministic applicability conditions consumed by reconciliation:
+# - legal-scope: high-risk-system uses profile scope/high-risk screening;
+#   transparency-obligation is screened independently from high-risk status.
+# - activities-any-of: at least one declared system activity must match when set.
+# - external-use-required: the deployment must indicate use outside the operator.
 schema-version: 1
 id: eu-ai-act-technical-evidence
 name: EU AI Act technical code evidence

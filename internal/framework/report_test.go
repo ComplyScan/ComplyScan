@@ -24,7 +24,7 @@ func TestTechnicalEvidenceReportsShowVersionCandidatesAndLimitations(t *testing.
 	if err := WriteTechnicalEvidenceTerminal(&terminal, report); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"@ 0.1.2", "CANDIDATE EVIDENCE", "Article 14", "Technical summary:", "Coverage limitation", "not a legal compliance conclusion"} {
+	for _, expected := range []string{"@ 0.1.2", "CANDIDATE EVIDENCE", "Article 14", "Applicability: legal scope high-risk-system", "Technical summary:", "Coverage limitation", "not a legal compliance conclusion"} {
 		if !strings.Contains(terminal.String(), expected) {
 			t.Errorf("terminal output missing %q:\n%s", expected, terminal.String())
 		}

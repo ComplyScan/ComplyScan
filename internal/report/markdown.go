@@ -311,6 +311,9 @@ func writeTechnicalEvidenceMarkdown(writer io.Writer, evidence framework.Technic
 			objectiveStatusLabel(objective.Status), markdownText(objective.Title), inlineCode(objective.ID), markdownText(objective.Verification), markdownText(objective.Description)); err != nil {
 			return err
 		}
+		if _, err := fmt.Fprintf(writer, "\n- Applicability conditions: %s\n", markdownText(framework.DescribeApplicability(objective.Applicability))); err != nil {
+			return err
+		}
 		if objective.ApplicabilityNote != "" {
 			if _, err := fmt.Fprintf(writer, "\nApplicability note: %s\n", markdownText(objective.ApplicabilityNote)); err != nil {
 				return err

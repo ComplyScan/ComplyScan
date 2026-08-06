@@ -45,6 +45,22 @@ func TestBuildMapsRequirementsAndKeepsMismatchesVisible(t *testing.T) {
 	}
 }
 
+func TestBuildUsesPackActivityConditionsInsteadOfObjectiveIDRules(t *testing.T) {
+	system := highRiskSystem()
+	technical := candidateTechnical()
+	technical.Objectives = technical.Objectives[:1]
+	technical.Objectives[0].Applicability.ActivitiesAnyOf = []string{"synthetic-content"}
+	report := Build([]profile.System{system}, profile.AssessEUAIAct([]profile.System{system}), technical, inventory.Report{})
+	if report.Systems[0].Objectives[0].Mapping != MappingEvidenceMismatch {
+		t.Fatalf("pack activity condition was ignored: %#v", report.Systems[0].Objectives[0])
+	}
+	technical.Objectives[0].Applicability.ActivitiesAnyOf = []string{"inference"}
+	report = Build([]profile.System{system}, profile.AssessEUAIAct([]profile.System{system}), technical, inventory.Report{})
+	if report.Systems[0].Objectives[0].Mapping != MappingRequirementWithEvidence {
+		t.Fatalf("updated pack activity condition was ignored: %#v", report.Systems[0].Objectives[0])
+	}
+}
+
 func TestBuildDoesNotGuessEvidenceOwnershipAcrossSystems(t *testing.T) {
 	first := highRiskSystem()
 	second := highRiskSystem()

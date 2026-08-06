@@ -83,7 +83,7 @@ func TestCacheRejectsSymlinkDestination(t *testing.T) {
 func testIdentity() Identity {
 	return Identity{
 		Provider: providers.Ollama, Model: "qwen3:8b", PromptVersion: providers.TechnicalReviewPromptVersion,
-		PackID: "eu-ai-act-technical-evidence", PackVersion: "0.1.1", PackDigest: strings.Repeat("a", 64),
+		PackID: "eu-ai-act-technical-evidence", PackVersion: "0.1.2", PackDigest: strings.Repeat("a", 64),
 	}
 }
 
