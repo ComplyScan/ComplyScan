@@ -271,7 +271,7 @@ You can instead set `ai.provider: ollama` in `.complyscan.yml`. `--review none` 
 
 Technical investigations are cached in the operating system's private user-cache directory, not in the scanned repository. The cache stores the same bounded, redacted observation used in reports plus hashes of submitted context; it does not store the submitted source-context records. Model rationales and evidence summaries are instructed not to quote code, but may still describe repository details and should be treated as potentially sensitive local data. Reuse requires the same provider, model tag, prompt version, control-pack ID/version/digest, objective, evidence fingerprint, complete bounded input digest, and full discovered-repository digest. Any repository code, context, pack, prompt, or model-name change therefore triggers a new request. Use `--refresh-review` to deliberately bypass existing technical observations. Each scan prints whether an investigation target is being reviewed by Ollama or reused from cache; completed responses are saved individually so an interrupted long scan can resume.
 
-The experimental default is the official Ollama `qwen3:8b` model. Ollama does not currently publish a `qwen3-coder:8b` tag; its official Qwen3-Coder family starts at `30b`, which has a substantially larger installation footprint. The model remains configurable. Setup may install Ollama, start its Homebrew service, or pull the selected model only after explicit confirmation; normal scans never install software or models. Fake-transport tests enforce the structured-output, redaction, injection, identifier-binding, grounded-path, and bounded-retrieval contracts. A two-target prompt-version-7 smoke run passed on 2026-08-06, including one successful three-excerpt follow-up and one malformed optional plan safely skipped before the expected bounded-negative result. Broader representative evaluation and the maintained applicability reassessment remain open before Ollama investigation can leave experimental status.
+The experimental default is the official Ollama `qwen3:8b` model. Ollama does not currently publish a `qwen3-coder:8b` tag; its official Qwen3-Coder family starts at `30b`, which has a substantially larger installation footprint. The model remains configurable. Setup may install Ollama, start its Homebrew service, or pull the selected model only after explicit confirmation; normal scans never install software or models. Fake-transport tests enforce the structured-output, redaction, injection, identifier-binding, grounded-path, bounded-retrieval, and isolated-test interpretation contracts. A two-target prompt-version-8 smoke run passed on 2026-08-06, including one successful three-excerpt follow-up and one malformed optional plan safely skipped before the expected bounded-negative result. Broader representative evaluation and the maintained applicability reassessment remain open before Ollama investigation can leave experimental status.
 
 ComplyScan uses two separate review flows, both bounded by `max-findings`. The finding flow sends visible, unsuppressed deterministic finding records with re-redacted metadata such as the rule ID, fingerprint, title, message, relative path, line, short evidence, remediation, severity, and confidence. The technical flow can make a search-planning request followed by one final decision request per existing candidate or likely-required missing-evidence investigation target. Candidate targets include reachability, imports, graph relationships, unresolved questions, a bounded match window, and connected symbol excerpts. Extended-search targets include deterministic search terms, coverage counts, up to six ranked excerpts, and at most 200 eligible repository paths. A requested follow-up can add at most three 2,000-character excerpts. The evidence fingerprint is withheld. ComplyScan never sends a complete repository or an unbounded file. Input excerpts are re-redacted and are not copied into the saved report. Investigating many objectives can therefore take materially longer than one batched model call.
 
@@ -285,19 +285,28 @@ The loopback restriction controls where ComplyScan sends review records. Ollama 
 
 ## Optional isolated execution verification
 
-ComplyScan can run a user-selected test command in a preloaded local Docker or Podman image and attach the bounded, redacted result to terminal, Markdown, and JSON reports. This is always opt-in. The repository is mounted read-only; the container has no network, no added capabilities, a read-only root filesystem, bounded CPU, memory, processes, temporary storage, output, and time; and the command runs directly without a shell. ComplyScan never pulls the image. The image itself remains a user-selected trust boundary.
+ComplyScan can run user-selected test commands in preloaded local Docker or Podman images and attach their bounded, redacted results to terminal, Markdown, and JSON reports. Reusable recipes live in `.complyscan.yml`, but configuration alone never executes them: every scan must opt in with `--verify`. The repository is mounted read-only; each container has no network, no added capabilities, a read-only root filesystem, bounded CPU, memory, processes, temporary storage, output, and time; and commands run directly without a shell. ComplyScan never pulls an image. The image itself remains a user-selected trust boundary.
 
-```bash
-docker pull golang:1.25
-complyscan scan . \
-  --verify-image golang:1.25 \
-  --verify-command go \
-  --verify-arg test \
-  --verify-arg ./... \
-  --verify-objective eu-aia-15-robustness-failure-handling
+```yaml
+verification:
+  recipes:
+    - id: robustness-tests
+      runtime: docker
+      image: your-preloaded-project-test-image:local
+      command: go
+      args: [test, ./...]
+      objectives: [eu-aia-15-robustness-failure-handling]
+      systems: [candidate-ranking]
+      timeout-seconds: 300
 ```
 
-Use `--verify-runtime podman` when preferred, repeat `--verify-arg` and `--verify-objective` as needed, and set `--verify-timeout` up to 30 minutes. Objective association is explicitly user-declared. A passing command is supporting execution evidence only; it does not prove that the test covers the objective, that the control is operationally effective, or that the system complies with the Act. A test failure is recorded in the report and does not change ComplyScan's finding-threshold exit code; container/runtime/configuration failures exit with code `2`.
+```bash
+complyscan scan . --verify
+```
+
+When exactly one system is configured, `systems` may be omitted and is inferred. Repositories with multiple systems must name the systems covered by each recipe so ComplyScan does not guess evidence ownership. Objective and system association remain explicitly user-declared. A passing recipe adds a separate `test-evidence-observed` assurance to the matching reconciliation result. When Ollama is also enabled for a zero- or one-system repository, its objective investigation receives only the bounded redacted execution summary and is instructed to check whether the test output and repository context actually support the claimed mechanism. It still cannot turn a passing test into a production-effectiveness or compliance conclusion.
+
+The existing ad-hoc `--verify-image`, `--verify-command`, repeatable `--verify-arg`, `--verify-objective`, and `--verify-system` flags remain available for a one-off run and cannot be mixed with `--verify`. Use `--verify-runtime podman` when preferred and set `--verify-timeout` up to 30 minutes. A test failure is recorded without changing the finding-threshold exit code; container, runtime, or configuration failures exit with code `2`.
 
 ## GitHub Actions
 
