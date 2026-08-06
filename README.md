@@ -49,6 +49,8 @@ complyscan setup
 complyscan init
 complyscan profile show
 complyscan profile setup # add context to an existing configuration
+complyscan ownership setup # map code paths when the repo contains multiple systems
+complyscan ownership show
 complyscan framework list
 complyscan framework assess .
 complyscan framework assess . --format json
@@ -81,7 +83,7 @@ Interactive setup selects `qwen3:8b` as the tested local default, lists other in
 
 `scan` defaults to the current directory, so `complyscan scan` and `complyscan scan .` are equivalent. In a terminal, `init` guides you through factual questions about each system's purpose, operating regions, value-chain role, use-case domain, users, affected groups, decision impact, AI activities, data, human oversight, and deployment. AI activities distinguish inference, training, fine-tuning, evaluation, automated decisions, agent tool use, and synthetic-content generation. Use `unknown` rather than guessing. Redirected or CI initialization is non-interactive and can be made explicit with `--non-interactive`.
 
-`profile show` reports conservative EU AI Act scope and high-risk screening from those declared facts. `profile setup` adds a system to an existing config; use `--replace` to update a profile with the same ID. Automated screening, human decisions, and missing context remain separate. ComplyScan never converts a scope signal into a compliance certificate.
+`profile show` reports conservative EU AI Act scope and high-risk screening from those declared facts. `profile setup` adds a system to an existing config; use `--replace` to update a profile with the same ID. When a repository declares multiple systems, setup offers a separate path-ownership wizard. `ownership setup` can replace those mappings later without repeating the applicability questionnaire, and `ownership show` prints them as terminal text or JSON. Automated screening, human decisions, and missing context remain separate. ComplyScan never converts a scope signal into a compliance certificate.
 
 `inventory` produces a component-focused view rather than compliance findings. It aggregates detected providers and frameworks with their technical evidence, runtime/test/configuration scope, package versions, confidence, and source locations. Its JSON output has a versioned schema for downstream tooling.
 
@@ -89,7 +91,7 @@ The two `generate` commands use that inventory to create `docs/AI_SYSTEM.md` and
 
 Terminal scans print findings as rules discover them and finish with declared applicability context, the independently discovered AI component inventory, requirement-to-evidence reconciliation, code-only technical evidence, and the final summary. Reconciliation distinguishes likely requirements with candidate evidence, likely requirements without detected evidence, configuration/evidence mismatches, unresolved applicability, and repository evidence that cannot safely be assigned to a configured system. When Ollama is enabled, reconciliation also shows the strongest advisory assurance reached for each investigated objective. “Without detected evidence” and “not found after investigation” remain bounded search statements, never proof of absence or breach.
 
-Every successful scan atomically writes `.complyscan/reports/latest.md` for people and `.complyscan/reports/latest.json` as the versioned machine-readable evidence bundle. The schema-version 3 bundle includes the inputs, deterministic reconciliation, grounded investigation claims, assurance level, and explicit runtime/legal-review boundaries so a future dashboard can display or recompute the mapping. `complyscan init` adds that generated directory to `.gitignore`; scans always exclude it from subsequent discovery. Use `--no-report` to disable persistence or `--report-dir` to select another directory inside the target.
+Every successful scan atomically writes `.complyscan/reports/latest.md` for people and `.complyscan/reports/latest.json` as the versioned machine-readable evidence bundle. The schema-version 4 bundle includes the inputs, deterministic reconciliation, path-ownership rules and per-reference resolution, grounded investigation claims, assurance level, and explicit runtime/legal-review boundaries so a future dashboard can display or recompute the mapping. `complyscan init` adds that generated directory to `.gitignore`; scans always exclude it from subsequent discovery. Use `--no-report` to disable persistence or `--report-dir` to select another directory inside the target.
 
 JSON and SARIF 2.1.0 output remain buffered so they are valid and deterministically ordered. JSON stdout and `latest.json` include applicability, AI inventory, technical evidence, and reconciliation. SARIF includes source locations and stable partial fingerprints for code-scanning integrations, but omits technical-objective summaries that have no single code-scanning location.
 
@@ -235,6 +237,10 @@ systems:
       - framework: eu-ai-act
         status: needs-review
 
+ownership:
+  - paths: [services/candidate-ranking/**]
+    systems: [candidate-ranking]
+
 baseline: .complyscan-baseline.json
 
 suppressions:
@@ -244,6 +250,8 @@ suppressions:
 ```
 
 One repository may declare multiple entries under `systems`. Controlled fields reject unsupported or misspelled values, while users and affected groups remain short factual labels. Confirmed profiles require a named reviewer and date. A human `applicable`, `not-applicable`, or `uncertain` decision additionally requires a rationale; the default is `needs-review`.
+
+`ownership` is a repository-layout mapping, not a legal conclusion. Each positive, repository-relative gitignore-style path rule names one or more declared system IDs. One owner means dedicated code; multiple owners in the same rule mean intentionally shared code—for example, `systems: [candidate-ranking, support-assistant]` after both IDs have been declared. Overlapping matching rules with different owner sets are reported as conflicting, and unmatched paths remain unassigned. ComplyScan attaches only assigned, shared, or explicitly disclosed single-system-inferred evidence to a system. Run `complyscan ownership setup` for guided configuration or edit this version-controlled section directly.
 
 The configuration is intended for version control. Do not put secrets, source excerpts, personal records, confidential customer names, or sensitive case details in a profile. Record concise categories and link to access-controlled evidence outside ComplyScan when necessary.
 
@@ -300,7 +308,7 @@ ComplyScan uses two separate review flows, both bounded by `max-findings`, regar
 
 Ollama endpoints must be `localhost` or a loopback IP; ComplyScan bypasses HTTP proxies for that local route. Remote adapters use fixed official HTTPS endpoints, may respect an operator-configured HTTPS proxy, and refuse redirects. Repository strings, code, and comments are explicitly labelled untrusted in the fixed prompts. Finding output must preserve submitted identifiers; unknown, changed, duplicate, or malformed bindings fail that review. Technical output contains only decision and evidence-summary fields, so the model cannot choose which objective receives its response. Any cited path outside the submitted bounded context fails the requested investigation.
 
-Finding observations are attached to existing fingerprints as `confirmed`, `uncertain`, or `not_supported`. Technical investigations remain attached to the exact objective/evidence target. Both are advisory: they cannot create or remove findings, change objective status or severity, update baselines or suppressions, or affect the failure threshold. Terminal, Markdown, and schema-version 3 JSON keep review separate from deterministic results; SARIF carries finding review only. ComplyScan requests non-streaming schema-constrained output; Ollama additionally receives temperature zero, while modern remote models use their provider defaults where sampling parameters are unsupported or deprecated. Model output can still vary.
+Finding observations are attached to existing fingerprints as `confirmed`, `uncertain`, or `not_supported`. Technical investigations remain attached to the exact objective/evidence target. In a multi-system repository, candidate investigations follow the exact owned evidence fingerprint; repository-wide missing-evidence investigations remain unresolved until they can be bounded to one system. Both review types are advisory: they cannot create or remove findings, change objective status or severity, update baselines or suppressions, or affect the failure threshold. Terminal, Markdown, and schema-version 4 JSON keep review separate from deterministic results; SARIF carries finding review only. ComplyScan requests non-streaming schema-constrained output; Ollama additionally receives temperature zero, while modern remote models use their provider defaults where sampling parameters are unsupported or deprecated. Model output can still vary.
 
 Deterministic, transparent guardrails constrain two recurring reasoning failures: discussion-only blog, documentation, FAQ, example, and quiz components cannot become implementation evidence, while executable graders, rubric renderers, assertions, and evaluation templates remain reviewable evidence even when static analysis cannot resolve dynamic registration. The report preserves the model's original strength in `model_strength` whenever a guardrail changes it.
 
@@ -406,7 +414,7 @@ go vet ./...
 go build ./cmd/complyscan
 ```
 
-The pipeline has two independent inputs: declared system configuration determines which technical objectives are likely relevant, while repository discovery builds the AI inventory and technical evidence without trusting that configuration. A deterministic reconciliation layer then combines them, preserves mismatches and uncertainty, and refuses to guess evidence ownership when a repository declares multiple systems. Optional model review annotates existing evidence afterward and cannot alter applicability, deterministic evidence, or reconciliation status. See [the architecture notes](docs/architecture.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+The pipeline has two independent inputs: declared system configuration determines which technical objectives are likely relevant, while repository discovery builds the AI inventory and technical evidence without trusting that configuration. Explicit path ownership connects discovered evidence to the correct declared system. A deterministic reconciliation layer combines the streams, preserves mismatches and uncertainty, and leaves unmatched or conflicting evidence unresolved instead of guessing. Optional model review annotates existing owned evidence afterward and cannot alter applicability, deterministic evidence, or reconciliation status. See [the architecture notes](docs/architecture.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 The labelled detector corpus lives under `testdata/evaluation`. Its test reports precision, recall, true positives, false positives, false negatives, and negative cases; the build fails if precision drops below 95% or recall below 90%.
 
@@ -420,7 +428,7 @@ Future releases may add:
 
 - broader labelled coverage for more languages, frameworks, model gateways, and data flows;
 - model and AI dependency supply-chain inventory;
-- explicit path-to-system ownership for multi-system repositories, including shared, overlapping, and unassigned code;
+- system-scoped repository-wide investigation for likely-required objectives in multi-system repositories;
 - a dashboard catalog that combines CLI code evidence with uploaded documents, declarations, attestations, and operational evidence;
 - automatic opt-in synchronization of the exact local JSON evidence bundle;
 - graph indexers for additional source languages and framework-specific route/call resolution;

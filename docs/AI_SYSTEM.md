@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Product | ComplyScan |
-| Version assessed | 0.1.3 |
+| Version assessed | 0.1.4 development |
 | Assessment date | 2026-08-06 |
 | Owner | ComplyScan maintainers |
 | Status | Reassessment in progress following graph-backed technical context and optional local or BYOK model review; not legal advice |
@@ -15,7 +15,7 @@ ComplyScan is an offline-by-default developer CLI that identifies technical sign
 
 ## Current system boundary
 
-ComplyScan 0.1.3 consists of:
+The current ComplyScan development version consists of:
 
 - bounded local repository discovery and file classification;
 - typed dependency, import, endpoint, and environment signal extraction;
@@ -27,6 +27,7 @@ ComplyScan 0.1.3 consists of:
 - optional Ollama, OpenAI, Anthropic, and Gemini providers that generate normalized advisory observations for existing findings and technical-objective candidates;
 - an optional container-only execution verifier that runs an explicitly supplied command against a read-only repository mount with networking disabled and attaches the bounded result to declared objective IDs;
 - validated, version-controlled multi-system profiles with provisional EU AI Act scope screening and attributable human applicability decisions;
+- validated, version-controlled repository path ownership with explicit shared, conflicting, unassigned, and single-system-inferred evidence states;
 - explicit configured AI activities covering inference, training, fine-tuning, evaluation, automated decisions, agent tool use, synthetic-content generation, and unknown context;
 - a deterministic, versioned EU AI Act technical pack with code-only objectives and no documentary or control-level compliance assessment;
 - deterministic reconciliation between screened technical requirements and independently discovered repository evidence, including visible mismatches and unresolved system ownership;
@@ -37,7 +38,7 @@ ComplyScan 0.1.3 consists of:
 
 Model review is disabled by the built-in scan default. Interactive setup presents Ollama first and requires separate confirmation for installation or model pull. Selecting OpenAI, Anthropic, or Gemini triggers a separate disclosure and default-no external-processing confirmation; automation requires `--allow-remote-review`. The default scan remains deterministic and makes no model call. Ollama's tested experimental configuration selects `qwen3:8b`. A prompt-version-8 two-target smoke run passed on 2026-08-06 after adding the isolated-test interpretation boundary. BYOK adapters have fake-transport contract tests but no maintained live-model quality baseline yet; they remain experimental. ComplyScan Cloud remains an inactive extension type.
 
-The technical pack, keyword-group evidence matcher, repository graph, activity-sensitive requirement mapping, reconciliation, and retrieval execution remain deterministic in every configuration. With review disabled, no technical-objective context leaves the CLI process. Ollama receives the bounded context through loopback. A BYOK provider receives the same bounded context through its fixed official HTTPS endpoint after consent; profiles are not sent. The model may propose one follow-up plan, but trusted deterministic code validates literal terms, searches only eligible discovered files, and bounds returned excerpts. Model observations cannot change the deterministic reconciliation result. The pack's `technical-semantic-and-human` verification labels still require human review and never mean that a model established compliance.
+The technical pack, keyword-group evidence matcher, repository graph, activity-sensitive requirement mapping, ownership resolver, reconciliation, and retrieval execution remain deterministic in every configuration. With review disabled, no technical-objective context leaves the CLI process. Ollama receives the bounded context through loopback. A BYOK provider receives the same bounded context through its fixed official HTTPS endpoint after consent; profiles are not sent. Candidate review follows an exact evidence fingerprint already attributed to the system. Repository-wide missing-evidence review is not run across a multi-system repository because its search context is not yet system-scoped. The model may propose one follow-up plan, but trusted deterministic code validates literal terms, searches only eligible discovered files, and bounds returned excerpts. Model observations cannot change the deterministic reconciliation result. The pack's `technical-semantic-and-human` verification labels still require human review and never mean that a model established compliance.
 
 ## AI Act applicability assessment
 

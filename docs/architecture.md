@@ -1,12 +1,14 @@
 # Architecture
 
-ComplyScan v0.1.2 has an offline-by-default pipeline:
+ComplyScan has an offline-by-default pipeline:
 
 ```text
 target directory
   ├─ validated, version-controlled system profiles
   │    → provisional applicability and high-risk screening
   │    → activity- and deployment-sensitive objective screening
+  ├─ validated path-to-system ownership rules
+  │    → dedicated, intentionally shared, conflicting, or unassigned paths
   └─ bounded repository discovery and file classification
        → language-neutral relationship graph and technical-objective matching
        → typed AI provider and framework inventory
@@ -15,7 +17,7 @@ target directory
        → mapped candidate evidence, non-detections, mismatches, and unresolved ownership
   → optional, separate advisory local-Ollama or BYOK-provider review of findings
        and bounded evidence investigation of candidates plus likely missing objectives
-  → terminal output plus atomic Markdown and schema-version 3 JSON reports, or SARIF
+  → terminal output plus atomic Markdown and schema-version 4 JSON reports, or SARIF
 ```
 
 Installation and onboarding are a separate pre-scan path: the POSIX installer selects a release archive for the host platform, verifies it against `checksums.txt`, atomically places the binary in the selected user directory, and invokes `complyscan setup` only when a terminal is present. The setup command reuses `internal/profile` for factual and attributable applicability collection, preserves existing repository configuration, and keeps external provisioning behind individual confirmations. It may invoke Homebrew or Ollama's official Linux installer, start a Homebrew Ollama service, and run `ollama pull`; none of these operations occur during a normal scan. The separate `complyscan verify setup` wizard reads the existing profile and repository, computes the same conservative objective mapping, detects bounded test-runner signals, and writes a user-confirmed inert recipe. It has no executor path and cannot run, build, pull, or preload anything.
@@ -30,7 +32,9 @@ Installation and onboarding are a separate pre-scan path: the POSIX installer se
 
 `internal/inventory` extracts typed signals from dependency declarations, source imports, recognised endpoints, and actual environment-variable access. It aggregates those signals into a versioned component report with scope, evidence type, package version, confidence, and location fields. Detection-signature files can carry the narrow `complyscan:ignore-ai-signals` marker so synthetic definitions do not self-identify as runtime components.
 
-`internal/reconciliation` consumes the versioned applicability-to-objective mapping from `internal/framework`; it contains no objective-ID mapping table of its own. It first screens each technical objective from the declared scope, possible high-risk classification, human applicability decision, AI activities, and deployment model. It then combines that requirement status with the independently produced objective evidence and component inventory. Results explicitly distinguish likely requirements with candidate evidence, likely requirements without detected evidence, unclear applicability, configuration/evidence mismatches, incomplete evaluation, and evidence without system ownership. Repository-wide evidence is provisionally associated only when exactly one system is declared. With zero systems it remains unassigned; with multiple systems it remains unassigned until a future path-to-system ownership mapping exists. This avoids inventing system attribution.
+`internal/ownership` validates positive repository-relative gitignore-style patterns and compiles them into a deterministic resolver. A rule with one system assigns dedicated code; one rule naming several systems explicitly shares code. Overlapping matching rules with different owner sets conflict. Paths matching no rule remain unassigned. Ownership is repository structure, not legal applicability, and every referenced system ID must exist in the profile.
+
+`internal/reconciliation` consumes the versioned applicability-to-objective mapping from `internal/framework`; it contains no objective-ID mapping table of its own. It first screens each technical objective from the declared scope, possible high-risk classification, human applicability decision, AI activities, and deployment model. It then combines that requirement status with the independently produced objective evidence and component inventory. Each evidence reference is resolved through `internal/ownership` before it can be attached to a system. Results explicitly distinguish likely requirements with candidate evidence, likely requirements without detected evidence, unclear applicability, configuration/evidence mismatches, incomplete evaluation, and evidence with conflicting or missing system ownership. With one declared system and no rules, legacy association remains available but is explicitly labelled `single-system-inference`; configuring any rule disables that fallback. With zero or multiple systems, unresolved ownership is never guessed.
 
 `internal/rules` owns the severity and finding models plus the deterministic rule interface. Rules receive a read-only repository snapshot. During ordinary scans every rule sees the full snapshot. During `--changed-since` scans, file-local rules receive only committed, staged, unstaged, and untracked changed files; rules implementing `RepositoryWideRule` retain the full snapshot. The documentation and risk-evidence checks use that interface so a small pull request cannot bypass repository-level governance.
 
@@ -38,7 +42,7 @@ Installation and onboarding are a separate pre-scan path: the POSIX installer se
 
 `internal/baseline` stores deterministic finding identities without source evidence. Configured suppressions require a review reason; both mechanisms are applied before streaming, reporting, and exit-code evaluation.
 
-`internal/report` constructs a schema-version 3 evidence bundle with scan identity, UTC timestamp, tool build, explicit scope, applicability input, AI inventory, technical evidence, deterministic reconciliation, and optional grounded investigation results. Terminal output streams deterministic findings live and then prints the mapped result. Every successful scan atomically replaces `.complyscan/reports/latest.md` and `latest.json`; generated reports are excluded from discovery, target-relative output cannot escape the repository, and symlink artifact destinations are refused. Markdown is the human report and JSON is the future dashboard contract. SARIF 2.1.0 remains a separate source-location integration. Finding observations are attached by finding fingerprint; technical investigations are attached by objective ID and evidence fingerprint. Investigation assurance is shown inside reconciliation but cannot change its deterministic statuses.
+`internal/report` constructs a schema-version 4 evidence bundle with scan identity, UTC timestamp, tool build, explicit scope, applicability input, ownership rules and resolution, AI inventory, technical evidence, deterministic reconciliation, and optional grounded investigation results. Terminal output streams deterministic findings live and then prints the mapped result. Every successful scan atomically replaces `.complyscan/reports/latest.md` and `latest.json`; generated reports are excluded from discovery, target-relative output cannot escape the repository, and symlink artifact destinations are refused. Markdown is the human report and JSON is the future dashboard contract. SARIF 2.1.0 remains a separate source-location integration. Finding observations are attached by finding fingerprint; candidate technical investigations attach only to systems containing that exact owned fingerprint. Repository-wide missing-evidence investigations are skipped for multi-system repositories until search context can be system-scoped. Investigation assurance is shown inside reconciliation but cannot change its deterministic statuses.
 
 `internal/reviewcontext` preserves connected context for deterministic candidates and creates one wider bounded search target for each likely-required objective without a candidate. The extended search ranks eligible files using the versioned pack terms, includes up to six excerpts and a bounded path manifest, and records eligible/matching-file coverage. Its synthetic fingerprint binds the exact bounded repository context.
 

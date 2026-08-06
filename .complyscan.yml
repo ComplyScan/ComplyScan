@@ -59,6 +59,10 @@ systems:
       - framework: eu-ai-act
         status: needs-review
 
+ownership:
+  - paths: ["**"]
+    systems: [complyscan-cli]
+
 baseline: .complyscan-baseline.json
 
 suppressions:

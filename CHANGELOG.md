@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+
+- Validated, version-controlled path ownership rules that assign repository evidence to one declared AI system or intentionally share it across several systems.
+- Guided `complyscan ownership setup` and inspectable `complyscan ownership show` commands, also offered during multi-system setup.
+- Per-reference ownership status in terminal, Markdown, and schema-version 4 JSON reports, including assigned, shared, conflicting, unassigned, and disclosed single-system inference states.
+
+### Changed
+
+- Reconciliation now maps objective evidence and observed AI components only to systems that own the matching repository path; conflicting and unmatched paths remain explicitly unresolved.
+- Advisory candidate investigations follow exact owned evidence fingerprints. Repository-wide missing-evidence investigation is conservatively skipped for multi-system repositories until it can be system-scoped.
+
 ## 0.1.3 - 2026-08-06
 
 ### Added
