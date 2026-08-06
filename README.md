@@ -387,6 +387,7 @@ Future releases may add:
 
 - broader labelled coverage for more languages, frameworks, model gateways, and data flows;
 - model and AI dependency supply-chain inventory;
+- explicit path-to-system ownership for multi-system repositories, including shared, overlapping, and unassigned code;
 - a dashboard catalog that combines CLI code evidence with uploaded documents, declarations, attestations, and operational evidence;
 - automatic opt-in synchronization of the exact local JSON evidence bundle;
 - graph indexers for additional source languages and framework-specific route/call resolution;
