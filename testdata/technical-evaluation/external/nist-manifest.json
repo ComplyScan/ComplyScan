@@ -1,0 +1,212 @@
+{
+  "schema_version": 1,
+  "name": "Pinned public repository NIST AI RMF technical-evidence study",
+  "pack_id": "nist-ai-rmf-technical-evidence",
+  "pack_version": "0.1.0",
+  "thresholds": {
+    "candidate_precision": 0.85,
+    "candidate_recall": 1.0,
+    "anchor_accuracy": 1.0,
+    "reachability_accuracy": 1.0,
+    "relationship_recall": 1.0,
+    "language_coverage": 1.0,
+    "max_forbidden_relationships": 0
+  },
+  "cases": [
+    {
+      "id": "localai",
+      "path": "localai",
+      "languages": ["go", "python", "javascript"],
+      "expected_candidates": [
+        {
+          "objective_id": "nist-rmf-manage-2.4-deactivation",
+          "path": "pkg/model/remote_shutdown_test.go"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.4-production-monitoring",
+          "path": "core/http/endpoints/localai/backend_monitor.go"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.4-production-monitoring",
+          "path": "core/services/monitoring/backend_monitor.go"
+        }
+      ]
+    },
+    {
+      "id": "simple-evals",
+      "path": "simple-evals",
+      "languages": ["python"],
+      "expected_candidates": []
+    },
+    {
+      "id": "promptfoo",
+      "path": "promptfoo",
+      "languages": ["go", "python", "javascript", "typescript"],
+      "expected_candidates": [
+        {
+          "objective_id": "nist-rmf-map-2.3-dataset-validation",
+          "path": "test/server/routes/serverApiSchemas.test.ts"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.11-fairness-bias",
+          "path": "src/redteam/plugins/medical/medicalAnchoringBias.ts"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.11-fairness-bias",
+          "path": "test/redteam/plugins/bias.test.ts"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.3-performance-criteria",
+          "path": "test/assertions/bleu.test.ts"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.3-performance-criteria",
+          "path": "test/assertions/contextPropagation.test.ts"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.3-performance-criteria",
+          "path": "test/assertions/contextRecall.test.ts"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.3-performance-criteria",
+          "path": "test/assertions/gleu.test.ts"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.3-performance-criteria",
+          "path": "test/assertions/python.test.ts"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.7-security-resilience",
+          "path": "src/redteam/plugins/indirectPromptInjection.ts"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.7-security-resilience",
+          "path": "test/redteam/plugins/indirectPromptInjection.test.ts"
+        }
+      ]
+    },
+    {
+      "id": "ollama",
+      "path": "ollama",
+      "languages": ["go", "javascript", "typescript"],
+      "expected_candidates": [
+        {
+          "objective_id": "nist-rmf-map-3.5-human-oversight",
+          "path": "cmd/tui/chat/approval.go"
+        },
+        {
+          "objective_id": "nist-rmf-map-3.5-human-oversight",
+          "path": "cmd/tui/chat/approval_test.go"
+        }
+      ]
+    },
+    {
+      "id": "openai-agents-python",
+      "path": "openai-agents-python",
+      "languages": ["python", "javascript"],
+      "expected_candidates": [
+        {
+          "objective_id": "nist-rmf-map-3.5-human-oversight",
+          "path": "examples/hosted_mcp/on_approval.py"
+        },
+        {
+          "objective_id": "nist-rmf-map-3.5-human-oversight",
+          "path": "integration_tests/openai/test_approval_resume.py"
+        },
+        {
+          "objective_id": "nist-rmf-map-3.5-human-oversight",
+          "path": "tests/mcp/test_mcp_approval.py"
+        }
+      ]
+    },
+    {
+      "id": "llm-guard",
+      "path": "llm-guard",
+      "languages": ["python"],
+      "expected_candidates": [
+        {
+          "objective_id": "nist-rmf-measure-2.7-security-resilience",
+          "path": "llm_guard/input_scanners/prompt_injection.py"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.7-security-resilience",
+          "path": "tests/input_scanners/test_prompt_injection.py"
+        }
+      ]
+    },
+    {
+      "id": "langgraph",
+      "path": "langgraph",
+      "languages": ["python", "javascript", "typescript"],
+      "expected_candidates": []
+    },
+    {
+      "id": "llama-index",
+      "path": "llama-index",
+      "languages": ["python", "javascript"],
+      "expected_candidates": []
+    },
+    {
+      "id": "garak",
+      "path": "garak",
+      "languages": ["python", "javascript", "typescript"],
+      "expected_candidates": [
+        {
+          "objective_id": "nist-rmf-measure-2.7-security-resilience",
+          "path": "garak/probes/web_injection.py"
+        }
+      ]
+    },
+    {
+      "id": "pyrit",
+      "path": "pyrit",
+      "languages": ["python", "javascript", "typescript"],
+      "expected_candidates": [
+        {
+          "objective_id": "nist-rmf-measure-2.11-fairness-bias",
+          "path": "pyrit/executor/benchmark/fairness_bias.py"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.11-fairness-bias",
+          "path": "pyrit/score/scorer_evaluation/scorer_evaluator.py"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.11-fairness-bias",
+          "path": "tests/unit/executor/benchmark/test_fairness_bias.py"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.6-safe-failure",
+          "path": "pyrit/executor/attack/component/adversarial_conversation_manager.py"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.6-safe-failure",
+          "path": "tests/unit/executor/attack/component/test_adversarial_conversation_manager.py"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.6-safe-failure",
+          "path": "tests/unit/executor/attack/component/test_simulated_conversation.py"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.7-security-resilience",
+          "path": "pyrit/datasets/jailbreak/templates/Arth_Singh/system_prompt_injection.yaml"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.7-security-resilience",
+          "path": "pyrit/datasets/seed_datasets/remote/agent_threat_rules_dataset.py"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.7-security-resilience",
+          "path": "pyrit/score/true_false/regex/static_prompt_injection_scorer.py"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.7-security-resilience",
+          "path": "tests/unit/datasets/test_agent_threat_rules_dataset.py"
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.7-security-resilience",
+          "path": "tests/unit/executor/attack/component/test_adversarial_conversation_manager.py"
+        }
+      ]
+    }
+  ]
+}

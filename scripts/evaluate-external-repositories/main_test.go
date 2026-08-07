@@ -41,14 +41,27 @@ func TestCheckedInExternalStudyMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := framework.LoadBenchmarkManifest(filepath.Join(root, "manifest.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := validateCatalogAgainstManifest(catalog, manifest); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"manifest.json", "nist-manifest.json"} {
+		manifest, err := framework.LoadBenchmarkManifest(filepath.Join(root, name))
+		if err != nil {
+			t.Fatalf("load %s: %v", name, err)
+		}
+		if err := validateCatalogAgainstManifest(catalog, manifest); err != nil {
+			t.Fatalf("validate %s: %v", name, err)
+		}
+		if name == "nist-manifest.json" && benchmarkCandidateCount(manifest) != 32 {
+			t.Fatalf("NIST reviewed candidate count = %d, want 32", benchmarkCandidateCount(manifest))
+		}
 	}
 	if _, err := loadSemanticBenchmarkConfig(filepath.Join(root, "semantic.json")); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func benchmarkCandidateCount(manifest framework.BenchmarkManifest) int {
+	total := 0
+	for _, benchmarkCase := range manifest.Cases {
+		total += len(benchmarkCase.ExpectedCandidates)
+	}
+	return total
 }
