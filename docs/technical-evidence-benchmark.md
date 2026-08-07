@@ -1,24 +1,30 @@
 # Technical evidence benchmark
 
-ComplyScan maintains a deterministic benchmark for the shared code-only control layer used by its framework packs. The current labels are anchored to the EU AI Act objectives and shared control IDs; they protect the same matcher behavior reused by NIST mappings. It is intended to catch scanner and repository-graph regressions before they reach users. It does not measure legal compliance, complete NIST AI RMF coverage, or general accuracy across arbitrary repositories.
+ComplyScan maintains deterministic benchmarks for the shared code-only control layer used by its framework packs. Separate EU AI Act and NIST AI RMF manifests label source-specific objectives while shared control IDs protect common matcher behavior. The benchmarks catch scanner and repository-graph regressions before they reach users. They do not measure legal compliance, a complete NIST AI RMF implementation, or general accuracy across arbitrary repositories.
 
-Run the checked-in corpus from the repository root:
+Run the checked-in EU corpus from the repository root:
 
 ```sh
 ./scripts/evaluate-technical-evidence.sh
 ```
 
+Run the NIST corpus with its pinned manifest:
+
+```sh
+./scripts/evaluate-technical-evidence.sh --manifest testdata/technical-evaluation/nist-manifest.json
+```
+
 For automation or comparison tooling, request the source-free JSON result:
 
 ```sh
-./scripts/evaluate-technical-evidence.sh --format json
+./scripts/evaluate-technical-evidence.sh --manifest testdata/technical-evaluation/nist-manifest.json --format json
 ```
 
-The runner exits `0` when every aggregate acceptance threshold passes, `1` when a quality threshold fails, and `2` for an invalid manifest or operational error. CI runs the human-readable form on every supported Go version in addition to the normal tests.
+The runner exits `0` when every aggregate acceptance threshold passes, `1` when a quality threshold fails, and `2` for an invalid manifest or operational error. CI runs both manifests on every supported Go version in addition to the normal tests.
 
 ## What is measured
 
-The versioned manifest at `testdata/technical-evaluation/manifest.json` binds the exact technical pack ID and version. For each repository case it labels:
+The versioned manifests at `testdata/technical-evaluation/manifest.json` and `testdata/technical-evaluation/nist-manifest.json` each bind an exact technical pack ID and version. For each repository case they label:
 
 - every expected objective and repository-relative evidence path;
 - the expected enclosing symbol and production, exported, test-only, or unreached classification;
@@ -28,7 +34,9 @@ The versioned manifest at `testdata/technical-evaluation/manifest.json` binds th
 
 The result reports candidate precision and recall, anchor accuracy, reachability accuracy, required-relationship recall, forbidden-relationship hits, and language coverage. Per-case diagnostics identify unexpected or missing candidates and incorrect context. Reports contain labels and aggregate metrics only; they do not serialize repository source.
 
-The initial corpus contains repository-shaped Go operations, Python model-pipeline, JavaScript review-service, and TypeScript assistant cases plus a hard-negative repository. It deliberately exercises routes, dataset validation, bias and performance tests, audit logging, human review, override and stop mechanisms, prompt-injection filtering, interaction disclosure, and synthetic-content provenance. These small maintained cases are regression evidence, not a substitute for larger representative-repository studies.
+The EU corpus contains repository-shaped Go operations, Python model-pipeline, JavaScript review-service, and TypeScript assistant cases plus a hard-negative repository. It exercises routes, dataset validation, bias and performance tests, audit logging, human review, override and stop mechanisms, prompt-injection filtering, interaction disclosure, and synthetic-content provenance.
+
+The NIST corpus covers every one of the 11 pack objectives. It reuses shared-control cases for dataset validation, human oversight, performance criteria, safe deactivation, security, fairness, and appeal or override. A dedicated Go operations case covers production behavior monitoring, fail-safe testing, incident recovery, and third-party model monitoring. A separate hard-negative repository places tempting keyword groups in different files to ensure the matcher does not combine unrelated fragments across file boundaries. The enforced baseline has 11 true-positive candidates, no false positives, no false negatives, and 100% anchor, reachability, relationship, and language scores. These small maintained cases are regression evidence, not a substitute for larger representative-repository studies.
 
 ## Pinned public-repository study
 
@@ -40,7 +48,7 @@ A separate manual study evaluates exact commits of three MIT-licensed public AI 
 
 The provenance catalog and human candidate labels live under `testdata/technical-evaluation/external`. The runner creates a temporary workspace, fetches only the pinned revisions, verifies each checkout and licence file, scans locally, prints source-free metrics, and deletes the checkout. Use `--workspace DIRECTORY` to reuse existing pinned checkouts and `--format json` for automation.
 
-The EU pack `0.1.3` baseline records 12 true-positive candidates, five false positives, no false negatives, and complete expected language detection: 70.6% precision and 100% recall on the labelled paths. Version 0.1.3 introduces canonical control IDs without changing the measured EU evidence-match terms. The remaining false positives are retained and documented because this deterministic retrieval stage is designed to favor reviewable candidates; optional semantic review can reject them. This small three-repository study is evidence for regression tuning, not a general accuracy claim, and it is not a network-dependent CI gate. NIST-only control additions need their own expanded labelled corpus before any NIST-specific accuracy claim.
+The EU pack `0.1.3` baseline records 12 true-positive candidates, five false positives, no false negatives, and complete expected language detection: 70.6% precision and 100% recall on the labelled paths. Version 0.1.3 introduces canonical control IDs without changing the measured EU evidence-match terms. The remaining false positives are retained and documented because this deterministic retrieval stage is designed to favor reviewable candidates; optional semantic review can reject them. This small public-repository study is evidence for regression tuning, not a general accuracy claim, and it is not a network-dependent CI gate. The NIST pack still needs separately reviewed public-repository labels before any NIST-specific real-world accuracy claim.
 
 With Ollama running and `qwen3:8b` installed, add `--review ollama` to evaluate every deterministic candidate using the policy and thresholds in `testdata/technical-evaluation/external/semantic.json`. ComplyScan makes a separate schema-constrained request for each candidate and attaches the decision to its trusted objective/fingerprint pair outside the model. The policy rejects only `not_supported`; missing observations are retained but reduce review coverage. On 2026-08-04, the complete 17-candidate run reached 91.7% precision, 91.7% recall, 80% negative specificity, and 100% coverage. Its one false positive and one false negative remain documented in the external study README. Live-model evaluation is manual, slow, and variable, so it does not run in CI and cannot support a general accuracy claim.
 
@@ -56,7 +64,7 @@ The distinction between raw inference and the final policy is intentional: this 
 
 1. Add a minimal repository-shaped fixture under `testdata/technical-evaluation/repositories` without real secrets, personal data, or third-party copyrighted source.
 2. Run the scanner and inspect every technical candidate, anchor, reachability classification, and relevant relationship.
-3. Label every candidate in the manifest. An unlabelled result is treated as a false positive; a missing label is treated as a false negative.
+3. Label every candidate in the source-specific manifest. An unlabelled result is treated as a false positive; a missing label is treated as a false negative.
 4. Add required relationships only when the source makes them unambiguous. Use forbidden relationships for meaningful hard negatives.
 5. Run the benchmark and the full Go test suite.
 
