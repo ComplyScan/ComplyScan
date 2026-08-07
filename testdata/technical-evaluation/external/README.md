@@ -69,6 +69,8 @@ These repeated results show stable behavior on this exact small corpus. They do 
 
 On 2026-08-05, the study expanded from three to ten pinned repositories by adding Ollama, OpenAI Agents SDK for Python, LLM Guard, LangGraph, LlamaIndex, NVIDIA garak, and Microsoft PyRIT. The labelled corpus now contains 31 reasonable technical-review candidates. The deterministic engine returned all 31 plus 11 false positives: 73.8% candidate precision, 100% recall, and 100% coverage of the 25 expected repository-language pairs.
 
+A fresh EU pack `0.1.3` run on 2026-08-07 returned the same 31 labelled candidates plus 10 false positives: 75.6% precision, 100% recall, and complete language coverage. The preceding 2026-08-05 values remain recorded as the historical expansion result rather than being silently rewritten.
+
 The broader review also drove structural filtering for categories that cannot represent application controls: developer-agent skill metadata, tracing-only disable flags, dataset-name selection, dataset-loader tests mistaken for bias evaluation, and compliance terms inside very large embedded parser fixtures. The remaining false positives are preserved for semantic review because their meaning depends on context rather than a generally safe static exclusion.
 
 Only bounded candidate context is sent to the local Ollama model. The JSON result contains sanitized rationales and decision metadata but no source excerpts. These labels say only whether a file is a reasonable candidate for human technical review. They do not state that a repository, product, or control complies with the EU AI Act. Re-review the complete candidate set before changing a pinned revision, pack version, keyword boundary, semantic policy, or threshold.
