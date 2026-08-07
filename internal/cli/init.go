@@ -54,8 +54,11 @@ func newInitCommand(stdout io.Writer) *cobra.Command {
 			cfg := config.Default()
 			interactive := forceInteractive || (!nonInteractive && isInteractiveReader(cmd.InOrStdin()))
 			prompt := promptSession{reader: bufio.NewReader(cmd.InOrStdin()), output: stdout}
+			if err := configureFrameworkSelection(prompt, &cfg, interactive, selectedFrameworks); err != nil {
+				return err
+			}
 			if interactive {
-				system, err := collectSystemProfileWithPrompt(prompt, target, time.Now())
+				system, err := collectSystemProfileWithPrompt(prompt, target, time.Now(), cfg.Frameworks...)
 				if err != nil {
 					return err
 				}
@@ -64,9 +67,6 @@ func newInitCommand(stdout io.Writer) *cobra.Command {
 				if _, err := fmt.Fprintln(stdout, "Non-interactive setup: no system profile was collected. Run `complyscan profile setup` from a terminal to add applicability context."); err != nil {
 					return err
 				}
-			}
-			if err := configureFrameworkSelection(prompt, &cfg, interactive, selectedFrameworks); err != nil {
-				return err
 			}
 			if err := config.Write(path, cfg, force); err != nil {
 				return err
@@ -86,18 +86,20 @@ func newInitCommand(stdout io.Writer) *cobra.Command {
 }
 
 func configureFrameworkSelection(prompt promptSession, cfg *config.Config, interactive bool, explicit []string) error {
+	if interactive {
+		if _, err := fmt.Fprintln(prompt.output, "\nFramework selection"); err != nil {
+			return err
+		}
+		if err := explainSetupQuestion(prompt, "frameworks"); err != nil {
+			return err
+		}
+	}
 	if len(explicit) > 0 {
 		cfg.Frameworks = append([]string(nil), explicit...)
 		return cfg.Validate()
 	}
 	if !interactive {
 		return nil
-	}
-	if _, err := fmt.Fprintln(prompt.output, "\nFramework selection"); err != nil {
-		return err
-	}
-	if err := explainSetupQuestion(prompt, "frameworks"); err != nil {
-		return err
 	}
 	selected, err := promptChoices(prompt, "Technical evidence packs", cfg.Frameworks,
 		framework.EUAIActTechnicalEvidencePackID, framework.NISTAIRMFTechnicalEvidencePackID)
@@ -173,7 +175,7 @@ func collectSystemProfile(input io.Reader, output io.Writer, target string, now 
 	return collectSystemProfileWithPrompt(promptSession{reader: bufio.NewReader(input), output: output}, target, now)
 }
 
-func collectSystemProfileWithPrompt(prompt promptSession, target string, now time.Time) (profile.System, error) {
+func collectSystemProfileWithPrompt(prompt promptSession, target string, now time.Time, enabledFrameworks ...string) (profile.System, error) {
 	output := prompt.output
 	absolute, err := filepath.Abs(target)
 	if err != nil {
@@ -185,17 +187,22 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 		defaultID = "system"
 	}
 	value := profile.NewDraftSystem(defaultID, defaultName)
+	if !frameworkEnabled(enabledFrameworks, framework.EUAIActTechnicalEvidencePackID) {
+		value.Applicability = nil
+	}
 	if _, err := fmt.Fprintln(output, "\nSystem applicability setup"); err != nil {
 		return profile.System{}, err
 	}
 	if _, err := fmt.Fprintln(output, "Answer factual questions. Use `unknown` when context has not been established; do not enter secrets or personal records."); err != nil {
 		return profile.System{}, err
 	}
-	if _, err := fmt.Fprintln(output, "The explanations translate EU AI Act screening concepts into developer language. They guide fact collection but are not legal advice."); err != nil {
+	if _, err := fmt.Fprintln(output, "The explanations translate AI governance and regulatory screening concepts into developer language. They guide fact collection but are not legal advice."); err != nil {
 		return profile.System{}, err
 	}
-	if _, err := fmt.Fprintln(output, "Reference: Regulation (EU) 2024/1689, especially Article 3 and Annex III: https://eur-lex.europa.eu/eli/reg/2024/1689/oj/eng"); err != nil {
-		return profile.System{}, err
+	if frameworkEnabled(enabledFrameworks, framework.EUAIActTechnicalEvidencePackID) {
+		if _, err := fmt.Fprintln(output, "EU reference: Regulation (EU) 2024/1689, especially Article 3 and Annex III: https://eur-lex.europa.eu/eli/reg/2024/1689/oj/eng"); err != nil {
+			return profile.System{}, err
+		}
 	}
 	if _, err := fmt.Fprintln(output); err != nil {
 		return profile.System{}, err
@@ -321,48 +328,62 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 	if !strings.EqualFold(reviewer, "unknown") {
 		value.ProfileReview = profile.ProfileReview{Status: profile.ReviewConfirmed, ReviewedBy: reviewer, ReviewedAt: now.Format(time.DateOnly)}
 	}
-	if _, err := fmt.Fprintln(output, "\nProvisional screening from the declared facts:"); err != nil {
-		return profile.System{}, err
-	}
-	if err := profile.WriteTerminal(output, profile.AssessEUAIAct([]profile.System{value})); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "applicability-decision"); err != nil {
-		return profile.System{}, err
-	}
-	decisionStatus, err := promptChoice(prompt, "Human EU AI Act applicability decision", profile.ApplicabilityNeedsReview,
-		profile.ApplicabilityNeedsReview, profile.ApplicabilityApplicable, profile.ApplicabilityNotApplicable, profile.ApplicabilityUncertain)
-	if err != nil {
-		return profile.System{}, err
-	}
-	decision := profile.ApplicabilityDecision{Framework: profile.FrameworkEUAIAct, Status: decisionStatus}
-	if decisionStatus != profile.ApplicabilityNeedsReview {
-		if err := explainSetupQuestion(prompt, "decision-rationale"); err != nil {
+	if frameworkEnabled(enabledFrameworks, framework.EUAIActTechnicalEvidencePackID) {
+		if _, err := fmt.Fprintln(output, "\nProvisional screening for the EU AI Act from the declared facts:"); err != nil {
 			return profile.System{}, err
 		}
-		if decision.Rationale, err = prompt.text("Decision rationale", ""); err != nil {
+		if err := profile.WriteTerminal(output, profile.AssessEUAIAct([]profile.System{value})); err != nil {
 			return profile.System{}, err
 		}
-		defaultReviewer := ""
-		if !strings.EqualFold(reviewer, "unknown") {
-			defaultReviewer = reviewer
-		}
-		if err := explainSetupQuestion(prompt, "applicability-reviewer"); err != nil {
+		if err := explainSetupQuestion(prompt, "applicability-decision"); err != nil {
 			return profile.System{}, err
 		}
-		if decision.ReviewedBy, err = prompt.text("Applicability reviewer", defaultReviewer); err != nil {
+		decisionStatus, err := promptChoice(prompt, "Human EU AI Act applicability decision", profile.ApplicabilityNeedsReview,
+			profile.ApplicabilityNeedsReview, profile.ApplicabilityApplicable, profile.ApplicabilityNotApplicable, profile.ApplicabilityUncertain)
+		if err != nil {
 			return profile.System{}, err
 		}
-		decision.ReviewedAt = now.Format(time.DateOnly)
+		decision := profile.ApplicabilityDecision{Framework: profile.FrameworkEUAIAct, Status: decisionStatus}
+		if decisionStatus != profile.ApplicabilityNeedsReview {
+			if err := explainSetupQuestion(prompt, "decision-rationale"); err != nil {
+				return profile.System{}, err
+			}
+			if decision.Rationale, err = prompt.text("Decision rationale", ""); err != nil {
+				return profile.System{}, err
+			}
+			defaultReviewer := ""
+			if !strings.EqualFold(reviewer, "unknown") {
+				defaultReviewer = reviewer
+			}
+			if err := explainSetupQuestion(prompt, "applicability-reviewer"); err != nil {
+				return profile.System{}, err
+			}
+			if decision.ReviewedBy, err = prompt.text("Applicability reviewer", defaultReviewer); err != nil {
+				return profile.System{}, err
+			}
+			decision.ReviewedAt = now.Format(time.DateOnly)
+		}
+		value.Applicability = []profile.ApplicabilityDecision{decision}
 	}
-	value.Applicability = []profile.ApplicabilityDecision{decision}
 	if err := value.Validate(); err != nil {
 		return profile.System{}, fmt.Errorf("validate collected system profile: %w", err)
 	}
-	if _, err := fmt.Fprintln(output, "\nSystem context collected. Applicability decisions are human records, not ComplyScan legal determinations."); err != nil {
+	if _, err := fmt.Fprintln(output, "\nSystem context collected. Any applicability decisions are human records, not ComplyScan legal determinations."); err != nil {
 		return profile.System{}, err
 	}
 	return value, nil
+}
+
+func frameworkEnabled(enabled []string, wanted string) bool {
+	if len(enabled) == 0 {
+		return wanted == framework.EUAIActTechnicalEvidencePackID
+	}
+	for _, id := range enabled {
+		if id == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 type promptSession struct {

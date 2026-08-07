@@ -804,7 +804,7 @@ func TestInitCommandProtectsExistingConfig(t *testing.T) {
 func TestInteractiveInitCollectsAttributedSystemContext(t *testing.T) {
 	target := t.TempDir()
 	input := strings.Join([]string{
-		"", "Candidate ranking", "Rank job applications for recruiter review.", "development", "provider", "eu,uk", "employment",
+		"", "", "Candidate ranking", "Rank job applications for recruiter review.", "development", "provider", "eu,uk", "employment",
 		"recruiters", "job applicants", "advisory", "required", "inference,automated-decision", "yes", "unknown", "no", "private-customer,api",
 		"A. Reviewer", "applicable", "The system is offered to EU customers by its provider.", "",
 	}, "\n") + "\n"

@@ -96,6 +96,31 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 	}
 }
 
+func TestNISTOnlySetupSkipsEUApplicabilityDecision(t *testing.T) {
+	target := t.TempDir()
+	input := strings.NewReader(strings.Repeat("\n", 18))
+	var stdout, stderr bytes.Buffer
+	code := executeWithInput([]string{
+		"setup", "--interactive", "--framework", "nist-ai-rmf-technical-evidence", "--review", "none", "--skip-scan", target,
+	}, input, &stdout, &stderr, testBuild)
+	if code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	cfg, err := config.Load(filepath.Join(target, config.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Frameworks) != 1 || cfg.Frameworks[0] != "nist-ai-rmf-technical-evidence" || len(cfg.Systems) != 1 {
+		t.Fatalf("unexpected NIST-only setup: %#v", cfg)
+	}
+	if len(cfg.Systems[0].Applicability) != 0 || strings.Contains(stdout.String(), "Human EU AI Act applicability decision") {
+		t.Fatalf("NIST-only setup asked for an EU legal decision:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "NIST AI RMF is voluntary guidance") {
+		t.Fatalf("framework explanation missing:\n%s", stdout.String())
+	}
+}
+
 func TestEverySetupQuestionHasDeveloperGuidance(t *testing.T) {
 	keys := []string{
 		"frameworks", "system-id", "system-name", "intended-purpose", "lifecycle-stage", "organization-roles",

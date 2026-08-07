@@ -110,8 +110,11 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	}
 
 	prompt := promptSession{reader: bufio.NewReader(cmd.InOrStdin()), output: stdout}
+	if err := configureFrameworkSelection(prompt, &cfg, interactive, options.frameworks); err != nil {
+		return err
+	}
 	if interactive {
-		system, collectErr := collectSystemProfileWithPrompt(prompt, target, time.Now())
+		system, collectErr := collectSystemProfileWithPrompt(prompt, target, time.Now(), cfg.Frameworks...)
 		if collectErr != nil {
 			return collectErr
 		}
@@ -138,10 +141,6 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 			return err
 		}
 	}
-	if err := configureFrameworkSelection(prompt, &cfg, interactive, options.frameworks); err != nil {
-		return err
-	}
-
 	modelReady, err := configureSetupReview(cmd.Context(), prompt, stdout, &cfg, interactive, options)
 	if err != nil {
 		return err

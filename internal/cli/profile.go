@@ -84,7 +84,7 @@ func newProfileSetupCommand(stdout io.Writer) *cobra.Command {
 				return errors.New("profile setup requires a terminal; use --interactive when piping answers or edit .complyscan.yml directly")
 			}
 			prompt := promptSession{reader: bufio.NewReader(cmd.InOrStdin()), output: stdout}
-			system, err := collectSystemProfileWithPrompt(prompt, target, time.Now())
+			system, err := collectSystemProfileWithPrompt(prompt, target, time.Now(), cfg.Frameworks...)
 			if err != nil {
 				return err
 			}
