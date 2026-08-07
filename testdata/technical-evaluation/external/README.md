@@ -2,12 +2,18 @@
 
 This directory contains provenance and human labels, not third-party source code. The manual benchmark downloads ten permissively licensed public repositories at exact commits and evaluates them with the same deterministic technical-evidence engine used by the CLI.
 
-The repositories cover AI runtimes, agent frameworks, orchestration libraries, evaluation suites, guardrails, and red-team tooling across Go, Python, JavaScript, and TypeScript. `sources.json` records the exact URLs, revisions, licence identifiers, and licence-file paths. `manifest.json` records candidate-level labels and acceptance thresholds for technical evidence only.
+The repositories cover AI runtimes, agent frameworks, orchestration libraries, evaluation suites, guardrails, and red-team tooling across Go, Python, JavaScript, and TypeScript. `sources.json` records the exact URLs, revisions, licence identifiers, and licence-file paths. `manifest.json` records EU AI Act candidate labels; `nist-manifest.json` independently records NIST AI RMF labels and thresholds. Both contain technical evidence only.
 
 Run the study with network access:
 
 ```sh
 ./scripts/evaluate-external-repositories.sh
+```
+
+Run the NIST study over the same verified revisions with:
+
+```sh
+./scripts/evaluate-external-repositories.sh --manifest testdata/technical-evaluation/external/nist-manifest.json
 ```
 
 To reuse already checked-out pinned repositories, place them in one directory using the IDs from `sources.json` and run:
@@ -18,7 +24,22 @@ To reuse already checked-out pinned repositories, place them in one directory us
 
 Add `--format json` for a source-free machine-readable result. The runner verifies every checkout's exact commit and licence-file presence before scanning. It exits `0` when thresholds pass, `1` for a metric failure, and `2` for provenance, checkout, or execution errors. The networked study is deliberately not a CI requirement.
 
-To evaluate the deterministic candidates with the configured local model, start Ollama, ensure `qwen3:8b` is installed, and run:
+## NIST AI RMF deterministic baseline
+
+On 2026-08-07, the NIST AI RMF pack `0.1.0` produced 37 candidates across the same ten pinned repositories. Human review retained 32 reasonable technical-review candidates and rejected five false positives: 86.5% candidate precision, 100% recall against the reviewed labels, and complete expected language coverage. No source code or excerpts are stored in the manifest or result.
+
+The retained candidates cover dataset validation, human oversight, performance criteria, production model monitoring, safe-failure behavior, AI security, fairness evaluation, and deactivation. The study did not independently identify public candidates for every pack objective, so its recall value applies only to the labelled candidate set and is not a claim of complete NIST AI RMF coverage.
+
+The five rejected candidates are deliberately left visible as regression pressure:
+
+- LocalAI's `AmbiguityAlert.jsx` is a backend-selection interface, not production model-behavior monitoring.
+- Promptfoo's `SecurityQuiz.tsx` and `_FAQ.tsx` discuss security concepts but do not implement or test an AI security control.
+- PyRIT's `test_response_contracts.py` serializes retry-event metadata but does not exercise an AI fault or recovery mechanism.
+- PyRIT's `test_exception_context.py` formats retry context but does not test fallback, recovery, or fail-safe behavior.
+
+PyRIT's general scorer evaluator is retained because it executes labelled harm-evaluation datasets, including the fairness-bias definition. Its adversarial conversation-manager tests are retained under both safe-failure and security objectives where the file exercises bounded retry behavior and adversarial-input routing. These are candidate-review judgments, not claims that the repositories implement NIST outcomes effectively.
+
+To evaluate the EU deterministic candidates with the configured local model, start Ollama, ensure `qwen3:8b` is installed, and run:
 
 ```sh
 ./scripts/evaluate-external-repositories.sh --review ollama

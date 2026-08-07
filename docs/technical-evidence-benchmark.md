@@ -40,15 +40,23 @@ The NIST corpus covers every one of the 11 pack objectives. It reuses shared-con
 
 ## Pinned public-repository study
 
-A separate manual study evaluates exact commits of three MIT-licensed public AI repositories without committing their source. Run it with network access:
+A separate manual study evaluates exact commits of ten permissively licensed public AI repositories without committing their source. Run it with network access:
 
 ```sh
 ./scripts/evaluate-external-repositories.sh
 ```
 
+Use the independently reviewed NIST labels over the same pinned sources with:
+
+```sh
+./scripts/evaluate-external-repositories.sh --manifest testdata/technical-evaluation/external/nist-manifest.json
+```
+
 The provenance catalog and human candidate labels live under `testdata/technical-evaluation/external`. The runner creates a temporary workspace, fetches only the pinned revisions, verifies each checkout and licence file, scans locally, prints source-free metrics, and deletes the checkout. Use `--workspace DIRECTORY` to reuse existing pinned checkouts and `--format json` for automation.
 
-The EU pack `0.1.3` baseline records 12 true-positive candidates, five false positives, no false negatives, and complete expected language detection: 70.6% precision and 100% recall on the labelled paths. Version 0.1.3 introduces canonical control IDs without changing the measured EU evidence-match terms. The remaining false positives are retained and documented because this deterministic retrieval stage is designed to favor reviewable candidates; optional semantic review can reject them. This small public-repository study is evidence for regression tuning, not a general accuracy claim, and it is not a network-dependent CI gate. The NIST pack still needs separately reviewed public-repository labels before any NIST-specific real-world accuracy claim.
+The expanded EU pack `0.1.3` study records 31 true-positive candidates and 11 false positives with no false negatives against the reviewed candidate labels: 73.8% precision, 100% recall, and complete expected language detection. Version 0.1.3 introduces canonical control IDs without changing the measured EU evidence-match terms.
+
+The NIST pack `0.1.0` study records 32 true-positive candidates and five false positives with no false negatives against its independently reviewed labels: 86.5% precision, 100% recall, and complete language detection. Its five false positives are a backend-selection interface, two educational security pages, retry-event serialization, and retry-context formatting. The source-free study README records the review rationale. Neither study's recall number proves that all relevant implementations were found; it measures only the maintained labelled paths. These studies are regression-tuning evidence, not general accuracy claims, and remain outside network-dependent CI.
 
 With Ollama running and `qwen3:8b` installed, add `--review ollama` to evaluate every deterministic candidate using the policy and thresholds in `testdata/technical-evaluation/external/semantic.json`. ComplyScan makes a separate schema-constrained request for each candidate and attaches the decision to its trusted objective/fingerprint pair outside the model. The policy rejects only `not_supported`; missing observations are retained but reduce review coverage. On 2026-08-04, the complete 17-candidate run reached 91.7% precision, 91.7% recall, 80% negative specificity, and 100% coverage. Its one false positive and one false negative remain documented in the external study README. Live-model evaluation is manual, slow, and variable, so it does not run in CI and cannot support a general accuracy claim.
 

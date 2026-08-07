@@ -25,7 +25,8 @@
 
 - Multi-framework regressions cover configuration validation, setup branching, report rendering, recommendation semantics, shared-control fingerprints, and verification objective selection.
 - A source-free NIST synthetic benchmark covers all 11 objectives, four indexed-language case types, production and test-only reachability, required graph relationships, and split-keyword hard negatives with enforced CI thresholds.
-- NIST-specific public-repository retrieval labels and a prompt-version 10 live-model run remain required before making real-world NIST accuracy or updated model-quality claims.
+- Independently reviewed NIST labels over ten exact public-repository revisions record 32 reasonable candidates, five false positives, 86.5% candidate precision, and complete recall against the labelled paths without storing third-party source.
+- A prompt-version 10 live-model run remains required before making updated model-quality claims.
 
 ## 0.1.3 - 2026-08-06
 

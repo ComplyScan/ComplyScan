@@ -72,6 +72,7 @@ The maintained verification baseline includes:
 - embedded EU and NIST code-only pack parsing, source/nature/version/digest validation, bounded deterministic evidence matching, canonical shared-control fingerprints, self-definition exclusion, stable line locations, and complete-repository checks for changed scans;
 - Go, Python, and TypeScript graph and adversarial repository fixtures covering imports, calls, routes, feature configuration, authorization, persistence, audit logging, live reachability, test-only dead code, unsupported source, and source-comment prompt injection;
 - versioned EU and NIST technical-evidence benchmarks with enforced candidate precision and recall, anchor and reachability accuracy, relationship recall, forbidden-relationship, and language-coverage thresholds across repository-shaped positive and hard-negative cases; the NIST corpus represents all 11 current objectives;
+- independent source-free EU and NIST candidate labels over ten exact public-repository revisions, including retained false positives and explicit limits on interpreting recall as complete control discovery;
 - Markdown escaping, JSON schema metadata, atomic report replacement, symlink and traversal rejection, report-directory discovery exclusion, and Git-ignore initialization tests;
 - deterministic GoReleaser archives for macOS, Linux, and Windows on amd64 and arm64;
 - release checksums and attestations; and
