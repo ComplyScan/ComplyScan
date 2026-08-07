@@ -75,7 +75,7 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 		}
 	}
 
-	if report.Applicability != nil {
+	if len(report.Frameworks) == 0 && report.Applicability != nil {
 		if _, err := fmt.Fprintln(writer, "\n## Declared applicability context"); err != nil {
 			return err
 		}
@@ -96,14 +96,19 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 			return err
 		}
 	}
+	for _, result := range report.Frameworks {
+		if err := writeFrameworkResultMarkdown(writer, result); err != nil {
+			return err
+		}
+	}
 
-	if report.Reconciliation != nil {
+	if len(report.Frameworks) == 0 && report.Reconciliation != nil {
 		if err := writeReconciliationMarkdown(writer, *report.Reconciliation); err != nil {
 			return err
 		}
 	}
 
-	if report.TechnicalEvidence != nil {
+	if len(report.Frameworks) == 0 && report.TechnicalEvidence != nil {
 		if err := writeTechnicalEvidenceMarkdown(writer, *report.TechnicalEvidence); err != nil {
 			return err
 		}
@@ -124,7 +129,7 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 			}
 		}
 	}
-	if report.TechnicalReview != nil {
+	if len(report.Frameworks) == 0 && report.TechnicalReview != nil {
 		if _, err := fmt.Fprintf(writer, "\n## Ollama technical evidence investigation\n\n- Model: %s\n- Targets investigated: %d of %d\n- Boundary: repository evidence only; runtime verification and legal acceptance remain separate\n", inlineCode(report.TechnicalReview.Model), report.TechnicalReview.Reviewed, report.TechnicalReview.InputCandidates); err != nil {
 			return err
 		}
@@ -210,6 +215,74 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 
 	_, err := fmt.Fprintln(writer, "\n---\n\nGenerated from the versioned JSON evidence bundle. Candidate evidence requires technical and human verification.")
 	return err
+}
+
+func writeFrameworkResultMarkdown(writer io.Writer, result FrameworkResult) error {
+	if _, err := fmt.Fprintf(writer, "\n## Framework: %s\n\n- Framework ID: %s\n- Nature: %s\n", markdownText(result.Name), inlineCode(result.ID), markdownText(result.Nature)); err != nil {
+		return err
+	}
+	if result.Applicability != nil {
+		if _, err := fmt.Fprintln(writer, "\n### Declared applicability context"); err != nil {
+			return err
+		}
+		for _, system := range result.Applicability.Systems {
+			if _, err := fmt.Fprintf(writer, "\n- %s (%s): scope %s; high-risk screening %s\n",
+				markdownText(system.SystemName), inlineCode(system.SystemID), markdownText(string(system.AutomatedScope)), markdownText(string(system.HighRiskScreening))); err != nil {
+				return err
+			}
+		}
+	}
+	if err := writeReconciliationMarkdown(writer, result.Reconciliation); err != nil {
+		return err
+	}
+	if err := writeTechnicalEvidenceMarkdown(writer, result.TechnicalEvidence); err != nil {
+		return err
+	}
+	if result.TechnicalReview != nil {
+		return writeFrameworkTechnicalReviewMarkdown(writer, *result.TechnicalReview)
+	}
+	return nil
+}
+
+func writeFrameworkTechnicalReviewMarkdown(writer io.Writer, review providers.TechnicalReviewResult) error {
+	if _, err := fmt.Fprintf(writer, "\n### Model evidence investigation\n\n- Model: %s\n- Targets investigated: %d of %d\n- Boundary: repository evidence only; runtime verification and legal acceptance remain separate\n", inlineCode(review.Model), review.Reviewed, review.InputCandidates); err != nil {
+		return err
+	}
+	for _, observation := range review.Observations {
+		if _, err := fmt.Fprintf(writer, "\n#### %s\n\n- System: %s\n- Ownership scope: %s\n- Repository files in scope: %d\n- Evidence fingerprint: %s\n- Investigation mode: %s\n- Prior evidence status: %s\n- Conclusion: %s\n- Assurance level: %s\n- Strength: %s\n- Confidence: %s\n- Runtime verification required: %t\n- Legal review required: %t\n\n%s\n",
+			inlineCode(observation.ObjectiveID), markdownTechnicalSystem(observation), markdownText(observation.OwnershipScope), observation.RepositoryFiles,
+			inlineCode(observation.EvidenceFingerprint), markdownText(observation.InvestigationMode), markdownText(observation.EvidenceStatus),
+			markdownText(string(observation.Conclusion)), markdownText(string(observation.Assurance)), markdownText(string(observation.Strength)),
+			markdownText(observation.Confidence), observation.RuntimeVerificationRequired, observation.LegalReviewRequired, markdownText(observation.Rationale)); err != nil {
+			return err
+		}
+		for _, claim := range observation.SupportingEvidence {
+			if _, err := fmt.Fprintf(writer, "\n- Supporting evidence: %s — %s", inlineCode(locationText(claim.Path, claim.Line)), markdownText(claim.Summary)); err != nil {
+				return err
+			}
+		}
+		for _, claim := range observation.ContradictoryEvidence {
+			if _, err := fmt.Fprintf(writer, "\n- Contradictory evidence: %s — %s", inlineCode(locationText(claim.Path, claim.Line)), markdownText(claim.Summary)); err != nil {
+				return err
+			}
+		}
+		for _, missing := range observation.MissingEvidence {
+			if _, err := fmt.Fprintf(writer, "\n- Missing evidence: %s", markdownText(missing)); err != nil {
+				return err
+			}
+		}
+		for _, question := range observation.UnresolvedQuestions {
+			if _, err := fmt.Fprintf(writer, "\n- Unresolved: %s", markdownText(question)); err != nil {
+				return err
+			}
+		}
+		if observation.SuggestedReview != "" {
+			if _, err := fmt.Fprintf(writer, "\n\nSuggested review: %s\n", markdownText(observation.SuggestedReview)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func writeAIInventoryMarkdown(writer io.Writer, value inventory.Report) error {
@@ -384,7 +457,8 @@ func markdownTechnicalSystem(observation providers.TechnicalObservation) string 
 }
 
 func writeTechnicalEvidenceMarkdown(writer io.Writer, evidence framework.TechnicalEvidenceReport) error {
-	if _, err := fmt.Fprintf(writer, "\n## EU AI Act technical evidence\n\n- Pack: %s at version %s\n- Pack digest: %s\n- Source: [%s](%s)\n- Checks with candidate evidence: %d\n- Checks with no evidence detected: %d\n- Checks not evaluated: %d\n",
+	if _, err := fmt.Fprintf(writer, "\n### Technical evidence: %s\n\n- Pack: %s at version %s\n- Pack digest: %s\n- Source: [%s](%s)\n- Checks with candidate evidence: %d\n- Checks with no evidence detected: %d\n- Checks not evaluated: %d\n",
+		markdownText(evidence.Pack.Name),
 		inlineCode(evidence.Pack.ID), inlineCode(evidence.Pack.Version), inlineCode(evidence.Pack.Digest),
 		markdownText(evidence.Source.Reference), evidence.Source.URL,
 		evidence.Summary.CandidateEvidence, evidence.Summary.NotDetected, evidence.Summary.NotEvaluated); err != nil {

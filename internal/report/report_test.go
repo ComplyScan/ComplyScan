@@ -50,7 +50,7 @@ func TestWriteJSON(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 4 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
+	if decoded.SchemaVersion != 5 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
 		t.Fatalf("unexpected tool: %#v", decoded.Tool)
 	}
 	if !strings.HasPrefix(decoded.Scan.ID, "scan-") || decoded.Scan.CreatedAt != "2026-08-03T08:30:00Z" || decoded.Scan.Scope.Findings != "changed-files" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
@@ -67,7 +67,7 @@ func TestWriteJSON(t *testing.T) {
 	}
 }
 
-func TestWriteJSONUsesSchemaFourEvidenceInvestigationContract(t *testing.T) {
+func TestWriteJSONUsesSchemaFiveEvidenceInvestigationContract(t *testing.T) {
 	value := New(".", "dev", nil, nil, 0)
 	value.TechnicalReview = &providers.TechnicalReviewResult{
 		Provider: providers.Ollama, Model: "qwen3:8b", InputCandidates: 1, Reviewed: 1,
@@ -82,8 +82,8 @@ func TestWriteJSONUsesSchemaFourEvidenceInvestigationContract(t *testing.T) {
 	if err := WriteJSON(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), `"schema_version": 4`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
-		t.Fatalf("unexpected schema-version-4 investigation JSON:\n%s", output.String())
+	if !strings.Contains(output.String(), `"schema_version": 5`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
+		t.Fatalf("unexpected schema-version-5 investigation JSON:\n%s", output.String())
 	}
 }
 
@@ -135,6 +135,27 @@ func TestWriteTerminalDoesNotAddColorWhenDisabled(t *testing.T) {
 	for _, want := range []string{"ComplyScan found 1 potential issue", "HIGH", "app.py:10", "Summary: 1 high", "Suppressed: 1 accepted or baselined issue"} {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, output.String())
+		}
+	}
+}
+
+func TestTerminalRendersSelectedFrameworkResultsWithoutLegacyDuplicates(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	value.Frameworks = []FrameworkResult{{
+		ID: "nist-ai-rmf", Name: "NIST AI RMF technical code evidence", Nature: framework.NatureVoluntaryFramework,
+		TechnicalEvidence: framework.TechnicalEvidenceReport{
+			Pack:   framework.PackReference{ID: framework.NISTAIRMFTechnicalEvidencePackID, Name: "NIST AI RMF technical code evidence", Version: "0.1.0"},
+			Source: framework.Source{Reference: "NIST AI 100-1", URL: "https://doi.org/10.6028/NIST.AI.100-1"},
+		},
+		Reconciliation: reconciliation.Report{MappingVersion: "0.1.0", Summary: reconciliation.Summary{Recommended: 2}},
+	}}
+	var output bytes.Buffer
+	if err := WriteTerminal(&output, value, TerminalOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"Framework: NIST AI RMF", "voluntary-framework", "2 recommended", "Technical evidence: NIST AI RMF"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("terminal output missing %q:\n%s", expected, output.String())
 		}
 	}
 }

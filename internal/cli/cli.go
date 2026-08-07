@@ -436,28 +436,38 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				result.Warnings,
 				result.Suppressed,
 			)
-			assessment := profile.AssessEUAIAct(cfg.Systems)
-			if len(cfg.Systems) > 0 {
-				reportValue.Applicability = &assessment
-			}
-			pack, err := framework.LoadBuiltin(framework.EUAIActTechnicalEvidencePackID)
-			if err != nil {
-				return err
-			}
-			technicalEvidence := framework.Evaluate(pack, cfg.Systems, result.FullRepository)
-			technicalEvidence.Target = target
-			technicalEvidence.Warnings = append(technicalEvidence.Warnings, result.Warnings...)
-			reportValue.TechnicalEvidence = &technicalEvidence
-			if err := reconciliation.ValidateCoverage(technicalEvidence); err != nil {
-				return err
-			}
 			aiInventory := inventory.NewReport(target, build.Version, inventory.Analyze(result.FullRepository), result.Warnings)
 			reportValue.AIInventory = &aiInventory
-			evidenceMapping := reconciliation.Build(cfg.Systems, assessment, technicalEvidence, aiInventory, cfg.Ownership)
-			reportValue.Reconciliation = &evidenceMapping
+			frameworkResults := make([]report.FrameworkResult, 0, len(cfg.Frameworks))
+			for _, packID := range cfg.Frameworks {
+				pack, loadErr := framework.LoadBuiltin(packID)
+				if loadErr != nil {
+					return loadErr
+				}
+				technicalEvidence := framework.Evaluate(pack, cfg.Systems, result.FullRepository)
+				technicalEvidence.Target = target
+				technicalEvidence.Warnings = append(technicalEvidence.Warnings, result.Warnings...)
+				if err := reconciliation.ValidateCoverage(technicalEvidence); err != nil {
+					return err
+				}
+				var assessment profile.AssessmentReport
+				var assessmentReference *profile.AssessmentReport
+				if pack.Coverage.Framework == profile.FrameworkEUAIAct {
+					assessment = profile.AssessEUAIAct(cfg.Systems)
+					if len(cfg.Systems) > 0 {
+						assessmentReference = &assessment
+					}
+				}
+				evidenceMapping := reconciliation.Build(cfg.Systems, assessment, technicalEvidence, aiInventory, cfg.Ownership)
+				frameworkResults = append(frameworkResults, report.FrameworkResult{
+					ID: pack.Coverage.Framework, Name: pack.Name, Nature: pack.Coverage.Nature,
+					Applicability: assessmentReference, TechnicalEvidence: technicalEvidence, Reconciliation: evidenceMapping,
+				})
+			}
+			reportValue.Frameworks = frameworkResults
 			verificationResults := []verification.Report{}
 			if len(verificationPlans) > 0 {
-				verificationPlans, err = validateVerificationPlans(verificationPlans, technicalEvidence, cfg.Systems)
+				verificationPlans, err = validateVerificationPlans(verificationPlans, combinedFrameworkEvidence(frameworkResults), cfg.Systems)
 				if err != nil {
 					return err
 				}
@@ -476,12 +486,18 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 					verificationResults = append(verificationResults, verificationResult)
 				}
 				reportValue.ExecutionVerifications = verificationResults
-				reconciliation.AttachExecutionVerifications(&evidenceMapping, verificationResults)
+				for index := range frameworkResults {
+					reconciliation.AttachExecutionVerifications(&frameworkResults[index].Reconciliation, verificationResults)
+				}
 			}
 			if cfg.AI.Provider != "none" {
-				investigationRequest := reviewcontext.BuildInvestigations(technicalEvidence, result.FullRepository, evidenceMapping)
-				investigationRequest = reviewcontext.AttachVerifications(investigationRequest, verificationResults)
-				candidateCount := len(investigationRequest.Candidates)
+				candidateCount := 0
+				investigationRequests := make([]providers.TechnicalReviewRequest, len(frameworkResults))
+				for index := range frameworkResults {
+					investigationRequests[index] = reviewcontext.BuildInvestigations(frameworkResults[index].TechnicalEvidence, result.FullRepository, frameworkResults[index].Reconciliation)
+					investigationRequests[index] = reviewcontext.AttachVerifications(investigationRequests[index], verificationResults)
+					candidateCount += len(investigationRequests[index].Candidates)
+				}
 				if outputFormat == "terminal" {
 					if _, err := fmt.Fprintf(stdout, "%s advisory review requested for %d finding(s) and %d technical evidence investigation target(s) with %s...\n\n", reviewProviderLabel(cfg.AI.Provider), len(visible), candidateCount, configuredReviewModel(cfg.AI)); err != nil {
 						return fmt.Errorf("write terminal report: %w", err)
@@ -496,17 +512,37 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				if outputFormat != "terminal" {
 					progressWriter = cmd.ErrOrStderr()
 				}
-				review, technicalReview, err := reviewWithProvider(
-					cmd.Context(), cfg.AI, target, visible, technicalEvidence, investigationRequest, result.FullRepository,
-					refreshReview, technicalReviewProgress(progressWriter),
-				)
-				if err != nil {
-					return err
+				for index := range frameworkResults {
+					var technicalReview providers.TechnicalReviewResult
+					if index == 0 {
+						review, reviewed, reviewErr := reviewWithProvider(
+							cmd.Context(), cfg.AI, target, visible, frameworkResults[index].TechnicalEvidence, investigationRequests[index], result.FullRepository,
+							refreshReview, technicalReviewProgress(progressWriter),
+						)
+						if reviewErr != nil {
+							return reviewErr
+						}
+						reportValue.Review = &review
+						technicalReview = reviewed
+					} else {
+						var reviewErr error
+						technicalReview, reviewErr = reviewTechnicalWithProvider(
+							cmd.Context(), cfg.AI, frameworkResults[index].TechnicalEvidence, investigationRequests[index], result.FullRepository,
+							refreshReview, technicalReviewProgress(progressWriter),
+						)
+						if reviewErr != nil {
+							return reviewErr
+						}
+					}
+					frameworkResults[index].TechnicalReview = &technicalReview
+					reconciliation.AttachTechnicalInvestigations(&frameworkResults[index].Reconciliation, technicalReview)
+					if frameworkResults[index].TechnicalEvidence.Pack.ID == framework.EUAIActTechnicalEvidencePackID {
+						reportValue.TechnicalReview = &technicalReview
+					}
 				}
-				reportValue.Review = &review
-				reportValue.TechnicalReview = &technicalReview
-				reconciliation.AttachTechnicalInvestigations(&evidenceMapping, technicalReview)
 			}
+			reportValue.Frameworks = frameworkResults
+			syncLegacyFrameworkFields(&reportValue)
 			var artifacts report.Artifacts
 			if resolvedReportDirectory != "" {
 				artifacts, err = report.WriteArtifacts(resolvedReportDirectory, reportValue)
@@ -585,6 +621,32 @@ func configuredVerificationOptions(target string, recipes []config.VerificationR
 	return result
 }
 
+func combinedFrameworkEvidence(results []report.FrameworkResult) framework.TechnicalEvidenceReport {
+	combined := framework.TechnicalEvidenceReport{Objectives: []framework.ObjectiveAssessment{}}
+	for _, result := range results {
+		combined.Objectives = append(combined.Objectives, result.TechnicalEvidence.Objectives...)
+	}
+	return combined
+}
+
+func syncLegacyFrameworkFields(value *report.Report) {
+	value.Applicability = nil
+	value.TechnicalEvidence = nil
+	value.Reconciliation = nil
+	value.TechnicalReview = nil
+	for index := range value.Frameworks {
+		result := &value.Frameworks[index]
+		if result.TechnicalEvidence.Pack.ID != framework.EUAIActTechnicalEvidencePackID {
+			continue
+		}
+		value.Applicability = result.Applicability
+		value.TechnicalEvidence = &result.TechnicalEvidence
+		value.Reconciliation = &result.Reconciliation
+		value.TechnicalReview = result.TechnicalReview
+		return
+	}
+}
+
 func validateVerificationPlans(plans []verification.Options, evidence framework.TechnicalEvidenceReport, systems []profile.System) ([]verification.Options, error) {
 	available := make(map[string]struct{}, len(evidence.Objectives))
 	for _, objective := range evidence.Objectives {
@@ -657,7 +719,44 @@ func reviewWithProvider(
 	if err != nil {
 		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, fmt.Errorf("%s advisory review: %w", reviewProviderLabel(settings.Provider), err)
 	}
+	technicalResult, err := runTechnicalReview(ctx, reviewer, settings, evidence, investigationRequest, repository, refresh, maxFindings, model, kind, onProgress)
+	if err != nil {
+		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, err
+	}
+	return findingResult, technicalResult, nil
+}
+
+func reviewTechnicalWithProvider(
+	ctx context.Context,
+	settings config.AIConfig,
+	evidence framework.TechnicalEvidenceReport,
+	investigationRequest providers.TechnicalReviewRequest,
+	repository discovery.Repository,
+	refresh bool,
+	onProgress func(technicalreview.Progress) error,
+) (providers.TechnicalReviewResult, error) {
+	reviewer, _, maxFindings, model, kind, err := configuredReviewer(settings)
+	if err != nil {
+		return providers.TechnicalReviewResult{}, err
+	}
+	return runTechnicalReview(ctx, reviewer, settings, evidence, investigationRequest, repository, refresh, maxFindings, model, kind, onProgress)
+}
+
+func runTechnicalReview(
+	ctx context.Context,
+	reviewer *providers.OllamaProvider,
+	settings config.AIConfig,
+	evidence framework.TechnicalEvidenceReport,
+	investigationRequest providers.TechnicalReviewRequest,
+	repository discovery.Repository,
+	refresh bool,
+	maxFindings int,
+	model string,
+	kind providers.Kind,
+	onProgress func(technicalreview.Progress) error,
+) (providers.TechnicalReviewResult, error) {
 	var cache *technicalreview.Cache
+	var err error
 	cacheUnavailable := false
 	cachePath, cachePathErr := technicalreview.DefaultPath()
 	if cachePathErr == nil {
@@ -680,12 +779,12 @@ func reviewWithProvider(
 		},
 	})
 	if err != nil {
-		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, fmt.Errorf("%s technical evidence investigation: %w", reviewProviderLabel(settings.Provider), err)
+		return providers.TechnicalReviewResult{}, fmt.Errorf("%s technical evidence investigation: %w", reviewProviderLabel(settings.Provider), err)
 	}
 	if cacheUnavailable {
 		technicalResult.Notes = append(technicalResult.Notes, "The local technical review cache was unavailable; review continued without cache reuse.")
 	}
-	return findingResult, technicalResult, nil
+	return technicalResult, nil
 }
 
 func configuredReviewer(settings config.AIConfig) (*providers.OllamaProvider, time.Duration, int, string, providers.Kind, error) {

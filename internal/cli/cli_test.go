@@ -94,7 +94,7 @@ func TestScanJSONOutputAndSeverityFilter(t *testing.T) {
 	if decoded.Summary.High == 0 || decoded.Summary.Medium != 0 || decoded.Summary.Info != 0 {
 		t.Fatalf("severity filter not reflected in summary: %#v", decoded.Summary)
 	}
-	if decoded.SchemaVersion != 4 || decoded.Tool.Commit != "test" || decoded.Scan.ID == "" || decoded.Scan.Scope.Findings != "full-repository" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
+	if decoded.SchemaVersion != 5 || decoded.Tool.Commit != "test" || decoded.Scan.ID == "" || decoded.Scan.Scope.Findings != "full-repository" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
 		t.Fatalf("missing evidence-bundle metadata: %#v", decoded)
 	}
 }
@@ -971,6 +971,52 @@ func TestScanJSONIncludesApplicabilityWithoutChangingFindings(t *testing.T) {
 	}
 	if decoded.Summary.Total != 0 {
 		t.Fatalf("applicability changed findings: %#v", decoded.Summary)
+	}
+	if len(decoded.Frameworks) != 1 || decoded.Frameworks[0].ID != profile.FrameworkEUAIAct {
+		t.Fatalf("default framework result missing: %#v", decoded.Frameworks)
+	}
+}
+
+func TestScanMapsSharedEvidenceAcrossEUAndNISTFrameworks(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "override.go"), []byte("package review\nfunc OverrideDecision(output string) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Frameworks = []string{framework.EUAIActTechnicalEvidencePackID, framework.NISTAIRMFTechnicalEvidencePackID}
+	system := profile.NewDraftSystem("assistant", "Assistant")
+	system.AIActivities = []profile.AIActivity{profile.ActivityInference}
+	cfg.Systems = []profile.System{system}
+	for id := range cfg.Rules {
+		cfg.Rules[id] = config.RuleConfig{Enabled: false}
+	}
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
+	}
+	var decoded report.Report
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.SchemaVersion != 5 || len(decoded.Frameworks) != 2 {
+		t.Fatalf("multi-framework contract missing: %#v", decoded.Frameworks)
+	}
+	var fingerprints []string
+	for _, result := range decoded.Frameworks {
+		for _, objective := range result.TechnicalEvidence.Objectives {
+			if objective.ControlID == "human-override" && len(objective.Matches) == 1 {
+				fingerprints = append(fingerprints, objective.Matches[0].Fingerprint)
+			}
+		}
+	}
+	if len(fingerprints) != 2 || fingerprints[0] != fingerprints[1] {
+		t.Fatalf("shared control evidence was not reused: %#v", fingerprints)
+	}
+	if decoded.Frameworks[1].Reconciliation.Summary.Recommended == 0 || decoded.Frameworks[1].Reconciliation.Summary.LikelyRequired != 0 {
+		t.Fatalf("NIST mapping was not kept voluntary: %#v", decoded.Frameworks[1].Reconciliation.Summary)
 	}
 }
 

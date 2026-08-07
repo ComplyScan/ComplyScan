@@ -66,6 +66,20 @@ type Report struct {
 	Review                 *providers.ReviewResult            `json:"review,omitempty"`
 	TechnicalReview        *providers.TechnicalReviewResult   `json:"evidence_investigation,omitempty"`
 	ExecutionVerifications []verification.Report              `json:"execution_verification,omitempty"`
+	Frameworks             []FrameworkResult                  `json:"frameworks,omitempty"`
+}
+
+// FrameworkResult keeps each framework's applicability, technical evidence,
+// reconciliation, and optional model investigation together. The legacy
+// singular fields remain populated for the primary EU pack during migration.
+type FrameworkResult struct {
+	ID                string                            `json:"id"`
+	Name              string                            `json:"name"`
+	Nature            string                            `json:"nature"`
+	Applicability     *profile.AssessmentReport         `json:"applicability,omitempty"`
+	TechnicalEvidence framework.TechnicalEvidenceReport `json:"technical_evidence"`
+	Reconciliation    reconciliation.Report             `json:"reconciliation"`
+	TechnicalReview   *providers.TechnicalReviewResult  `json:"evidence_investigation,omitempty"`
 }
 
 type TerminalOptions struct {
@@ -97,7 +111,7 @@ func NewWithMetadata(target string, tool Tool, scope ScanScope, createdAt time.T
 	created := createdAt.UTC().Format(time.RFC3339Nano)
 	identifier := sha256.Sum256([]byte(strings.Join([]string{target, tool.Version, tool.Commit, created}, "\x00")))
 	return Report{
-		SchemaVersion: 4,
+		SchemaVersion: 5,
 		Tool:          tool,
 		Scan: ScanMetadata{
 			ID: "scan-" + fmt.Sprintf("%x", identifier[:12]), CreatedAt: created, Scope: scope,
@@ -164,7 +178,7 @@ func WriteTerminal(w io.Writer, report Report, options TerminalOptions) error {
 			return err
 		}
 	}
-	if report.Applicability != nil {
+	if len(report.Frameworks) == 0 && report.Applicability != nil {
 		if err := profile.WriteTerminal(w, *report.Applicability); err != nil {
 			return err
 		}
@@ -174,12 +188,12 @@ func WriteTerminal(w io.Writer, report Report, options TerminalOptions) error {
 			return err
 		}
 	}
-	if report.Reconciliation != nil {
+	if len(report.Frameworks) == 0 && report.Reconciliation != nil {
 		if err := writeReconciliationTerminal(w, *report.Reconciliation); err != nil {
 			return err
 		}
 	}
-	if report.TechnicalEvidence != nil {
+	if len(report.Frameworks) == 0 && report.TechnicalEvidence != nil {
 		if err := framework.WriteTechnicalEvidenceTerminal(w, *report.TechnicalEvidence); err != nil {
 			return err
 		}
@@ -189,10 +203,13 @@ func WriteTerminal(w io.Writer, report Report, options TerminalOptions) error {
 			return err
 		}
 	}
-	if report.TechnicalReview != nil {
+	if len(report.Frameworks) == 0 && report.TechnicalReview != nil {
 		if err := WriteTerminalTechnicalReview(w, *report.TechnicalReview); err != nil {
 			return err
 		}
+	}
+	if err := writeFrameworkResultsTerminal(w, report.Frameworks); err != nil {
+		return err
 	}
 	for _, executionVerification := range report.ExecutionVerifications {
 		if err := WriteTerminalExecutionVerification(w, executionVerification); err != nil {
@@ -234,7 +251,7 @@ func WriteTerminalFinding(w io.Writer, finding rules.Finding, options TerminalOp
 
 // WriteTerminalCompletion closes a streaming report with final counts.
 func WriteTerminalCompletion(w io.Writer, report Report) error {
-	if report.Applicability != nil {
+	if len(report.Frameworks) == 0 && report.Applicability != nil {
 		if err := profile.WriteTerminal(w, *report.Applicability); err != nil {
 			return err
 		}
@@ -244,12 +261,12 @@ func WriteTerminalCompletion(w io.Writer, report Report) error {
 			return err
 		}
 	}
-	if report.Reconciliation != nil {
+	if len(report.Frameworks) == 0 && report.Reconciliation != nil {
 		if err := writeReconciliationTerminal(w, *report.Reconciliation); err != nil {
 			return err
 		}
 	}
-	if report.TechnicalEvidence != nil {
+	if len(report.Frameworks) == 0 && report.TechnicalEvidence != nil {
 		if err := framework.WriteTechnicalEvidenceTerminal(w, *report.TechnicalEvidence); err != nil {
 			return err
 		}
@@ -259,10 +276,13 @@ func WriteTerminalCompletion(w io.Writer, report Report) error {
 			return err
 		}
 	}
-	if report.TechnicalReview != nil {
+	if len(report.Frameworks) == 0 && report.TechnicalReview != nil {
 		if err := WriteTerminalTechnicalReview(w, *report.TechnicalReview); err != nil {
 			return err
 		}
+	}
+	if err := writeFrameworkResultsTerminal(w, report.Frameworks); err != nil {
+		return err
 	}
 	for _, executionVerification := range report.ExecutionVerifications {
 		if err := WriteTerminalExecutionVerification(w, executionVerification); err != nil {
@@ -273,6 +293,31 @@ func WriteTerminalCompletion(w io.Writer, report Report) error {
 		return err
 	}
 	return writeTerminalSummary(w, report)
+}
+
+func writeFrameworkResultsTerminal(w io.Writer, results []FrameworkResult) error {
+	for _, result := range results {
+		if _, err := fmt.Fprintf(w, "Framework: %s (%s; %s)\n", result.Name, result.ID, result.Nature); err != nil {
+			return err
+		}
+		if result.Applicability != nil {
+			if err := profile.WriteTerminal(w, *result.Applicability); err != nil {
+				return err
+			}
+		}
+		if err := writeReconciliationTerminal(w, result.Reconciliation); err != nil {
+			return err
+		}
+		if err := framework.WriteTechnicalEvidenceTerminal(w, result.TechnicalEvidence); err != nil {
+			return err
+		}
+		if result.TechnicalReview != nil {
+			if err := WriteTerminalTechnicalReview(w, *result.TechnicalReview); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // WriteTerminalReview renders advisory observations separately from findings.
