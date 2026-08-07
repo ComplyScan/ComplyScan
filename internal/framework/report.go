@@ -47,7 +47,7 @@ func WritePackListTerminal(writer io.Writer, listings []PackListing) error {
 		if _, err := fmt.Fprintf(writer, "%s @ %s\n", listing.Pack.ID, listing.Pack.Version); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(writer, "  %s\n  Evidence: %s; %d technical objectives\n  Provisions: %s\n  Source: %s\n", listing.Pack.Name, listing.Coverage.EvidenceType, listing.Objectives, strings.Join(listing.Coverage.Provisions, ", "), listing.Source.Reference); err != nil {
+		if _, err := fmt.Fprintf(writer, "  %s\n  Nature: %s\n  Evidence: %s; %d technical objectives\n  Provisions: %s\n  Source: %s\n", listing.Pack.Name, listing.Coverage.Nature, listing.Coverage.EvidenceType, listing.Objectives, strings.Join(listing.Coverage.Provisions, ", "), listing.Source.Reference); err != nil {
 			return err
 		}
 		for _, limitation := range listing.Coverage.Limitations {
@@ -174,7 +174,7 @@ func WriteTechnicalEvidenceTerminal(writer io.Writer, report TechnicalEvidenceRe
 }
 
 func DescribeApplicability(applicability ObjectiveApplicability) string {
-	parts := []string{"legal scope " + applicability.LegalScope}
+	parts := []string{"framework scope " + applicability.Scope}
 	if len(applicability.ActivitiesAnyOf) > 0 {
 		parts = append(parts, "activities any of "+strings.Join(applicability.ActivitiesAnyOf, ", "))
 	}

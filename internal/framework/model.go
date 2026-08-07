@@ -21,6 +21,7 @@ type Source struct {
 
 type Coverage struct {
 	Framework    string   `yaml:"framework" json:"framework"`
+	Nature       string   `yaml:"nature" json:"nature"`
 	EvidenceType string   `yaml:"evidence-type" json:"evidence_type"`
 	Provisions   []string `yaml:"provisions" json:"provisions"`
 	Limitations  []string `yaml:"limitations" json:"limitations"`
@@ -28,6 +29,7 @@ type Coverage struct {
 
 type TechnicalObjective struct {
 	ID                string                 `yaml:"id" json:"id"`
+	ControlID         string                 `yaml:"control-id" json:"control_id"`
 	Title             string                 `yaml:"title" json:"title"`
 	SourceReference   string                 `yaml:"source-reference" json:"source_reference"`
 	Description       string                 `yaml:"description" json:"description"`
@@ -40,12 +42,16 @@ type TechnicalObjective struct {
 }
 
 type ObjectiveApplicability struct {
-	LegalScope          string   `yaml:"legal-scope" json:"legal_scope"`
+	Scope               string   `yaml:"scope" json:"scope"`
 	ActivitiesAnyOf     []string `yaml:"activities-any-of" json:"activities_any_of"`
 	ExternalUseRequired bool     `yaml:"external-use-required" json:"external_use_required"`
 }
 
 const (
+	NatureLegislation        = "legislation"
+	NatureVoluntaryFramework = "voluntary-framework"
+
 	ApplicabilityHighRiskSystem         = "high-risk-system"
 	ApplicabilityTransparencyObligation = "transparency-obligation"
+	ApplicabilitySelectedFramework      = "selected-framework"
 )

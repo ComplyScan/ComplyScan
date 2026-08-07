@@ -86,7 +86,7 @@ func TestObjectiveTermsMustOccurWithinBoundedContext(t *testing.T) {
 
 func TestCandidateScopeRejectsDeveloperAgentMetadata(t *testing.T) {
 	if candidatePassesStaticScope(
-		"eu-aia-14-human-review-gate",
+		"human-review-gate",
 		".agents/skills/maintainer-review/agents/openai.yaml",
 		"request approval before a decision",
 		1,
@@ -97,7 +97,7 @@ func TestCandidateScopeRejectsDeveloperAgentMetadata(t *testing.T) {
 
 func TestCandidateScopeRejectsTracingOnlySafeStop(t *testing.T) {
 	if candidatePassesStaticScope(
-		"eu-aia-14-safe-stop",
+		"safe-stop",
 		"tests/tracing/test_tracing_env_disable.py",
 		"disable tracing and do not log model data",
 		1,
@@ -105,7 +105,7 @@ func TestCandidateScopeRejectsTracingOnlySafeStop(t *testing.T) {
 		t.Fatal("disabling tracing was treated as stopping an AI operation")
 	}
 	if !candidatePassesStaticScope(
-		"eu-aia-14-safe-stop",
+		"safe-stop",
 		"internal/inference/model_shutdown.go",
 		"disable model inference",
 		1,
@@ -116,18 +116,18 @@ func TestCandidateScopeRejectsTracingOnlySafeStop(t *testing.T) {
 
 func TestCandidateScopeRejectsDatasetNameSelection(t *testing.T) {
 	content := "# Validate dataset names if specified\ninvalid_names = [name for name in dataset_names]\n"
-	if candidatePassesStaticScope("eu-aia-10-dataset-validation", "dataset_provider.py", content, 1) {
+	if candidatePassesStaticScope("dataset-validation", "dataset_provider.py", content, 1) {
 		t.Fatal("dataset-name selection was treated as dataset quality validation")
 	}
 	content = "# Validate dataset schema\nmissing_fields = required - dataset.keys()\n"
-	if !candidatePassesStaticScope("eu-aia-10-dataset-validation", "dataset_validation.py", content, 1) {
+	if !candidatePassesStaticScope("dataset-validation", "dataset_validation.py", content, 1) {
 		t.Fatal("dataset schema validation was rejected")
 	}
 }
 
 func TestCandidateScopeRejectsDatasetLoaderAsBiasEvaluation(t *testing.T) {
 	if candidatePassesStaticScope(
-		"eu-aia-10-bias-evaluation",
+		"bias-evaluation",
 		"tests/unit/datasets/test_social_bias_dataset.py",
 		"test discrimination dataset loading",
 		1,
@@ -135,7 +135,7 @@ func TestCandidateScopeRejectsDatasetLoaderAsBiasEvaluation(t *testing.T) {
 		t.Fatal("a dataset loader test was treated as bias evaluation")
 	}
 	if !candidatePassesStaticScope(
-		"eu-aia-10-bias-evaluation",
+		"bias-evaluation",
 		"tests/benchmark/test_fairness_dataset.py",
 		"evaluate fairness on the dataset",
 		1,
@@ -149,7 +149,7 @@ func TestCandidateScopeRejectsLongEmbeddedParserFixture(t *testing.T) {
 		strings.Repeat("reference material\n", 120) +
 		"safety evaluation recall threshold\n\"\"\"\n"
 	if candidatePassesStaticScope(
-		"eu-aia-15-performance-thresholds",
+		"performance-thresholds",
 		"tests/node_parser/test_markdown_element.py",
 		content,
 		123,
@@ -157,7 +157,7 @@ func TestCandidateScopeRejectsLongEmbeddedParserFixture(t *testing.T) {
 		t.Fatal("an embedded document parser fixture was treated as a performance control")
 	}
 	if !candidatePassesStaticScope(
-		"eu-aia-15-performance-thresholds",
+		"performance-thresholds",
 		"tests/evaluation/test_threshold.py",
 		"assert recall >= threshold\n",
 		1,
@@ -172,7 +172,7 @@ func TestCandidateScopeRequiresPerformanceThresholdEnforcement(t *testing.T) {
     "metrics": {"f1_score": 0.85, "recall": 0.82},
 }`
 	if candidatePassesStaticScope(
-		"eu-aia-15-performance-thresholds",
+		"performance-thresholds",
 		"tests/unit/score/test_scorer_metrics.py",
 		metadata,
 		2,
@@ -183,7 +183,7 @@ func TestCandidateScopeRequiresPerformanceThresholdEnforcement(t *testing.T) {
   expect(checkRecall({ score: 0.4, threshold: 0.5 }).pass).toBe(false)
 })`
 	if !candidatePassesStaticScope(
-		"eu-aia-15-performance-thresholds",
+		"performance-thresholds",
 		"test/assertions/contextRecall.test.ts",
 		assertion,
 		2,

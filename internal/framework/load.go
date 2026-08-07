@@ -25,7 +25,7 @@ var identifierPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 var semanticVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 
 var builtinPaths = map[string]string{
-	EUAIActTechnicalEvidencePackID: "packs/eu-ai-act-technical-evidence-v0.1.2.yml",
+	EUAIActTechnicalEvidencePackID: "packs/eu-ai-act-technical-evidence-v0.1.3.yml",
 }
 
 var supportedFileKinds = map[string]struct{}{
@@ -79,7 +79,7 @@ func Parse(data []byte) (Pack, error) {
 }
 
 func (pack Pack) Validate() error {
-	if pack.SchemaVersion != 1 {
+	if pack.SchemaVersion != 2 {
 		return fmt.Errorf("unsupported schema-version %d", pack.SchemaVersion)
 	}
 	if !identifierPattern.MatchString(pack.ID) {
@@ -101,7 +101,7 @@ func (pack Pack) Validate() error {
 	if err != nil || parsedURL.Scheme != "https" || parsedURL.Host == "" {
 		return errors.New("source URL must be an absolute HTTPS URL")
 	}
-	if strings.TrimSpace(pack.Coverage.Framework) == "" || pack.Coverage.EvidenceType != "code" || len(pack.Coverage.Provisions) == 0 || len(pack.Coverage.Limitations) == 0 {
+	if strings.TrimSpace(pack.Coverage.Framework) == "" || !supportedNature(pack.Coverage.Nature) || pack.Coverage.EvidenceType != "code" || len(pack.Coverage.Provisions) == 0 || len(pack.Coverage.Limitations) == 0 {
 		return errors.New("coverage must declare framework, code evidence type, provisions, and limitations")
 	}
 	if len(pack.Objectives) == 0 {
@@ -116,6 +116,9 @@ func (pack Pack) Validate() error {
 			return fmt.Errorf("objectives[%d].id %q is duplicated", index, objective.ID)
 		}
 		seenObjectives[objective.ID] = struct{}{}
+		if !identifierPattern.MatchString(objective.ControlID) {
+			return fmt.Errorf("objectives[%d].control-id must be a lowercase identifier", index)
+		}
 		if strings.TrimSpace(objective.Title) == "" || strings.TrimSpace(objective.SourceReference) == "" || strings.TrimSpace(objective.Description) == "" {
 			return fmt.Errorf("objectives[%d] must declare title, source-reference, and description", index)
 		}
@@ -156,8 +159,8 @@ func (pack Pack) Validate() error {
 }
 
 func (applicability ObjectiveApplicability) Validate() error {
-	if applicability.LegalScope != ApplicabilityHighRiskSystem && applicability.LegalScope != ApplicabilityTransparencyObligation {
-		return fmt.Errorf("legal-scope %q is not supported", applicability.LegalScope)
+	if applicability.Scope != ApplicabilityHighRiskSystem && applicability.Scope != ApplicabilityTransparencyObligation && applicability.Scope != ApplicabilitySelectedFramework {
+		return fmt.Errorf("scope %q is not supported", applicability.Scope)
 	}
 	seenActivities := make(map[string]struct{}, len(applicability.ActivitiesAnyOf))
 	for index, activity := range applicability.ActivitiesAnyOf {
@@ -169,11 +172,15 @@ func (applicability ObjectiveApplicability) Validate() error {
 		}
 		seenActivities[activity] = struct{}{}
 	}
-	if applicability.LegalScope == ApplicabilityTransparencyObligation && len(applicability.ActivitiesAnyOf) == 0 {
+	if applicability.Scope == ApplicabilityTransparencyObligation && len(applicability.ActivitiesAnyOf) == 0 {
 		return errors.New("activities-any-of is required for a transparency obligation")
 	}
-	if applicability.ExternalUseRequired && applicability.LegalScope != ApplicabilityTransparencyObligation {
+	if applicability.ExternalUseRequired && applicability.Scope != ApplicabilityTransparencyObligation {
 		return errors.New("external-use-required is supported only for transparency obligations")
 	}
 	return nil
+}
+
+func supportedNature(value string) bool {
+	return value == NatureLegislation || value == NatureVoluntaryFramework
 }

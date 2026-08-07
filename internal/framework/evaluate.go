@@ -73,6 +73,7 @@ type ObjectiveSummary struct {
 
 type ObjectiveAssessment struct {
 	ID                  string                 `json:"id"`
+	ControlID           string                 `json:"control_id"`
 	Title               string                 `json:"title"`
 	SourceReference     string                 `json:"source_reference"`
 	Description         string                 `json:"description"`
@@ -137,7 +138,7 @@ func evaluateObjectives(pack Pack, repository discovery.Repository, graph codegr
 	usedKinds := make(map[string]struct{})
 	for index, objective := range pack.Objectives {
 		assessments[index] = ObjectiveAssessment{
-			ID: objective.ID, Title: objective.Title, SourceReference: objective.SourceReference,
+			ID: objective.ID, ControlID: objective.ControlID, Title: objective.Title, SourceReference: objective.SourceReference,
 			Description: objective.Description, ApplicabilityNote: objective.ApplicabilityNote, Applicability: objective.Applicability,
 			Status: ObjectiveNotDetected, Verification: objective.Verification,
 			EligibleFileKinds:  append([]string(nil), objective.FileKinds...),
@@ -170,11 +171,11 @@ func evaluateObjectives(pack Pack, repository discovery.Repository, graph codegr
 			if !matched {
 				continue
 			}
-			if !candidatePassesStaticScope(objective.ID, path, rawContent, line) {
+			if !candidatePassesStaticScope(objective.ControlID, path, rawContent, line) {
 				continue
 			}
 			assessments[index].Matches = append(assessments[index].Matches, EvidenceMatch{
-				Fingerprint:  evidenceFingerprint(objective.ID, file.Path, line, terms),
+				Fingerprint:  evidenceFingerprint(objective.ControlID, file.Path, line, terms),
 				Path:         file.Path,
 				Kind:         string(file.Kind),
 				StartLine:    line,
@@ -235,30 +236,30 @@ func objectiveInvestigationTerms(objective TechnicalObjective) []string {
 // candidatePassesStaticScope rejects bounded categories that satisfy lexical
 // rules but cannot represent the objective they matched. Semantic review still
 // handles contextual ambiguity; these checks cover structural false positives.
-func candidatePassesStaticScope(objectiveID, path, content string, line int) bool {
+func candidatePassesStaticScope(controlID, path, content string, line int) bool {
 	normalizedPath := normalizeSearchContent(path)
 	if strings.HasPrefix(path, ".agents/skills/") {
 		return false
 	}
 
-	switch objectiveID {
-	case "eu-aia-10-dataset-validation":
+	switch controlID {
+	case "dataset-validation":
 		window := normalizeSearchContent(contentLineWindow(content, line, 3))
 		if strings.Contains(window, "dataset name") && !containsAny(window,
 			"schema", "completeness", "missing field", "missing value", "quality") {
 			return false
 		}
-	case "eu-aia-10-bias-evaluation":
+	case "bias-evaluation":
 		if containsAny(normalizedPath, "/dataset/", "/datasets/", " dataset ") &&
 			!containsAny(normalizedPath, "evaluation", "benchmark", "scorer") {
 			return false
 		}
-	case "eu-aia-14-safe-stop":
+	case "safe-stop":
 		if containsAny(normalizedPath, "tracing", "telemetry", "logging", "audit") &&
 			!containsAny(normalizedPath, "model", "inference", "prediction", "decision", "shutdown", "stop", "kill") {
 			return false
 		}
-	case "eu-aia-15-performance-thresholds":
+	case "performance-thresholds":
 		window := normalizeSearchContent(contentLineWindow(content, line, 10))
 		if containsAny(normalizedPath, "test", "spec") &&
 			!containsAny(window, "expect", "assert", "pass", "fail", "greater than", "less than", "minimum", ">=", "<=") {

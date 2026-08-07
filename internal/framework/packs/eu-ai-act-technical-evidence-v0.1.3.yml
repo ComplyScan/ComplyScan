@@ -1,15 +1,15 @@
 # complyscan:ignore-technical-evidence
 # Each objective contains both its repository evidence matcher and the
 # deterministic applicability conditions consumed by reconciliation:
-# - legal-scope: high-risk-system uses profile scope/high-risk screening;
+# - scope: high-risk-system uses profile scope/high-risk screening;
 #   transparency-obligation is screened independently from high-risk status.
 # - activities-any-of: at least one declared system activity must match when set.
 # - external-use-required: the deployment must indicate use outside the operator.
-schema-version: 1
+schema-version: 2
 id: eu-ai-act-technical-evidence
 name: EU AI Act technical code evidence
-version: 0.1.2
-released: "2026-08-06"
+version: 0.1.3
+released: "2026-08-07"
 source:
   title: Artificial Intelligence Act
   reference: Regulation (EU) 2024/1689
@@ -17,6 +17,7 @@ source:
   edition: Official Journal text dated 13 June 2024
 coverage:
   framework: eu-ai-act
+  nature: legislation
   evidence-type: code
   provisions: [Article 9, Article 10, Article 12, Article 14, Article 15, Article 50]
   limitations:
@@ -26,12 +27,13 @@ coverage:
 objectives:
   # Article 9: for a potentially high-risk system, look for executable tests or evaluations that connect identified AI risks to a technical control check.
   - id: eu-aia-9-risk-control-testing
+    control-id: risk-control-testing
     title: Risk-control testing hooks
     source-reference: Article 9
     description: Tests or automated evaluation hooks connect identified AI safety or risk conditions to validation activity.
     applicability-note: Article 9 applies to high-risk AI systems; the dashboard determines legal applicability from declared context.
     applicability:
-      legal-scope: high-risk-system
+      scope: high-risk-system
       activities-any-of: []
       external-use-required: false
     file-kinds: [source, configuration, ci, github-actions]
@@ -42,12 +44,13 @@ objectives:
     verification: technical-semantic-and-human
   # Article 10: when the system trains, fine-tunes, or evaluates models, look for code that rejects incomplete, malformed, or low-quality datasets.
   - id: eu-aia-10-dataset-validation
+    control-id: dataset-validation
     title: Dataset validation controls
     source-reference: Article 10
     description: Code validates training, validation, or test data for expected schema, completeness, or quality properties.
     applicability-note: Detailed Article 10 duties depend on the system and its use of training, validation, or test data.
     applicability:
-      legal-scope: high-risk-system
+      scope: high-risk-system
       activities-any-of: [training, fine-tuning, evaluation]
       external-use-required: false
     file-kinds: [source, configuration, ci, github-actions]
@@ -58,12 +61,13 @@ objectives:
     verification: technical-semantic-and-human
   # Article 10: when data is used for training or evaluation, look for executable fairness or discrimination measurements rather than policy statements alone.
   - id: eu-aia-10-bias-evaluation
+    control-id: bias-evaluation
     title: Bias and fairness evaluation
     source-reference: Article 10
     description: Automated tests or evaluation code measure bias, discrimination, or fairness-related behavior.
     applicability-note: A technical signal cannot establish which affected groups, metrics, or mitigations are legally appropriate.
     applicability:
-      legal-scope: high-risk-system
+      scope: high-risk-system
       activities-any-of: [training, fine-tuning, evaluation]
       external-use-required: false
     file-kinds: [source, configuration, ci, github-actions]
@@ -74,12 +78,13 @@ objectives:
     verification: technical-semantic-and-human
   # Article 12: for a potentially high-risk system, look for automatic technical records of inference, prediction, response, or decision events.
   - id: eu-aia-12-automatic-event-logging
+    control-id: ai-event-logging
     title: Automatic AI event logging
     source-reference: Article 12
     description: Code or configuration emits structured events for AI inference, prediction, response, or decision activity.
     applicability-note: A match does not prove that logging is enabled, complete, protected, or retained in production.
     applicability:
-      legal-scope: high-risk-system
+      scope: high-risk-system
       activities-any-of: []
       external-use-required: false
     file-kinds: [source, configuration, terraform, dockerfile]
@@ -90,12 +95,13 @@ objectives:
     verification: technical-semantic-and-human
   # Article 12: look for repository-controlled retention or expiry settings for AI event logs; production enforcement still requires operational verification.
   - id: eu-aia-12-log-retention-configuration
+    control-id: ai-log-retention
     title: AI log retention configuration
     source-reference: Article 12
     description: Configuration or infrastructure code defines retention or expiry behavior for AI-related logs or audit records.
     applicability-note: Repository configuration cannot prove the effective production retention period.
     applicability:
-      legal-scope: high-risk-system
+      scope: high-risk-system
       activities-any-of: []
       external-use-required: false
     file-kinds: [source, configuration, terraform, dockerfile]
@@ -106,12 +112,13 @@ objectives:
     verification: technical-semantic-and-human
   # Article 14: look for a real workflow gate where an authorised person must approve or reject an AI-assisted output before the consequential action continues.
   - id: eu-aia-14-human-review-gate
+    control-id: human-review-gate
     title: Human review gate
     source-reference: Article 14
     description: Code routes an AI-assisted decision or output through an explicit human approval or rejection step.
     applicability-note: A match does not establish reviewer competence, authority, availability, or actual production use.
     applicability:
-      legal-scope: high-risk-system
+      scope: high-risk-system
       activities-any-of: []
       external-use-required: false
     file-kinds: [source, configuration]
@@ -122,12 +129,13 @@ objectives:
     verification: technical-semantic-and-human
   # Article 14: look for an implemented path that lets an authorised person override, disregard, or intervene in an AI output or decision.
   - id: eu-aia-14-override-intervention
+    control-id: human-override
     title: Human override or intervention mechanism
     source-reference: Article 14
     description: Code allows an authorised person to override, disregard, or intervene in an AI output or decision.
     applicability-note: Static evidence cannot establish that the mechanism covers every relevant operating condition.
     applicability:
-      legal-scope: high-risk-system
+      scope: high-risk-system
       activities-any-of: []
       external-use-required: false
     file-kinds: [source, configuration]
@@ -138,12 +146,13 @@ objectives:
     verification: technical-semantic-and-human
   # Article 14: look for a reachable mechanism that can stop, disable, or gate the relevant model, inference path, or automated-decision feature.
   - id: eu-aia-14-safe-stop
+    control-id: safe-stop
     title: Safe stop or disable mechanism
     source-reference: Article 14
     description: Code or configuration can stop, disable, or gate an AI model, inference path, or automated decision feature.
     applicability-note: A repository match cannot prove the control is reachable, authorised, timely, or enabled in production.
     applicability:
-      legal-scope: high-risk-system
+      scope: high-risk-system
       activities-any-of: []
       external-use-required: false
     file-kinds: [source, configuration, terraform]
@@ -154,12 +163,13 @@ objectives:
     verification: technical-semantic-and-human
   # Article 15: look for measurable model-performance criteria that tests or CI actually enforce, not metrics that are merely displayed or documented.
   - id: eu-aia-15-performance-thresholds
+    control-id: performance-thresholds
     title: Performance metrics and acceptance thresholds
     source-reference: Article 15
     description: Tests, CI, or configuration enforce measurable AI accuracy or performance acceptance thresholds.
     applicability-note: Technical thresholds require contextual review for suitability, representativeness, and continued validity.
     applicability:
-      legal-scope: high-risk-system
+      scope: high-risk-system
       activities-any-of: []
       external-use-required: false
     file-kinds: [source, configuration, ci, github-actions]
@@ -170,12 +180,13 @@ objectives:
     verification: technical-semantic-and-human
   # Article 15: look for tests of faults or adversarial conditions together with bounded retry, fallback, recovery, or fail-safe behavior.
   - id: eu-aia-15-robustness-failure-handling
+    control-id: robustness-failure-handling
     title: Robustness and failure handling
     source-reference: Article 15
     description: Code or tests exercise faults or adversarial conditions and implement bounded fallback, retry, or fail-safe behavior.
     applicability-note: Static evidence cannot demonstrate effectiveness across the system's real operating environment.
     applicability:
-      legal-scope: high-risk-system
+      scope: high-risk-system
       activities-any-of: []
       external-use-required: false
     file-kinds: [source, configuration, ci, github-actions, terraform]
@@ -186,12 +197,13 @@ objectives:
     verification: technical-semantic-and-human
   # Article 15: look for implemented checks or tests addressing AI-specific attacks such as prompt injection, data poisoning, evasion, or adversarial input.
   - id: eu-aia-15-ai-security-controls
+    control-id: ai-security-controls
     title: AI-specific security controls
     source-reference: Article 15
     description: Code, tests, or configuration address AI-specific threats such as prompt injection, poisoning, evasion, or adversarial inputs.
     applicability-note: Detection does not replace a threat model, penetration test, or assessment of control effectiveness.
     applicability:
-      legal-scope: high-risk-system
+      scope: high-risk-system
       activities-any-of: []
       external-use-required: false
     file-kinds: [source, configuration, ci, github-actions, terraform]
@@ -202,12 +214,13 @@ objectives:
     verification: technical-semantic-and-human
   # Article 50: when people externally interact with AI-driven behavior, look for user-facing code or configuration that clearly discloses the AI interaction.
   - id: eu-aia-50-ai-interaction-disclosure
+    control-id: ai-interaction-disclosure
     title: AI interaction disclosure
     source-reference: Article 50
     description: User-facing source or configuration contains a disclosure that a person is interacting with an AI system.
     applicability-note: Article 50 contains scope conditions and exceptions that require dashboard context and human review.
     applicability:
-      legal-scope: transparency-obligation
+      scope: transparency-obligation
       activities-any-of: [inference, automated-decision, agent-tool-use]
       external-use-required: true
     file-kinds: [source, configuration]
@@ -218,12 +231,13 @@ objectives:
     verification: technical-semantic-and-human
   # Article 50: when the system generates synthetic content, look for machine-readable labels, provenance metadata, or watermarking added to the output.
   - id: eu-aia-50-synthetic-content-marking
+    control-id: synthetic-content-marking
     title: Machine-readable synthetic-content marking
     source-reference: Article 50
     description: Code marks synthetic audio, image, video, or text output using labels, metadata, provenance, or watermarking.
     applicability-note: Applicability and technical feasibility depend on the system, content, role, and statutory exceptions.
     applicability:
-      legal-scope: transparency-obligation
+      scope: transparency-obligation
       activities-any-of: [synthetic-content]
       external-use-required: false
     file-kinds: [source, configuration]

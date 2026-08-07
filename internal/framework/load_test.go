@@ -10,14 +10,14 @@ func TestBuiltinEUAIActPackContainsCodeObjectivesOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pack.Version != "0.1.2" || pack.Source.Reference != "Regulation (EU) 2024/1689" || pack.Coverage.EvidenceType != "code" {
+	if pack.Version != "0.1.3" || pack.Source.Reference != "Regulation (EU) 2024/1689" || pack.Coverage.EvidenceType != "code" || pack.Coverage.Nature != NatureLegislation {
 		t.Fatalf("unexpected pack metadata: %#v", pack)
 	}
 	if len(pack.Digest) != 64 || len(pack.Objectives) < 10 {
 		t.Fatalf("digest=%q objectives=%d", pack.Digest, len(pack.Objectives))
 	}
 	for _, objective := range pack.Objectives {
-		if objective.Applicability.LegalScope == "" {
+		if objective.ControlID == "" || objective.Applicability.Scope == "" {
 			t.Fatalf("objective %q has no inspectable applicability condition", objective.ID)
 		}
 		for _, kind := range objective.FileKinds {
@@ -80,15 +80,15 @@ func TestPackParserRejectsUnknownFieldsDuplicateObjectivesAndDocuments(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	pack.Objectives[0].Applicability.LegalScope = ""
-	if err := pack.Validate(); err == nil || !strings.Contains(err.Error(), "legal-scope") {
+	pack.Objectives[0].Applicability.Scope = ""
+	if err := pack.Validate(); err == nil || !strings.Contains(err.Error(), "scope") {
 		t.Fatalf("got error %v", err)
 	}
-	pack.Objectives[0].Applicability = ObjectiveApplicability{LegalScope: ApplicabilityTransparencyObligation}
+	pack.Objectives[0].Applicability = ObjectiveApplicability{Scope: ApplicabilityTransparencyObligation}
 	if err := pack.Validate(); err == nil || !strings.Contains(err.Error(), "activities-any-of") {
 		t.Fatalf("got error %v", err)
 	}
-	pack.Objectives[0].Applicability = ObjectiveApplicability{LegalScope: ApplicabilityHighRiskSystem, ActivitiesAnyOf: []string{"unknown"}}
+	pack.Objectives[0].Applicability = ObjectiveApplicability{Scope: ApplicabilityHighRiskSystem, ActivitiesAnyOf: []string{"unknown"}}
 	if err := pack.Validate(); err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Fatalf("got error %v", err)
 	}

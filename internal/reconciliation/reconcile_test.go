@@ -11,9 +11,9 @@ import (
 
 func candidateTechnical() framework.TechnicalEvidenceReport {
 	return framework.TechnicalEvidenceReport{Pack: framework.PackReference{ID: framework.EUAIActTechnicalEvidencePackID, Version: "0.1.2"}, Objectives: []framework.ObjectiveAssessment{
-		{ID: "eu-aia-14-human-review-gate", Title: "Human review gate", SourceReference: "Article 14", Applicability: framework.ObjectiveApplicability{LegalScope: framework.ApplicabilityHighRiskSystem}, Status: framework.ObjectiveCandidate, Matches: []framework.EvidenceMatch{{Fingerprint: "abc", Path: "review.go", StartLine: 12, Kind: "source"}}},
-		{ID: "eu-aia-15-performance-thresholds", Title: "Performance thresholds", SourceReference: "Article 15", Applicability: framework.ObjectiveApplicability{LegalScope: framework.ApplicabilityHighRiskSystem}, Status: framework.ObjectiveNotDetected},
-		{ID: "eu-aia-50-synthetic-content-marking", Title: "Synthetic content marking", SourceReference: "Article 50", Applicability: framework.ObjectiveApplicability{LegalScope: framework.ApplicabilityTransparencyObligation, ActivitiesAnyOf: []string{"synthetic-content"}}, Status: framework.ObjectiveCandidate, Matches: []framework.EvidenceMatch{{Fingerprint: "def", Path: "watermark.go", StartLine: 7, Kind: "source"}}},
+		{ID: "eu-aia-14-human-review-gate", ControlID: "human-review-gate", Title: "Human review gate", SourceReference: "Article 14", Applicability: framework.ObjectiveApplicability{Scope: framework.ApplicabilityHighRiskSystem}, Status: framework.ObjectiveCandidate, Matches: []framework.EvidenceMatch{{Fingerprint: "abc", Path: "review.go", StartLine: 12, Kind: "source"}}},
+		{ID: "eu-aia-15-performance-thresholds", ControlID: "performance-thresholds", Title: "Performance thresholds", SourceReference: "Article 15", Applicability: framework.ObjectiveApplicability{Scope: framework.ApplicabilityHighRiskSystem}, Status: framework.ObjectiveNotDetected},
+		{ID: "eu-aia-50-synthetic-content-marking", ControlID: "synthetic-content-marking", Title: "Synthetic content marking", SourceReference: "Article 50", Applicability: framework.ObjectiveApplicability{Scope: framework.ApplicabilityTransparencyObligation, ActivitiesAnyOf: []string{"synthetic-content"}}, Status: framework.ObjectiveCandidate, Matches: []framework.EvidenceMatch{{Fingerprint: "def", Path: "watermark.go", StartLine: 7, Kind: "source"}}},
 	}}
 }
 

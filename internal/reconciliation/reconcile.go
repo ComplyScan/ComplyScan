@@ -118,7 +118,7 @@ func screenRequirement(system profile.System, assessment profile.Assessment, obj
 		}
 	}
 
-	if rule.LegalScope == framework.ApplicabilityTransparencyObligation {
+	if rule.Scope == framework.ApplicabilityTransparencyObligation {
 		if status, reasons, decided := screenActivity(system, rule); decided {
 			return status, reasons
 		}
