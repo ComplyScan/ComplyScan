@@ -117,15 +117,8 @@ func runVerifySetup(cmd *cobra.Command, stdout io.Writer, target, configPath str
 		return err
 	}
 
-	pack, err := framework.LoadBuiltin(framework.EUAIActTechnicalEvidencePackID)
-	if err != nil {
-		return err
-	}
-	technical := framework.Evaluate(pack, cfg.Systems, discovered.Repository)
-	assessment := profile.AssessEUAIAct(cfg.Systems)
 	components := inventory.NewReport(target, "setup", inventory.Analyze(discovered.Repository), discovered.Warnings)
-	mapping := reconciliation.Build(cfg.Systems, assessment, technical, components, cfg.Ownership)
-	objectives, err := verificationObjectivesForSystem(mapping, technical, selectedSystem.ID)
+	objectives, err := verificationObjectivesForFrameworks(cfg, discovered.Repository, components, selectedSystem.ID)
 	if err != nil {
 		return err
 	}
@@ -328,6 +321,35 @@ func promptDetectedTestCommand(prompt promptSession, commands []detectedTestComm
 type verificationObjectiveChoice struct {
 	Objective framework.ObjectiveAssessment
 	Mapping   reconciliation.ObjectiveResult
+	Framework string
+}
+
+func verificationObjectivesForFrameworks(cfg config.Config, repository discovery.Repository, components inventory.Report, systemID string) ([]verificationObjectiveChoice, error) {
+	choices := []verificationObjectiveChoice{}
+	for _, packID := range cfg.Frameworks {
+		pack, err := framework.LoadBuiltin(packID)
+		if err != nil {
+			return nil, err
+		}
+		technical := framework.Evaluate(pack, cfg.Systems, repository)
+		assessment := profile.AssessmentReport{}
+		if pack.ID == framework.EUAIActTechnicalEvidencePackID {
+			assessment = profile.AssessEUAIAct(cfg.Systems)
+		}
+		mapping := reconciliation.Build(cfg.Systems, assessment, technical, components, cfg.Ownership)
+		packChoices, err := verificationObjectivesForSystem(mapping, technical, systemID)
+		if err != nil {
+			return nil, fmt.Errorf("select objectives from %s: %w", pack.Name, err)
+		}
+		for index := range packChoices {
+			packChoices[index].Framework = pack.Name
+		}
+		choices = append(choices, packChoices...)
+	}
+	if len(choices) == 0 {
+		return nil, fmt.Errorf("system %q has no likely-required or recommended technical objectives; review its profile and selected frameworks before creating test mappings", systemID)
+	}
+	return choices, nil
 }
 
 func verificationObjectivesForSystem(mapping reconciliation.Report, technical framework.TechnicalEvidenceReport, systemID string) ([]verificationObjectiveChoice, error) {
@@ -346,21 +368,18 @@ func verificationObjectivesForSystem(mapping reconciliation.Report, technical fr
 			}
 			choices = append(choices, verificationObjectiveChoice{Objective: objectiveByID[result.ObjectiveID], Mapping: result})
 		}
-		if len(choices) == 0 {
-			return nil, fmt.Errorf("system %q has no likely-required technical objectives; review its profile before creating test mappings", systemID)
-		}
 		return choices, nil
 	}
 	return nil, fmt.Errorf("system %q was not found in reconciliation", systemID)
 }
 
 func writeVerificationObjectiveChoices(output io.Writer, choices []verificationObjectiveChoice) error {
-	if _, err := fmt.Fprintln(output, "\nLikely-required technical objectives\nThese are conservative screening results, not legal conclusions. Select only mechanisms this exact test command genuinely exercises."); err != nil {
+	if _, err := fmt.Fprintln(output, "\nApplicable or recommended technical objectives\nLegal requirements and voluntary framework recommendations remain distinct. Select only mechanisms this exact test command genuinely exercises."); err != nil {
 		return err
 	}
 	for index, choice := range choices {
-		if _, err := fmt.Fprintf(output, "\n  %d. %s (%s)\n     Developer meaning: %s\n     Current repository signal: %s",
-			index+1, choice.Objective.Title, choice.Objective.SourceReference, choice.Objective.Description, choice.Objective.Status); err != nil {
+		if _, err := fmt.Fprintf(output, "\n  %d. %s (%s)\n     Framework: %s\n     Developer meaning: %s\n     Current repository signal: %s",
+			index+1, choice.Objective.Title, choice.Objective.SourceReference, choice.Framework, choice.Objective.Description, choice.Objective.Status); err != nil {
 			return err
 		}
 		if len(choice.Objective.Matches) > 0 {

@@ -9,6 +9,8 @@ import (
 
 	"github.com/ComplyScan/ComplyScan/internal/config"
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
+	"github.com/ComplyScan/ComplyScan/internal/framework"
+	"github.com/ComplyScan/ComplyScan/internal/inventory"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 )
 
@@ -98,6 +100,30 @@ func TestVerifySetupRejectsNonInteractiveInputAndMissingProfiles(t *testing.T) {
 	code = executeWithInput([]string{"verify", "setup", target}, strings.NewReader(""), &stdout, &stderr, testBuild)
 	if code != 2 || !strings.Contains(stderr.String(), "requires a terminal") {
 		t.Fatalf("non-interactive code=%d stderr=%q", code, stderr.String())
+	}
+}
+
+func TestVerificationSetupOffersObjectivesFromEverySelectedFramework(t *testing.T) {
+	cfg := config.Default()
+	cfg.Frameworks = []string{framework.EUAIActTechnicalEvidencePackID, framework.NISTAIRMFTechnicalEvidencePackID}
+	system := cliCandidateProviderSystem()
+	system.AIActivities = []profile.AIActivity{profile.ActivityInference, profile.ActivityAutomatedDecision}
+	cfg.Systems = []profile.System{system}
+	repository := discovery.Repository{Files: []discovery.File{{
+		Path: "review.go", Kind: discovery.KindSource,
+		Content: []byte("package review\nfunc humanReview() { approveDecision() }\n"),
+	}}}
+	components := inventory.NewReport(".", "setup", inventory.Analyze(repository), nil)
+	choices, err := verificationObjectivesForFrameworks(cfg, repository, components, system.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, choice := range choices {
+		seen[choice.Framework] = true
+	}
+	if !seen["EU AI Act technical code evidence"] || !seen["NIST AI RMF technical code evidence"] {
+		t.Fatalf("framework choices = %#v", seen)
 	}
 }
 
