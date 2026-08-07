@@ -98,7 +98,7 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 
 func TestEverySetupQuestionHasDeveloperGuidance(t *testing.T) {
 	keys := []string{
-		"system-id", "system-name", "intended-purpose", "lifecycle-stage", "organization-roles",
+		"frameworks", "system-id", "system-name", "intended-purpose", "lifecycle-stage", "organization-roles",
 		"operating-regions", "use-case-domains", "users", "affected-groups", "decision-impact",
 		"human-oversight", "ai-activities", "personal-data", "special-category-data", "children-data",
 		"deployment-models", "profile-reviewer", "applicability-decision", "decision-rationale",

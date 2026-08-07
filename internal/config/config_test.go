@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/ownership"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
@@ -48,6 +49,41 @@ ai:
 	}
 	if cfg.AI.Ollama.Model != "qwen3:8b" {
 		t.Fatalf("default Ollama model = %q", cfg.AI.Ollama.Model)
+	}
+	if len(cfg.Frameworks) != 1 || cfg.Frameworks[0] != framework.EUAIActTechnicalEvidencePackID {
+		t.Fatalf("default frameworks = %#v", cfg.Frameworks)
+	}
+}
+
+func TestLoadAcceptsMultipleFrameworkPacks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	content := `version: 1
+frameworks:
+  - eu-ai-act-technical-evidence
+  - nist-ai-rmf-technical-evidence
+fail-on: high
+ai:
+  provider: none
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Frameworks) != 2 {
+		t.Fatalf("frameworks = %#v", cfg.Frameworks)
+	}
+}
+
+func TestValidateRejectsUnknownOrDuplicateFrameworkPack(t *testing.T) {
+	for _, ids := range [][]string{{"unknown"}, {framework.EUAIActTechnicalEvidencePackID, framework.EUAIActTechnicalEvidencePackID}} {
+		cfg := Default()
+		cfg.Frameworks = ids
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("frameworks %#v should be rejected", ids)
+		}
 	}
 }
 

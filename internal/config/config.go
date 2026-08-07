@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/ownership"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
@@ -30,6 +31,7 @@ var supportedRules = []string{
 
 type Config struct {
 	Version      int                   `yaml:"version"`
+	Frameworks   []string              `yaml:"frameworks"`
 	Scan         ScanConfig            `yaml:"scan"`
 	FailOn       rules.Severity        `yaml:"fail-on"`
 	Rules        map[string]RuleConfig `yaml:"rules"`
@@ -110,7 +112,8 @@ func Default() Config {
 		ruleConfig[id] = RuleConfig{Enabled: true}
 	}
 	return Config{
-		Version: 1,
+		Version:    1,
+		Frameworks: []string{framework.EUAIActTechnicalEvidencePackID},
 		Scan: ScanConfig{
 			Exclude:       []string{"node_modules", "vendor", "dist", "build", ".complyscan/reports"},
 			MaxFiles:      25_000,
@@ -151,6 +154,20 @@ func Load(path string) (Config, error) {
 func (c Config) Validate() error {
 	if c.Version != 1 {
 		return fmt.Errorf("unsupported version %d", c.Version)
+	}
+	if len(c.Frameworks) == 0 {
+		return errors.New("frameworks must contain at least one built-in technical evidence pack")
+	}
+	seenFrameworks := make(map[string]struct{}, len(c.Frameworks))
+	for index, id := range c.Frameworks {
+		id = strings.TrimSpace(id)
+		if _, duplicate := seenFrameworks[id]; duplicate {
+			return fmt.Errorf("frameworks[%d] %q is duplicated", index, id)
+		}
+		if _, err := framework.LoadBuiltin(id); err != nil {
+			return fmt.Errorf("frameworks[%d]: %w", index, err)
+		}
+		seenFrameworks[id] = struct{}{}
 	}
 	if _, err := rules.ParseSeverity(string(c.FailOn)); err != nil {
 		return fmt.Errorf("fail-on: %w", err)

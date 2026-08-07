@@ -5,6 +5,10 @@ import (
 )
 
 var setupQuestionHelp = map[string][]string{
+	"frameworks": {
+		"Choose which sources ComplyScan should map technical repository evidence against. The EU pack screens potential legal obligations; NIST AI RMF is voluntary guidance.",
+		"Select both to reuse the same detected controls across both mappings. This does not make a framework legally applicable or certify that its outcomes are satisfied.",
+	},
 	"system-id": {
 		"A short, stable machine-readable identifier used to connect scans and future dashboard records to this system.",
 		"Usually accept the repository-based default. Change it only if your organisation already has a stable system ID.",

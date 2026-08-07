@@ -28,6 +28,7 @@ type setupOptions struct {
 	ollamaModel       string
 	remoteModel       string
 	remoteAPIKeyEnv   string
+	frameworks        []string
 	allowRemoteReview bool
 	pullModel         bool
 	skipModelPull     bool
@@ -77,6 +78,7 @@ func newSetupCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().StringVar(&options.ollamaModel, "ollama-model", "", "Ollama model name")
 	command.Flags().StringVar(&options.remoteModel, "model", "", "remote-provider model name")
 	command.Flags().StringVar(&options.remoteAPIKeyEnv, "api-key-env", "", "environment-variable name containing the remote-provider API key")
+	command.Flags().StringSliceVar(&options.frameworks, "framework", nil, "built-in technical evidence pack to enable (repeatable)")
 	command.Flags().BoolVar(&options.allowRemoteReview, "allow-remote-review", false, "confirm that bounded repository context may be sent to the selected remote provider")
 	command.Flags().BoolVar(&options.pullModel, "pull-model", false, "download the configured Ollama model (requires --review ollama in non-interactive mode)")
 	command.Flags().BoolVar(&options.skipModelPull, "skip-model-pull", false, "configure Ollama without offering to download the model")
@@ -135,6 +137,9 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		if _, err := fmt.Fprintln(stdout, "Non-interactive setup: no system profile was collected."); err != nil {
 			return err
 		}
+	}
+	if err := configureFrameworkSelection(prompt, &cfg, interactive, options.frameworks); err != nil {
+		return err
 	}
 
 	modelReady, err := configureSetupReview(cmd.Context(), prompt, stdout, &cfg, interactive, options)

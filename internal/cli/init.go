@@ -11,15 +11,17 @@ import (
 	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/config"
+	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/spf13/cobra"
 )
 
 func newInitCommand(stdout io.Writer) *cobra.Command {
 	var (
-		force            bool
-		forceInteractive bool
-		nonInteractive   bool
+		force              bool
+		forceInteractive   bool
+		nonInteractive     bool
+		selectedFrameworks []string
 	)
 	command := &cobra.Command{
 		Use:   "init [path]",
@@ -51,8 +53,9 @@ func newInitCommand(stdout io.Writer) *cobra.Command {
 
 			cfg := config.Default()
 			interactive := forceInteractive || (!nonInteractive && isInteractiveReader(cmd.InOrStdin()))
+			prompt := promptSession{reader: bufio.NewReader(cmd.InOrStdin()), output: stdout}
 			if interactive {
-				system, err := collectSystemProfile(cmd.InOrStdin(), stdout, target, time.Now())
+				system, err := collectSystemProfileWithPrompt(prompt, target, time.Now())
 				if err != nil {
 					return err
 				}
@@ -61,6 +64,9 @@ func newInitCommand(stdout io.Writer) *cobra.Command {
 				if _, err := fmt.Fprintln(stdout, "Non-interactive setup: no system profile was collected. Run `complyscan profile setup` from a terminal to add applicability context."); err != nil {
 					return err
 				}
+			}
+			if err := configureFrameworkSelection(prompt, &cfg, interactive, selectedFrameworks); err != nil {
+				return err
 			}
 			if err := config.Write(path, cfg, force); err != nil {
 				return err
@@ -75,7 +81,31 @@ func newInitCommand(stdout io.Writer) *cobra.Command {
 	command.Flags().BoolVar(&force, "force", false, "overwrite an existing configuration")
 	command.Flags().BoolVar(&forceInteractive, "interactive", false, "collect system context even when input is redirected")
 	command.Flags().BoolVar(&nonInteractive, "non-interactive", false, "create scanner configuration without asking setup questions")
+	command.Flags().StringSliceVar(&selectedFrameworks, "framework", nil, "built-in technical evidence pack to enable (repeatable)")
 	return command
+}
+
+func configureFrameworkSelection(prompt promptSession, cfg *config.Config, interactive bool, explicit []string) error {
+	if len(explicit) > 0 {
+		cfg.Frameworks = append([]string(nil), explicit...)
+		return cfg.Validate()
+	}
+	if !interactive {
+		return nil
+	}
+	if _, err := fmt.Fprintln(prompt.output, "\nFramework selection"); err != nil {
+		return err
+	}
+	if err := explainSetupQuestion(prompt, "frameworks"); err != nil {
+		return err
+	}
+	selected, err := promptChoices(prompt, "Technical evidence packs", cfg.Frameworks,
+		framework.EUAIActTechnicalEvidencePackID, framework.NISTAIRMFTechnicalEvidencePackID)
+	if err != nil {
+		return err
+	}
+	cfg.Frameworks = selected
+	return nil
 }
 
 const reportGitIgnoreEntry = "/.complyscan/reports/"
