@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "name": "NIST AI RMF technical evidence benchmark",
+  "pack_id": "nist-ai-rmf-technical-evidence",
+  "pack_version": "0.1.0",
+  "thresholds": {
+    "candidate_precision": 0.95,
+    "candidate_recall": 0.90,
+    "anchor_accuracy": 0.95,
+    "reachability_accuracy": 0.95,
+    "relationship_recall": 0.90,
+    "language_coverage": 1.0,
+    "max_forbidden_relationships": 0
+  },
+  "cases": [
+    {
+      "id": "go-operations",
+      "path": "repositories/go-operations",
+      "languages": ["go"],
+      "expected_candidates": [
+        {
+          "objective_id": "nist-rmf-manage-2.4-deactivation",
+          "path": "stop.go",
+          "anchor": "main.handleStopModel",
+          "reachability": "production-reachable",
+          "relationships": [
+            {"kind": "route", "label": "HANDLEFUNC /admin/stop", "resolved": true},
+            {"kind": "authorization", "label": "authorizeOperator", "resolved": true},
+            {"kind": "call", "label": "disableModelInference", "resolved": true}
+          ]
+        },
+        {
+          "objective_id": "nist-rmf-manage-4.1-appeal-override",
+          "path": "override.go",
+          "anchor": "main.handleOverrideDecision",
+          "reachability": "production-reachable",
+          "relationships": [
+            {"kind": "route", "label": "HANDLEFUNC /decisions/override", "resolved": true},
+            {"kind": "authorization", "label": "authorizeOperator", "resolved": true},
+            {"kind": "persistence", "label": "persistOverrideDecision", "resolved": true},
+            {"kind": "logging", "label": "auditDecisionEvent", "resolved": true}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "python-ml-service",
+      "path": "repositories/python-ml-service",
+      "languages": ["python"],
+      "expected_candidates": [
+        {
+          "objective_id": "nist-rmf-map-2.3-dataset-validation",
+          "path": "pipeline/dataset_validation.py",
+          "anchor": "pipeline.dataset_validation.validate_training_dataset",
+          "reachability": "production-reachable",
+          "relationships": [
+            {"kind": "route", "label": "POST /datasets/validate", "resolved": true}
+          ]
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.3-performance-criteria",
+          "path": "evaluation/test_performance.py",
+          "anchor": "evaluation.test_performance.test_model_accuracy_threshold",
+          "reachability": "test-only",
+          "forbidden_relationships": [
+            {"kind": "authorization"}
+          ]
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.11-fairness-bias",
+          "path": "evaluation/test_fairness.py",
+          "anchor": "evaluation.test_fairness.test_fairness_metric_threshold",
+          "reachability": "test-only",
+          "forbidden_relationships": [
+            {"kind": "authorization"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "typescript-assistant",
+      "path": "repositories/typescript-assistant",
+      "languages": ["typescript"],
+      "expected_candidates": [
+        {
+          "objective_id": "nist-rmf-measure-2.7-security-resilience",
+          "path": "src/security/prompt_injection.ts",
+          "anchor": "src.security.prompt_injection.sanitizePromptInjectionInput",
+          "reachability": "production-reachable",
+          "relationships": [
+            {"kind": "route", "label": "POST /generate", "resolved": true}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "javascript-review-service",
+      "path": "repositories/javascript-review-service",
+      "languages": ["javascript"],
+      "expected_candidates": [
+        {
+          "objective_id": "nist-rmf-map-3.5-human-oversight",
+          "path": "src/review/approval.js",
+          "anchor": "src.review.approval.approveHumanReviewDecision",
+          "reachability": "production-reachable",
+          "relationships": [
+            {"kind": "route", "label": "POST /review", "resolved": true},
+            {"kind": "authorization", "label": "requireReviewer", "resolved": true}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "nist-operations",
+      "path": "repositories/nist-operations",
+      "languages": ["go"],
+      "expected_candidates": [
+        {
+          "objective_id": "nist-rmf-measure-2.4-production-monitoring",
+          "path": "monitoring.go",
+          "anchor": "main.handleModelMetrics",
+          "reachability": "production-reachable",
+          "relationships": [
+            {"kind": "route", "label": "HANDLEFUNC /operations/model-metrics", "resolved": true},
+            {"kind": "logging", "label": "recordModelInferenceTelemetry", "resolved": true}
+          ]
+        },
+        {
+          "objective_id": "nist-rmf-measure-2.6-safe-failure",
+          "path": "fault_test.go",
+          "anchor": "main.TestInferenceTimeoutUsesFailSafeFallback",
+          "reachability": "test-only",
+          "relationships": [
+            {"kind": "test", "label": "runInferenceWithFallback", "resolved": true}
+          ]
+        },
+        {
+          "objective_id": "nist-rmf-manage-2.3-incident-recovery",
+          "path": "incident.go",
+          "anchor": "main.recoverModelIncident",
+          "reachability": "production-reachable",
+          "relationships": [
+            {"kind": "route", "label": "HANDLEFUNC /operations/model-incident", "resolved": true},
+            {"kind": "call", "label": "rollbackModelVersion", "resolved": true}
+          ]
+        },
+        {
+          "objective_id": "nist-rmf-manage-3.2-pretrained-model-monitoring",
+          "path": "provider.go",
+          "anchor": "main.monitorExternalModelProvider",
+          "reachability": "production-reachable",
+          "relationships": [
+            {"kind": "route", "label": "HANDLEFUNC /operations/provider-health", "resolved": true},
+            {"kind": "call", "label": "checkPinnedModelVersion", "resolved": true}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "nist-hard-negative",
+      "path": "repositories/nist-hard-negative",
+      "languages": ["go"],
+      "expected_candidates": []
+    }
+  ]
+}
