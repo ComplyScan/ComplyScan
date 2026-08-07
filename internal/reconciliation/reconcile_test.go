@@ -17,6 +17,25 @@ func candidateTechnical() framework.TechnicalEvidenceReport {
 	}}
 }
 
+func TestSelectedVoluntaryFrameworkProducesRecommendedPractices(t *testing.T) {
+	system := profile.NewDraftSystem("assistant", "Assistant")
+	system.AIActivities = []profile.AIActivity{profile.ActivityInference}
+	technical := framework.TechnicalEvidenceReport{
+		Pack:     framework.PackReference{ID: framework.NISTAIRMFTechnicalEvidencePackID, Version: "0.1.0"},
+		Coverage: framework.Coverage{Framework: "nist-ai-rmf", Nature: framework.NatureVoluntaryFramework},
+		Objectives: []framework.ObjectiveAssessment{{
+			ID: "nist-rmf-manage-4.1-appeal-override", ControlID: "human-override", Title: "Appeal or human override", SourceReference: "MANAGE 4.1",
+			Applicability: framework.ObjectiveApplicability{Scope: framework.ApplicabilitySelectedFramework, ActivitiesAnyOf: []string{"inference"}},
+			Status:        framework.ObjectiveCandidate, Matches: []framework.EvidenceMatch{{Fingerprint: "shared", Path: "override.go", StartLine: 4, Kind: "source"}},
+		}},
+	}
+	report := Build([]profile.System{system}, profile.AssessmentReport{}, technical, inventory.Report{}, nil)
+	result := report.Systems[0].Objectives[0]
+	if result.Requirement != RequirementRecommended || result.Mapping != MappingRecommendedWithEvidence || report.Summary.Recommended != 1 {
+		t.Fatalf("voluntary objective was treated as a legal requirement: result=%#v summary=%#v", result, report.Summary)
+	}
+}
+
 func highRiskSystem() profile.System {
 	system := profile.NewDraftSystem("ranking", "Candidate ranking")
 	system.IntendedPurpose = "Rank candidates for recruiter review."

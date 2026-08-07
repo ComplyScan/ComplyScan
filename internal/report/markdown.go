@@ -240,10 +240,10 @@ func writeReconciliationMarkdown(writer io.Writer, value reconciliation.Report) 
 	if value.Ownership.Configured {
 		configured = "yes"
 	}
-	if _, err := fmt.Fprintf(writer, "\n## Requirement-to-evidence reconciliation\n\n- Mapping version: %s\n- Path ownership configured: %s (%d rules)\n- Assigned evidence references: %d\n- Intentionally shared evidence references: %d\n- Conflicting evidence references: %d\n- Unassigned evidence references: %d\n- Single-system inferred references: %d\n- Likely required objectives: %d\n- With candidate evidence: %d\n- Without detected evidence: %d\n- Configuration/evidence mismatches: %d\n- Unresolved results: %d\n- Evidence groups with unresolved ownership: %d\n- AI-substantiated objectives: %d\n- Structurally verified objectives: %d\n- Objectives with isolated test evidence: %d\n- Extended investigations with no evidence: %d\n- Unresolved investigations: %d\n",
+	if _, err := fmt.Fprintf(writer, "\n## Requirement-to-evidence reconciliation\n\n- Mapping version: %s\n- Path ownership configured: %s (%d rules)\n- Assigned evidence references: %d\n- Intentionally shared evidence references: %d\n- Conflicting evidence references: %d\n- Unassigned evidence references: %d\n- Single-system inferred references: %d\n- Likely required objectives: %d\n- Voluntary-framework recommended practices: %d\n- With candidate evidence: %d\n- Without detected evidence: %d\n- Configuration/evidence mismatches: %d\n- Unresolved results: %d\n- Evidence groups with unresolved ownership: %d\n- AI-substantiated objectives: %d\n- Structurally verified objectives: %d\n- Objectives with isolated test evidence: %d\n- Extended investigations with no evidence: %d\n- Unresolved investigations: %d\n",
 		inlineCode(value.MappingVersion), configured, len(value.Ownership.Rules), value.Summary.AssignedReferences,
 		value.Summary.SharedReferences, value.Summary.ConflictingReferences, value.Summary.UnassignedReferences, value.Summary.InferredReferences,
-		value.Summary.LikelyRequired, value.Summary.RequirementWithEvidence,
+		value.Summary.LikelyRequired, value.Summary.Recommended, value.Summary.RequirementWithEvidence,
 		value.Summary.RequirementWithoutEvidence, value.Summary.EvidenceMismatches, value.Summary.Unresolved, value.Summary.UnmappedEvidence,
 		value.Summary.AISubstantiated, value.Summary.StructurallyVerified, value.Summary.TestEvidenceObserved, value.Summary.InvestigationNoEvidence, value.Summary.InvestigationUnresolved); err != nil {
 		return err

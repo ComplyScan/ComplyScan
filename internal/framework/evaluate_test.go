@@ -56,6 +56,39 @@ func TestEvaluateWorksWithoutSystemProfile(t *testing.T) {
 	}
 }
 
+func TestSharedControlProducesSameEvidenceFingerprintAcrossFrameworks(t *testing.T) {
+	euPack, err := LoadBuiltin(EUAIActTechnicalEvidencePackID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nistPack, err := LoadBuiltin(NISTAIRMFTechnicalEvidencePackID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := discovery.Repository{Files: []discovery.File{{
+		Path: "review/override.go", Kind: discovery.KindSource,
+		Content: []byte("package review\nfunc OverrideDecision(output string) {}\n"),
+	}}}
+	eu := Evaluate(euPack, nil, repository)
+	nist := Evaluate(nistPack, nil, repository)
+	euMatch := objectiveByControl(t, eu.Objectives, "human-override").Matches
+	nistMatch := objectiveByControl(t, nist.Objectives, "human-override").Matches
+	if len(euMatch) != 1 || len(nistMatch) != 1 || euMatch[0].Fingerprint != nistMatch[0].Fingerprint {
+		t.Fatalf("shared evidence was not stable across framework mappings: eu=%#v nist=%#v", euMatch, nistMatch)
+	}
+}
+
+func objectiveByControl(t *testing.T, objectives []ObjectiveAssessment, controlID string) ObjectiveAssessment {
+	t.Helper()
+	for _, objective := range objectives {
+		if objective.ControlID == controlID {
+			return objective
+		}
+	}
+	t.Fatalf("control %q not found", controlID)
+	return ObjectiveAssessment{}
+}
+
 func TestObjectivePathSignalIsRequiredWhenConfigured(t *testing.T) {
 	objective := TechnicalObjective{
 		PathKeywords:  []string{"override"},

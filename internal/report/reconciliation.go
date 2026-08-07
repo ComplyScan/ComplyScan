@@ -34,8 +34,8 @@ func writeAIInventoryTerminal(writer io.Writer, value inventory.Report) error {
 }
 
 func writeReconciliationTerminal(writer io.Writer, value reconciliation.Report) error {
-	if _, err := fmt.Fprintf(writer, "Requirement/evidence reconciliation (mapping %s): %d likely required, %d with candidate evidence, %d without detected evidence, %d mismatch(es), %d unresolved\n",
-		value.MappingVersion, value.Summary.LikelyRequired, value.Summary.RequirementWithEvidence,
+	if _, err := fmt.Fprintf(writer, "Requirement/evidence reconciliation (mapping %s): %d likely required, %d recommended, %d with candidate evidence, %d without detected evidence, %d mismatch(es), %d unresolved\n",
+		value.MappingVersion, value.Summary.LikelyRequired, value.Summary.Recommended, value.Summary.RequirementWithEvidence,
 		value.Summary.RequirementWithoutEvidence, value.Summary.EvidenceMismatches, value.Summary.Unresolved); err != nil {
 		return err
 	}
@@ -138,6 +138,10 @@ func reconciliationLabel(status reconciliation.MappingStatus) string {
 		return "MATCH"
 	case reconciliation.MappingRequirementWithoutEvidence:
 		return "NOT FOUND"
+	case reconciliation.MappingRecommendedWithEvidence:
+		return "RECOMMENDED"
+	case reconciliation.MappingRecommendedWithoutEvidence:
+		return "REC. MISSING"
 	case reconciliation.MappingEvidenceMismatch:
 		return "MISMATCH"
 	case reconciliation.MappingEvidenceUnclear:
@@ -155,7 +159,7 @@ func reconciliationLabel(status reconciliation.MappingStatus) string {
 
 func showReconciliationReason(status reconciliation.MappingStatus) bool {
 	switch status {
-	case reconciliation.MappingRequirementWithEvidence, reconciliation.MappingNotCurrentlyIndicated:
+	case reconciliation.MappingRequirementWithEvidence, reconciliation.MappingRecommendedWithEvidence, reconciliation.MappingNotCurrentlyIndicated:
 		return false
 	default:
 		return true

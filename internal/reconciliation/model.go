@@ -16,12 +16,15 @@ type UnmappedEvidenceKind string
 
 const (
 	RequirementLikelyRequired        RequirementStatus = "likely-required"
+	RequirementRecommended           RequirementStatus = "recommended-practice"
 	RequirementContextDependent      RequirementStatus = "context-dependent"
 	RequirementNotCurrentlyIndicated RequirementStatus = "not-currently-indicated"
 	RequirementUnresolved            RequirementStatus = "unresolved"
 
 	MappingRequirementWithEvidence    MappingStatus = "requirement-with-candidate-evidence"
 	MappingRequirementWithoutEvidence MappingStatus = "requirement-without-detected-evidence"
+	MappingRecommendedWithEvidence    MappingStatus = "recommended-practice-with-candidate-evidence"
+	MappingRecommendedWithoutEvidence MappingStatus = "recommended-practice-without-detected-evidence"
 	MappingEvidenceUnclear            MappingStatus = "evidence-with-unclear-applicability"
 	MappingEvidenceMismatch           MappingStatus = "evidence-configuration-mismatch"
 	MappingApplicabilityUnresolved    MappingStatus = "applicability-unresolved"
@@ -111,6 +114,7 @@ type UnmappedEvidence struct {
 type Summary struct {
 	Systems                    int `json:"systems"`
 	LikelyRequired             int `json:"likely_required"`
+	Recommended                int `json:"recommended_practices"`
 	RequirementWithEvidence    int `json:"requirement_with_candidate_evidence"`
 	RequirementWithoutEvidence int `json:"requirement_without_detected_evidence"`
 	EvidenceMismatches         int `json:"evidence_configuration_mismatches"`

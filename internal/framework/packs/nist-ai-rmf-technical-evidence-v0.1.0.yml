@@ -1,0 +1,212 @@
+# complyscan:ignore-technical-evidence
+# NIST AI RMF 1.0 is voluntary and outcome-based. This pack contains only
+# outcomes for which bounded repository code can provide a useful signal.
+# Selecting the pack means the operator wants these practices screened; it
+# does not turn NIST guidance into a legal obligation or a certification.
+schema-version: 2
+id: nist-ai-rmf-technical-evidence
+name: NIST AI RMF technical code evidence
+version: 0.1.0
+released: "2026-08-07"
+source:
+  title: Artificial Intelligence Risk Management Framework 1.0
+  reference: NIST AI 100-1
+  url: https://doi.org/10.6028/NIST.AI.100-1
+  edition: AI RMF 1.0 dated 26 January 2023
+coverage:
+  framework: nist-ai-rmf
+  nature: voluntary-framework
+  evidence-type: code
+  provisions: [MAP 2.3, MAP 3.5, MEASURE 2.3, MEASURE 2.4, MEASURE 2.6, MEASURE 2.7, MEASURE 2.11, MEASURE 3.1, MANAGE 2.3, MANAGE 2.4, MANAGE 3.2, MANAGE 4.1]
+  limitations:
+    - This pack contains code, configuration, test, CI, and infrastructure objectives only; governance, organisational processes, risk decisions, stakeholder engagement, and documentary outcomes belong in the dashboard.
+    - NIST AI RMF is voluntary and outcome-based; selecting this pack requests technical screening and does not make every outcome mandatory.
+    - Candidate code is not proof that an RMF outcome is implemented effectively, and no evidence detected does not prove that a practice is absent.
+objectives:
+  # MAP 2.3: for systems using model-development data, look for executable validation of dataset suitability, completeness, or schema.
+  - id: nist-rmf-map-2.3-dataset-validation
+    control-id: dataset-validation
+    title: Dataset validation for TEVV
+    source-reference: MAP 2.3
+    description: Code validates training, validation, or test data for schema, completeness, or quality before technical evaluation.
+    applicability-note: Repository evidence cannot establish scientific integrity, representativeness, or suitability for the deployment context.
+    applicability:
+      scope: selected-framework
+      activities-any-of: [training, fine-tuning, evaluation]
+      external-use-required: false
+    file-kinds: [source, configuration, ci, github-actions]
+    path-keywords: [data, dataset, validation, schema, schemas]
+    keyword-groups:
+      - [training data, validation data, test data, dataset]
+      - [validate training data, validate training dataset, validate validation data, validate validation dataset, validate test data, validate test dataset, validate dataset, validates dataset, dataset validation, schema validation, quality check, completeness, missing value, missing field]
+    verification: technical-semantic-and-human
+  # MAP 3.5: look for a workflow gate that routes an AI-assisted output through explicit human approval or rejection.
+  - id: nist-rmf-map-3.5-human-oversight
+    control-id: human-review-gate
+    title: Human oversight workflow
+    source-reference: MAP 3.5
+    description: Code routes an AI-assisted decision or output through an explicit human approval or rejection step.
+    applicability-note: A match does not establish whether the oversight design is appropriate, staffed, authoritative, or effective.
+    applicability:
+      scope: selected-framework
+      activities-any-of: [inference, automated-decision, agent-tool-use]
+      external-use-required: false
+    file-kinds: [source, configuration]
+    path-keywords: [review, approval, decision]
+    keyword-groups:
+      - [human review, manual review, reviewer, approval]
+      - [approve, reject, pending, decision]
+    verification: technical-semantic-and-human
+  # MEASURE 2.3: look for tests or CI that enforce measurable AI performance or assurance criteria.
+  - id: nist-rmf-measure-2.3-performance-criteria
+    control-id: performance-thresholds
+    title: Enforced performance or assurance criteria
+    source-reference: MEASURE 2.3
+    description: Tests, CI, or configuration enforce measurable AI performance or assurance thresholds.
+    applicability-note: Static thresholds cannot establish similarity to deployment conditions or the suitability of the selected metric.
+    applicability:
+      scope: selected-framework
+      activities-any-of: []
+      external-use-required: false
+    file-kinds: [source, configuration, ci, github-actions]
+    path-keywords: [evaluation, benchmark, performance, test]
+    keyword-groups:
+      - [model accuracy, evaluation accuracy, accuracy metric, precision, recall, f1, model performance, inference performance]
+      - [threshold, acceptance criteria, minimum]
+    verification: technical-semantic-and-human
+  # MEASURE 2.4 and MEASURE 3.1: look for production-oriented model telemetry, metrics, or alerts that track behavior over time.
+  - id: nist-rmf-measure-2.4-production-monitoring
+    control-id: production-model-monitoring
+    title: Production AI behavior monitoring
+    source-reference: MEASURE 2.4 / MEASURE 3.1
+    description: Code or configuration records and monitors model or inference behavior using metrics, telemetry, or alerts.
+    applicability-note: Repository signals cannot establish production coverage, alert ownership, response quality, or ongoing operation.
+    applicability:
+      scope: selected-framework
+      activities-any-of: [inference, automated-decision, agent-tool-use]
+      external-use-required: false
+    file-kinds: [source, configuration, terraform, dockerfile]
+    path-keywords: [monitor, monitoring, telemetry, observability, alert]
+    keyword-groups:
+      - [model, inference, prediction, ai response, automated decision]
+      - [monitor, monitoring, telemetry, metric, alert, anomaly]
+    verification: technical-semantic-and-human
+  # MEASURE 2.6: look for tests of faults or adversarial conditions together with bounded fallback, recovery, or fail-safe behavior.
+  - id: nist-rmf-measure-2.6-safe-failure
+    control-id: robustness-failure-handling
+    title: Safety, robustness, and fail-safe evaluation
+    source-reference: MEASURE 2.6
+    description: Code or tests exercise AI faults or adversarial conditions and implement bounded fallback, retry, recovery, or fail-safe behavior.
+    applicability-note: Static evidence cannot demonstrate safety, residual risk, or robustness across real operating conditions.
+    applicability:
+      scope: selected-framework
+      activities-any-of: []
+      external-use-required: false
+    file-kinds: [source, configuration, ci, github-actions, terraform]
+    path-keywords: [robustness, adversarial, fault, fallback, test]
+    keyword-groups:
+      - [robustness, adversarial, fuzz, model fault, inference fault, inference timeout]
+      - [model fallback, inference fallback, fail-safe, circuit breaker, retry, recovery test]
+    verification: technical-semantic-and-human
+  # MEASURE 2.7: look for executable controls or tests addressing AI-specific security and resilience threats.
+  - id: nist-rmf-measure-2.7-security-resilience
+    control-id: ai-security-controls
+    title: AI security and resilience evaluation
+    source-reference: MEASURE 2.7
+    description: Code, tests, or configuration address AI-specific threats such as prompt injection, poisoning, evasion, or adversarial input.
+    applicability-note: Detection does not replace a threat model, security assessment, penetration test, or resilience evaluation.
+    applicability:
+      scope: selected-framework
+      activities-any-of: []
+      external-use-required: false
+    file-kinds: [source, configuration, ci, github-actions, terraform]
+    path-keywords: [security, threat, adversarial, injection]
+    keyword-groups:
+      - [prompt injection, data poisoning, model poisoning, adversarial input, model evasion]
+      - [sanitize, validate, detect, filter, test]
+    verification: technical-semantic-and-human
+  # MEASURE 2.11: for model training, fine-tuning, or evaluation, look for executable fairness or discrimination measurements.
+  - id: nist-rmf-measure-2.11-fairness-bias
+    control-id: bias-evaluation
+    title: Fairness and bias evaluation
+    source-reference: MEASURE 2.11
+    description: Automated tests or evaluation code measure bias, discrimination, or fairness-related behavior.
+    applicability-note: Code cannot establish the affected groups, harms, thresholds, or trade-offs that should govern an evaluation.
+    applicability:
+      scope: selected-framework
+      activities-any-of: [training, fine-tuning, evaluation]
+      external-use-required: false
+    file-kinds: [source, configuration, ci, github-actions]
+    path-keywords: [bias, fairness, evaluation]
+    keyword-groups:
+      - [fairness, discrimination, demographic parity, equalized odds, political bias, anchoring bias, gender bias, racial bias]
+      - [test, evaluation, metric, threshold]
+    verification: technical-semantic-and-human
+  # MANAGE 2.3 and MANAGE 4.1: look for implemented response and recovery behavior for model or inference incidents.
+  - id: nist-rmf-manage-2.3-incident-recovery
+    control-id: ai-incident-recovery
+    title: AI incident response and recovery hooks
+    source-reference: MANAGE 2.3 / MANAGE 4.1
+    description: Code or configuration implements response, rollback, recovery, or fallback behavior for AI incidents and failures.
+    applicability-note: A code hook cannot establish incident ownership, communications, exercises, response timing, or operational effectiveness.
+    applicability:
+      scope: selected-framework
+      activities-any-of: []
+      external-use-required: false
+    file-kinds: [source, configuration, ci, github-actions, terraform]
+    path-keywords: [incident, recovery, rollback, fallback]
+    keyword-groups:
+      - [ai incident, model incident, inference failure, model failure]
+      - [recover, recovery, rollback, fallback, failover]
+    verification: technical-semantic-and-human
+  # MANAGE 2.4: look for a mechanism that can disable, disengage, or deactivate an AI feature or inference path.
+  - id: nist-rmf-manage-2.4-deactivation
+    control-id: safe-stop
+    title: AI system deactivation mechanism
+    source-reference: MANAGE 2.4
+    description: Code or configuration can stop, disable, or gate an AI model, inference path, or automated-decision feature.
+    applicability-note: A repository match cannot establish assigned responsibility, decision criteria, authorization, timeliness, or production availability.
+    applicability:
+      scope: selected-framework
+      activities-any-of: []
+      external-use-required: false
+    file-kinds: [source, configuration, terraform]
+    path-keywords: [stop, shutdown, disable, feature]
+    keyword-groups:
+      - [stop, shutdown, disable, kill switch, feature flag]
+      - [model, ai, inference, decision]
+    verification: technical-semantic-and-human
+  # MANAGE 3.2: look for monitoring, health checks, or controlled version tracking around externally supplied or pre-trained models.
+  - id: nist-rmf-manage-3.2-pretrained-model-monitoring
+    control-id: third-party-model-monitoring
+    title: Pre-trained and third-party model monitoring
+    source-reference: MANAGE 3.2
+    description: Code or configuration monitors the health, behavior, or controlled version of a pre-trained or third-party model dependency.
+    applicability-note: Repository evidence cannot establish supplier governance, complete third-party risk coverage, or ongoing maintenance.
+    applicability:
+      scope: selected-framework
+      activities-any-of: [inference, fine-tuning, evaluation, automated-decision, agent-tool-use]
+      external-use-required: false
+    file-kinds: [source, dependency-manifest, configuration, terraform, dockerfile]
+    path-keywords: [model, provider, dependency, monitoring]
+    keyword-groups:
+      - [pretrained model, pre-trained model, foundation model, model provider, external model]
+      - [monitor, health check, version pin, pinned version, model version]
+    verification: technical-semantic-and-human
+  # MANAGE 4.1: look for a user or operator mechanism to appeal, override, disregard, or intervene in an AI output.
+  - id: nist-rmf-manage-4.1-appeal-override
+    control-id: human-override
+    title: Appeal or human override mechanism
+    source-reference: MANAGE 4.1
+    description: Code allows a user or authorised operator to appeal, override, disregard, or intervene in an AI output or decision.
+    applicability-note: Static evidence cannot establish accessibility, procedural fairness, authority, coverage, or effective resolution.
+    applicability:
+      scope: selected-framework
+      activities-any-of: [inference, automated-decision, agent-tool-use]
+      external-use-required: false
+    file-kinds: [source, configuration]
+    path-keywords: [appeal, override, intervention, decision]
+    keyword-groups:
+      - [appeal, override, intervene, intervention, disregard]
+      - [decision, output, prediction, result]
+    verification: technical-semantic-and-human

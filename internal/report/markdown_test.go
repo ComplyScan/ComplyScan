@@ -77,7 +77,7 @@ func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
 		"exported-entry-candidate",
 		"Unresolved:",
 		"Candidate evidence detected — Human override or intervention mechanism",
-		"Applicability conditions: legal scope high-risk-system",
+		"Applicability conditions: framework scope high-risk-system",
 		"`review/override.go:2`",
 		"No evidence detected",
 		"## Coverage boundary",

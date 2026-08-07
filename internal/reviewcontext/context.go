@@ -79,7 +79,7 @@ func BuildInvestigations(evidence framework.TechnicalEvidenceReport, repository 
 					system.SystemID, system.SystemName, scopeMode, digest,
 				))
 			}
-			if mapped.Requirement != reconciliation.RequirementLikelyRequired || len(mapped.EvidenceReferences) > 0 {
+			if !investigationRequirement(mapped.Requirement) || len(mapped.EvidenceReferences) > 0 {
 				continue
 			}
 			if mapped.Evidence != "" {
@@ -93,6 +93,10 @@ func BuildInvestigations(evidence framework.TechnicalEvidenceReport, repository 
 		perSystem = append(perSystem, systemCandidates)
 	}
 	return providers.TechnicalReviewRequest{Candidates: interleaveSystemCandidates(perSystem)}
+}
+
+func investigationRequirement(status reconciliation.RequirementStatus) bool {
+	return status == reconciliation.RequirementLikelyRequired || status == reconciliation.RequirementRecommended
 }
 
 func interleaveSystemCandidates(groups [][]providers.TechnicalCandidate) []providers.TechnicalCandidate {

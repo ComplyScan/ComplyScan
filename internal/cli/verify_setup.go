@@ -341,7 +341,7 @@ func verificationObjectivesForSystem(mapping reconciliation.Report, technical fr
 		}
 		choices := []verificationObjectiveChoice{}
 		for _, result := range system.Objectives {
-			if result.Requirement != reconciliation.RequirementLikelyRequired {
+			if result.Requirement != reconciliation.RequirementLikelyRequired && result.Requirement != reconciliation.RequirementRecommended {
 				continue
 			}
 			choices = append(choices, verificationObjectiveChoice{Objective: objectiveByID[result.ObjectiveID], Mapping: result})

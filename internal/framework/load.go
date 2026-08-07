@@ -16,7 +16,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const EUAIActTechnicalEvidencePackID = "eu-ai-act-technical-evidence"
+const (
+	EUAIActTechnicalEvidencePackID   = "eu-ai-act-technical-evidence"
+	NISTAIRMFTechnicalEvidencePackID = "nist-ai-rmf-technical-evidence"
+)
 
 //go:embed packs/*.yml
 var builtins embed.FS
@@ -25,7 +28,8 @@ var identifierPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 var semanticVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 
 var builtinPaths = map[string]string{
-	EUAIActTechnicalEvidencePackID: "packs/eu-ai-act-technical-evidence-v0.1.3.yml",
+	EUAIActTechnicalEvidencePackID:   "packs/eu-ai-act-technical-evidence-v0.1.3.yml",
+	NISTAIRMFTechnicalEvidencePackID: "packs/nist-ai-rmf-technical-evidence-v0.1.0.yml",
 }
 
 var supportedFileKinds = map[string]struct{}{
@@ -53,7 +57,7 @@ func LoadBuiltin(id string) (Pack, error) {
 
 func BuiltinPacks() ([]Pack, error) {
 	packs := make([]Pack, 0, len(builtinPaths))
-	for _, id := range []string{EUAIActTechnicalEvidencePackID} {
+	for _, id := range []string{EUAIActTechnicalEvidencePackID, NISTAIRMFTechnicalEvidencePackID} {
 		pack, err := LoadBuiltin(id)
 		if err != nil {
 			return nil, err

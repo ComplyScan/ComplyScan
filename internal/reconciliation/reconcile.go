@@ -58,7 +58,7 @@ func Build(systems []profile.System, assessments profile.AssessmentReport, techn
 		}
 		assessment := assessmentBySystem[system.ID]
 		for index, objective := range technical.Objectives {
-			requirement, reasons := screenRequirement(system, assessment, objective)
+			requirement, reasons := screenRequirement(system, assessment, technical.Coverage, objective)
 			mapped := mapObjective(requirement, objective, reasons, referencesForSystem(objectiveRefs[index], system.ID), objectiveRefs[index])
 			result.Objectives = append(result.Objectives, mapped)
 			addObjectiveSummary(&report.Summary, mapped)
@@ -104,10 +104,22 @@ func Build(systems []profile.System, assessments profile.AssessmentReport, techn
 	return report
 }
 
-func screenRequirement(system profile.System, assessment profile.Assessment, objective framework.ObjectiveAssessment) (RequirementStatus, []Reason) {
+func screenRequirement(system profile.System, assessment profile.Assessment, coverage framework.Coverage, objective framework.ObjectiveAssessment) (RequirementStatus, []Reason) {
 	rule := objective.Applicability
 	if err := rule.Validate(); err != nil {
 		return RequirementUnresolved, []Reason{{Code: "objective-mapping-missing", Message: "This technical objective has no valid applicability conditions in its technical control pack."}}
+	}
+	if rule.Scope == framework.ApplicabilitySelectedFramework {
+		if coverage.Nature != framework.NatureVoluntaryFramework {
+			return RequirementUnresolved, []Reason{{Code: "framework-scope-mismatch", Message: "A selected-framework objective must come from a voluntary framework pack."}}
+		}
+		if len(rule.ActivitiesAnyOf) > 0 {
+			status, reasons, _ := screenActivity(system, rule)
+			if status != RequirementLikelyRequired {
+				return status, reasons
+			}
+		}
+		return RequirementRecommended, []Reason{{Code: "voluntary-framework-selected", Message: "The operator selected this voluntary framework, so the technical practice is recommended for the configured system; this is not a legal obligation."}}
 	}
 	if decision := euDecision(system); decision != nil {
 		switch decision.Status {
@@ -211,6 +223,13 @@ func mapObjective(requirement RequirementStatus, objective framework.ObjectiveAs
 		} else {
 			result.Mapping = MappingRequirementWithoutEvidence
 			result.Reasons = append(result.Reasons, Reason{Code: "candidate-evidence-not-detected", Message: "The bounded scan did not detect configured evidence for this likely requirement; this does not prove the implementation is absent."})
+		}
+	case RequirementRecommended:
+		if evidenceStatus == framework.ObjectiveCandidate {
+			result.Mapping = MappingRecommendedWithEvidence
+		} else {
+			result.Mapping = MappingRecommendedWithoutEvidence
+			result.Reasons = append(result.Reasons, Reason{Code: "recommended-evidence-not-detected", Message: "The bounded scan did not detect configured evidence for this selected voluntary-framework practice; this does not prove the implementation is absent."})
 		}
 	case RequirementNotCurrentlyIndicated:
 		if evidenceStatus == framework.ObjectiveCandidate {
@@ -375,11 +394,13 @@ func containsString(values []string, wanted string) bool {
 func addObjectiveSummary(summary *Summary, result ObjectiveResult) {
 	if result.Requirement == RequirementLikelyRequired {
 		summary.LikelyRequired++
+	} else if result.Requirement == RequirementRecommended {
+		summary.Recommended++
 	}
 	switch result.Mapping {
-	case MappingRequirementWithEvidence:
+	case MappingRequirementWithEvidence, MappingRecommendedWithEvidence:
 		summary.RequirementWithEvidence++
-	case MappingRequirementWithoutEvidence:
+	case MappingRequirementWithoutEvidence, MappingRecommendedWithoutEvidence:
 		summary.RequirementWithoutEvidence++
 	case MappingEvidenceMismatch:
 		summary.EvidenceMismatches++
