@@ -4,15 +4,27 @@
 
 ### Added
 
+- A built-in, code-only NIST AI RMF 1.0 technical evidence pack with 11 inspectable objectives and explicit voluntary-framework semantics.
+- Framework selection in configuration and guided setup, including repeatable `--framework` automation flags and EU-specific applicability questions only when the EU pack is selected.
+- Canonical technical control IDs that let different framework objectives reuse repository evidence and stable fingerprints without conflating their citations or legal nature.
+- Per-framework terminal, Markdown, and schema-version 5 JSON results, plus selected-framework objective choices in guided verification setup.
 - Validated, version-controlled path ownership rules that assign repository evidence to one declared AI system or intentionally share it across several systems.
 - Guided `complyscan ownership setup` and inspectable `complyscan ownership show` commands, also offered during multi-system setup.
-- Per-reference ownership status in terminal, Markdown, and schema-version 4 JSON reports, including assigned, shared, conflicting, unassigned, and disclosed single-system inference states.
+- Per-reference ownership status in terminal, Markdown, and schema-version 5 JSON reports, including assigned, shared, conflicting, unassigned, and disclosed single-system inference states.
 
 ### Changed
 
+- Scans now discover and inventory a repository once, then evaluate every configured technical pack and label NIST results as voluntary recommendations rather than likely legal requirements.
+- The EU AI Act technical pack is version 0.1.3 with schema-version 2 applicability fields and canonical control mappings; its measured evidence-match terms remain unchanged.
+- The technical-review prompt contract is version 10 and binds review targets to their selected framework pack.
 - Reconciliation now maps objective evidence and observed AI components only to systems that own the matching repository path; conflicting and unmatched paths remain explicitly unresolved.
 - Advisory candidate and missing-evidence investigations are now scoped per system. Graph construction, initial retrieval, model-directed follow-up, cache entries, observations, isolated-test context, and reconciliation use only assigned or intentionally shared paths.
-- The technical-review prompt contract is version 9 and the source-free cache uses schema version 2 so earlier unscoped observations cannot be reused.
+- The source-free cache uses schema version 2 so earlier unscoped observations cannot be reused.
+
+### Testing
+
+- Multi-framework regressions cover configuration validation, setup branching, report rendering, recommendation semantics, shared-control fingerprints, and verification objective selection.
+- NIST-specific external-repository retrieval labels and a prompt-version 10 live-model run remain required before making NIST accuracy or updated model-quality claims.
 
 ## 0.1.3 - 2026-08-06
 
