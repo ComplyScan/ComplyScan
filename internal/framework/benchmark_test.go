@@ -45,6 +45,42 @@ func TestTechnicalEvidenceBenchmarkCorpus(t *testing.T) {
 	}
 }
 
+func TestNISTAIRMFTechnicalEvidenceBenchmarkCorpus(t *testing.T) {
+	manifestPath := filepath.Join("..", "..", "testdata", "technical-evaluation", "nist-manifest.json")
+	manifest, err := LoadBenchmarkManifest(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack, err := LoadBuiltin(manifest.PackID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := RunBenchmark(context.Background(), manifestPath, manifest, pack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Passed {
+		t.Fatalf("benchmark failed: %#v", report.Failures)
+	}
+	metrics := report.Metrics
+	if metrics.TruePositiveCandidates != 11 || metrics.FalsePositiveCandidates != 0 || metrics.FalseNegativeCandidates != 0 {
+		t.Fatalf("unexpected candidate metrics: %#v", metrics)
+	}
+	if metrics.CorrectAnchors != 11 || metrics.CorrectReachability != 11 || metrics.MatchedRelationships != 18 || metrics.ForbiddenRelationshipsFound != 0 {
+		t.Fatalf("unexpected context metrics: %#v", metrics)
+	}
+	if metrics.DetectedLanguages != 6 || metrics.ExpectedLanguages != 6 {
+		t.Fatalf("unexpected language coverage: %#v", metrics)
+	}
+	encoded, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "inference timeout fail-safe recovery test") {
+		t.Fatal("benchmark report leaked repository source")
+	}
+}
+
 func TestTechnicalEvidenceBenchmarkThresholdDetectsUnexpectedCandidate(t *testing.T) {
 	manifestPath := filepath.Join("..", "..", "testdata", "technical-evaluation", "manifest.json")
 	manifest, err := LoadBenchmarkManifest(manifestPath)

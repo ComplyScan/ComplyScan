@@ -23,8 +23,10 @@ jobs:
           cache: true
       - name: Test
         run: go test ./...
-      - name: Technical evidence benchmark
-        run: ./scripts/evaluate-technical-evidence.sh
+      - name: Technical evidence benchmarks
+        run: |
+          ./scripts/evaluate-technical-evidence.sh
+          ./scripts/evaluate-technical-evidence.sh --manifest testdata/technical-evaluation/nist-manifest.json
       - name: Vet
         run: go vet ./...
       - name: Validate installer syntax
