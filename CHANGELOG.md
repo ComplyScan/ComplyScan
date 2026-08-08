@@ -26,7 +26,7 @@
 - Multi-framework regressions cover configuration validation, setup branching, report rendering, recommendation semantics, shared-control fingerprints, and verification objective selection.
 - A source-free NIST synthetic benchmark covers all 11 objectives, four indexed-language case types, production and test-only reachability, required graph relationships, and split-keyword hard negatives with enforced CI thresholds.
 - Independently reviewed NIST labels over ten exact public-repository revisions record 32 reasonable candidates, five false positives, 86.5% candidate precision, and complete recall against the labelled paths without storing third-party source.
-- A prompt-version 10 live-model run remains required before making updated model-quality claims.
+- A cache-bypassed prompt-version 10 `qwen3:8b` gate passed across Go, Python, and TypeScript with independently validated EU and NIST targets, bounded prompt-injection fixtures, and no semantic guardrail corrections; an hours-long TypeScript outlier keeps performance explicitly experimental.
 
 ## 0.1.3 - 2026-08-06
 

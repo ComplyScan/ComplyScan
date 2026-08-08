@@ -14,7 +14,7 @@ For the faster two-target evidence-investigation and follow-up-retrieval contrac
 ./scripts/smoke-ollama-investigation.sh
 ```
 
-The harness builds the current source, confirms the configured model appears in `ollama list`, and scans the Go, Python, and TypeScript fixtures under `testdata/technical-context-*`. The fixtures contain:
+The harness builds the current source, confirms the configured model appears in `ollama list`, and scans the Go, Python, and TypeScript fixtures under `testdata/technical-context-*`. Each fixture selects both the EU AI Act and NIST AI RMF packs so the same repository mechanism is reviewed under separate source objectives. The fixtures contain:
 
 - a production-routed override handler connected to configuration, authorization, persistence, and audit calls;
 - a test-only override lookalike without authorization or audit relationships; and
@@ -22,7 +22,7 @@ The harness builds the current source, confirms the configured model appears in 
 
 Each fixture uses the generated 360-second Ollama timeout because inference time varies materially with language, hardware, and thermal load. Users can change it explicitly in `.complyscan.yml`.
 
-Validation passes for each language only when the production-routed candidate receives `partial` or `strong`, while every test-only candidate receives `weak` or `not_supported`. ComplyScan binds each identifier-free model decision to the sole submitted candidate in trusted code, and a deterministic guardrail correction does not count as a clean model-quality pass.
+Validation passes for each language only when both the EU and NIST production-routed candidates receive `partial` or `strong`, while every test-only candidate under both frameworks receives `weak` or `not_supported`. ComplyScan binds each identifier-free model decision to the sole submitted candidate in trusted code, and a deterministic guardrail correction does not count as a clean model-quality pass. A missing framework result also fails the gate.
 
 Generated per-language JSON, resource metrics, and the combined validation summary are saved under `.complyscan/validation/ollama/` and are ignored by Git. The metrics distinguish each ComplyScan CLI process measured by `/usr/bin/time` from the separately running model allocation reported by `ollama ps`. Review all JSON reports and the metrics before recording a qualified release result. Override the defaults with `COMPLYSCAN_OLLAMA_MODEL` or `COMPLYSCAN_VALIDATION_DIR` when needed. To run only selected fixtures during development, provide a space-separated list such as `COMPLYSCAN_VALIDATION_FIXTURES="typescript"` or `COMPLYSCAN_VALIDATION_FIXTURES="python typescript"`.
 
@@ -65,5 +65,17 @@ This is a small adversarial fixture result, not a general quality benchmark. Rep
 On 2026-08-06, prompt version 7 passed the two-target smoke fixture with `qwen3:8b`. The positive human-override target was `partial` with AI-substantiated assurance and three grounded references after one three-query follow-up. The likely-required risk-control-testing target was `not_supported` with investigation-no-evidence assurance. Its planner returned `needed=true` without a query; the bounded-plan guardrail skipped that malformed optional round and allowed the original investigation to complete. The source-free report was saved under `.complyscan/validation/ollama-smoke/`. This validates the small retrieval contract and fallback only, not general model accuracy.
 
 Prompt version 8 repeated the same two-target gate on 2026-08-06 after adding the user-declared isolated-test evidence boundary. The positive target remained `partial` with AI-substantiated assurance, used the same three-query/three-excerpt follow-up, and returned two grounded references. The negative target remained `not_supported` with investigation-no-evidence assurance; its empty optional search plan was safely skipped and its comment-only negative claim was removed by the non-executable-claim guardrail. This confirms the small prompt contract only and does not evaluate an actual project-specific verification recipe.
+
+Prompt version 10 passed the strengthened multi-framework fixture gate with `qwen3:8b` on 2026-08-07. Every Go, Python, and TypeScript fixture produced three EU Article 14 override candidates and three NIST MANAGE 4.1 appeal/override candidates from the same repository mechanisms. Under both frameworks:
+
+- every production-routed candidate was `partial`;
+- every test-only candidate was `weak` or `not_supported`;
+- prompt-injection content remained bounded;
+- returned evidence remained attached to the correct framework objective and fingerprint; and
+- no observation required a deterministic semantic correction.
+
+The cache-bypassed combined wall times were 513.8 seconds for Go, 495.1 seconds for Python, and 14,158.5 seconds for TypeScript. The TypeScript duration is an extreme outlier even though all six decisions passed; it demonstrates that local-model wall time can stretch to hours under real machine conditions and is not a performance SLA. Peak ComplyScan CLI resident size was approximately 19.3 MB. The loaded Ollama model allocation remained 5.6 GB at a 4,096-token context. Source-free reports and metrics were saved locally under `.complyscan/validation/ollama/` with timestamps `20260807T221544Z` and `20260807T222506Z` and remain Git-ignored.
+
+This closes the prompt-version 10 small-fixture release gate. It does not validate every NIST objective, establish general model accuracy, eliminate variability, or promote model review beyond experimental status. Larger live studies and explicit performance work remain separate.
 
 The validation harness always passes `--refresh-review`. This guarantees that reported classifications, duration, and resource measurements come from fresh Ollama inference rather than ComplyScan's local technical-observation cache.
