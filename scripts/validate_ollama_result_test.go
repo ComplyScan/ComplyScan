@@ -31,8 +31,8 @@ func TestValidateOllamaResultRejectsStrongTestOnlyCandidate(t *testing.T) {
 
 func TestValidateOllamaResultRejectsHiddenGuardrailCorrection(t *testing.T) {
 	value := validationReport(providers.StrengthStrong, providers.StrengthWeak)
-	value.TechnicalReview.Observations[1].ModelStrength = providers.StrengthPartial
-	value.TechnicalReview.Observations[1].GuardrailNote = "Test-only cap applied."
+	value.Frameworks[0].TechnicalReview.Observations[1].ModelStrength = providers.StrengthPartial
+	value.Frameworks[0].TechnicalReview.Observations[1].GuardrailNote = "Test-only cap applied."
 	_, err := validateOllamaResult(value, "qwen3:8b")
 	if err == nil || !strings.Contains(err.Error(), "required a deterministic guardrail") {
 		t.Fatalf("got error %v", err)
@@ -44,22 +44,27 @@ func validationReport(production, testOnly providers.EvidenceStrength) report.Re
 		productionFingerprint = "production-fingerprint"
 		testFingerprint       = "test-fingerprint"
 	)
-	return report.Report{
-		TechnicalEvidence: &framework.TechnicalEvidenceReport{Objectives: []framework.ObjectiveAssessment{{
-			ID: validationObjective,
-			Matches: []framework.EvidenceMatch{
-				{Fingerprint: productionFingerprint, Context: contextWithReachability(codegraph.ReachableProduction)},
-				{Fingerprint: testFingerprint, Context: contextWithReachability(codegraph.ReachableTestOnly)},
+	value := report.Report{Frameworks: make([]report.FrameworkResult, 0, len(validationTargets))}
+	for _, target := range validationTargets {
+		value.Frameworks = append(value.Frameworks, report.FrameworkResult{
+			ID: target.FrameworkID,
+			TechnicalEvidence: framework.TechnicalEvidenceReport{Objectives: []framework.ObjectiveAssessment{{
+				ID: target.ObjectiveID,
+				Matches: []framework.EvidenceMatch{
+					{Fingerprint: productionFingerprint, Context: contextWithReachability(codegraph.ReachableProduction)},
+					{Fingerprint: testFingerprint, Context: contextWithReachability(codegraph.ReachableTestOnly)},
+				},
+			}}},
+			TechnicalReview: &providers.TechnicalReviewResult{
+				Model: "qwen3:8b",
+				Observations: []providers.TechnicalObservation{
+					{ObjectiveID: target.ObjectiveID, EvidenceFingerprint: productionFingerprint, Strength: production},
+					{ObjectiveID: target.ObjectiveID, EvidenceFingerprint: testFingerprint, Strength: testOnly},
+				},
 			},
-		}}},
-		TechnicalReview: &providers.TechnicalReviewResult{
-			Model: "qwen3:8b",
-			Observations: []providers.TechnicalObservation{
-				{ObjectiveID: validationObjective, EvidenceFingerprint: productionFingerprint, Strength: production},
-				{ObjectiveID: validationObjective, EvidenceFingerprint: testFingerprint, Strength: testOnly},
-			},
-		},
+		})
 	}
+	return value
 }
 
 func contextWithReachability(value codegraph.Reachability) codegraph.ContextPackage {

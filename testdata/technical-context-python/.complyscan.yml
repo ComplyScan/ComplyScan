@@ -1,5 +1,9 @@
 version: 1
 
+frameworks:
+  - eu-ai-act-technical-evidence
+  - nist-ai-rmf-technical-evidence
+
 ai:
   ollama:
     timeout-seconds: 360
