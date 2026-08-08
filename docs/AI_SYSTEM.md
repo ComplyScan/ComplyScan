@@ -3,10 +3,10 @@
 | Field | Value |
 | --- | --- |
 | Product | ComplyScan |
-| Version assessed | 0.1.4 development |
-| Assessment date | 2026-08-07 |
+| Version assessed | 0.1.4 |
+| Assessment date | 2026-08-08 |
 | Owner | ComplyScan maintainers |
-| Status | Reassessment in progress following graph-backed technical context and optional local or BYOK model review; not legal advice |
+| Status | Reviewed for v0.1.4 with model review retained as optional experimental advisory functionality; not legal advice |
 | Next review | Required before promoting any model review from experimental status, then before any reassessment trigger below |
 
 ## Intended purpose
@@ -15,7 +15,7 @@ ComplyScan is an offline-by-default developer CLI that identifies technical sign
 
 ## Current system boundary
 
-The current ComplyScan development version consists of:
+The current ComplyScan version consists of:
 
 - bounded local repository discovery and file classification;
 - typed dependency, import, endpoint, and environment signal extraction;

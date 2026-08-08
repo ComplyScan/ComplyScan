@@ -3,10 +3,10 @@
 | Field | Value |
 | --- | --- |
 | Product | ComplyScan |
-| Version assessed | 0.1.4 development |
-| Assessment date | 2026-08-06 |
+| Version assessed | 0.1.4 |
+| Assessment date | 2026-08-08 |
 | Owner | ComplyScan maintainers |
-| Status | Updated for local and BYOK model review, bounded retrieval, and opt-in isolated execution; representative-repository and applicability review remain open |
+| Status | Reviewed for v0.1.4; local and BYOK model review remains experimental and broader representative evaluation remains open |
 | Next review | Before promoting any model review from experimental status, after any material product change, or by 2027-02-02 |
 
 ## Scope and method
