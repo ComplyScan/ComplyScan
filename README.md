@@ -442,6 +442,7 @@ ComplyScan applies the same evidence discipline to itself. Its maintained [AI ap
 
 Future releases may add:
 
+- evidence-assisted onboarding that runs a configuration-independent discovery scan first, proposes source-cited answers only for repository-evident technical questions, and asks a human to confirm them and supply markets, intended purpose, organisational role, affected people, production data, deployment facts, and final applicability decisions;
 - broader labelled coverage for more languages, frameworks, model gateways, and data flows;
 - model and AI dependency supply-chain inventory;
 - a reviewed South Korean AI Basic Act code-only pack, with jurisdiction-specific applicability kept outside the shared scanner controls;
