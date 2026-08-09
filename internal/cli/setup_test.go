@@ -77,6 +77,8 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 		"1) EU AI Act",
 		"2) NIST AI RMF",
 		"3) Both",
+		"Select Lifecycle stage (1-5)",
+		"Organization roles numbers (comma-separated)",
 		"A short, stable machine-readable identifier",
 		"provider — your organisation develops it",
 		"biometrics — identifies people",
@@ -153,13 +155,84 @@ func TestPromptFrameworkSelectionUsesHumanReadableNumberedChoices(t *testing.T) 
 			if actual := strings.Join(selected, ","); actual != test.want {
 				t.Fatalf("selection = %q, want %q", actual, test.want)
 			}
-			for _, expected := range []string{"1) EU AI Act", "2) NIST AI RMF", "3) Both", "Select technical evidence packs (1,2,3)"} {
+			for _, expected := range []string{"1) EU AI Act", "2) NIST AI RMF", "3) Both", "Select technical evidence packs (1-3)"} {
 				if !strings.Contains(strings.ReplaceAll(output.String(), ", ", ","), expected) {
 					t.Errorf("picker output missing %q:\n%s", expected, output.String())
 				}
 			}
-			if test.name == "invalid then both" && !strings.Contains(output.String(), "Enter one of: 1,2,3") {
+			if test.name == "invalid then both" && !strings.Contains(output.String(), "Enter a number from 1 to 3.") {
 				t.Errorf("invalid selection did not explain valid choices:\n%s", output.String())
+			}
+		})
+	}
+}
+
+func TestPromptChoiceUsesNumberedMenu(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		invalid bool
+	}{
+		{name: "number", input: "2\n", want: "beta"},
+		{name: "default", input: "\n", want: "beta"},
+		{name: "legacy text", input: "gamma\n", want: "gamma"},
+		{name: "invalid then number", input: "9\n1\n", want: "alpha", invalid: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			prompt := promptSession{reader: bufio.NewReader(strings.NewReader(test.input)), output: &output}
+			selected, err := promptChoice(prompt, "example", "beta", "alpha", "beta", "gamma")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if selected != test.want {
+				t.Fatalf("selection = %q, want %q", selected, test.want)
+			}
+			for _, expected := range []string{"1) alpha", "2) beta", "3) gamma", "Select example (1-3) [2]"} {
+				if !strings.Contains(output.String(), expected) {
+					t.Errorf("picker output missing %q:\n%s", expected, output.String())
+				}
+			}
+			if test.invalid && !strings.Contains(output.String(), "Enter a number from 1 to 3.") {
+				t.Errorf("invalid selection did not explain numeric choices:\n%s", output.String())
+			}
+		})
+	}
+}
+
+func TestPromptChoicesUsesNumberedMultiSelect(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		invalid bool
+	}{
+		{name: "numbers", input: "1,3\n", want: "alpha,gamma"},
+		{name: "default", input: "\n", want: "beta,gamma"},
+		{name: "legacy text", input: "alpha,gamma\n", want: "alpha,gamma"},
+		{name: "deduplicates", input: "3,3,1\n", want: "gamma,alpha"},
+		{name: "invalid then numbers", input: "1,9\n2\n", want: "beta", invalid: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			prompt := promptSession{reader: bufio.NewReader(strings.NewReader(test.input)), output: &output}
+			selected, err := promptChoices(prompt, "Examples", []string{"beta", "gamma"}, "alpha", "beta", "gamma")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if actual := strings.Join(selected, ","); actual != test.want {
+				t.Fatalf("selection = %q, want %q", actual, test.want)
+			}
+			for _, expected := range []string{"1) alpha", "2) beta", "3) gamma", "Examples numbers (comma-separated) [2,3]"} {
+				if !strings.Contains(output.String(), expected) {
+					t.Errorf("picker output missing %q:\n%s", expected, output.String())
+				}
+			}
+			if test.invalid && !strings.Contains(output.String(), "Enter one or more numbers from 1 to 3, separated by commas.") {
+				t.Errorf("invalid selection did not explain numeric choices:\n%s", output.String())
 			}
 		})
 	}

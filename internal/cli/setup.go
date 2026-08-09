@@ -402,7 +402,7 @@ func promptRemoteModel(prompt promptSession, provider string) (string, error) {
 		return "", err
 	}
 	for index, model := range models {
-		if _, err := fmt.Fprintf(prompt.output, "    %d. %s\n", index+1, model); err != nil {
+		if _, err := fmt.Fprintf(prompt.output, "    %d) %s\n", index+1, model); err != nil {
 			return "", err
 		}
 	}
@@ -577,7 +577,7 @@ func promptOllamaModel(prompt promptSession, current string, installed []string)
 		if strings.EqualFold(option.tag, current) {
 			defaultIndex = index + 1
 		}
-		if _, err := fmt.Fprintf(prompt.output, "    %d. %s — %s\n", index+1, option.tag, option.detail); err != nil {
+		if _, err := fmt.Fprintf(prompt.output, "    %d) %s — %s\n", index+1, option.tag, option.detail); err != nil {
 			return "", err
 		}
 	}

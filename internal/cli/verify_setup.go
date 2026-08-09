@@ -280,7 +280,7 @@ func promptVerificationSystem(prompt promptSession, systems []profile.System) (p
 		return profile.System{}, err
 	}
 	for index, system := range systems {
-		if _, err := fmt.Fprintf(prompt.output, "  %d. %s (%s)\n", index+1, system.Name, system.ID); err != nil {
+		if _, err := fmt.Fprintf(prompt.output, "  %d) %s (%s)\n", index+1, system.Name, system.ID); err != nil {
 			return profile.System{}, err
 		}
 	}
@@ -303,7 +303,7 @@ func promptDetectedTestCommand(prompt promptSession, commands []detectedTestComm
 		return detectedTestCommand{}, err
 	}
 	for index, command := range commands {
-		if _, err := fmt.Fprintf(prompt.output, "  %d. %s — %s\n", index+1, command.Name, commandText(command.Command, command.Args)); err != nil {
+		if _, err := fmt.Fprintf(prompt.output, "  %d) %s — %s\n", index+1, command.Name, commandText(command.Command, command.Args)); err != nil {
 			return detectedTestCommand{}, err
 		}
 	}
@@ -378,7 +378,7 @@ func writeVerificationObjectiveChoices(output io.Writer, choices []verificationO
 		return err
 	}
 	for index, choice := range choices {
-		if _, err := fmt.Fprintf(output, "\n  %d. %s (%s)\n     Framework: %s\n     Developer meaning: %s\n     Current repository signal: %s",
+		if _, err := fmt.Fprintf(output, "\n  %d) %s (%s)\n     Framework: %s\n     Developer meaning: %s\n     Current repository signal: %s",
 			index+1, choice.Objective.Title, choice.Objective.SourceReference, choice.Framework, choice.Objective.Description, choice.Objective.Status); err != nil {
 			return err
 		}

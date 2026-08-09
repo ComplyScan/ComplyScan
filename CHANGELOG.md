@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Interactive framework setup now uses a numbered, human-readable EU AI Act, NIST AI RMF, or combined selection instead of requiring internal pack IDs.
+- Interactive setup now uses numbered menus for framework, profile, review-provider, ownership, and verification choices; multi-select questions accept comma-separated numbers instead of requiring internal values.
 
 ## 0.1.4 - 2026-08-08
 

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -110,28 +111,27 @@ func configureFrameworkSelection(prompt promptSession, cfg *config.Config, inter
 }
 
 func promptFrameworkSelection(prompt promptSession, defaults []string) ([]string, error) {
-	if _, err := fmt.Fprintln(prompt.output,
-		"  1) EU AI Act — code evidence linked to potential legal obligations\n"+
-			"  2) NIST AI RMF — voluntary technical practices\n"+
-			"  3) Both — map shared evidence against each source separately"); err != nil {
-		return nil, err
-	}
-	defaultSelection := "1"
+	const (
+		euOption   = "EU AI Act — code evidence linked to potential legal obligations"
+		nistOption = "NIST AI RMF — voluntary technical practices"
+		bothOption = "Both — map shared evidence against each source separately"
+	)
+	defaultSelection := euOption
 	euSelected := frameworkEnabled(defaults, framework.EUAIActTechnicalEvidencePackID)
 	nistSelected := frameworkEnabled(defaults, framework.NISTAIRMFTechnicalEvidencePackID)
 	if euSelected && nistSelected {
-		defaultSelection = "3"
+		defaultSelection = bothOption
 	} else if nistSelected {
-		defaultSelection = "2"
+		defaultSelection = nistOption
 	}
-	selection, err := promptChoice(prompt, "Select technical evidence packs", defaultSelection, "1", "2", "3")
+	selection, err := promptChoice(prompt, "technical evidence packs", defaultSelection, euOption, nistOption, bothOption)
 	if err != nil {
 		return nil, err
 	}
 	switch selection {
-	case "2":
+	case nistOption:
 		return []string{framework.NISTAIRMFTechnicalEvidencePackID}, nil
-	case "3":
+	case bothOption:
 		return []string{framework.EUAIActTechnicalEvidencePackID, framework.NISTAIRMFTechnicalEvidencePackID}, nil
 	default:
 		return []string{framework.EUAIActTechnicalEvidencePackID}, nil
@@ -482,56 +482,96 @@ func (session promptSession) textList(label string, defaultValue []string) ([]st
 }
 
 func promptChoice[T ~string](session promptSession, label string, defaultValue T, allowed ...T) (T, error) {
+	if len(allowed) == 0 {
+		return defaultValue, fmt.Errorf("%s has no available choices", strings.ToLower(label))
+	}
+	defaultIndex := 0
+	for index, candidate := range allowed {
+		if strings.EqualFold(string(defaultValue), string(candidate)) {
+			defaultIndex = index
+		}
+		if _, err := fmt.Fprintf(session.output, "  %d) %s\n", index+1, candidate); err != nil {
+			return defaultValue, err
+		}
+	}
 	for {
-		value, err := session.text(label+" ("+joinValues(allowed)+")", string(defaultValue))
+		value, err := session.text(fmt.Sprintf("Select %s (1-%d)", label, len(allowed)), strconv.Itoa(defaultIndex+1))
 		if err != nil {
 			return defaultValue, err
 		}
-		for _, candidate := range allowed {
-			if strings.EqualFold(value, string(candidate)) {
-				return candidate, nil
-			}
+		if index, matched := choiceIndex(value, allowed); matched {
+			return allowed[index], nil
 		}
-		if _, err := fmt.Fprintf(session.output, "  Enter one of: %s\n", joinValues(allowed)); err != nil {
+		if _, err := fmt.Fprintf(session.output, "  Enter a number from 1 to %d.\n", len(allowed)); err != nil {
 			return defaultValue, err
 		}
 	}
 }
 
 func promptChoices[T ~string](session promptSession, label string, defaultValue []T, allowed ...T) ([]T, error) {
+	if len(allowed) == 0 {
+		return nil, fmt.Errorf("%s has no available choices", strings.ToLower(label))
+	}
+	for index, candidate := range allowed {
+		if _, err := fmt.Fprintf(session.output, "  %d) %s\n", index+1, candidate); err != nil {
+			return nil, err
+		}
+	}
+	defaultIndexes := make([]string, 0, len(defaultValue))
+	seenDefaults := make(map[int]struct{}, len(defaultValue))
+	for _, value := range defaultValue {
+		if index, matched := choiceIndex(string(value), allowed); matched {
+			if _, duplicate := seenDefaults[index]; !duplicate {
+				defaultIndexes = append(defaultIndexes, strconv.Itoa(index+1))
+				seenDefaults[index] = struct{}{}
+			}
+		}
+	}
+	if len(defaultIndexes) == 0 {
+		defaultIndexes = []string{"1"}
+	}
 	for {
-		value, err := session.text(label+" (comma-separated: "+joinValues(allowed)+")", joinValues(defaultValue))
+		value, err := session.text(label+" numbers (comma-separated)", strings.Join(defaultIndexes, ","))
 		if err != nil {
 			return nil, err
 		}
 		parts := splitValues(value)
 		result := make([]T, 0, len(parts))
-		seen := make(map[T]struct{}, len(parts))
+		seen := make(map[int]struct{}, len(parts))
 		valid := true
 		for _, part := range parts {
-			matched := false
-			for _, candidate := range allowed {
-				if strings.EqualFold(part, string(candidate)) {
-					matched = true
-					if _, duplicate := seen[candidate]; !duplicate {
-						result = append(result, candidate)
-						seen[candidate] = struct{}{}
-					}
-					break
-				}
-			}
+			index, matched := choiceIndex(part, allowed)
 			if !matched {
 				valid = false
 				break
+			}
+			if _, duplicate := seen[index]; !duplicate {
+				result = append(result, allowed[index])
+				seen[index] = struct{}{}
 			}
 		}
 		if valid && len(result) > 0 {
 			return result, nil
 		}
-		if _, err := fmt.Fprintf(session.output, "  Enter one or more of: %s\n", joinValues(allowed)); err != nil {
+		if _, err := fmt.Fprintf(session.output, "  Enter one or more numbers from 1 to %d, separated by commas.\n", len(allowed)); err != nil {
 			return nil, err
 		}
 	}
+}
+
+func choiceIndex[T ~string](value string, allowed []T) (int, bool) {
+	trimmed := strings.TrimSpace(value)
+	if number, err := strconv.Atoi(trimmed); err == nil && strconv.Itoa(number) == trimmed && number >= 1 && number <= len(allowed) {
+		return number - 1, true
+	}
+	// Continue accepting the former textual input so redirected interactive
+	// setup scripts do not break, while the visible UI advertises numbers only.
+	for index, candidate := range allowed {
+		if strings.EqualFold(trimmed, string(candidate)) {
+			return index, true
+		}
+	}
+	return 0, false
 }
 
 func splitValues(value string) []string {
