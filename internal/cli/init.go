@@ -101,13 +101,41 @@ func configureFrameworkSelection(prompt promptSession, cfg *config.Config, inter
 	if !interactive {
 		return nil
 	}
-	selected, err := promptChoices(prompt, "Technical evidence packs", cfg.Frameworks,
-		framework.EUAIActTechnicalEvidencePackID, framework.NISTAIRMFTechnicalEvidencePackID)
+	selected, err := promptFrameworkSelection(prompt, cfg.Frameworks)
 	if err != nil {
 		return err
 	}
 	cfg.Frameworks = selected
 	return nil
+}
+
+func promptFrameworkSelection(prompt promptSession, defaults []string) ([]string, error) {
+	if _, err := fmt.Fprintln(prompt.output,
+		"  1) EU AI Act — code evidence linked to potential legal obligations\n"+
+			"  2) NIST AI RMF — voluntary technical practices\n"+
+			"  3) Both — map shared evidence against each source separately"); err != nil {
+		return nil, err
+	}
+	defaultSelection := "1"
+	euSelected := frameworkEnabled(defaults, framework.EUAIActTechnicalEvidencePackID)
+	nistSelected := frameworkEnabled(defaults, framework.NISTAIRMFTechnicalEvidencePackID)
+	if euSelected && nistSelected {
+		defaultSelection = "3"
+	} else if nistSelected {
+		defaultSelection = "2"
+	}
+	selection, err := promptChoice(prompt, "Select technical evidence packs", defaultSelection, "1", "2", "3")
+	if err != nil {
+		return nil, err
+	}
+	switch selection {
+	case "2":
+		return []string{framework.NISTAIRMFTechnicalEvidencePackID}, nil
+	case "3":
+		return []string{framework.EUAIActTechnicalEvidencePackID, framework.NISTAIRMFTechnicalEvidencePackID}, nil
+	default:
+		return []string{framework.EUAIActTechnicalEvidencePackID}, nil
+	}
 }
 
 const reportGitIgnoreEntry = "/.complyscan/reports/"

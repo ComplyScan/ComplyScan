@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Interactive framework setup now uses a numbered, human-readable EU AI Act, NIST AI RMF, or combined selection instead of requiring internal pack IDs.
+
 ## 0.1.4 - 2026-08-08
 
 ### Added

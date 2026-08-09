@@ -74,6 +74,9 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 		}
 	}
 	for _, expected := range []string{
+		"1) EU AI Act",
+		"2) NIST AI RMF",
+		"3) Both",
 		"A short, stable machine-readable identifier",
 		"provider — your organisation develops it",
 		"biometrics — identifies people",
@@ -86,6 +89,9 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("guided setup output missing explanation %q:\n%s", expected, stdout.String())
 		}
+	}
+	if strings.Contains(stdout.String(), "comma-separated: eu-ai-act-technical-evidence") {
+		t.Errorf("guided setup exposed internal framework IDs:\n%s", stdout.String())
 	}
 	ignored, err := os.ReadFile(filepath.Join(target, ".gitignore"))
 	if err != nil {
@@ -118,6 +124,44 @@ func TestNISTOnlySetupSkipsEUApplicabilityDecision(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "NIST AI RMF is voluntary guidance") {
 		t.Fatalf("framework explanation missing:\n%s", stdout.String())
+	}
+}
+
+func TestPromptFrameworkSelectionUsesHumanReadableNumberedChoices(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		defaults []string
+		want     string
+	}{
+		{name: "default EU", input: "\n", want: "eu-ai-act-technical-evidence"},
+		{name: "EU", input: "1\n", want: "eu-ai-act-technical-evidence"},
+		{name: "NIST", input: "2\n", want: "nist-ai-rmf-technical-evidence"},
+		{name: "both", input: "3\n", want: "eu-ai-act-technical-evidence,nist-ai-rmf-technical-evidence"},
+		{name: "configured NIST default", input: "\n", defaults: []string{"nist-ai-rmf-technical-evidence"}, want: "nist-ai-rmf-technical-evidence"},
+		{name: "configured both default", input: "\n", defaults: []string{"eu-ai-act-technical-evidence", "nist-ai-rmf-technical-evidence"}, want: "eu-ai-act-technical-evidence,nist-ai-rmf-technical-evidence"},
+		{name: "invalid then both", input: "4\n3\n", want: "eu-ai-act-technical-evidence,nist-ai-rmf-technical-evidence"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			prompt := promptSession{reader: bufio.NewReader(strings.NewReader(test.input)), output: &output}
+			selected, err := promptFrameworkSelection(prompt, test.defaults)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if actual := strings.Join(selected, ","); actual != test.want {
+				t.Fatalf("selection = %q, want %q", actual, test.want)
+			}
+			for _, expected := range []string{"1) EU AI Act", "2) NIST AI RMF", "3) Both", "Select technical evidence packs (1,2,3)"} {
+				if !strings.Contains(strings.ReplaceAll(output.String(), ", ", ","), expected) {
+					t.Errorf("picker output missing %q:\n%s", expected, output.String())
+				}
+			}
+			if test.name == "invalid then both" && !strings.Contains(output.String(), "Enter one of: 1,2,3") {
+				t.Errorf("invalid selection did not explain valid choices:\n%s", output.String())
+			}
+		})
 	}
 }
 
