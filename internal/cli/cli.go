@@ -303,7 +303,7 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			if quickScan && deepScan {
 				return errors.New("--quick and --deep cannot be used together")
 			}
-			if quickScan {
+			if quickScan || (!deepScan && !cmd.Flags().Changed("review")) {
 				cfg.AI.Provider = "none"
 			}
 			if deepScan && cfg.AI.Provider == "none" && !cmd.Flags().Changed("review") {

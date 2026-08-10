@@ -61,6 +61,11 @@ func TestScanModesControlConfiguredAIReview(t *testing.T) {
 	if code := Execute([]string{"scan", "--quick", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("quick scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("default scan unexpectedly invoked configured AI: code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
 
 	cfg.AI.Provider = "none"
 	if err := config.Write(filepath.Join(target, config.FileName), cfg, true); err != nil {

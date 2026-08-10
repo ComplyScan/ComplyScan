@@ -14,6 +14,7 @@
 - Advisory review now inspects at most two representative code candidates per system and technical objective, while retaining every deterministic match in the report and disclosing any omitted repetitive model targets.
 - Terminal scans now finish with a concise AI inventory, technical-objective, requirement-mapping, and advisory-review summary; `--verbose` restores the full framework and evidence dump while reports always retain complete detail.
 - Findings now identify production, test, documentation/example, or configuration scope. Ambiguous generic `message` logging signals are medium severity, while explicit prompt, response, or model-output logging remains high severity, and additional obvious token placeholders are ignored.
+- Routine `complyscan` and `complyscan scan` runs are now deterministic by default even when a reviewer is configured; model execution requires `--deep` or an explicit `--review` override.
 
 ## 0.1.4 - 2026-08-08
 
