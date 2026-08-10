@@ -28,7 +28,8 @@
         {"field": "ai-activities", "value": "agent-tool-use", "evidence_any_of": ["app.py"]},
         {"field": "deployment-models", "value": "api", "evidence_any_of": ["app.py"]},
         {"field": "human-oversight", "value": "required", "evidence_any_of": ["README.md", "app.py"]},
-        {"field": "decision-impact", "value": "advisory", "evidence_any_of": ["README.md", "app.py"]}
+        {"field": "decision-impact", "value": "advisory", "evidence_any_of": ["README.md", "app.py"]},
+        {"field": "use-case-domains", "value": "other", "evidence_any_of": ["README.md"]}
       ],
       "forbidden_fields": ["lifecycle-stage", "personal-data", "special-category-data", "children-data"]
     },
@@ -38,7 +39,9 @@
       "expected": [
         {"field": "ai-activities", "value": "training", "evidence_any_of": ["pipeline.py"]},
         {"field": "ai-activities", "value": "evaluation", "evidence_any_of": ["pipeline.py"]},
-        {"field": "personal-data", "value": "yes", "evidence_any_of": ["pipeline.py"]}
+        {"field": "personal-data", "value": "yes", "evidence_any_of": ["pipeline.py"]},
+        {"field": "deployment-models", "value": "internal", "evidence_any_of": ["README.md"]},
+        {"field": "use-case-domains", "value": "other", "evidence_any_of": ["README.md"]}
       ],
       "forbidden_fields": ["lifecycle-stage", "special-category-data", "children-data"]
     },

@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const ProfileDraftPromptVersion = 2
+const ProfileDraftPromptVersion = 3
 
 const (
 	maxProfileDraftContexts     = 24
@@ -97,6 +97,11 @@ func (provider *OllamaProvider) DraftProfile(ctx context.Context, request Profil
 	if err := json.Unmarshal([]byte(response.Message.Content), &payload); err != nil {
 		return ProfileDraftResult{}, fmt.Errorf("decode %s structured profile draft: %w", provider.label, err)
 	}
+	cleanedSuggestions, discarded := discardUnsupportedProfileSuggestions(payload.Suggestions)
+	payload.Suggestions = cleanedSuggestions
+	if discarded > 0 {
+		result.Notes = append(result.Notes, fmt.Sprintf("Discarded %d empty, negative, or self-contradictory model suggestion(s).", discarded))
+	}
 	suggestions, err := validateProfileSuggestions(payload.Suggestions, sanitized)
 	if err != nil {
 		return ProfileDraftResult{}, err
@@ -107,6 +112,46 @@ func (provider *OllamaProvider) DraftProfile(ctx context.Context, request Profil
 		TotalDurationNS: response.TotalDuration,
 	}
 	return result, nil
+}
+
+func discardUnsupportedProfileSuggestions(values []ProfileSuggestion) ([]ProfileSuggestion, int) {
+	result := make([]ProfileSuggestion, 0, len(values))
+	discarded := 0
+	for _, value := range values {
+		if len(value.Values) == 0 {
+			discarded++
+			continue
+		}
+		if _, yesOnly := profileDraftPositiveOnlyFields[value.Field]; yesOnly {
+			if len(value.Values) != 1 || value.Values[0] != "yes" || profileSuggestionReliesOnAbsence(value) {
+				discarded++
+				continue
+			}
+		}
+		if _, positiveRequired := profileDraftPositiveEvidenceFields[value.Field]; positiveRequired && profileSuggestionReliesOnAbsence(value) {
+			discarded++
+			continue
+		}
+		result = append(result, value)
+	}
+	return result, discarded
+}
+
+func profileSuggestionReliesOnAbsence(value ProfileSuggestion) bool {
+	parts := []string{value.Rationale}
+	for _, evidence := range value.Evidence {
+		parts = append(parts, evidence.Summary)
+	}
+	text := strings.ToLower(strings.Join(parts, " "))
+	for _, phrase := range []string{
+		"no evidence", "without evidence", "lacks evidence", "lack of evidence", "not established",
+		"does not explicitly", "not explicitly", "may contain", "might contain", "could contain",
+	} {
+		if strings.Contains(text, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func sanitizeProfileDraftRequest(request ProfileDraftRequest) ProfileDraftRequest {
@@ -242,6 +287,14 @@ var profileDraftAllowedValues = map[string]map[string]struct{}{
 	"children-data":         enumSet("yes"),
 }
 
+var profileDraftPositiveOnlyFields = map[string]struct{}{
+	"personal-data": {}, "special-category-data": {}, "children-data": {},
+}
+
+var profileDraftPositiveEvidenceFields = map[string]struct{}{
+	"lifecycle-stage": {}, "decision-impact": {}, "human-oversight": {},
+}
+
 func profileDraftSchema() map[string]any {
 	fields := make([]string, 0, len(profileDraftAllowedValues))
 	for field := range profileDraftAllowedValues {
@@ -263,7 +316,7 @@ func profileDraftSchema() map[string]any {
 			"type": "object",
 			"properties": map[string]any{
 				"field":      map[string]any{"type": "string", "const": field},
-				"values":     map[string]any{"type": "array", "items": valueItems},
+				"values":     map[string]any{"type": "array", "items": valueItems, "minItems": 1, "maxItems": maxProfileDraftValues},
 				"confidence": map[string]any{"type": "string", "enum": []string{"low", "medium", "high"}},
 				"rationale":  map[string]any{"type": "string"},
 				"evidence":   profileDraftEvidenceSchema(),
@@ -316,11 +369,16 @@ You may suggest only these fields:
 - users and affected-groups
 - personal-data, special-category-data, and children-data: yes only when positive code or schema evidence exists; never infer no from absence
 
+Return a sparse set of only directly evidenced fields, usually two to five suggestions. Do not try to fill the questionnaire. For a multi-value field, return every directly evidenced value in one suggestion.
+
 Interpret the controlled values narrowly:
 - agent-tool-use means a model request is configured with callable functions or tools, or model output is dispatched to a tool; a static helper alone is insufficient
+- every executable model API call supports inference in addition to any more specific activity such as agent-tool-use
 - advisory decision impact means the model drafts or recommends and a human must approve before the result is acted on
 - significant decision impact requires evidence that the system affects consequential access, eligibility, employment, education, credit, health, legal, or safety outcomes; ordinary customer support does not establish it
 - autonomous decision impact requires evidence that consequential outcomes execute without human approval
 - essential-services requires an actual workflow concerning access to an essential public or private service; an ordinary service API or customer-support workflow does not establish it
+- software-development means the AI system assists programming or software-engineering work; the mere fact that the repository contains software does not establish it
+- other is appropriate when the repository positively identifies a domain, such as ordinary customer support, that is outside the named categories
 
 Omit a field unless supplied repository evidence directly supports it. Never return unknown, no, none, or another placeholder: omit that field instead. Never infer operating regions, organisation role, actual production use, contracts, legal applicability, legal risk class, or compliance. A deployment file can support a deployment mechanism but cannot prove that deployment is active. A policy or README claim is weaker than executable code or configuration. Every suggestion must cite the supplied path and actual line that supports the value; describe only what that evidence shows and explain uncertainty. Return only the requested structured object.`

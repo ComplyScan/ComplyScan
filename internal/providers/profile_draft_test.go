@@ -103,3 +103,20 @@ func TestProfileDraftSchemaConstrainsValuesByField(t *testing.T) {
 		t.Fatal("personal-data schema variant not found")
 	}
 }
+
+func TestDiscardUnsupportedProfileSuggestionsKeepsGroundedFacts(t *testing.T) {
+	values := []ProfileSuggestion{
+		{Field: "personal-data", Values: []string{"yes"}, Rationale: "The schema requires customer_email."},
+		{Field: "special-category-data", Values: []string{"yes"}, Rationale: "Request text may contain health details."},
+		{Field: "children-data", Values: []string{}, Rationale: "No value was selected."},
+		{Field: "human-oversight", Values: []string{"required"}, Rationale: "There is no evidence of autonomous action."},
+		{Field: "ai-activities", Values: []string{"training"}, Rationale: "Trainer.train is called."},
+	}
+	filtered, discarded := discardUnsupportedProfileSuggestions(values)
+	if discarded != 3 || len(filtered) != 2 {
+		t.Fatalf("discarded %d and retained %#v", discarded, filtered)
+	}
+	if filtered[0].Field != "personal-data" || filtered[1].Field != "ai-activities" {
+		t.Fatalf("retained %#v", filtered)
+	}
+}
