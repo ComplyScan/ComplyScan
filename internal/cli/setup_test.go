@@ -26,7 +26,7 @@ func TestPromptOllamaModelListsInstalledModelsAndAcceptsCustomTag(t *testing.T) 
 	if model != "codestral:22b" {
 		t.Fatalf("model = %q", model)
 	}
-	for _, expected := range []string{"qwen3.5:9b", "live validation pending", "qwen3:8b", "previously validated", "qwen3-coder:30b", "codestral:22b", "installed; compatibility not yet validated"} {
+	for _, expected := range []string{"qwen3.5:9b", "onboarding benchmark recorded", "qwen3:8b", "technical-review baseline", "qwen3-coder:30b", "codestral:22b", "compatibility checked automatically"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("picker output missing %q:\n%s", expected, output.String())
 		}

@@ -35,6 +35,7 @@ type setupOptions struct {
 	allowRemoteReview bool
 	pullModel         bool
 	skipModelPull     bool
+	qualifyModel      bool
 	installOllama     bool
 	skipOllamaInstall bool
 	skipScan          bool
@@ -86,6 +87,7 @@ func newSetupCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().BoolVar(&options.allowRemoteReview, "allow-remote-review", false, "confirm that bounded repository context may be sent to the selected remote provider")
 	command.Flags().BoolVar(&options.pullModel, "pull-model", false, "download the configured Ollama model (requires --review ollama in non-interactive mode)")
 	command.Flags().BoolVar(&options.skipModelPull, "skip-model-pull", false, "configure Ollama without offering to download the model")
+	command.Flags().BoolVar(&options.qualifyModel, "qualify-model", false, "run the bounded synthetic model compatibility check (automatic in interactive setup; remote providers may charge)")
 	command.Flags().BoolVar(&options.installOllama, "install-ollama", false, "install Ollama when it is missing (requires explicit use in non-interactive mode)")
 	command.Flags().BoolVar(&options.skipOllamaInstall, "skip-ollama-install", false, "do not offer to install Ollama when it is missing")
 	command.Flags().BoolVar(&options.skipScan, "skip-scan", false, "do not offer to run the first scan")
@@ -246,7 +248,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 
 func setupReviewExplicit(options setupOptions) bool {
 	return options.reviewProvider != "" || options.ollamaModel != "" || options.remoteModel != "" || options.remoteAPIKeyEnv != "" ||
-		options.allowRemoteReview || options.pullModel || options.skipModelPull || options.installOllama || options.skipOllamaInstall
+		options.allowRemoteReview || options.pullModel || options.skipModelPull || options.qualifyModel || options.installOllama || options.skipOllamaInstall
 }
 
 func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.Writer, cfg *config.Config, interactive bool, options setupOptions) (bool, error) {
@@ -312,6 +314,9 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 	if options.allowRemoteReview && !isRemoteReviewProvider(provider) {
 		return false, errors.New("--allow-remote-review requires --review openai, anthropic, or gemini")
 	}
+	if options.qualifyModel && provider == "none" {
+		return false, errors.New("--qualify-model requires an advisory review provider")
+	}
 	cfg.AI.Provider = provider
 	if provider == "none" {
 		if _, err := fmt.Fprintln(stdout, "AI-assisted analysis disabled. Fast deterministic scanning remains available."); err != nil {
@@ -320,7 +325,7 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 		return true, nil
 	}
 	if isRemoteReviewProvider(provider) {
-		return configureRemoteReview(prompt, stdout, cfg, interactive, options)
+		return configureRemoteReview(ctx, prompt, stdout, cfg, interactive, options)
 	}
 
 	ollamaPath, _ := exec.LookPath("ollama")
@@ -382,7 +387,7 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 		if _, err := fmt.Fprintf(stdout, "Ollama model %q is already installed.\n", model); err != nil {
 			return false, err
 		}
-		return true, nil
+		return finishSetupModelQualification(ctx, stdout, cfg.AI, interactive || options.qualifyModel)
 	}
 	shouldPull := options.pullModel
 	if interactive && !options.skipModelPull && !options.pullModel {
@@ -413,10 +418,10 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 		}
 		return false, nil
 	}
-	return true, nil
+	return finishSetupModelQualification(ctx, stdout, cfg.AI, interactive || options.qualifyModel)
 }
 
-func configureRemoteReview(prompt promptSession, stdout io.Writer, cfg *config.Config, interactive bool, options setupOptions) (bool, error) {
+func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.Writer, cfg *config.Config, interactive bool, options setupOptions) (bool, error) {
 	provider := cfg.AI.Provider
 	allowed := options.allowRemoteReview
 	if interactive {
@@ -485,7 +490,7 @@ func configureRemoteReview(prompt promptSession, stdout io.Writer, cfg *config.C
 	if _, err := fmt.Fprintf(stdout, "%s review configured with model %q. The credential was found in %s and was not saved.\n", reviewProviderLabel(provider), model, keyEnvironment); err != nil {
 		return false, err
 	}
-	return true, nil
+	return finishSetupModelQualification(ctx, stdout, cfg.AI, interactive || options.qualifyModel)
 }
 
 func promptRemoteModel(prompt promptSession, provider string) (string, error) {
@@ -672,9 +677,9 @@ const customModelChoice = "__complyscan_custom_model__"
 
 func promptOllamaModel(prompt promptSession, current string, installed []string) (string, error) {
 	options := []setupModelOption{
-		{tag: defaultSetupModel, detail: "recommended default; live ComplyScan validation pending"},
-		{tag: "qwen3:8b", detail: "smaller previously validated model"},
-		{tag: "qwen3-coder:30b", detail: "larger coding model; substantially more memory; unvalidated"},
+		{tag: defaultSetupModel, detail: "recommended default; onboarding benchmark recorded; automatic compatibility check after selection"},
+		{tag: "qwen3:8b", detail: "smaller model with a technical-review baseline; automatic compatibility check after selection"},
+		{tag: "qwen3-coder:30b", detail: "larger coding model; substantially more memory; automatic compatibility check after selection"},
 	}
 	if current = strings.TrimSpace(current); current != "" {
 		options = prependUniqueModel(options, setupModelOption{tag: current, detail: modelStatus(current, installed)})
@@ -777,21 +782,21 @@ func modelStatus(model string, installed []string) string {
 	for _, candidate := range installed {
 		if strings.EqualFold(candidate, model) {
 			if strings.EqualFold(model, defaultSetupModel) {
-				return "installed; recommended default; live validation pending"
+				return "installed; recommended default; onboarding benchmark recorded; compatibility checked after selection"
 			}
 			if strings.EqualFold(model, "qwen3:8b") {
-				return "installed; previously validated model"
+				return "installed; technical-review baseline recorded; compatibility checked after selection"
 			}
-			return "installed; compatibility not yet validated by ComplyScan"
+			return "installed; compatibility checked automatically after selection"
 		}
 	}
 	if strings.EqualFold(model, defaultSetupModel) {
-		return "recommended default; not currently installed; live validation pending"
+		return "recommended default; not currently installed; onboarding benchmark recorded"
 	}
 	if strings.EqualFold(model, "qwen3:8b") {
-		return "previously validated model; not currently installed"
+		return "technical-review baseline recorded; not currently installed"
 	}
-	return "configured; not currently installed or validated"
+	return "configured; not currently installed; compatibility checked after installation"
 }
 
 func setupModelDefault(value string) string {
