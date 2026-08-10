@@ -59,7 +59,7 @@ func TestDraftProfileRejectsUnsupportedClaimsAndPaths(t *testing.T) {
 		t.Fatalf("unsupported legal fact error = %v", err)
 	}
 	_, err = validateProfileSuggestions([]ProfileSuggestion{{
-		Field: "lifecycle-stage", Values: []string{"production"}, Confidence: "medium", Rationale: "Deployment file",
+		Field: "lifecycle-stage", Values: []string{"testing"}, Confidence: "medium", Rationale: "Test workflow",
 		Evidence: []ProfileEvidence{{Path: "missing.yml", Summary: "Deployment"}},
 	}}, request)
 	if err == nil || !strings.Contains(err.Error(), "unavailable path") {

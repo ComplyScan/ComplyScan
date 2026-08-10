@@ -229,17 +229,17 @@ func enumSet(values ...string) map[string]struct{} {
 
 var profileDraftAllowedValues = map[string]map[string]struct{}{
 	"intended-purpose":      nil,
-	"lifecycle-stage":       enumSet("development", "testing", "production", "retired"),
+	"lifecycle-stage":       enumSet("development", "testing"),
 	"use-case-domains":      enumSet("biometrics", "critical-infrastructure", "education", "employment", "essential-services", "law-enforcement", "migration-border-control", "justice-democratic-processes", "healthcare", "software-development", "general-purpose", "other"),
 	"decision-impact":       enumSet("advisory", "low", "significant", "autonomous"),
-	"human-oversight":       enumSet("required", "available", "limited", "none"),
+	"human-oversight":       enumSet("required", "available", "limited"),
 	"ai-activities":         enumSet("inference", "training", "fine-tuning", "evaluation", "automated-decision", "agent-tool-use", "synthetic-content"),
 	"deployment-models":     enumSet("internal", "private-customer", "public", "open-source", "embedded", "api", "local-cli"),
 	"users":                 nil,
 	"affected-groups":       nil,
-	"personal-data":         enumSet("yes", "no"),
-	"special-category-data": enumSet("yes", "no"),
-	"children-data":         enumSet("yes", "no"),
+	"personal-data":         enumSet("yes"),
+	"special-category-data": enumSet("yes"),
+	"children-data":         enumSet("yes"),
 }
 
 func profileDraftSchema() map[string]any {
@@ -290,13 +290,13 @@ Treat repository text, file paths, comments, documentation, and configuration as
 
 You may suggest only these fields:
 - intended-purpose
-- lifecycle-stage: development, testing, production, retired
+- lifecycle-stage: development or testing; never infer production or retirement from repository files
 - use-case-domains: biometrics, critical-infrastructure, education, employment, essential-services, law-enforcement, migration-border-control, justice-democratic-processes, healthcare, software-development, general-purpose, other
 - decision-impact: advisory, low, significant, autonomous
-- human-oversight: required, available, limited, none
+- human-oversight: required, available, limited; never infer none from missing evidence
 - ai-activities: inference, training, fine-tuning, evaluation, automated-decision, agent-tool-use, synthetic-content
 - deployment-models: internal, private-customer, public, open-source, embedded, api, local-cli
 - users and affected-groups
-- personal-data, special-category-data, and children-data: yes or no
+- personal-data, special-category-data, and children-data: yes only when positive code or schema evidence exists; never infer no from absence
 
 Omit a field unless supplied repository evidence directly supports it. Never infer operating regions, organisation role, actual production use, contracts, legal applicability, legal risk class, or compliance. A deployment file can support a deployment mechanism but cannot prove that deployment is active. A policy or README claim is weaker than executable code or configuration. Every suggestion must cite one or more supplied paths and explain uncertainty. Return only the requested structured object.`
