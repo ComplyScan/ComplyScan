@@ -8,6 +8,10 @@
 - First-run setup now establishes its local, cloud, or model-free privacy boundary before repository analysis, uses a ready reviewer to draft only repository-evident profile answers with confidence and cited paths, and presents every draft as an editable human-confirmed default. Jurisdiction, organisation role, actual production use, legal applicability, negative data claims, and other facts that source code cannot establish remain direct human questions.
 - The final first-run scan reuses the bounded repository discovery already completed during setup rather than traversing and classifying the same files a second time; code-graph construction and framework evaluation still run once against the confirmed profile.
 
+### Testing
+
+- A labelled AI-assisted-onboarding benchmark measures controlled-field precision and recall, forbidden inferences, grounded citations, and per-case time across three positive repository shapes and a documentation-only hard negative. A live Ollama harness saves machine-readable results and resource measurements without making model execution part of CI.
+
 ## 0.1.5 - 2026-08-10
 
 ### Changed

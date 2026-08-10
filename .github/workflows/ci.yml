@@ -33,4 +33,5 @@ jobs:
         run: |
           sh -n install.sh
           sh -n scripts/evaluate-technical-evidence.sh
+          sh -n scripts/validate-profile-draft.sh
           sh -n scripts/validate-ollama.sh
