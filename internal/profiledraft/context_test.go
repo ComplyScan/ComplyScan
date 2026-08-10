@@ -6,6 +6,7 @@ import (
 
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/inventory"
+	"github.com/ComplyScan/ComplyScan/internal/providers"
 )
 
 func TestDeterministicSuggestionsUseRuntimeEvidence(t *testing.T) {
@@ -39,5 +40,25 @@ func TestBuildRequestPrioritizesRelevantBoundedFiles(t *testing.T) {
 	}
 	if !strings.Contains(request.Contexts[0].Source+request.Contexts[1].Source, "3: func run") {
 		t.Fatalf("source contexts = %#v", request.Contexts)
+	}
+}
+
+func TestMergeSuggestionsPreservesDeterministicMultiValues(t *testing.T) {
+	base := map[string]providers.ProfileSuggestion{
+		"ai-activities": {
+			Field: "ai-activities", Values: []string{"inference"}, Confidence: "medium", Rationale: "Runtime client detected.",
+			Evidence: []providers.ProfileEvidence{{Path: "agent.go", Line: 2, Summary: "Model client."}},
+		},
+	}
+	merged := MergeSuggestions(base, []providers.ProfileSuggestion{{
+		Field: "ai-activities", Values: []string{"agent-tool-use"}, Confidence: "high", Rationale: "Tools are passed.",
+		Evidence: []providers.ProfileEvidence{{Path: "agent.go", Line: 8, Summary: "Tool definition."}},
+	}})
+	suggestion := merged["ai-activities"]
+	if strings.Join(suggestion.Values, ",") != "inference,agent-tool-use" {
+		t.Fatalf("merged values = %v", suggestion.Values)
+	}
+	if suggestion.Confidence != "medium" || len(suggestion.Evidence) != 2 {
+		t.Fatalf("merged suggestion = %#v", suggestion)
 	}
 }

@@ -15,6 +15,45 @@ import (
 
 const MaxContexts = 24
 
+// MergeSuggestions combines conservative deterministic defaults with model
+// suggestions without allowing a model response for one multi-value field to
+// erase already detected repository evidence.
+func MergeSuggestions(base map[string]providers.ProfileSuggestion, additions []providers.ProfileSuggestion) map[string]providers.ProfileSuggestion {
+	result := make(map[string]providers.ProfileSuggestion, len(base)+len(additions))
+	for field, suggestion := range base {
+		result[field] = suggestion
+	}
+	for _, addition := range additions {
+		existing, found := result[addition.Field]
+		if !found {
+			result[addition.Field] = addition
+			continue
+		}
+		existing.Values = appendUnique(existing.Values, addition.Values, 8)
+		existing.Evidence = appendUniqueEvidence(existing.Evidence, addition.Evidence, 4)
+		if strings.TrimSpace(addition.Rationale) != "" && !strings.Contains(existing.Rationale, addition.Rationale) {
+			existing.Rationale = strings.TrimSpace(existing.Rationale + " " + addition.Rationale)
+		}
+		existing.Confidence = conservativeConfidence(existing.Confidence, addition.Confidence)
+		result[addition.Field] = existing
+	}
+	return result
+}
+
+// SuggestionSlice returns stable field-ordered output for reports and tests.
+func SuggestionSlice(values map[string]providers.ProfileSuggestion) []providers.ProfileSuggestion {
+	fields := make([]string, 0, len(values))
+	for field := range values {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	result := make([]providers.ProfileSuggestion, 0, len(fields))
+	for _, field := range fields {
+		result = append(result, values[field])
+	}
+	return result
+}
+
 // DeterministicSuggestions returns conservative repository-evident defaults
 // that remain available when no model is selected or ready.
 func DeterministicSuggestions(report inventory.Report) map[string]providers.ProfileSuggestion {
@@ -197,4 +236,49 @@ func languageForPath(path string) string {
 	default:
 		return ""
 	}
+}
+
+func appendUnique(existing, additions []string, maximum int) []string {
+	seen := make(map[string]struct{}, len(existing)+len(additions))
+	result := make([]string, 0, len(existing)+len(additions))
+	for _, values := range [][]string{existing, additions} {
+		for _, value := range values {
+			if _, duplicate := seen[value]; duplicate {
+				continue
+			}
+			seen[value] = struct{}{}
+			result = append(result, value)
+			if len(result) == maximum {
+				return result
+			}
+		}
+	}
+	return result
+}
+
+func appendUniqueEvidence(existing, additions []providers.ProfileEvidence, maximum int) []providers.ProfileEvidence {
+	seen := make(map[string]struct{}, len(existing)+len(additions))
+	result := make([]providers.ProfileEvidence, 0, len(existing)+len(additions))
+	for _, values := range [][]providers.ProfileEvidence{existing, additions} {
+		for _, value := range values {
+			key := fmt.Sprintf("%s\x00%d", value.Path, value.Line)
+			if _, duplicate := seen[key]; duplicate {
+				continue
+			}
+			seen[key] = struct{}{}
+			result = append(result, value)
+			if len(result) == maximum {
+				return result
+			}
+		}
+	}
+	return result
+}
+
+func conservativeConfidence(first, second string) string {
+	rank := map[string]int{"low": 0, "medium": 1, "high": 2}
+	if rank[first] <= rank[second] {
+		return first
+	}
+	return second
 }

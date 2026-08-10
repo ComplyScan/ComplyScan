@@ -166,9 +166,7 @@ func draftProfileForSetup(
 		_, _ = fmt.Fprintf(output, "Warning: AI-assisted profile drafting was incomplete: %v. Continuing with repository signals and human questions.\n", err)
 		return draft
 	}
-	for _, suggestion := range result.Suggestions {
-		draft.Suggestions[suggestion.Field] = suggestion
-	}
+	draft.Suggestions = profiledraft.MergeSuggestions(draft.Suggestions, result.Suggestions)
 	_, _ = fmt.Fprintf(output, "Prepared %d editable setup suggestion(s). Business, jurisdictional, and legal facts still require your answer.\n", len(draft.Suggestions))
 	return draft
 }

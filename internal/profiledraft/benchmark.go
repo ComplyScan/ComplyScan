@@ -185,6 +185,7 @@ func runBenchmarkCase(ctx context.Context, base string, benchmarkCase BenchmarkC
 	}
 	inventoryReport := inventory.NewReport(repositoryPath, "profile-draft-benchmark", inventory.Analyze(discovered.Repository), discovered.Warnings)
 	request := BuildRequest(repositoryPath, discovered.Repository, Languages(discovered.Repository), inventoryReport)
+	deterministic := DeterministicSuggestions(inventoryReport)
 	result.Contexts = len(request.Contexts)
 	caseContext, cancel := context.WithTimeout(ctx, time.Duration(maximumSeconds)*time.Second)
 	started := time.Now()
@@ -194,7 +195,7 @@ func runBenchmarkCase(ctx context.Context, base string, benchmarkCase BenchmarkC
 	if err != nil {
 		return result, err
 	}
-	result.Suggestions = draft.Suggestions
+	result.Suggestions = SuggestionSlice(MergeSuggestions(deterministic, draft.Suggestions))
 	result.PromptTokens = draft.Usage.PromptTokens
 	result.CompletionTokens = draft.Usage.CompletionTokens
 	evaluateBenchmarkCase(&result, benchmarkCase, evaluated, discovered.Repository)
