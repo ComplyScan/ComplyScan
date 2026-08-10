@@ -11,6 +11,7 @@
 ### Testing
 
 - A labelled AI-assisted-onboarding benchmark measures controlled-field precision and recall, forbidden inferences, grounded citations, and per-case time across three positive repository shapes and a documentation-only hard negative. A live Ollama harness saves machine-readable results and resource measurements without making model execution part of CI.
+- Profile-draft prompt version 4 passed the complete `qwen3.5:9b` onboarding gate with 88.2% precision, 88.2% recall, zero forbidden claims, zero ungrounded references, and all four cases within their time limit; the separate technical-review gate remains pending.
 
 ## 0.1.5 - 2026-08-10
 
