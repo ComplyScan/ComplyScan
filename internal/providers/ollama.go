@@ -16,6 +16,8 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
 
+const ReviewPromptVersion = 1
+
 const (
 	maxOllamaResponseBytes = 2 << 20
 	maxReviewMessageChars  = 1200
