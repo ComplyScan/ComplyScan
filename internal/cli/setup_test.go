@@ -110,7 +110,7 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 		"advisory — AI suggests or drafts",
 		"remaining conditionally relevant facts",
 		"EU AI Act technical mapping is recommended",
-		"Ollama to keep model context on this machine",
+		"Local AI-assisted analysis — Ollama keeps context on this machine",
 	} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("guided setup output missing explanation %q:\n%s", expected, stdout.String())
@@ -416,11 +416,14 @@ func TestTerminalPromptAvailabilityRespectsAccessibleModeAndStreams(t *testing.T
 
 func TestPromptSetupScanModeMakesExpensiveReviewExplicit(t *testing.T) {
 	tests := []struct {
-		name  string
-		input string
-		want  setupScanMode
+		name       string
+		input      string
+		provider   string
+		modelReady bool
+		want       setupScanMode
 	}{
 		{name: "quick default", input: "\n", want: setupScanQuick},
+		{name: "deep default after ready AI setup", input: "\n", provider: "ollama", modelReady: true, want: setupScanDeep},
 		{name: "deep", input: "2\n", want: setupScanDeep},
 		{name: "configure only", input: "3\n", want: setupScanNone},
 	}
@@ -428,7 +431,7 @@ func TestPromptSetupScanModeMakesExpensiveReviewExplicit(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer
 			prompt := promptSession{reader: bufio.NewReader(strings.NewReader(test.input)), output: &output}
-			mode, err := promptSetupScanMode(prompt, setupRepositorySummary{})
+			mode, err := promptSetupScanMode(prompt, setupRepositorySummary{}, test.provider, test.modelReady)
 			if err != nil {
 				t.Fatal(err)
 			}

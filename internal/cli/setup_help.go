@@ -163,8 +163,8 @@ var setupQuestionHelp = map[string][]string{
 		"Choose no if you only wanted to inspect the rules; use `complyscan ownership show` to review them without changing configuration.",
 	},
 	"review-provider": {
-		"Choose none for deterministic-only scanning, Ollama to keep model context on this machine, or a supported remote provider using your own account and API key.",
-		"Every model result is advisory: it cannot decide legal compliance, change deterministic findings, or change the scan exit status.",
+		"Choose local AI to keep bounded model context on this machine, cloud AI to use your own provider account, or fast technical analysis to run without a model.",
+		"This choice is made before repository analysis so no model receives context before its privacy boundary is clear. Every model result remains an advisory draft that requires confirmation.",
 	},
 	"ollama-model": {
 		"Choose the local Ollama model used for advisory code-context review. Setup lists installed models and recommendations; qwen3.5:9b is the default candidate, while qwen3:8b retains the previous live-validation baseline.",

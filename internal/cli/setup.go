@@ -113,7 +113,20 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 
 	prompt := newPromptSession(cmd.InOrStdin(), stdout)
 	var repositorySummary setupRepositorySummary
+	modelReady := true
+	reviewConfigured := false
 	if interactive {
+		if _, err := fmt.Fprintln(stdout, "Analysis and privacy mode"); err != nil {
+			return err
+		}
+		modelReady, err = configureSetupReview(cmd.Context(), prompt, stdout, &cfg, true, options)
+		if err != nil {
+			return err
+		}
+		reviewConfigured = true
+		if _, err := fmt.Fprintln(stdout); err != nil {
+			return err
+		}
 		summary, inspectErr := inspectRepositoryForSetup(cmd.Context(), stdout, target, cfg, build)
 		if inspectErr != nil {
 			return inspectErr
@@ -171,13 +184,12 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	}
 	scanMode := setupScanNone
 	if interactive && !options.skipScan {
-		scanMode, err = promptSetupScanMode(prompt, repositorySummary)
+		scanMode, err = promptSetupScanMode(prompt, repositorySummary, cfg.AI.Provider, modelReady)
 		if err != nil {
 			return err
 		}
 	}
-	configureReview := !interactive || options.skipScan || scanMode == setupScanDeep || setupReviewExplicit(options)
-	modelReady := true
+	configureReview := !reviewConfigured && (!interactive || options.skipScan || scanMode == setupScanDeep || setupReviewExplicit(options))
 	if configureReview {
 		modelReady, err = configureSetupReview(cmd.Context(), prompt, stdout, &cfg, interactive, options)
 		if err != nil {
@@ -226,15 +238,38 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 		if err := explainSetupQuestion(prompt, "review-provider"); err != nil {
 			return false, err
 		}
-		defaultProvider := cfg.AI.Provider
-		if defaultProvider == "none" || defaultProvider == "" {
-			defaultProvider = "ollama"
+		const (
+			localOption     = "Local AI-assisted analysis — Ollama keeps context on this machine"
+			openAIOption    = "Cloud AI-assisted analysis — OpenAI"
+			anthropicOption = "Cloud AI-assisted analysis — Anthropic"
+			geminiOption    = "Cloud AI-assisted analysis — Gemini"
+			fastOption      = "Fast technical analysis — no model"
+		)
+		defaultProvider := localOption
+		switch cfg.AI.Provider {
+		case "openai":
+			defaultProvider = openAIOption
+		case "anthropic":
+			defaultProvider = anthropicOption
+		case "gemini":
+			defaultProvider = geminiOption
 		}
-		selected, err := promptChoice(prompt, "Advisory review provider", defaultProvider, "none", "ollama", "openai", "anthropic", "gemini")
+		selected, err := promptChoice(prompt, "Analysis mode", defaultProvider, localOption, openAIOption, anthropicOption, geminiOption, fastOption)
 		if err != nil {
 			return false, err
 		}
-		provider = selected
+		switch selected {
+		case localOption:
+			provider = "ollama"
+		case openAIOption:
+			provider = "openai"
+		case anthropicOption:
+			provider = "anthropic"
+		case geminiOption:
+			provider = "gemini"
+		default:
+			provider = "none"
+		}
 	}
 	if provider == "" {
 		provider = cfg.AI.Provider

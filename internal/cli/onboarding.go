@@ -34,14 +34,18 @@ const (
 	setupScanNone  setupScanMode = "none"
 )
 
-func promptSetupScanMode(prompt promptSession, summary setupRepositorySummary) (setupScanMode, error) {
+func promptSetupScanMode(prompt promptSession, summary setupRepositorySummary, provider string, modelReady bool) (setupScanMode, error) {
 	if err := explainSetupQuestion(prompt, "scan-mode"); err != nil {
 		return setupScanNone, err
 	}
 	quick := "Quick scan — deterministic discovery and checks; no model"
 	deep := "Deep AI review — bounded semantic review after the preliminary report"
 	none := "Save setup without scanning"
-	selected, err := promptChoice(prompt, "first-run action", quick, quick, deep, none)
+	defaultMode := quick
+	if provider != "none" && modelReady {
+		defaultMode = deep
+	}
+	selected, err := promptChoice(prompt, "first-run action", defaultMode, quick, deep, none)
 	if err != nil {
 		return setupScanNone, err
 	}
