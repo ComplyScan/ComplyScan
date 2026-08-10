@@ -133,7 +133,7 @@ func TestRelevantEUContextAsksHighRiskFollowUpQuestions(t *testing.T) {
 	input := strings.NewReader("4\n1\n3\nrecruiters\njob applicants\n1\n2\n2\nProduct owner\n")
 	var output bytes.Buffer
 	prompt := promptSession{reader: bufio.NewReader(input), output: &output}
-	if err := collectRelevantEUApplicabilityContext(prompt, &system, time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)); err != nil {
+	if err := collectRelevantEUApplicabilityContext(prompt, &system, time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC), newSetupProfileDraft()); err != nil {
 		t.Fatal(err)
 	}
 	assessment := profile.AssessEUAIAct([]profile.System{system}).Systems[0]
@@ -153,7 +153,7 @@ func TestRelevantEUContextSkipsIrrelevantPeopleAndDataQuestions(t *testing.T) {
 	input := strings.NewReader("10\n1\n6\n\n")
 	var output bytes.Buffer
 	prompt := promptSession{reader: bufio.NewReader(input), output: &output}
-	if err := collectRelevantEUApplicabilityContext(prompt, &system, time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)); err != nil {
+	if err := collectRelevantEUApplicabilityContext(prompt, &system, time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC), newSetupProfileDraft()); err != nil {
 		t.Fatal(err)
 	}
 	assessment := profile.AssessEUAIAct([]profile.System{system}).Systems[0]

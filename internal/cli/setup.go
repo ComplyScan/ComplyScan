@@ -132,6 +132,10 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 			return inspectErr
 		}
 		repositorySummary = summary
+		profileDraft := newSetupProfileDraft()
+		if !options.advanced {
+			profileDraft = draftProfileForSetup(cmd.Context(), stdout, target, cfg, summary, modelReady)
+		}
 		var system profile.System
 		var collectErr error
 		if options.advanced {
@@ -140,13 +144,15 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 			}
 			system, collectErr = collectSystemProfileWithPrompt(prompt, target, time.Now(), cfg.Frameworks...)
 		} else {
-			system, collectErr = collectBasicSystemProfile(prompt, target, time.Now(), summary)
+			system, collectErr = collectBasicSystemProfile(prompt, target, time.Now(), summary, profileDraft)
 			if collectErr == nil {
 				collectErr = configureRecommendedFrameworks(prompt, &cfg, system, options.frameworks)
 				applyFrameworksToSystem(&system, cfg.Frameworks)
 			}
 			if collectErr == nil && frameworkEnabled(cfg.Frameworks, framework.EUAIActTechnicalEvidencePackID) {
-				collectErr = collectRelevantEUApplicabilityContext(prompt, &system, time.Now())
+				collectErr = collectRelevantEUApplicabilityContext(prompt, &system, time.Now(), profileDraft)
+			} else if collectErr == nil {
+				collectErr = collectNonEUTechnicalContext(prompt, &system, profileDraft)
 			}
 		}
 		if collectErr != nil {

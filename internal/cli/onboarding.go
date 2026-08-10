@@ -67,8 +67,14 @@ func inspectRepositoryForSetup(ctx context.Context, output io.Writer, target str
 	if _, err := fmt.Fprintln(output, "Inspecting the repository before asking setup questions..."); err != nil {
 		return setupRepositorySummary{}, err
 	}
+	excludes := withGeneratedReportExclusion(append([]string(nil), cfg.Scan.Exclude...))
+	if cfg.Baseline != "" {
+		if exclusion := targetExclusion(target, resolveTargetPath(target, cfg.Baseline)); exclusion != "" {
+			excludes = append(excludes, exclusion)
+		}
+	}
 	result, err := discovery.Discover(ctx, target, discovery.Options{
-		Exclude:                   withGeneratedReportExclusion(cfg.Scan.Exclude),
+		Exclude:                   excludes,
 		MaxFiles:                  cfg.Scan.MaxFiles,
 		MaxTotalBytes:             cfg.Scan.MaxTotalBytes,
 		IncludeNestedRepositories: cfg.Scan.IncludeNestedRepositories,
@@ -134,7 +140,7 @@ func writeSetupRepositorySummary(output io.Writer, summary setupRepositorySummar
 	return err
 }
 
-func collectBasicSystemProfile(prompt promptSession, target string, now time.Time, summary setupRepositorySummary) (profile.System, error) {
+func collectBasicSystemProfile(prompt promptSession, target string, now time.Time, summary setupRepositorySummary, draft setupProfileDraft) (profile.System, error) {
 	absolute, err := filepath.Abs(target)
 	if err != nil {
 		return profile.System{}, fmt.Errorf("resolve setup target: %w", err)
@@ -161,7 +167,10 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 	if err := explainSetupQuestion(prompt, "intended-purpose"); err != nil {
 		return profile.System{}, err
 	}
-	if value.IntendedPurpose, err = prompt.text("Intended purpose", "unknown"); err != nil {
+	if err := draft.explain(prompt.output, "intended-purpose"); err != nil {
+		return profile.System{}, err
+	}
+	if value.IntendedPurpose, err = prompt.text("Intended purpose", draft.first("intended-purpose", "unknown")); err != nil {
 		return profile.System{}, err
 	}
 	if err := explainSetupQuestion(prompt, "operating-regions"); err != nil {
@@ -199,37 +208,32 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 	if err := explainSetupQuestion(prompt, "decision-impact"); err != nil {
 		return profile.System{}, err
 	}
-	if value.DecisionImpact, err = promptChoice(prompt, "Decision impact", profile.ImpactUnknown,
+	if err := draft.explain(prompt.output, "decision-impact"); err != nil {
+		return profile.System{}, err
+	}
+	if value.DecisionImpact, err = promptChoice(prompt, "Decision impact", draft.decisionImpact(profile.ImpactUnknown),
 		profile.ImpactAdvisory, profile.ImpactLow, profile.ImpactSignificant, profile.ImpactAutonomous, profile.ImpactUnknown); err != nil {
 		return profile.System{}, err
 	}
 	if err := explainSetupQuestion(prompt, "lifecycle-stage"); err != nil {
 		return profile.System{}, err
 	}
-	if value.LifecycleStage, err = promptChoice(prompt, "Lifecycle stage", profile.LifecycleUnknown,
+	if err := draft.explain(prompt.output, "lifecycle-stage"); err != nil {
+		return profile.System{}, err
+	}
+	if value.LifecycleStage, err = promptChoice(prompt, "Lifecycle stage", draft.lifecycle(profile.LifecycleUnknown),
 		profile.LifecycleDevelopment, profile.LifecycleTesting, profile.LifecycleProduction, profile.LifecycleRetired, profile.LifecycleUnknown); err != nil {
 		return profile.System{}, err
 	}
 	if err := explainSetupQuestion(prompt, "human-oversight"); err != nil {
 		return profile.System{}, err
 	}
-	if value.HumanOversight, err = promptChoice(prompt, "Human oversight", profile.OversightUnknown,
-		profile.OversightRequired, profile.OversightAvailable, profile.OversightLimited, profile.OversightNone, profile.OversightUnknown); err != nil {
+	if err := draft.explain(prompt.output, "human-oversight"); err != nil {
 		return profile.System{}, err
 	}
-
-	if summary.Inventory.Summary.RuntimeSignals > 0 {
-		if _, err := fmt.Fprintf(prompt.output,
-			"\nTechnical suggestion: runtime AI-provider or framework usage was detected. This supports an inference candidate, but does not prove how the product uses it.\n"); err != nil {
-			return profile.System{}, err
-		}
-		confirmed, err := prompt.confirm("Record model inference as a human-confirmed setup fact", false)
-		if err != nil {
-			return profile.System{}, err
-		}
-		if confirmed {
-			value.AIActivities = []profile.AIActivity{profile.ActivityInference}
-		}
+	if value.HumanOversight, err = promptChoice(prompt, "Human oversight", draft.humanOversight(profile.OversightUnknown),
+		profile.OversightRequired, profile.OversightAvailable, profile.OversightLimited, profile.OversightNone, profile.OversightUnknown); err != nil {
+		return profile.System{}, err
 	}
 
 	value.ProfileReview = profile.ProfileReview{Status: profile.ReviewDraft}
@@ -244,53 +248,36 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 	return value, nil
 }
 
-func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile.System, now time.Time) error {
+func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile.System, now time.Time, draft setupProfileDraft) error {
 	if err := explainSetupQuestion(prompt, "applicability-context"); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintln(prompt.output, "\nRelevant EU AI Act context"); err != nil {
 		return err
 	}
-	var err error
-	if err = explainSetupQuestion(prompt, "use-case-domains"); err != nil {
-		return err
-	}
-	if system.UseCaseDomains, err = promptChoices(prompt, "Use-case domains", system.UseCaseDomains,
-		profile.DomainBiometrics, profile.DomainCriticalInfrastructure, profile.DomainEducation, profile.DomainEmployment,
-		profile.DomainEssentialServices, profile.DomainLawEnforcement, profile.DomainMigrationBorderControl,
-		profile.DomainJusticeDemocraticProcess, profile.DomainHealthcare, profile.DomainSoftwareDevelopment,
-		profile.DomainGeneralPurpose, profile.DomainOther, profile.DomainUnknown); err != nil {
-		return err
-	}
-	if err = explainSetupQuestion(prompt, "ai-activities"); err != nil {
-		return err
-	}
-	if system.AIActivities, err = promptChoices(prompt, "AI activities", system.AIActivities,
-		profile.ActivityInference, profile.ActivityTraining, profile.ActivityFineTuning, profile.ActivityEvaluation,
-		profile.ActivityAutomatedDecision, profile.ActivityAgentToolUse, profile.ActivitySyntheticContent, profile.ActivityUnknown); err != nil {
-		return err
-	}
-	if err = explainSetupQuestion(prompt, "deployment-models"); err != nil {
-		return err
-	}
-	if system.DeploymentModels, err = promptChoices(prompt, "Deployment models", system.DeploymentModels,
-		profile.DeploymentInternal, profile.DeploymentPrivateCustomer, profile.DeploymentPublic, profile.DeploymentOpenSource,
-		profile.DeploymentEmbedded, profile.DeploymentAPI, profile.DeploymentLocalCLI, profile.DeploymentUnknown); err != nil {
+	if err := collectTechnicalSystemContext(prompt, system, draft, true); err != nil {
 		return err
 	}
 
 	assessment := profile.AssessEUAIAct([]profile.System{*system}).Systems[0]
+	var err error
 	if needsPeopleContext(*system, assessment.HighRiskScreening) {
 		if err = explainSetupQuestion(prompt, "users"); err != nil {
 			return err
 		}
-		if system.Users, err = prompt.textList("Users", system.Users); err != nil {
+		if err = draft.explain(prompt.output, "users"); err != nil {
+			return err
+		}
+		if system.Users, err = prompt.textList("Users", draft.values("users", system.Users)); err != nil {
 			return err
 		}
 		if err = explainSetupQuestion(prompt, "affected-groups"); err != nil {
 			return err
 		}
-		if system.AffectedGroups, err = prompt.textList("Potentially affected groups", system.AffectedGroups); err != nil {
+		if err = draft.explain(prompt.output, "affected-groups"); err != nil {
+			return err
+		}
+		if system.AffectedGroups, err = prompt.textList("Potentially affected groups", draft.values("affected-groups", system.AffectedGroups)); err != nil {
 			return err
 		}
 	}
@@ -298,19 +285,28 @@ func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile
 		if err = explainSetupQuestion(prompt, "personal-data"); err != nil {
 			return err
 		}
-		if system.Data.PersonalData, err = promptChoice(prompt, "Processes personal data", system.Data.PersonalData, profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
+		if err = draft.explain(prompt.output, "personal-data"); err != nil {
+			return err
+		}
+		if system.Data.PersonalData, err = promptChoice(prompt, "Processes personal data", draft.triState("personal-data", system.Data.PersonalData), profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
 			return err
 		}
 		if err = explainSetupQuestion(prompt, "special-category-data"); err != nil {
 			return err
 		}
-		if system.Data.SpecialCategoryData, err = promptChoice(prompt, "Processes special-category or similarly sensitive data", system.Data.SpecialCategoryData, profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
+		if err = draft.explain(prompt.output, "special-category-data"); err != nil {
+			return err
+		}
+		if system.Data.SpecialCategoryData, err = promptChoice(prompt, "Processes special-category or similarly sensitive data", draft.triState("special-category-data", system.Data.SpecialCategoryData), profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
 			return err
 		}
 		if err = explainSetupQuestion(prompt, "children-data"); err != nil {
 			return err
 		}
-		if system.Data.ChildrenData, err = promptChoice(prompt, "Processes children's data", system.Data.ChildrenData, profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
+		if err = draft.explain(prompt.output, "children-data"); err != nil {
+			return err
+		}
+		if system.Data.ChildrenData, err = promptChoice(prompt, "Processes children's data", draft.triState("children-data", system.Data.ChildrenData), profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
 			return err
 		}
 	}
@@ -329,6 +325,62 @@ func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile
 		return fmt.Errorf("validate relevant applicability context: %w", err)
 	}
 	return writeApplicabilityReadinessGate(prompt.output, *system)
+}
+
+func collectNonEUTechnicalContext(prompt promptSession, system *profile.System, draft setupProfileDraft) error {
+	if _, err := fmt.Fprintln(prompt.output,
+		"\nRepository technical context\nThese answers prioritize voluntary technical recommendations. They remain factual engineering context, not a legal assessment."); err != nil {
+		return err
+	}
+	if err := collectTechnicalSystemContext(prompt, system, draft, false); err != nil {
+		return err
+	}
+	if err := system.Validate(); err != nil {
+		return fmt.Errorf("validate technical context: %w", err)
+	}
+	return nil
+}
+
+func collectTechnicalSystemContext(prompt promptSession, system *profile.System, draft setupProfileDraft, includeUseCase bool) error {
+	var err error
+	if includeUseCase {
+		if err = explainSetupQuestion(prompt, "use-case-domains"); err != nil {
+			return err
+		}
+		if err = draft.explain(prompt.output, "use-case-domains"); err != nil {
+			return err
+		}
+		if system.UseCaseDomains, err = promptChoices(prompt, "Use-case domains", draft.useCaseDomains(system.UseCaseDomains),
+			profile.DomainBiometrics, profile.DomainCriticalInfrastructure, profile.DomainEducation, profile.DomainEmployment,
+			profile.DomainEssentialServices, profile.DomainLawEnforcement, profile.DomainMigrationBorderControl,
+			profile.DomainJusticeDemocraticProcess, profile.DomainHealthcare, profile.DomainSoftwareDevelopment,
+			profile.DomainGeneralPurpose, profile.DomainOther, profile.DomainUnknown); err != nil {
+			return err
+		}
+	}
+	if err = explainSetupQuestion(prompt, "ai-activities"); err != nil {
+		return err
+	}
+	if err = draft.explain(prompt.output, "ai-activities"); err != nil {
+		return err
+	}
+	if system.AIActivities, err = promptChoices(prompt, "AI activities", draft.aiActivities(system.AIActivities),
+		profile.ActivityInference, profile.ActivityTraining, profile.ActivityFineTuning, profile.ActivityEvaluation,
+		profile.ActivityAutomatedDecision, profile.ActivityAgentToolUse, profile.ActivitySyntheticContent, profile.ActivityUnknown); err != nil {
+		return err
+	}
+	if err = explainSetupQuestion(prompt, "deployment-models"); err != nil {
+		return err
+	}
+	if err = draft.explain(prompt.output, "deployment-models"); err != nil {
+		return err
+	}
+	if system.DeploymentModels, err = promptChoices(prompt, "Deployment models", draft.deploymentModels(system.DeploymentModels),
+		profile.DeploymentInternal, profile.DeploymentPrivateCustomer, profile.DeploymentPublic, profile.DeploymentOpenSource,
+		profile.DeploymentEmbedded, profile.DeploymentAPI, profile.DeploymentLocalCLI, profile.DeploymentUnknown); err != nil {
+		return err
+	}
+	return nil
 }
 
 func writeApplicabilityReadinessGate(output io.Writer, system profile.System) error {
