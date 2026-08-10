@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/config"
+	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 )
@@ -154,6 +155,32 @@ func TestFastSetupUsesDeterministicDraftWithoutModel(t *testing.T) {
 	}
 	if cfg.AI.Provider != "none" || !strings.Contains(stdout.String(), "Prepared 1 repository-evident setup suggestion(s) without a model") || !strings.Contains(stdout.String(), "editable draft") {
 		t.Fatalf("fast setup output:\n%s", stdout.String())
+	}
+}
+
+func TestRefreshSetupDiscoveryAddsAndReplacesGeneratedFiles(t *testing.T) {
+	target := t.TempDir()
+	configPath := filepath.Join(target, config.FileName)
+	ignorePath := filepath.Join(target, ".gitignore")
+	if err := os.WriteFile(configPath, []byte("frameworks: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ignorePath, []byte("/.complyscan/reports/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initial := discovery.Result{
+		Repository: discovery.Repository{Root: target, Files: []discovery.File{{Path: config.FileName, Kind: discovery.KindConfig, Size: 3, Content: []byte("old")}}},
+		Stats:      discovery.Stats{FilesRead: 1, BytesRead: 3},
+	}
+	refreshed, err := refreshSetupDiscovery(initial, target,
+		setupGeneratedFile{Path: configPath, Kind: discovery.KindConfig},
+		setupGeneratedFile{Path: ignorePath, Kind: discovery.KindOtherText},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refreshed.Repository.Files) != 2 || refreshed.Stats.FilesRead != 2 || refreshed.Repository.Files[0].Path != config.FileName || string(refreshed.Repository.Files[0].Content) != "frameworks: []\n" {
+		t.Fatalf("refreshed = %#v", refreshed)
 	}
 }
 

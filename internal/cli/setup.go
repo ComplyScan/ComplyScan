@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -209,6 +210,15 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	if err := ensureReportGitIgnore(target); err != nil {
 		return fmt.Errorf("saved %s but could not ignore generated reports: %w", path, err)
 	}
+	if interactive {
+		repositorySummary.Discovery, err = refreshSetupDiscovery(repositorySummary.Discovery, target,
+			setupGeneratedFile{Path: path, Kind: discovery.KindConfig},
+			setupGeneratedFile{Path: filepath.Join(target, ".gitignore"), Kind: discovery.KindOtherText},
+		)
+		if err != nil {
+			return fmt.Errorf("refresh setup repository snapshot: %w", err)
+		}
+	}
 	if _, err := fmt.Fprintf(stdout, "\nSaved %s with %d system profile(s).\n", path, len(cfg.Systems)); err != nil {
 		return err
 	}
@@ -304,7 +314,7 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 	}
 	cfg.AI.Provider = provider
 	if provider == "none" {
-		if _, err := fmt.Fprintln(stdout, "Local AI review disabled. Deterministic scanning remains available."); err != nil {
+		if _, err := fmt.Fprintln(stdout, "AI-assisted analysis disabled. Fast deterministic scanning remains available."); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -789,6 +799,58 @@ func setupModelDefault(value string) string {
 		return value
 	}
 	return defaultSetupModel
+}
+
+type setupGeneratedFile struct {
+	Path string
+	Kind discovery.FileKind
+}
+
+func refreshSetupDiscovery(result discovery.Result, target string, generated ...setupGeneratedFile) (discovery.Result, error) {
+	absoluteTarget, err := filepath.Abs(target)
+	if err != nil {
+		return result, err
+	}
+	for _, candidate := range generated {
+		absolutePath, err := filepath.Abs(candidate.Path)
+		if err != nil {
+			return result, err
+		}
+		relative, err := filepath.Rel(absoluteTarget, absolutePath)
+		if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			continue
+		}
+		info, err := os.Lstat(absolutePath)
+		if err != nil {
+			return result, err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return result, fmt.Errorf("%s must be a regular file and must not be a symlink", absolutePath)
+		}
+		content, err := os.ReadFile(absolutePath)
+		if err != nil {
+			return result, err
+		}
+		path := filepath.ToSlash(relative)
+		replaced := false
+		for index := range result.Repository.Files {
+			if result.Repository.Files[index].Path != path {
+				continue
+			}
+			result.Stats.BytesRead -= result.Repository.Files[index].Size
+			result.Repository.Files[index] = discovery.File{Path: path, Kind: candidate.Kind, Size: int64(len(content)), Content: content}
+			result.Stats.BytesRead += int64(len(content))
+			replaced = true
+			break
+		}
+		if !replaced {
+			result.Repository.Files = append(result.Repository.Files, discovery.File{Path: path, Kind: candidate.Kind, Size: int64(len(content)), Content: content})
+			result.Stats.FilesRead++
+			result.Stats.BytesRead += int64(len(content))
+		}
+	}
+	sort.Slice(result.Repository.Files, func(i, j int) bool { return result.Repository.Files[i].Path < result.Repository.Files[j].Path })
+	return result, nil
 }
 
 func systemIndex(systems []profile.System, id string) int {
