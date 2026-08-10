@@ -13,6 +13,7 @@ import (
 
 // Severity describes the potential engineering impact of a finding.
 type Severity string
+type FindingScope string
 
 const (
 	SeverityInfo     Severity = "info"
@@ -22,22 +23,31 @@ const (
 	SeverityCritical Severity = "critical"
 )
 
+const (
+	ScopeProduction    FindingScope = "production"
+	ScopeTest          FindingScope = "test"
+	ScopeDocumentation FindingScope = "documentation-example"
+	ScopeConfiguration FindingScope = "configuration"
+	ScopeUnknown       FindingScope = "unknown"
+)
+
 // Finding is a single piece of technical evidence requiring review.
 type Finding struct {
-	Fingerprint string     `json:"fingerprint"`
-	RuleID      string     `json:"rule_id"`
-	Title       string     `json:"title"`
-	Severity    Severity   `json:"severity"`
-	Category    string     `json:"category"`
-	Message     string     `json:"message"`
-	Path        string     `json:"path,omitempty"`
-	StartLine   int        `json:"start_line,omitempty"`
-	EndLine     int        `json:"end_line,omitempty"`
-	Evidence    string     `json:"evidence,omitempty"`
-	Remediation string     `json:"remediation"`
-	Confidence  string     `json:"confidence"`
-	Occurrences int        `json:"occurrences,omitempty"`
-	Locations   []Location `json:"locations,omitempty"`
+	Fingerprint string       `json:"fingerprint"`
+	RuleID      string       `json:"rule_id"`
+	Title       string       `json:"title"`
+	Severity    Severity     `json:"severity"`
+	Category    string       `json:"category"`
+	Message     string       `json:"message"`
+	Path        string       `json:"path,omitempty"`
+	StartLine   int          `json:"start_line,omitempty"`
+	EndLine     int          `json:"end_line,omitempty"`
+	Evidence    string       `json:"evidence,omitempty"`
+	Remediation string       `json:"remediation"`
+	Confidence  string       `json:"confidence"`
+	Scope       FindingScope `json:"scope,omitempty"`
+	Occurrences int          `json:"occurrences,omitempty"`
+	Locations   []Location   `json:"locations,omitempty"`
 }
 
 // ComputeFingerprint returns a stable identity for a finding. Line numbers are

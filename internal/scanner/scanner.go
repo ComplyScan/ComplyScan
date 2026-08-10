@@ -3,7 +3,9 @@ package scanner
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
@@ -64,7 +66,12 @@ func (e *Engine) Scan(ctx context.Context, target string, options Options) (Resu
 		scopedRepository = filterRepository(fullRepository, changed)
 	}
 	result := Result{Repository: scopedRepository, FullRepository: fullRepository, Warnings: discovered.Warnings}
+	fileKinds := make(map[string]discovery.FileKind, len(fullRepository.Files))
+	for _, file := range fullRepository.Files {
+		fileKinds[file.Path] = file.Kind
+	}
 	recordFinding := func(finding rules.Finding) error {
+		finding.Scope = findingScope(finding.Path, fileKinds[finding.Path])
 		finding.Fingerprint = rules.ComputeFingerprint(finding)
 		if options.Suppress != nil && options.Suppress(finding) {
 			result.Suppressed++
@@ -126,6 +133,27 @@ func (e *Engine) Scan(ctx context.Context, target string, options Options) (Resu
 		return left.StartLine < right.StartLine
 	})
 	return result, nil
+}
+
+func findingScope(path string, kind discovery.FileKind) rules.FindingScope {
+	lower := "/" + strings.ToLower(filepath.ToSlash(path))
+	base := strings.ToLower(filepath.Base(path))
+	if strings.Contains(lower, "/test/") || strings.Contains(lower, "/tests/") || strings.Contains(lower, "/__tests__/") ||
+		strings.HasSuffix(base, "_test.go") || strings.HasPrefix(base, "test_") || strings.HasSuffix(base, "_test.py") ||
+		strings.Contains(base, ".test.") || strings.Contains(base, ".spec.") {
+		return rules.ScopeTest
+	}
+	if kind == discovery.KindDocumentation || kind == discovery.KindReadme || strings.Contains(lower, "/docs/") || strings.Contains(lower, "/examples/") {
+		return rules.ScopeDocumentation
+	}
+	switch kind {
+	case discovery.KindManifest, discovery.KindDockerfile, discovery.KindGitHubAction, discovery.KindCI, discovery.KindTerraform, discovery.KindEnvTemplate, discovery.KindConfig:
+		return rules.ScopeConfiguration
+	case discovery.KindSource:
+		return rules.ScopeProduction
+	default:
+		return rules.ScopeUnknown
+	}
 }
 
 func filterRepository(repo discovery.Repository, paths map[string]struct{}) discovery.Repository {

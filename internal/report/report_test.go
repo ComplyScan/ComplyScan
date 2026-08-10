@@ -215,6 +215,30 @@ func TestWriteTerminalCompletion(t *testing.T) {
 	}
 }
 
+func TestWriteTerminalConciseCompletionSummarizesWithoutEvidenceDump(t *testing.T) {
+	value := New(".", "0.1.5-dev", []rules.Finding{{Severity: rules.SeverityMedium}}, nil, 0)
+	value.AIInventory = &inventory.Report{Summary: inventory.Summary{Components: 3, Signals: 12}}
+	value.Frameworks = []FrameworkResult{{
+		TechnicalEvidence: framework.TechnicalEvidenceReport{Summary: framework.ObjectiveSummary{Total: 7, CandidateEvidence: 3, NotDetected: 4}},
+		Reconciliation:    reconciliation.Report{Summary: reconciliation.Summary{LikelyRequired: 5, RequirementWithEvidence: 3, RequirementWithoutEvidence: 2, Unresolved: 1}},
+		TechnicalReview:   &providers.TechnicalReviewResult{InputCandidates: 4, Reviewed: 3},
+	}}
+	var output bytes.Buffer
+	if err := WriteTerminalConciseCompletion(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"Scan complete: 1 potential issue", "AI inventory: 3 component", "Technical objectives: 7 total", "Requirement mapping: 5 likely required", "3/4 technical target", "Use --verbose"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("concise completion missing %q:\n%s", expected, output.String())
+		}
+	}
+	for _, unwanted := range []string{"Candidate location:", "Pack digest:", "EVIDENCE "} {
+		if strings.Contains(output.String(), unwanted) {
+			t.Errorf("concise completion included detailed evidence %q:\n%s", unwanted, output.String())
+		}
+	}
+}
+
 func TestTerminalCompletionSeparatesAdvisoryReview(t *testing.T) {
 	value := New(".", "0.2.0", nil, nil, 0)
 	value.Review = &providers.ReviewResult{

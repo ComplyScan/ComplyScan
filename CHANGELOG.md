@@ -12,6 +12,8 @@
 - A failed or invalid model response now marks only that technical target as incomplete and continues with the remaining evidence investigations instead of aborting the entire scan.
 - Deep review now reuses deterministic graph and source retrieval directly, asks the model to plan follow-up searches only for context-poor investigations, and bounds local-model output budgets to reduce unnecessary generation time.
 - Advisory review now inspects at most two representative code candidates per system and technical objective, while retaining every deterministic match in the report and disclosing any omitted repetitive model targets.
+- Terminal scans now finish with a concise AI inventory, technical-objective, requirement-mapping, and advisory-review summary; `--verbose` restores the full framework and evidence dump while reports always retain complete detail.
+- Findings now identify production, test, documentation/example, or configuration scope. Ambiguous generic `message` logging signals are medium severity, while explicit prompt, response, or model-output logging remains high severity, and additional obvious token placeholders are ignored.
 
 ## 0.1.4 - 2026-08-08
 

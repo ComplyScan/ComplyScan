@@ -52,6 +52,24 @@ func TestFindingFingerprintSurvivesLineMovement(t *testing.T) {
 	}
 }
 
+func TestFindingScopeClassifiesRepositoryEvidence(t *testing.T) {
+	tests := []struct {
+		path string
+		kind discovery.FileKind
+		want rules.FindingScope
+	}{
+		{path: "src/app.py", kind: discovery.KindSource, want: rules.ScopeProduction},
+		{path: "tests/test_app.py", kind: discovery.KindSource, want: rules.ScopeTest},
+		{path: "docs/example.md", kind: discovery.KindDocumentation, want: rules.ScopeDocumentation},
+		{path: "pyproject.toml", kind: discovery.KindManifest, want: rules.ScopeConfiguration},
+	}
+	for _, test := range tests {
+		if actual := findingScope(test.path, test.kind); actual != test.want {
+			t.Errorf("findingScope(%q, %q) = %q, want %q", test.path, test.kind, actual, test.want)
+		}
+	}
+}
+
 func TestScannerStreamsEveryFinding(t *testing.T) {
 	target := filepath.Join("..", "..", "testdata", "vulnerable-python-ai-app")
 	var streamed []rules.Finding

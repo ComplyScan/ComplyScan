@@ -58,6 +58,8 @@ export OPENAI_API_KEY="your-key-from-your-secret-store"
 ANTHROPIC_API_KEY="replace-me-with-your-key"
 GEMINI_API_KEY="<your-api-key>"
 MISTRAL_API_KEY="example-placeholder-value"
+HF_TOKEN="your-token-from-your-secret-store"
+COHERE_API_KEY="test_token_for_documentation"
 `)
 	findings, err := (HardcodedSecretRule{}).Run(context.Background(), repo)
 	if err != nil {

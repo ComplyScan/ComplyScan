@@ -52,7 +52,7 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 		if _, err := fmt.Fprintf(writer, "\n### %s — %s\n\n", strings.ToUpper(markdownText(string(finding.Severity))), markdownText(finding.Title)); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(writer, "- Rule: %s\n- Confidence: %s\n- Fingerprint: %s\n", inlineCode(finding.RuleID), markdownText(finding.Confidence), inlineCode(finding.Fingerprint)); err != nil {
+		if _, err := fmt.Fprintf(writer, "- Rule: %s\n- Confidence: %s\n- Scope: %s\n- Fingerprint: %s\n", inlineCode(finding.RuleID), markdownText(finding.Confidence), markdownText(string(finding.Scope)), inlineCode(finding.Fingerprint)); err != nil {
 			return err
 		}
 		if finding.Path != "" {

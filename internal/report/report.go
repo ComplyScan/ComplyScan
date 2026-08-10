@@ -237,6 +237,11 @@ func WriteTerminalFinding(w io.Writer, finding rules.Finding, options TerminalOp
 			return err
 		}
 	}
+	if finding.Scope != "" {
+		if _, err := fmt.Fprintf(w, "       Scope: %s\n", finding.Scope); err != nil {
+			return err
+		}
+	}
 	if _, err := fmt.Fprintf(w, "       %s\n", finding.Message); err != nil {
 		return err
 	}
@@ -293,6 +298,63 @@ func WriteTerminalCompletion(w io.Writer, report Report) error {
 		return err
 	}
 	return writeTerminalSummary(w, report)
+}
+
+// WriteTerminalConciseCompletion closes a streaming scan without repeating the
+// detailed evidence already saved in the Markdown and JSON artifacts.
+func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
+	if _, err := fmt.Fprintf(w, "Scan complete: %d potential %s\n", value.Summary.Total, issueWord(value.Summary.Total)); err != nil {
+		return err
+	}
+	if err := writeTerminalSummary(w, value); err != nil {
+		return err
+	}
+	if value.AIInventory != nil {
+		if _, err := fmt.Fprintf(w, "AI inventory: %d component(s), %d technical signal(s)\n", value.AIInventory.Summary.Components, value.AIInventory.Summary.Signals); err != nil {
+			return err
+		}
+	}
+	objectives := framework.ObjectiveSummary{}
+	required, recommended, withEvidence, withoutEvidence, unresolved := 0, 0, 0, 0, 0
+	reviewTargets, reviewedTargets := 0, 0
+	for _, result := range value.Frameworks {
+		objectives.Total += result.TechnicalEvidence.Summary.Total
+		objectives.CandidateEvidence += result.TechnicalEvidence.Summary.CandidateEvidence
+		objectives.NotDetected += result.TechnicalEvidence.Summary.NotDetected
+		objectives.NotEvaluated += result.TechnicalEvidence.Summary.NotEvaluated
+		required += result.Reconciliation.Summary.LikelyRequired
+		recommended += result.Reconciliation.Summary.Recommended
+		withEvidence += result.Reconciliation.Summary.RequirementWithEvidence
+		withoutEvidence += result.Reconciliation.Summary.RequirementWithoutEvidence
+		unresolved += result.Reconciliation.Summary.Unresolved
+		if result.TechnicalReview != nil {
+			reviewTargets += result.TechnicalReview.InputCandidates
+			reviewedTargets += result.TechnicalReview.Reviewed
+		}
+	}
+	if objectives.Total > 0 {
+		if _, err := fmt.Fprintf(w, "Technical objectives: %d total; %d candidate evidence; %d not detected; %d not evaluated\n",
+			objectives.Total, objectives.CandidateEvidence, objectives.NotDetected, objectives.NotEvaluated); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "Requirement mapping: %d likely required; %d voluntary recommendations; %d with candidate evidence; %d without detected evidence; %d unresolved\n",
+			required, recommended, withEvidence, withoutEvidence, unresolved); err != nil {
+			return err
+		}
+	}
+	if value.Review != nil || reviewTargets > 0 {
+		findingReviewed, findingTargets := 0, 0
+		if value.Review != nil {
+			findingReviewed = value.Review.Reviewed
+			findingTargets = value.Review.InputFindings
+		}
+		if _, err := fmt.Fprintf(w, "Advisory AI review: %d/%d finding(s), %d/%d technical target(s) completed\n",
+			findingReviewed, findingTargets, reviewedTargets, reviewTargets); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(w, "Use --verbose for full terminal evidence; the saved Markdown report contains the reviewable detail.")
+	return err
 }
 
 func writeFrameworkResultsTerminal(w io.Writer, results []FrameworkResult) error {

@@ -277,6 +277,7 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 		verifySystems             []string
 		quickScan                 bool
 		deepScan                  bool
+		verbose                   bool
 	)
 	command := &cobra.Command{
 		Use:   "scan [path]",
@@ -622,7 +623,11 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 					return err
 				}
 			} else {
-				if err := report.WriteTerminalCompletion(stdout, reportValue); err != nil {
+				completionWriter := report.WriteTerminalConciseCompletion
+				if verbose {
+					completionWriter = report.WriteTerminalCompletion
+				}
+				if err := completionWriter(stdout, reportValue); err != nil {
 					return fmt.Errorf("write terminal report: %w", err)
 				}
 				if artifacts.Markdown != "" {
@@ -659,6 +664,7 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().BoolVar(&refreshReview, "refresh-review", false, "ignore cached technical observations and run the configured provider again")
 	command.Flags().BoolVar(&quickScan, "quick", false, "run deterministic discovery and checks without AI review")
 	command.Flags().BoolVar(&deepScan, "deep", false, "require the configured AI review provider for a deep scan")
+	command.Flags().BoolVarP(&verbose, "verbose", "v", false, "print full framework, evidence, and advisory-review details in the terminal")
 	command.Flags().BoolVar(&verifyConfigured, "verify", false, "run verification recipes from .complyscan.yml in isolated containers")
 	command.Flags().StringVar(&verifyRuntime, "verify-runtime", "docker", "local container runtime for opt-in execution: docker or podman")
 	command.Flags().StringVar(&verifyImage, "verify-image", "", "preloaded local container image for opt-in execution")

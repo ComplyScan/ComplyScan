@@ -41,13 +41,17 @@ func (PromptLoggingRule) RunStreaming(ctx context.Context, repo discovery.Reposi
 				continue
 			}
 			confidence := "medium"
+			severity := SeverityHigh
 			normalized := strings.ToLower(match)
 			if normalized == "message" || normalized == "messages" || normalized == "response" {
 				confidence = "low"
 			}
+			if normalized == "message" || normalized == "messages" {
+				severity = SeverityMedium
+			}
 			if err := emit(Finding{
 				RuleID: "AI-LOG-001", Title: "Prompt or model response may be logged",
-				Severity: SeverityHigh, Category: "data-handling",
+				Severity: severity, Category: "data-handling",
 				Message:     "A value named " + match + " appears to be passed to a logging function. Prompts and model outputs may contain personal or sensitive information and require human review.",
 				Path:        file.Path,
 				StartLine:   lineIndex + 1,

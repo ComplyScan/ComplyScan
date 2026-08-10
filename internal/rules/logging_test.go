@@ -26,4 +26,12 @@ logger.info("result", response)
 	if findings[1].Confidence != "low" {
 		t.Errorf("unexpected response confidence: %#v", findings[1])
 	}
+	messageRepo := repositoryWithFile("worker.py", discovery.KindSource, `logger.info(message)`)
+	messageFindings, err := (PromptLoggingRule{}).Run(context.Background(), messageRepo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messageFindings) != 1 || messageFindings[0].Severity != SeverityMedium || messageFindings[0].Confidence != "low" {
+		t.Fatalf("ambiguous generic message was not downgraded: %#v", messageFindings)
+	}
 }

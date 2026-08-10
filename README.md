@@ -45,7 +45,9 @@ go build -ldflags "-X main.version=0.1.4 -X main.commit=$(git rev-parse --short 
 ## Quick start
 
 ```bash
+complyscan # setup when needed; otherwise scan the current repository
 complyscan setup
+complyscan setup --advanced
 complyscan init
 complyscan profile show
 complyscan profile setup # add context to an existing configuration
@@ -56,6 +58,9 @@ complyscan framework assess .
 complyscan framework assess . --pack nist-ai-rmf-technical-evidence
 complyscan framework assess . --format json
 complyscan scan .
+complyscan scan . --quick
+complyscan scan . --deep
+complyscan scan . --verbose
 complyscan scan . --format json
 complyscan scan . --format sarif > complyscan.sarif
 complyscan scan . --severity high --no-color
@@ -74,7 +79,9 @@ complyscan doctor .
 complyscan version
 ```
 
-`setup` is the recommended first command. It creates or updates `.complyscan.yml`, asks which technical evidence packs to use, runs the factual system questionnaire, collects the EU-specific human-applicability decision only when the EU pack is selected, and lets the user choose deterministic-only scanning, local Ollama, or an explicitly consented BYOK OpenAI, Anthropic, or Gemini reviewer. Ollama setup lists installed models plus recommendations, accepts any exact tag, and offers installation or model download separately. Remote setup explains external processing and possible cost, asks for the model, and saves only the API-key environment-variable name. Every interactive question first explains why the fact matters, defines each controlled option in developer language, and provides examples where useful. The wizard recommends `needs-review` rather than asking developers to invent a legal conclusion.
+Running `complyscan` is the recommended first command. With no configuration it inspects the repository before asking questions, summarizes languages, source/test/documentation composition, and detected AI components, then runs a short factual setup. The quick path asks only for the system's purpose, operating regions, organisation role, decision impact, lifecycle, and human oversight; it recommends a framework mapping from those declared facts and leaves legal applicability at `needs-review`. Use `complyscan setup --advanced` for the complete data, deployment, supply-chain, reviewer, and attributed applicability questionnaire.
+
+First-run setup offers three explicit actions: a quick deterministic scan, a deep AI-assisted review, or saving configuration without scanning. Quick is the default and never invokes a model. Deep review lets the user choose local Ollama or an explicitly consented BYOK OpenAI, Anthropic, or Gemini reviewer. Ollama setup lists installed models plus recommendations, accepts any exact tag, and offers installation or model download separately. Remote setup explains external processing and possible cost, asks for the model, and saves only the API-key environment-variable name.
 
 `doctor` checks the installed build, repository configuration, Git detection, report-directory permissions, local Ollama readiness, and the presence—not the value—of a configured remote credential. `complyscan doctor --probe-review` makes a separate live synthetic structured-output request; remote probes may incur a small provider charge and never contain repository data.
 
@@ -82,7 +89,7 @@ Maintainers can run the repeatable live-model quality and resource gate with `./
 
 Interactive setup selects `qwen3:8b` as the tested local default, lists other installed models, and accepts any Ollama tag. Automation never installs software or downloads a model unless `--install-ollama` or `--pull-model` is explicitly passed. Non-interactive remote setup additionally requires `--allow-remote-review`; use `--non-interactive --review none` for a network-free starter configuration.
 
-`scan` defaults to the current directory, so `complyscan scan` and `complyscan scan .` are equivalent. In a terminal, `init` guides you through factual questions about each system's purpose, operating regions, value-chain role, use-case domain, users, affected groups, decision impact, AI activities, data, human oversight, and deployment. AI activities distinguish inference, training, fine-tuning, evaluation, automated decisions, agent tool use, and synthetic-content generation. Use `unknown` rather than guessing. Redirected or CI initialization is non-interactive and can be made explicit with `--non-interactive`.
+`scan` defaults to the current directory, so `complyscan scan` and `complyscan scan .` are equivalent. `--quick` guarantees deterministic-only operation even when a reviewer is configured; `--deep` requires a configured reviewer. Findings still print as they are discovered. The default completion is concise, while `--verbose` prints every framework objective and model observation in the terminal. Use `unknown` rather than guessing. Redirected or CI initialization is non-interactive and can be made explicit with `--non-interactive`.
 
 `profile show` reports conservative EU AI Act scope and high-risk screening from those declared facts. `profile setup` adds a system to an existing config; use `--replace` to update a profile with the same ID. When a repository declares multiple systems, setup offers a separate path-ownership wizard. `ownership setup` can replace those mappings later without repeating the applicability questionnaire, and `ownership show` prints them as terminal text or JSON. Automated screening, human decisions, and missing context remain separate. ComplyScan never converts a scope signal into a compliance certificate.
 
@@ -90,9 +97,9 @@ Interactive setup selects `qwen3:8b` as the tested local default, lists other in
 
 The two `generate` commands use that inventory to create `docs/AI_SYSTEM.md` and `docs/risk-assessment.md`. The generated files are deliberately marked as drafts, preserve discovery warnings, and contain explicit human-review fields. Existing documents are protected unless `--force` is supplied.
 
-Terminal scans print findings as rules discover them and finish with declared applicability context, the independently discovered AI component inventory, one result section per selected framework, and the final summary. EU reconciliation distinguishes likely requirements, gaps, mismatches, and unresolved applicability. NIST reconciliation labels selected practices as recommendations, never legal requirements. Repository evidence that cannot safely be assigned to a configured system remains unresolved. When model review is enabled, reconciliation also shows the strongest advisory assurance reached for each investigated objective. “Without detected evidence” and “not found after investigation” remain bounded search statements, never proof of absence or breach.
+Terminal scans print findings as rules discover them and finish with a concise inventory, technical-objective, requirement-mapping, and advisory-review summary. Full framework detail remains in the Markdown and JSON reports or can be printed with `--verbose`. EU reconciliation distinguishes likely requirements, gaps, mismatches, and unresolved applicability. NIST reconciliation labels selected practices as recommendations, never legal requirements. Repository evidence that cannot safely be assigned to a configured system remains unresolved. When model review is enabled, reconciliation also shows the strongest advisory assurance reached for each investigated objective. “Without detected evidence” and “not found after investigation” remain bounded search statements, never proof of absence or breach.
 
-Every successful scan atomically writes `.complyscan/reports/latest.md` for people and `.complyscan/reports/latest.json` as the versioned machine-readable evidence bundle. The schema-version 5 bundle contains a `frameworks` array with each pack's identity, nature, applicability where relevant, technical evidence, reconciliation, and optional grounded investigation. It also includes path ownership, assurance, and explicit runtime/legal-review boundaries so a future dashboard can display or recompute the mapping. Transitional EU-only top-level fields remain populated for compatibility and will be removed only in a future breaking schema version. `complyscan init` adds the generated directory to `.gitignore`; scans always exclude it from subsequent discovery. Use `--no-report` to disable persistence or `--report-dir` to select another directory inside the target.
+Every successful scan atomically writes `.complyscan/reports/latest.md` for people and `.complyscan/reports/latest.json` as the versioned machine-readable evidence bundle. A deep scan writes the complete preliminary report before its first model request and checkpoints completed framework reviews, so provider failures cannot erase deterministic results. Invalid output for one technical target is recorded as incomplete while later targets continue. The schema-version 5 bundle contains a `frameworks` array with each pack's identity, nature, applicability where relevant, technical evidence, reconciliation, and optional grounded investigation. It also includes path ownership, assurance, and explicit runtime/legal-review boundaries so a future dashboard can display or recompute the mapping. Transitional EU-only top-level fields remain populated for compatibility and will be removed only in a future breaking schema version. `complyscan init` adds the generated directory to `.gitignore`; scans always exclude it from subsequent discovery. Use `--no-report` to disable persistence or `--report-dir` to select another directory inside the target.
 
 JSON and SARIF 2.1.0 output remain buffered so they are valid and deterministically ordered. JSON stdout and `latest.json` include applicability, AI inventory, technical evidence, and reconciliation. SARIF includes source locations and stable partial fingerprints for code-scanning integrations, but omits technical-objective summaries that have no single code-scanning location.
 
@@ -442,7 +449,7 @@ ComplyScan applies the same evidence discipline to itself. Its maintained [AI ap
 
 Future releases may add:
 
-- evidence-assisted onboarding that runs a configuration-independent discovery scan first, proposes source-cited answers only for repository-evident technical questions, and asks a human to confirm them and supply markets, intended purpose, organisational role, affected people, production data, deployment facts, and final applicability decisions;
+- broader source-cited onboarding suggestions for technical facts beyond the currently detected AI components and runtime inference candidate;
 - broader labelled coverage for more languages, frameworks, model gateways, and data flows;
 - model and AI dependency supply-chain inventory;
 - a reviewed South Korean AI Basic Act code-only pack, with jurisdiction-specific applicability kept outside the shared scanner controls;
