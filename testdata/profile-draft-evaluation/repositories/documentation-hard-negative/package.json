@@ -1,0 +1,7 @@
+{
+  "name": "ai-terminology-viewer",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  }
+}
