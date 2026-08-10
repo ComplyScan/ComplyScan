@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Multi-select setup questions now use keyboard-controlled checkboxes in interactive terminals; redirected input, dumb terminals, and `COMPLYSCAN_ACCESSIBLE=1` retain the numbered text fallback.
+
 ## 0.1.5 - 2026-08-10
 
 ### Changed
