@@ -5,7 +5,8 @@
 ### Changed
 
 - Interactive setup now uses numbered menus for framework, profile, review-provider, ownership, and verification choices; multi-select questions accept comma-separated numbers instead of requiring internal values.
-- First-run setup now inspects and summarizes the repository before asking questions, uses a short factual profile by default, recommends a technical framework mapping from declared regions, and keeps the complete questionnaire available through `complyscan setup --advanced`.
+- First-run setup now inspects and summarizes the repository before asking questions, recommends a technical framework mapping from declared regions, and follows the short screening with only the additional EU applicability questions made relevant by earlier answers. The complete unbranched questionnaire and attributed legal decision record remain available through `complyscan setup --advanced`.
+- EU reports now label technical mapping context as `incomplete`, `factually-ready`, or `human-reviewed`, list unresolved facts, and keep requirement mappings explicitly provisional when inputs are missing.
 - First-run setup now offers an explicit quick scan, deep AI review, or configure-only choice. `complyscan scan --quick` guarantees a model-free preliminary scan, while `--deep` requires a configured review provider.
 - Running `complyscan` without a subcommand now starts discovery-first setup when no repository configuration exists and scans immediately when the current repository is already configured.
 - Deep scans now save a complete preliminary Markdown and JSON report before the first model request, checkpoint completed framework reviews, and preserve deterministic results when advisory finding review is unavailable.
