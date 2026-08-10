@@ -2,7 +2,9 @@ package technicalreview
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ComplyScan/ComplyScan/internal/providers"
@@ -15,6 +17,24 @@ type fakeReviewer struct {
 type planningReviewer struct {
 	fakeReviewer
 	plans int
+}
+
+type intermittentReviewer struct {
+	calls int
+}
+
+func (reviewer *intermittentReviewer) ReviewTechnical(_ context.Context, request providers.TechnicalReviewRequest) (providers.TechnicalReviewResult, error) {
+	result := providers.TechnicalReviewResult{Provider: providers.Ollama, Model: "test", InputCandidates: len(request.Candidates), Observations: []providers.TechnicalObservation{}}
+	if len(request.Candidates) == 0 {
+		return result, nil
+	}
+	reviewer.calls++
+	if reviewer.calls == 1 {
+		return providers.TechnicalReviewResult{}, errors.New("model cited a path outside the submitted context")
+	}
+	result.Reviewed = 1
+	result.Observations = []providers.TechnicalObservation{testObservation(request.Candidates[0])}
+	return result, nil
 }
 
 func (reviewer *planningReviewer) PlanTechnicalSearch(_ context.Context, _ providers.TechnicalCandidate) (providers.TechnicalSearchPlan, providers.Usage, error) {
@@ -136,5 +156,26 @@ func TestRunPlansAndCachesOneBoundedFollowUp(t *testing.T) {
 	}
 	if cachedReviewer.plans != 0 || cachedReviewer.calls != 0 || !cached.Observations[0].FollowUpRequested {
 		t.Fatalf("cached follow-up was not reused: reviewer=%#v result=%#v", cachedReviewer, cached)
+	}
+}
+
+func TestRunContinuesAfterOneInvalidModelResponse(t *testing.T) {
+	first := testCandidate("first")
+	second := testCandidate("second")
+	second.Path = "second.go"
+	second.EvidenceFingerprint = strings.Repeat("c", 64)
+	reviewer := &intermittentReviewer{}
+	result, err := Run(context.Background(), reviewer, providers.TechnicalReviewRequest{Candidates: []providers.TechnicalCandidate{first, second}}, Options{
+		Identity: testIdentity(), MaxCandidates: 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reviewer.calls != 2 || result.Reviewed != 1 || len(result.Observations) != 1 || result.Observations[0].EvidenceFingerprint != second.EvidenceFingerprint {
+		t.Fatalf("review did not continue after the invalid response: calls=%d result=%#v", reviewer.calls, result)
+	}
+	joined := strings.Join(result.Notes, "\n")
+	if !strings.Contains(joined, "AI investigation incomplete") || !strings.Contains(joined, "review continued") {
+		t.Fatalf("partial failure was not recorded: %s", joined)
 	}
 }

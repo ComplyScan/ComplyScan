@@ -79,6 +79,39 @@ func TestScanModesControlConfiguredAIReview(t *testing.T) {
 	}
 }
 
+func TestDeepScanSavesPreliminaryReportAndSurvivesProviderFailure(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("import openai\nlogger.info(model_output)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.AI.Provider = "ollama"
+	cfg.AI.Ollama.Endpoint = "http://127.0.0.1:1"
+	cfg.Systems = []profile.System{profile.NewDraftSystem("example", "Example")}
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := Execute([]string{"scan", "--deep", "--no-color", target}, &stdout, &stderr, testBuild)
+	if code != 0 && code != 1 {
+		t.Fatalf("deep scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Preliminary report saved before AI review") || !strings.Contains(stdout.String(), "review was incomplete") {
+		t.Fatalf("deep scan did not preserve and explain partial results:\n%s", stdout.String())
+	}
+	data, err := os.ReadFile(filepath.Join(target, report.DefaultDirectory, "latest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded report.Report
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Findings) == 0 || !strings.Contains(strings.Join(decoded.Warnings, "\n"), "review was incomplete") {
+		t.Fatalf("saved report lost deterministic or failure information: %#v", decoded)
+	}
+}
+
 func TestRootCommandScansConfiguredCurrentRepository(t *testing.T) {
 	target := t.TempDir()
 	if err := os.WriteFile(filepath.Join(target, "main.go"), []byte("package main\n"), 0o644); err != nil {

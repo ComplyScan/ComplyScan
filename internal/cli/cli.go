@@ -342,6 +342,11 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			if err := cfg.Validate(); err != nil {
 				return fmt.Errorf("validate review configuration: %w", err)
 			}
+			if cfg.AI.Provider != "none" {
+				if _, _, _, _, _, err := configuredReviewer(cfg.AI); err != nil {
+					return fmt.Errorf("configure %s review: %w", reviewProviderLabel(cfg.AI.Provider), err)
+				}
+			}
 			if cmd.Flags().Changed("max-files") && maxFiles <= 0 {
 				return errors.New("--max-files must be greater than zero")
 			}
@@ -523,6 +528,20 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 					reconciliation.AttachExecutionVerifications(&frameworkResults[index].Reconciliation, verificationResults)
 				}
 			}
+			reportValue.Frameworks = frameworkResults
+			syncLegacyFrameworkFields(&reportValue)
+			var artifacts report.Artifacts
+			if resolvedReportDirectory != "" && cfg.AI.Provider != "none" {
+				artifacts, err = report.WriteArtifacts(resolvedReportDirectory, reportValue)
+				if err != nil {
+					return fmt.Errorf("save preliminary scan reports: %w", err)
+				}
+				if outputFormat == "terminal" {
+					if _, err := fmt.Fprintf(stdout, "Preliminary report saved before AI review:\n  %s\n  %s\n\n", artifacts.Markdown, artifacts.JSON); err != nil {
+						return fmt.Errorf("write preliminary report paths: %w", err)
+					}
+				}
+			}
 			if cfg.AI.Provider != "none" {
 				candidateCount := 0
 				investigationRequests := make([]providers.TechnicalReviewRequest, len(frameworkResults))
@@ -548,35 +567,46 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				for index := range frameworkResults {
 					var technicalReview providers.TechnicalReviewResult
 					if index == 0 {
-						review, reviewed, reviewErr := reviewWithProvider(
-							cmd.Context(), cfg.AI, target, visible, frameworkResults[index].TechnicalEvidence, investigationRequests[index], result.FullRepository,
-							refreshReview, technicalReviewProgress(progressWriter),
-						)
+						review, reviewErr := reviewFindingsWithProvider(cmd.Context(), cfg.AI, target, visible)
 						if reviewErr != nil {
-							return reviewErr
+							warning := fmt.Sprintf("%s finding review was incomplete: %v. Deterministic findings remain unchanged.", reviewProviderLabel(cfg.AI.Provider), reviewErr)
+							reportValue.Warnings = append(reportValue.Warnings, warning)
+							if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
+								return fmt.Errorf("write review warning: %w", err)
+							}
+						} else {
+							reportValue.Review = &review
 						}
-						reportValue.Review = &review
-						technicalReview = reviewed
-					} else {
-						var reviewErr error
-						technicalReview, reviewErr = reviewTechnicalWithProvider(
-							cmd.Context(), cfg.AI, frameworkResults[index].TechnicalEvidence, investigationRequests[index], result.FullRepository,
-							refreshReview, technicalReviewProgress(progressWriter),
-						)
-						if reviewErr != nil {
-							return reviewErr
+					}
+					technicalReview, reviewErr := reviewTechnicalWithProvider(
+						cmd.Context(), cfg.AI, frameworkResults[index].TechnicalEvidence, investigationRequests[index], result.FullRepository,
+						refreshReview, technicalReviewProgress(progressWriter),
+					)
+					if reviewErr != nil {
+						warning := fmt.Sprintf("%s technical evidence review for %s was incomplete: %v. Deterministic evidence remains available.", reviewProviderLabel(cfg.AI.Provider), frameworkResults[index].Name, reviewErr)
+						reportValue.Warnings = append(reportValue.Warnings, warning)
+						if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
+							return fmt.Errorf("write technical review warning: %w", err)
 						}
+						continue
 					}
 					frameworkResults[index].TechnicalReview = &technicalReview
 					reconciliation.AttachTechnicalInvestigations(&frameworkResults[index].Reconciliation, technicalReview)
 					if frameworkResults[index].TechnicalEvidence.Pack.ID == framework.EUAIActTechnicalEvidencePackID {
 						reportValue.TechnicalReview = &technicalReview
 					}
+					reportValue.Frameworks = frameworkResults
+					syncLegacyFrameworkFields(&reportValue)
+					if resolvedReportDirectory != "" {
+						artifacts, err = report.WriteArtifacts(resolvedReportDirectory, reportValue)
+						if err != nil {
+							return fmt.Errorf("checkpoint AI review reports: %w", err)
+						}
+					}
 				}
 			}
 			reportValue.Frameworks = frameworkResults
 			syncLegacyFrameworkFields(&reportValue)
-			var artifacts report.Artifacts
 			if resolvedReportDirectory != "" {
 				artifacts, err = report.WriteArtifacts(resolvedReportDirectory, reportValue)
 				if err != nil {
@@ -731,34 +761,25 @@ func validateVerificationPlans(plans []verification.Options, evidence framework.
 	return plans, nil
 }
 
-func reviewWithProvider(
+func reviewFindingsWithProvider(
 	ctx context.Context,
 	settings config.AIConfig,
 	target string,
 	findings []rules.Finding,
-	evidence framework.TechnicalEvidenceReport,
-	investigationRequest providers.TechnicalReviewRequest,
-	repository discovery.Repository,
-	refresh bool,
-	onProgress func(technicalreview.Progress) error,
-) (providers.ReviewResult, providers.TechnicalReviewResult, error) {
-	reviewer, timeout, maxFindings, model, kind, err := configuredReviewer(settings)
+) (providers.ReviewResult, error) {
+	reviewer, timeout, _, _, _, err := configuredReviewer(settings)
 	if err != nil {
-		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, err
+		return providers.ReviewResult{}, err
 	}
 	findingContext, cancelFindings := context.WithTimeout(ctx, timeout)
+	defer cancelFindings()
 	findingResult, err := reviewer.Review(findingContext, providers.ReviewRequest{
 		RepositoryRoot: target, Findings: findings,
 	})
-	cancelFindings()
 	if err != nil {
-		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, fmt.Errorf("%s advisory review: %w", reviewProviderLabel(settings.Provider), err)
+		return providers.ReviewResult{}, fmt.Errorf("%s advisory review: %w", reviewProviderLabel(settings.Provider), err)
 	}
-	technicalResult, err := runTechnicalReview(ctx, reviewer, settings, evidence, investigationRequest, repository, refresh, maxFindings, model, kind, onProgress)
-	if err != nil {
-		return providers.ReviewResult{}, providers.TechnicalReviewResult{}, err
-	}
-	return findingResult, technicalResult, nil
+	return findingResult, nil
 }
 
 func reviewTechnicalWithProvider(

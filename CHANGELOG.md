@@ -8,6 +8,8 @@
 - First-run setup now inspects and summarizes the repository before asking questions, uses a short factual profile by default, recommends a technical framework mapping from declared regions, and keeps the complete questionnaire available through `complyscan setup --advanced`.
 - First-run setup now offers an explicit quick scan, deep AI review, or configure-only choice. `complyscan scan --quick` guarantees a model-free preliminary scan, while `--deep` requires a configured review provider.
 - Running `complyscan` without a subcommand now starts discovery-first setup when no repository configuration exists and scans immediately when the current repository is already configured.
+- Deep scans now save a complete preliminary Markdown and JSON report before the first model request, checkpoint completed framework reviews, and preserve deterministic results when advisory finding review is unavailable.
+- A failed or invalid model response now marks only that technical target as incomplete and continues with the remaining evidence investigations instead of aborting the entire scan.
 
 ## 0.1.4 - 2026-08-08
 

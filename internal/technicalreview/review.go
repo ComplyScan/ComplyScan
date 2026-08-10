@@ -86,7 +86,11 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 			var plannerUsage providers.Usage
 			plan, plannerUsage, err = planner.PlanTechnicalSearch(ctx, baseCandidate)
 			if err != nil {
-				return providers.TechnicalReviewResult{}, fmt.Errorf("plan bounded technical follow-up: %w", err)
+				if ctx.Err() != nil {
+					return base, ctx.Err()
+				}
+				base.Notes = append(base.Notes, candidateFailureNote(candidate, "follow-up planning", err))
+				continue
 			}
 			base.Usage.PromptTokens += plannerUsage.PromptTokens
 			base.Usage.CompletionTokens += plannerUsage.CompletionTokens
@@ -100,10 +104,15 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 		}
 		partial, err := reviewer.ReviewTechnical(ctx, providers.TechnicalReviewRequest{Candidates: []providers.TechnicalCandidate{candidate}})
 		if err != nil {
-			return providers.TechnicalReviewResult{}, err
+			if ctx.Err() != nil {
+				return base, ctx.Err()
+			}
+			base.Notes = append(base.Notes, candidateFailureNote(candidate, "model review", err))
+			continue
 		}
 		if len(partial.Observations) != 1 || partial.Observations[0].SystemID != candidate.SystemID || partial.Observations[0].ObjectiveID != candidate.ObjectiveID || partial.Observations[0].EvidenceFingerprint != candidate.EvidenceFingerprint {
-			return providers.TechnicalReviewResult{}, errors.New("technical reviewer did not return exactly one correctly bound observation")
+			base.Notes = append(base.Notes, candidateFailureNote(candidate, "model review", errors.New("technical reviewer did not return exactly one correctly bound observation")))
+			continue
 		}
 		observation = partial.Observations[0]
 		observation.FollowUpRequested = plan.Needed
@@ -126,6 +135,18 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 		base.Notes = append(base.Notes, fmt.Sprintf("Reused %d of %d technical observation(s) from the local source-free review cache.", cacheHits, len(selected)))
 	}
 	return base, nil
+}
+
+func candidateFailureNote(candidate providers.TechnicalCandidate, stage string, err error) string {
+	detail := strings.ReplaceAll(strings.TrimSpace(err.Error()), "\n", " ")
+	if len(detail) > 500 {
+		detail = detail[:500] + "..."
+	}
+	location := candidate.Path
+	if location == "" {
+		location = "extended repository search"
+	}
+	return fmt.Sprintf("AI investigation incomplete for %s at %s during %s: %s. The target remains unresolved and review continued.", candidate.ObjectiveID, location, stage, detail)
 }
 
 func searchQueryLabels(queries []providers.TechnicalSearchQuery) []string {
