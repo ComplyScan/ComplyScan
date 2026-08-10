@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "model": "qwen3:8b",
+  "model": "qwen3.5:9b",
   "batch_size": 1,
   "timeout_seconds": 600,
   "rejected_strengths": ["not_supported"],

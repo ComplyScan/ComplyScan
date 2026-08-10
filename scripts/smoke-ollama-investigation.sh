@@ -4,7 +4,7 @@ set -eu
 
 script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repository_root=$(CDPATH= cd -- "${script_directory}/.." && pwd)
-model=${COMPLYSCAN_OLLAMA_MODEL:-qwen3:8b}
+model=${COMPLYSCAN_OLLAMA_MODEL:-qwen3.5:9b}
 output_directory=${COMPLYSCAN_SMOKE_DIR:-${repository_root}/.complyscan/validation/ollama-smoke}
 fixture=${repository_root}/testdata/ollama-investigation-smoke
 temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/complyscan-ollama-smoke.XXXXXX")
