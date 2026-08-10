@@ -219,6 +219,10 @@ func TestWriteTerminalConciseCompletionSummarizesWithoutEvidenceDump(t *testing.
 	value := New(".", "0.1.5-dev", []rules.Finding{{Severity: rules.SeverityMedium}}, nil, 0)
 	value.AIInventory = &inventory.Report{Summary: inventory.Summary{Components: 3, Signals: 12}}
 	value.Frameworks = []FrameworkResult{{
+		Applicability: func() *profile.AssessmentReport {
+			assessment := profile.AssessEUAIAct([]profile.System{profile.NewDraftSystem("example", "Example")})
+			return &assessment
+		}(),
 		TechnicalEvidence: framework.TechnicalEvidenceReport{Summary: framework.ObjectiveSummary{Total: 7, CandidateEvidence: 3, NotDetected: 4}},
 		Reconciliation:    reconciliation.Report{Summary: reconciliation.Summary{LikelyRequired: 5, RequirementWithEvidence: 3, RequirementWithoutEvidence: 2, Unresolved: 1}},
 		TechnicalReview:   &providers.TechnicalReviewResult{InputCandidates: 4, Reviewed: 3},
@@ -227,7 +231,7 @@ func TestWriteTerminalConciseCompletionSummarizesWithoutEvidenceDump(t *testing.
 	if err := WriteTerminalConciseCompletion(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"Scan complete: 1 potential issue", "AI inventory: 3 component", "Technical objectives: 7 total", "Requirement mapping: 5 likely required", "3/4 technical target", "Use --verbose"} {
+	for _, expected := range []string{"Scan complete: 1 potential issue", "AI inventory: 3 component", "Applicability context: Example — incomplete", "unresolved fact(s); requirement mapping is provisional", "Technical objectives: 7 total", "Requirement mapping: 5 likely required", "3/4 technical target", "Use --verbose"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("concise completion missing %q:\n%s", expected, output.String())
 		}

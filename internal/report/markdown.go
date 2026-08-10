@@ -80,7 +80,7 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 			return err
 		}
 		for _, system := range report.Applicability.Systems {
-			if _, err := fmt.Fprintf(writer, "\n### %s\n\n- System ID: %s\n- Automated scope: %s\n- High-risk screening: %s\n", markdownText(system.SystemName), inlineCode(system.SystemID), markdownText(string(system.AutomatedScope)), markdownText(string(system.HighRiskScreening))); err != nil {
+			if _, err := fmt.Fprintf(writer, "\n### %s\n\n- System ID: %s\n- Automated scope: %s\n- High-risk screening: %s\n- Technical mapping readiness: %s\n", markdownText(system.SystemName), inlineCode(system.SystemID), markdownText(string(system.AutomatedScope)), markdownText(string(system.HighRiskScreening)), markdownText(string(system.MappingReadiness))); err != nil {
 				return err
 			}
 			for _, missing := range system.MissingContext {
@@ -226,9 +226,14 @@ func writeFrameworkResultMarkdown(writer io.Writer, result FrameworkResult) erro
 			return err
 		}
 		for _, system := range result.Applicability.Systems {
-			if _, err := fmt.Fprintf(writer, "\n- %s (%s): scope %s; high-risk screening %s\n",
-				markdownText(system.SystemName), inlineCode(system.SystemID), markdownText(string(system.AutomatedScope)), markdownText(string(system.HighRiskScreening))); err != nil {
+			if _, err := fmt.Fprintf(writer, "\n- %s (%s): scope %s; high-risk screening %s; technical mapping readiness **%s**\n",
+				markdownText(system.SystemName), inlineCode(system.SystemID), markdownText(string(system.AutomatedScope)), markdownText(string(system.HighRiskScreening)), markdownText(string(system.MappingReadiness))); err != nil {
 				return err
+			}
+			for _, missing := range system.MissingContext {
+				if _, err := fmt.Fprintf(writer, "  - Unresolved fact: %s\n", markdownText(missing)); err != nil {
+					return err
+				}
 			}
 		}
 	}

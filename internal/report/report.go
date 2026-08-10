@@ -314,6 +314,9 @@ func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
 			return err
 		}
 	}
+	if err := writeConciseApplicabilityReadiness(w, value); err != nil {
+		return err
+	}
 	objectives := framework.ObjectiveSummary{}
 	required, recommended, withEvidence, withoutEvidence, unresolved := 0, 0, 0, 0, 0
 	reviewTargets, reviewedTargets := 0, 0
@@ -355,6 +358,34 @@ func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
 	}
 	_, err := fmt.Fprintln(w, "Use --verbose for full terminal evidence; the saved Markdown report contains the reviewable detail.")
 	return err
+}
+
+func writeConciseApplicabilityReadiness(w io.Writer, value Report) error {
+	reports := make([]*profile.AssessmentReport, 0, len(value.Frameworks)+1)
+	if value.Applicability != nil {
+		reports = append(reports, value.Applicability)
+	}
+	for _, result := range value.Frameworks {
+		if result.Applicability != nil {
+			reports = append(reports, result.Applicability)
+		}
+	}
+	for _, report := range reports {
+		for _, system := range report.Systems {
+			if _, err := fmt.Fprintf(w, "Applicability context: %s — %s", system.SystemName, system.MappingReadiness); err != nil {
+				return err
+			}
+			if len(system.MissingContext) > 0 {
+				if _, err := fmt.Fprintf(w, " (%d unresolved fact(s); requirement mapping is provisional)", len(system.MissingContext)); err != nil {
+					return err
+				}
+			}
+			if _, err := fmt.Fprintln(w); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func writeFrameworkResultsTerminal(w io.Writer, results []FrameworkResult) error {

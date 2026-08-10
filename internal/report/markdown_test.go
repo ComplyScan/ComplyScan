@@ -102,3 +102,21 @@ func TestMarkdownTextRemovesLineBreaksAndEscapesMarkup(t *testing.T) {
 		t.Fatalf("inlineCode did not protect backtick: %q", got)
 	}
 }
+
+func TestMarkdownShowsApplicabilityReadinessAndUnresolvedFacts(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	assessment := profile.AssessEUAIAct([]profile.System{profile.NewDraftSystem("example", "Example")})
+	value.Frameworks = []FrameworkResult{{
+		ID: "eu-ai-act", Name: "EU AI Act technical code evidence", Nature: framework.NatureLegislation,
+		Applicability: &assessment,
+	}}
+	var output bytes.Buffer
+	if err := WriteMarkdown(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"technical mapping readiness **incomplete**", "Unresolved fact: Operating regions have not been established"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
+		}
+	}
+}
