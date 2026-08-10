@@ -54,7 +54,7 @@ func newInitCommand(stdout io.Writer) *cobra.Command {
 
 			cfg := config.Default()
 			interactive := forceInteractive || (!nonInteractive && isInteractiveReader(cmd.InOrStdin()))
-			prompt := promptSession{reader: bufio.NewReader(cmd.InOrStdin()), output: stdout}
+			prompt := newPromptSession(cmd.InOrStdin(), stdout)
 			if err := configureFrameworkSelection(prompt, &cfg, interactive, selectedFrameworks); err != nil {
 				return err
 			}
@@ -200,7 +200,7 @@ func ensureReportGitIgnore(target string) error {
 }
 
 func collectSystemProfile(input io.Reader, output io.Writer, target string, now time.Time) (profile.System, error) {
-	return collectSystemProfileWithPrompt(promptSession{reader: bufio.NewReader(input), output: output}, target, now)
+	return collectSystemProfileWithPrompt(newPromptSession(input, output), target, now)
 }
 
 func collectSystemProfileWithPrompt(prompt promptSession, target string, now time.Time, enabledFrameworks ...string) (profile.System, error) {
@@ -415,8 +415,19 @@ func frameworkEnabled(enabled []string, wanted string) bool {
 }
 
 type promptSession struct {
-	reader *bufio.Reader
-	output io.Writer
+	reader     *bufio.Reader
+	output     io.Writer
+	selectMany func(label string, defaults, allowed []string) ([]string, error)
+}
+
+func newPromptSession(input io.Reader, output io.Writer) promptSession {
+	session := promptSession{reader: bufio.NewReader(input), output: output}
+	if terminalPromptAvailable(input, output) {
+		session.selectMany = func(label string, defaults, allowed []string) ([]string, error) {
+			return runTerminalMultiSelect(input, output, label, defaults, allowed)
+		}
+	}
+	return session
 }
 
 func (session promptSession) confirm(label string, defaultValue bool) (bool, error) {
@@ -511,6 +522,36 @@ func promptChoice[T ~string](session promptSession, label string, defaultValue T
 func promptChoices[T ~string](session promptSession, label string, defaultValue []T, allowed ...T) ([]T, error) {
 	if len(allowed) == 0 {
 		return nil, fmt.Errorf("%s has no available choices", strings.ToLower(label))
+	}
+	if session.selectMany != nil {
+		defaultStrings := make([]string, len(defaultValue))
+		for index, value := range defaultValue {
+			defaultStrings[index] = string(value)
+		}
+		allowedStrings := make([]string, len(allowed))
+		for index, value := range allowed {
+			allowedStrings[index] = string(value)
+		}
+		selected, err := session.selectMany(label, defaultStrings, allowedStrings)
+		if err != nil {
+			return nil, err
+		}
+		result := make([]T, 0, len(selected))
+		seen := make(map[int]struct{}, len(selected))
+		for _, value := range selected {
+			index, matched := choiceIndex(value, allowed)
+			if !matched {
+				return nil, fmt.Errorf("%s selector returned unsupported value %q", strings.ToLower(label), value)
+			}
+			if _, duplicate := seen[index]; !duplicate {
+				result = append(result, allowed[index])
+				seen[index] = struct{}{}
+			}
+		}
+		if len(result) == 0 {
+			return nil, fmt.Errorf("%s requires at least one selection", strings.ToLower(label))
+		}
+		return result, nil
 	}
 	for index, candidate := range allowed {
 		if _, err := fmt.Fprintf(session.output, "  %d) %s\n", index+1, candidate); err != nil {

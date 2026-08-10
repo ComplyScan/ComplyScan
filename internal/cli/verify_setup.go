@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -95,7 +94,7 @@ func runVerifySetup(cmd *cobra.Command, stdout io.Writer, target, configPath str
 	if len(detected) == 0 {
 		return errors.New("no supported test command was detected; add a test manifest or configure a recipe directly in .complyscan.yml")
 	}
-	prompt := promptSession{reader: bufio.NewReader(cmd.InOrStdin()), output: stdout}
+	prompt := newPromptSession(cmd.InOrStdin(), stdout)
 	selectedSystem, err := promptVerificationSystem(prompt, cfg.Systems)
 	if err != nil {
 		return err

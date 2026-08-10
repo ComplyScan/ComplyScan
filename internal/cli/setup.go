@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -112,7 +111,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		return err
 	}
 
-	prompt := promptSession{reader: bufio.NewReader(cmd.InOrStdin()), output: stdout}
+	prompt := newPromptSession(cmd.InOrStdin(), stdout)
 	var repositorySummary setupRepositorySummary
 	if interactive {
 		summary, inspectErr := inspectRepositoryForSetup(cmd.Context(), stdout, target, cfg, build)

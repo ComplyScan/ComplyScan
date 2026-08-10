@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -86,7 +85,7 @@ func newOwnershipSetupCommand(stdout io.Writer) *cobra.Command {
 			if !forceInteractive && !isInteractiveReader(cmd.InOrStdin()) {
 				return errors.New("ownership setup requires a terminal; use --interactive when piping answers or edit .complyscan.yml directly")
 			}
-			prompt := promptSession{reader: bufio.NewReader(cmd.InOrStdin()), output: stdout}
+			prompt := newPromptSession(cmd.InOrStdin(), stdout)
 			changed, err := collectOwnershipRules(prompt, &cfg, false)
 			if err != nil {
 				return err

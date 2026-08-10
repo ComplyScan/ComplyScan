@@ -287,6 +287,48 @@ func TestPromptChoicesUsesNumberedMultiSelect(t *testing.T) {
 	}
 }
 
+func TestPromptChoicesUsesTerminalMultiSelectWhenAvailable(t *testing.T) {
+	var output bytes.Buffer
+	called := false
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("")), output: &output,
+		selectMany: func(label string, defaults, allowed []string) ([]string, error) {
+			called = true
+			if label != "Operating regions" || strings.Join(defaults, ",") != "unknown" || strings.Join(allowed, ",") != "eu,us,unknown" {
+				t.Fatalf("selector arguments: label=%q defaults=%#v allowed=%#v", label, defaults, allowed)
+			}
+			return []string{"eu", "us"}, nil
+		},
+	}
+	selected, err := promptChoices(prompt, "Operating regions", []profile.OperatingRegion{profile.RegionUnknown},
+		profile.RegionEU, profile.RegionUS, profile.RegionUnknown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called || len(selected) != 2 || selected[0] != profile.RegionEU || selected[1] != profile.RegionUS {
+		t.Fatalf("selected = %#v; called=%t", selected, called)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("numbered fallback was unexpectedly rendered: %q", output.String())
+	}
+}
+
+func TestTerminalPromptAvailabilityRespectsAccessibleModeAndStreams(t *testing.T) {
+	var input, output bytes.Buffer
+	if terminalPromptAvailable(&input, &output) {
+		t.Fatal("buffers must use the text fallback")
+	}
+	t.Setenv(accessiblePromptEnvironment, "1")
+	if terminalPromptAvailable(os.Stdin, os.Stdout) {
+		t.Fatal("accessible mode must use the text fallback")
+	}
+	t.Setenv(accessiblePromptEnvironment, "")
+	t.Setenv("TERM", "dumb")
+	if terminalPromptAvailable(os.Stdin, os.Stdout) {
+		t.Fatal("dumb terminals must use the text fallback")
+	}
+}
+
 func TestPromptSetupScanModeMakesExpensiveReviewExplicit(t *testing.T) {
 	tests := []struct {
 		name  string
