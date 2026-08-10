@@ -7,6 +7,7 @@ import (
 
 type ScopeStatus string
 type HighRiskScreening string
+type MappingReadiness string
 
 const (
 	ScopePotentiallyApplicable ScopeStatus = "potentially-applicable"
@@ -16,6 +17,10 @@ const (
 	HighRiskPotential HighRiskScreening = "potential-high-risk"
 	HighRiskNoSignal  HighRiskScreening = "no-direct-high-risk-signal"
 	HighRiskUnknown   HighRiskScreening = "needs-context"
+
+	MappingIncomplete     MappingReadiness = "incomplete"
+	MappingFactuallyReady MappingReadiness = "factually-ready"
+	MappingHumanReviewed  MappingReadiness = "human-reviewed"
 )
 
 type AssessmentReport struct {
@@ -30,6 +35,7 @@ type Assessment struct {
 	SystemName        string                 `json:"system_name"`
 	AutomatedScope    ScopeStatus            `json:"automated_scope"`
 	HighRiskScreening HighRiskScreening      `json:"high_risk_screening"`
+	MappingReadiness  MappingReadiness       `json:"technical_mapping_readiness"`
 	Signals           []string               `json:"signals"`
 	MissingContext    []string               `json:"missing_context"`
 	HumanDecision     *ApplicabilityDecision `json:"human_decision,omitempty"`
@@ -44,6 +50,7 @@ func AssessEUAIAct(systems []System) AssessmentReport {
 		Framework: "EU AI Act", FrameworkURL: euAIActURL, Systems: make([]Assessment, 0, len(systems)),
 		Notes: []string{
 			"Automated scope and high-risk screening are provisional and use only the declared system profile.",
+			"Technical mapping readiness means the factual inputs needed by this control pack are present; it is not a legal applicability conclusion.",
 			"No result is a legal determination, conformity assessment, or compliance certificate.",
 		},
 	}
@@ -102,12 +109,6 @@ func assessSystem(system System) Assessment {
 	if system.LifecycleStage == LifecycleUnknown {
 		assessment.MissingContext = append(assessment.MissingContext, "The lifecycle stage has not been established.")
 	}
-	if containsText(system.Users, "unknown") {
-		assessment.MissingContext = append(assessment.MissingContext, "The system's users have not been established.")
-	}
-	if containsText(system.AffectedGroups, "unknown") {
-		assessment.MissingContext = append(assessment.MissingContext, "Potentially affected groups have not been established.")
-	}
 	if system.DecisionImpact == ImpactUnknown {
 		assessment.MissingContext = append(assessment.MissingContext, "Decision impact has not been established.")
 	}
@@ -117,14 +118,20 @@ func assessSystem(system System) Assessment {
 	if len(system.AIActivities) == 0 || contains(system.AIActivities, ActivityUnknown) {
 		assessment.MissingContext = append(assessment.MissingContext, "AI activities such as inference, training, evaluation, automated decisions, agent tool use, or synthetic-content generation have not been established.")
 	}
-	if system.Data.PersonalData == TriUnknown || system.Data.SpecialCategoryData == TriUnknown || system.Data.ChildrenData == TriUnknown {
+	if requiresDataContext(system, assessment.HighRiskScreening) &&
+		(system.Data.PersonalData == TriUnknown || system.Data.SpecialCategoryData == TriUnknown || system.Data.ChildrenData == TriUnknown) {
 		assessment.MissingContext = append(assessment.MissingContext, "One or more data categories have not been established.")
 	}
 	if contains(system.DeploymentModels, DeploymentUnknown) {
 		assessment.MissingContext = append(assessment.MissingContext, "Deployment models have not been established.")
 	}
-	if system.ProfileReview.Status != ReviewConfirmed {
-		assessment.MissingContext = append(assessment.MissingContext, "The factual system profile has not been confirmed by a named reviewer.")
+	if requiresPeopleContext(system, assessment.HighRiskScreening) {
+		if containsText(system.Users, "unknown") {
+			assessment.MissingContext = append(assessment.MissingContext, "The system's users have not been established.")
+		}
+		if containsText(system.AffectedGroups, "unknown") {
+			assessment.MissingContext = append(assessment.MissingContext, "Potentially affected groups have not been established.")
+		}
 	}
 	for _, decision := range system.Applicability {
 		if decision.Framework == FrameworkEUAIAct {
@@ -133,7 +140,29 @@ func assessSystem(system System) Assessment {
 			break
 		}
 	}
+	assessment.MappingReadiness = MappingFactuallyReady
+	if len(assessment.MissingContext) > 0 {
+		assessment.MappingReadiness = MappingIncomplete
+	} else if system.ProfileReview.Status == ReviewConfirmed {
+		assessment.MappingReadiness = MappingHumanReviewed
+	}
 	return assessment
+}
+
+func requiresPeopleContext(system System, screening HighRiskScreening) bool {
+	return screening == HighRiskPotential || system.DecisionImpact == ImpactSignificant || system.DecisionImpact == ImpactAutonomous
+}
+
+func requiresDataContext(system System, screening HighRiskScreening) bool {
+	if screening == HighRiskPotential {
+		return true
+	}
+	for _, activity := range system.AIActivities {
+		if activity == ActivityTraining || activity == ActivityFineTuning || activity == ActivityEvaluation || activity == ActivityAutomatedDecision {
+			return true
+		}
+	}
+	return contains(system.UseCaseDomains, DomainBiometrics)
 }
 
 func contains[T comparable](values []T, wanted T) bool {

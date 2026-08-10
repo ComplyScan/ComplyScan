@@ -24,6 +24,9 @@ func TestAssessEUAIActSeparatesAutomatedSignalsAndHumanDecision(t *testing.T) {
 	if len(assessment.MissingContext) != 0 {
 		t.Fatalf("unexpected missing context: %#v", assessment.MissingContext)
 	}
+	if assessment.MappingReadiness != MappingHumanReviewed {
+		t.Fatalf("mapping readiness = %q", assessment.MappingReadiness)
+	}
 }
 
 func TestAssessEUAIActKeepsUnknownContextVisible(t *testing.T) {
@@ -36,8 +39,27 @@ func TestAssessEUAIActKeepsUnknownContextVisible(t *testing.T) {
 	if len(assessment.MissingContext) < 6 {
 		t.Fatalf("missing context was hidden: %#v", assessment.MissingContext)
 	}
+	if assessment.MappingReadiness != MappingIncomplete {
+		t.Fatalf("mapping readiness = %q", assessment.MappingReadiness)
+	}
 	if assessment.HumanDecision == nil || assessment.HumanDecision.Status != ApplicabilityNeedsReview {
 		t.Fatalf("unexpected human decision: %#v", assessment.HumanDecision)
+	}
+}
+
+func TestAssessEUAIActOnlyRequiresConditionalContextWhenRelevant(t *testing.T) {
+	system := validSystem()
+	system.UseCaseDomains = []UseCaseDomain{DomainSoftwareDevelopment}
+	system.DecisionImpact = ImpactLow
+	system.AIActivities = []AIActivity{ActivityInference}
+	system.Users = []string{"unknown"}
+	system.AffectedGroups = []string{"unknown"}
+	system.Data = DataProfile{PersonalData: TriUnknown, SpecialCategoryData: TriUnknown, ChildrenData: TriUnknown}
+	system.ProfileReview = ProfileReview{Status: ReviewDraft}
+
+	assessment := AssessEUAIAct([]System{system}).Systems[0]
+	if len(assessment.MissingContext) != 0 || assessment.MappingReadiness != MappingFactuallyReady {
+		t.Fatalf("irrelevant conditional context blocked mapping: %#v", assessment)
 	}
 }
 

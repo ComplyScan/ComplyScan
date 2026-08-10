@@ -13,7 +13,7 @@ func TestAssessmentReportsRemainExplicitlyProvisional(t *testing.T) {
 	if err := WriteTerminal(&terminal, report); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"Automated scope: needs-context", "Human decision: needs-review", "No result is a legal determination"} {
+	for _, expected := range []string{"Automated scope: needs-context", "Technical mapping readiness: incomplete", "Human decision: needs-review", "No result is a legal determination"} {
 		if !strings.Contains(terminal.String(), expected) {
 			t.Errorf("terminal output missing %q:\n%s", expected, terminal.String())
 		}

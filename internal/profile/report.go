@@ -25,7 +25,7 @@ func WriteTerminal(writer io.Writer, report AssessmentReport) error {
 		if _, err := fmt.Fprintf(writer, "%s (%s)\n", assessment.SystemName, assessment.SystemID); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(writer, "  Automated scope: %s\n  High-risk screening: %s\n", assessment.AutomatedScope, assessment.HighRiskScreening); err != nil {
+		if _, err := fmt.Fprintf(writer, "  Automated scope: %s\n  High-risk screening: %s\n  Technical mapping readiness: %s\n", assessment.AutomatedScope, assessment.HighRiskScreening, assessment.MappingReadiness); err != nil {
 			return err
 		}
 		if assessment.HumanDecision == nil {
