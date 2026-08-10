@@ -46,6 +46,26 @@ func TestScanExitCodes(t *testing.T) {
 	}
 }
 
+func TestScanCommandReusesGuidedSetupDiscovery(t *testing.T) {
+	target := t.TempDir()
+	seed := &scanDiscoverySeed{Target: target, Discovery: discovery.Result{Repository: discovery.Repository{
+		Root:  target,
+		Files: []discovery.File{{Path: "app.py", Kind: discovery.KindSource, Content: []byte("from openai import OpenAI\nclient = OpenAI()\n")}},
+	}}}
+	var stdout, stderr bytes.Buffer
+	command := newScanCommandWithDiscovery(&stdout, testBuild, seed)
+	command.SilenceErrors = true
+	command.SilenceUsage = true
+	command.SetErr(&stderr)
+	command.SetArgs([]string{"--quick", "--no-report", target})
+	if err := command.Execute(); err != nil {
+		t.Fatalf("scan error = %v; stderr=%q\n%s", err, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Reusing repository discovery from guided setup") || !strings.Contains(stdout.String(), "AI-DISC-001") {
+		t.Fatalf("seeded scan output:\n%s", stdout.String())
+	}
+}
+
 func TestScanModesControlConfiguredAIReview(t *testing.T) {
 	target := t.TempDir()
 	if err := os.WriteFile(filepath.Join(target, "main.go"), []byte("package main\n"), 0o644); err != nil {

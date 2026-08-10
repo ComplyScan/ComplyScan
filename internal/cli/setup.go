@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/config"
+	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/spf13/cobra"
@@ -230,7 +231,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		_, err := fmt.Fprintf(stdout, "Next: complyscan scan --quick %s\nDeep review when ready: complyscan scan --deep %s\n", shellQuote(target), shellQuote(target))
 		return err
 	}
-	return runFirstScan(cmd, stdout, build, target, scanMode)
+	return runFirstScan(cmd, stdout, build, target, scanMode, repositorySummary.Discovery)
 }
 
 func setupReviewExplicit(options setupOptions) bool {
@@ -799,7 +800,7 @@ func systemIndex(systems []profile.System, id string) int {
 	return -1
 }
 
-func runFirstScan(parent *cobra.Command, stdout io.Writer, build BuildInfo, target string, mode setupScanMode) error {
+func runFirstScan(parent *cobra.Command, stdout io.Writer, build BuildInfo, target string, mode setupScanMode, discovered discovery.Result) error {
 	label := "quick preliminary scan"
 	args := []string{"--quick", target}
 	if mode == setupScanDeep {
@@ -809,7 +810,7 @@ func runFirstScan(parent *cobra.Command, stdout io.Writer, build BuildInfo, targ
 	if _, err := fmt.Fprintf(stdout, "\nStarting first %s...\n", label); err != nil {
 		return err
 	}
-	command := newScanCommand(stdout, build)
+	command := newScanCommandWithDiscovery(stdout, build, &scanDiscoverySeed{Target: target, Discovery: discovered})
 	command.SilenceErrors = true
 	command.SilenceUsage = true
 	command.SetIn(parent.InOrStdin())

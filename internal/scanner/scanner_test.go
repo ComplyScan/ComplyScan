@@ -39,6 +39,26 @@ func TestScannerRunsOfflineRulePipeline(t *testing.T) {
 	}
 }
 
+func TestScannerRunsAgainstPreDiscoveredRepository(t *testing.T) {
+	target := t.TempDir()
+	discovered := discovery.Result{Repository: discovery.Repository{Root: target, Files: []discovery.File{{
+		Path: "app.py", Kind: discovery.KindSource, Content: []byte("from openai import OpenAI\nclient = OpenAI()\n"),
+	}}}}
+	result, err := New().ScanDiscovered(context.Background(), target, discovered, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range result.Findings {
+		if finding.RuleID == "AI-DISC-001" && finding.Path == "app.py" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("pre-discovered findings = %#v", result.Findings)
+	}
+}
+
 func TestFindingFingerprintSurvivesLineMovement(t *testing.T) {
 	first := rules.Finding{RuleID: "TEST-001", Title: "Test", Path: "src/app.go", StartLine: 4, Evidence: "logger.Info(prompt)"}
 	second := first

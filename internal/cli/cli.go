@@ -246,6 +246,15 @@ func newInventoryCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 }
 
 func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
+	return newScanCommandWithDiscovery(stdout, build, nil)
+}
+
+type scanDiscoverySeed struct {
+	Target    string
+	Discovery discovery.Result
+}
+
+func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDiscoverySeed) *cobra.Command {
 	var (
 		format                    string
 		minimum                   string
@@ -453,7 +462,18 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 				scanOptions.OnProgress = terminalProgress(stdout)
 			}
 
-			result, err := scanner.New().Scan(cmd.Context(), target, scanOptions)
+			engine := scanner.New()
+			var result scanner.Result
+			if seed != nil && sameScanTarget(seed.Target, target) {
+				if outputFormat == "terminal" {
+					if _, err := fmt.Fprintln(stdout, "Reusing repository discovery from guided setup."); err != nil {
+						return fmt.Errorf("write discovery reuse status: %w", err)
+					}
+				}
+				result, err = engine.ScanDiscovered(cmd.Context(), target, seed.Discovery, scanOptions)
+			} else {
+				result, err = engine.Scan(cmd.Context(), target, scanOptions)
+			}
 			if err != nil {
 				return fmt.Errorf("scan %q: %w", target, err)
 			}
@@ -674,6 +694,12 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().StringArrayVar(&verifySystems, "verify-system", nil, "configured system the test supports (repeatable; required when multiple systems exist)")
 	command.Flags().DurationVar(&verifyTimeout, "verify-timeout", 5*time.Minute, "timeout for opt-in isolated execution (maximum 30m)")
 	return command
+}
+
+func sameScanTarget(left, right string) bool {
+	leftPath, leftErr := filepath.Abs(left)
+	rightPath, rightErr := filepath.Abs(right)
+	return leftErr == nil && rightErr == nil && filepath.Clean(leftPath) == filepath.Clean(rightPath)
 }
 
 func configuredVerificationOptions(target string, recipes []config.VerificationRecipe) []verification.Options {

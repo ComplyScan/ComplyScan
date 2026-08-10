@@ -55,7 +55,13 @@ func (e *Engine) Scan(ctx context.Context, target string, options Options) (Resu
 	if err != nil {
 		return Result{}, err
 	}
+	return e.ScanDiscovered(ctx, target, discovered, options)
+}
 
+// ScanDiscovered runs the scanner pipeline against an already discovered
+// repository. It is used by scan-first onboarding so the final scan does not
+// read and classify every repository file a second time.
+func (e *Engine) ScanDiscovered(ctx context.Context, target string, discovered discovery.Result, options Options) (Result, error) {
 	fullRepository := discovered.Repository
 	scopedRepository := fullRepository
 	if options.ChangedSince != "" {
