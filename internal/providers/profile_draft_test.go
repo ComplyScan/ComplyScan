@@ -120,3 +120,17 @@ func TestDiscardUnsupportedProfileSuggestionsKeepsGroundedFacts(t *testing.T) {
 		t.Fatalf("retained %#v", filtered)
 	}
 }
+
+func TestCoalesceProfileSuggestionsCombinesDuplicateFields(t *testing.T) {
+	values := []ProfileSuggestion{
+		{Field: "deployment-models", Values: []string{"api"}, Confidence: "high", Rationale: "An HTTP route is defined.", Evidence: []ProfileEvidence{{Path: "app.ts", Line: 3}}},
+		{Field: "deployment-models", Values: []string{"public"}, Confidence: "medium", Rationale: "The route is described as public.", Evidence: []ProfileEvidence{{Path: "README.md", Line: 2}}},
+	}
+	merged, combined := coalesceProfileSuggestions(values)
+	if combined != 1 || len(merged) != 1 || strings.Join(merged[0].Values, ",") != "api,public" {
+		t.Fatalf("combined=%d merged=%#v", combined, merged)
+	}
+	if merged[0].Confidence != "medium" || len(merged[0].Evidence) != 2 {
+		t.Fatalf("merged=%#v", merged[0])
+	}
+}

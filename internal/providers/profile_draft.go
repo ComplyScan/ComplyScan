@@ -98,9 +98,13 @@ func (provider *OllamaProvider) DraftProfile(ctx context.Context, request Profil
 		return ProfileDraftResult{}, fmt.Errorf("decode %s structured profile draft: %w", provider.label, err)
 	}
 	cleanedSuggestions, discarded := discardUnsupportedProfileSuggestions(payload.Suggestions)
-	payload.Suggestions = cleanedSuggestions
+	coalescedSuggestions, combined := coalesceProfileSuggestions(cleanedSuggestions)
+	payload.Suggestions = coalescedSuggestions
 	if discarded > 0 {
 		result.Notes = append(result.Notes, fmt.Sprintf("Discarded %d empty, negative, or self-contradictory model suggestion(s).", discarded))
+	}
+	if combined > 0 {
+		result.Notes = append(result.Notes, fmt.Sprintf("Combined %d duplicate model suggestion field(s) into multi-value answers.", combined))
 	}
 	suggestions, err := validateProfileSuggestions(payload.Suggestions, sanitized)
 	if err != nil {
@@ -112,6 +116,74 @@ func (provider *OllamaProvider) DraftProfile(ctx context.Context, request Profil
 		TotalDurationNS: response.TotalDuration,
 	}
 	return result, nil
+}
+
+func coalesceProfileSuggestions(values []ProfileSuggestion) ([]ProfileSuggestion, int) {
+	result := make([]ProfileSuggestion, 0, len(values))
+	indexByField := make(map[string]int, len(values))
+	combined := 0
+	for _, value := range values {
+		index, exists := indexByField[value.Field]
+		if !exists {
+			indexByField[value.Field] = len(result)
+			result = append(result, value)
+			continue
+		}
+		combined++
+		existing := &result[index]
+		existing.Values = appendUniqueProfileValues(existing.Values, value.Values, maxProfileDraftValues)
+		existing.Evidence = appendUniqueProfileEvidence(existing.Evidence, value.Evidence, maxProfileDraftEvidence)
+		if strings.TrimSpace(value.Rationale) != "" && !strings.Contains(existing.Rationale, value.Rationale) {
+			existing.Rationale = strings.TrimSpace(existing.Rationale + " " + value.Rationale)
+		}
+		existing.Confidence = conservativeProfileConfidence(existing.Confidence, value.Confidence)
+	}
+	return result, combined
+}
+
+func appendUniqueProfileValues(existing, additions []string, maximum int) []string {
+	seen := make(map[string]struct{}, len(existing)+len(additions))
+	result := make([]string, 0, len(existing)+len(additions))
+	for _, group := range [][]string{existing, additions} {
+		for _, value := range group {
+			if _, duplicate := seen[value]; duplicate {
+				continue
+			}
+			seen[value] = struct{}{}
+			result = append(result, value)
+			if len(result) == maximum {
+				return result
+			}
+		}
+	}
+	return result
+}
+
+func appendUniqueProfileEvidence(existing, additions []ProfileEvidence, maximum int) []ProfileEvidence {
+	seen := make(map[string]struct{}, len(existing)+len(additions))
+	result := make([]ProfileEvidence, 0, len(existing)+len(additions))
+	for _, group := range [][]ProfileEvidence{existing, additions} {
+		for _, value := range group {
+			key := fmt.Sprintf("%s\x00%d", value.Path, value.Line)
+			if _, duplicate := seen[key]; duplicate {
+				continue
+			}
+			seen[key] = struct{}{}
+			result = append(result, value)
+			if len(result) == maximum {
+				return result
+			}
+		}
+	}
+	return result
+}
+
+func conservativeProfileConfidence(first, second string) string {
+	rank := map[string]int{"low": 0, "medium": 1, "high": 2}
+	if rank[first] <= rank[second] {
+		return first
+	}
+	return second
 }
 
 func discardUnsupportedProfileSuggestions(values []ProfileSuggestion) ([]ProfileSuggestion, int) {
@@ -318,7 +390,7 @@ func profileDraftSchema() map[string]any {
 				"field":      map[string]any{"type": "string", "const": field},
 				"values":     map[string]any{"type": "array", "items": valueItems, "minItems": 1, "maxItems": maxProfileDraftValues},
 				"confidence": map[string]any{"type": "string", "enum": []string{"low", "medium", "high"}},
-				"rationale":  map[string]any{"type": "string"},
+				"rationale":  map[string]any{"type": "string", "maxLength": 600},
 				"evidence":   profileDraftEvidenceSchema(),
 			},
 			"required":             []string{"field", "values", "confidence", "rationale", "evidence"},
@@ -329,7 +401,7 @@ func profileDraftSchema() map[string]any {
 		"type": "object",
 		"properties": map[string]any{
 			"suggestions": map[string]any{
-				"type":  "array",
+				"type": "array", "maxItems": len(fields),
 				"items": map[string]any{"oneOf": suggestionSchemas},
 			},
 		},
@@ -344,13 +416,15 @@ func profileDraftEvidenceSchema() map[string]any {
 		"items": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":    map[string]any{"type": "string"},
+				"path":    map[string]any{"type": "string", "maxLength": 500},
 				"line":    map[string]any{"type": "integer", "minimum": 0},
-				"summary": map[string]any{"type": "string"},
+				"summary": map[string]any{"type": "string", "maxLength": 300},
 			},
 			"required":             []string{"path", "line", "summary"},
 			"additionalProperties": false,
 		},
+		"minItems": 1,
+		"maxItems": maxProfileDraftEvidence,
 	}
 }
 
@@ -370,11 +444,13 @@ You may suggest only these fields:
 - personal-data, special-category-data, and children-data: yes only when positive code or schema evidence exists; never infer no from absence
 
 Return only directly evidenced fields. Do not try to fill the questionnaire from absence or speculation. For a multi-value field, return every directly evidenced value in one suggestion; do not stop after the first applicable value.
+Return each field at most once. Keep each rationale to one short sentence and cite at most two decisive evidence locations with one short sentence each.
 
 Interpret the controlled values narrowly:
 - agent-tool-use means a model request is configured with callable functions or tools, or model output is dispatched to a tool; a static helper alone is insufficient
 - every executable model API call supports inference in addition to any more specific activity such as agent-tool-use
 - Trainer.train supports training, Trainer.evaluate supports evaluation, and generated AI media or text supports synthetic-content in addition to inference
+- an explicit email, user ID, account ID, name, address, or similar person-linked schema field supports personal-data=yes
 - advisory decision impact means the model drafts or recommends and a human must approve before the result is acted on
 - significant decision impact requires evidence that the system affects consequential access, eligibility, employment, education, credit, health, legal, or safety outcomes; ordinary customer support does not establish it
 - autonomous decision impact requires evidence that consequential outcomes execute without human approval
