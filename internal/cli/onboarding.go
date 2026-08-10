@@ -234,10 +234,138 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 		return profile.System{}, fmt.Errorf("validate quick system profile: %w", err)
 	}
 	if _, err := fmt.Fprintln(prompt.output,
-		"\nQuick context collected. Detailed fields remain explicitly unknown until a human completes advanced setup or reviews them in the future dashboard."); err != nil {
+		"\nInitial context collected. If EU mapping is selected, setup will now ask the remaining conditionally relevant facts."); err != nil {
 		return profile.System{}, err
 	}
 	return value, nil
+}
+
+func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile.System, now time.Time) error {
+	if err := explainSetupQuestion(prompt, "applicability-context"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(prompt.output, "\nRelevant EU AI Act context"); err != nil {
+		return err
+	}
+	var err error
+	if err = explainSetupQuestion(prompt, "use-case-domains"); err != nil {
+		return err
+	}
+	if system.UseCaseDomains, err = promptChoices(prompt, "Use-case domains", system.UseCaseDomains,
+		profile.DomainBiometrics, profile.DomainCriticalInfrastructure, profile.DomainEducation, profile.DomainEmployment,
+		profile.DomainEssentialServices, profile.DomainLawEnforcement, profile.DomainMigrationBorderControl,
+		profile.DomainJusticeDemocraticProcess, profile.DomainHealthcare, profile.DomainSoftwareDevelopment,
+		profile.DomainGeneralPurpose, profile.DomainOther, profile.DomainUnknown); err != nil {
+		return err
+	}
+	if err = explainSetupQuestion(prompt, "ai-activities"); err != nil {
+		return err
+	}
+	if system.AIActivities, err = promptChoices(prompt, "AI activities", system.AIActivities,
+		profile.ActivityInference, profile.ActivityTraining, profile.ActivityFineTuning, profile.ActivityEvaluation,
+		profile.ActivityAutomatedDecision, profile.ActivityAgentToolUse, profile.ActivitySyntheticContent, profile.ActivityUnknown); err != nil {
+		return err
+	}
+	if err = explainSetupQuestion(prompt, "deployment-models"); err != nil {
+		return err
+	}
+	if system.DeploymentModels, err = promptChoices(prompt, "Deployment models", system.DeploymentModels,
+		profile.DeploymentInternal, profile.DeploymentPrivateCustomer, profile.DeploymentPublic, profile.DeploymentOpenSource,
+		profile.DeploymentEmbedded, profile.DeploymentAPI, profile.DeploymentLocalCLI, profile.DeploymentUnknown); err != nil {
+		return err
+	}
+
+	assessment := profile.AssessEUAIAct([]profile.System{*system}).Systems[0]
+	if needsPeopleContext(*system, assessment.HighRiskScreening) {
+		if err = explainSetupQuestion(prompt, "users"); err != nil {
+			return err
+		}
+		if system.Users, err = prompt.textList("Users", system.Users); err != nil {
+			return err
+		}
+		if err = explainSetupQuestion(prompt, "affected-groups"); err != nil {
+			return err
+		}
+		if system.AffectedGroups, err = prompt.textList("Potentially affected groups", system.AffectedGroups); err != nil {
+			return err
+		}
+	}
+	if needsDataContext(*system, assessment.HighRiskScreening) {
+		if err = explainSetupQuestion(prompt, "personal-data"); err != nil {
+			return err
+		}
+		if system.Data.PersonalData, err = promptChoice(prompt, "Processes personal data", system.Data.PersonalData, profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
+			return err
+		}
+		if err = explainSetupQuestion(prompt, "special-category-data"); err != nil {
+			return err
+		}
+		if system.Data.SpecialCategoryData, err = promptChoice(prompt, "Processes special-category or similarly sensitive data", system.Data.SpecialCategoryData, profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
+			return err
+		}
+		if err = explainSetupQuestion(prompt, "children-data"); err != nil {
+			return err
+		}
+		if system.Data.ChildrenData, err = promptChoice(prompt, "Processes children's data", system.Data.ChildrenData, profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
+			return err
+		}
+	}
+
+	if err = explainSetupQuestion(prompt, "profile-reviewer"); err != nil {
+		return err
+	}
+	reviewer, err := prompt.text("Factual profile reviewer (leave `unknown` to keep this unreviewed)", "unknown")
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(strings.TrimSpace(reviewer), "unknown") {
+		system.ProfileReview = profile.ProfileReview{Status: profile.ReviewConfirmed, ReviewedBy: reviewer, ReviewedAt: now.Format(time.DateOnly)}
+	}
+	if err := system.Validate(); err != nil {
+		return fmt.Errorf("validate relevant applicability context: %w", err)
+	}
+	return writeApplicabilityReadinessGate(prompt.output, *system)
+}
+
+func writeApplicabilityReadinessGate(output io.Writer, system profile.System) error {
+	assessment := profile.AssessEUAIAct([]profile.System{system}).Systems[0]
+	if _, err := fmt.Fprintf(output, "\nApplicability readiness gate: %s\n", assessment.MappingReadiness); err != nil {
+		return err
+	}
+	switch assessment.MappingReadiness {
+	case profile.MappingHumanReviewed:
+		_, err := fmt.Fprintln(output, "  The factual inputs needed by the current EU technical control pack are present and have a named human reviewer.")
+		return err
+	case profile.MappingFactuallyReady:
+		_, err := fmt.Fprintln(output, "  The needed factual inputs are present, but the profile and legal applicability decision still require accountable human review.")
+		return err
+	default:
+		if _, err := fmt.Fprintln(output, "  Technical scanning can continue, but requirement mapping remains provisional because these facts are unresolved:"); err != nil {
+			return err
+		}
+		for _, missing := range assessment.MissingContext {
+			if _, err := fmt.Fprintf(output, "  - %s\n", missing); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+func needsPeopleContext(system profile.System, screening profile.HighRiskScreening) bool {
+	return screening == profile.HighRiskPotential || system.DecisionImpact == profile.ImpactSignificant || system.DecisionImpact == profile.ImpactAutonomous
+}
+
+func needsDataContext(system profile.System, screening profile.HighRiskScreening) bool {
+	if screening == profile.HighRiskPotential {
+		return true
+	}
+	for _, activity := range system.AIActivities {
+		if activity == profile.ActivityTraining || activity == profile.ActivityFineTuning || activity == profile.ActivityEvaluation || activity == profile.ActivityAutomatedDecision {
+			return true
+		}
+	}
+	return false
 }
 
 func recommendFrameworks(system profile.System) ([]string, string) {

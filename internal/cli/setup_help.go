@@ -5,6 +5,10 @@ import (
 )
 
 var setupQuestionHelp = map[string][]string{
+	"applicability-context": {
+		"ComplyScan now asks only the remaining facts used by the selected EU technical control pack. Later questions appear only when an earlier answer makes them relevant.",
+		"You may answer unknown, but the report will then label requirement mapping as provisional. Completing these facts does not itself decide that the EU AI Act applies.",
+	},
 	"frameworks": {
 		"Choose which sources ComplyScan should map technical repository evidence against. The EU pack screens potential legal obligations; NIST AI RMF is voluntary guidance.",
 		"Select both to reuse the same detected controls across both mappings. This does not make a framework legally applicable or certify that its outcomes are satisfied.",

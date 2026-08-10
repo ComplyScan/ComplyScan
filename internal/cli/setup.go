@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/config"
+	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/spf13/cobra"
 )
@@ -131,6 +132,9 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 			if collectErr == nil {
 				collectErr = configureRecommendedFrameworks(prompt, &cfg, system, options.frameworks)
 				applyFrameworksToSystem(&system, cfg.Frameworks)
+			}
+			if collectErr == nil && frameworkEnabled(cfg.Frameworks, framework.EUAIActTechnicalEvidencePackID) {
+				collectErr = collectRelevantEUApplicabilityContext(prompt, &system, time.Now())
 			}
 		}
 		if collectErr != nil {

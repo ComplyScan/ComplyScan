@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/config"
+	"github.com/ComplyScan/ComplyScan/internal/profile"
 )
 
 func TestPromptOllamaModelListsInstalledModelsAndAcceptsCustomTag(t *testing.T) {
@@ -78,7 +80,7 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 		"Operating regions numbers (comma-separated)",
 		"Select organisation role (1-4)",
 		"advisory — AI suggests or drafts",
-		"Detailed fields remain explicitly unknown",
+		"remaining conditionally relevant facts",
 		"EU AI Act technical mapping is recommended",
 		"Ollama to keep model context on this machine",
 	} {
@@ -96,6 +98,59 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 	if !strings.Contains(string(ignored), reportGitIgnoreEntry) {
 		t.Fatalf("generated reports are not ignored:\n%s", ignored)
 	}
+}
+
+func TestRelevantEUContextAsksHighRiskFollowUpQuestions(t *testing.T) {
+	system := basicApplicabilityTestSystem()
+	input := strings.NewReader("4\n1\n3\nrecruiters\njob applicants\n1\n2\n2\nProduct owner\n")
+	var output bytes.Buffer
+	prompt := promptSession{reader: bufio.NewReader(input), output: &output}
+	if err := collectRelevantEUApplicabilityContext(prompt, &system, time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	assessment := profile.AssessEUAIAct([]profile.System{system}).Systems[0]
+	if assessment.MappingReadiness != profile.MappingHumanReviewed || len(assessment.MissingContext) != 0 {
+		t.Fatalf("assessment = %#v", assessment)
+	}
+	for _, expected := range []string{"? Users", "? Potentially affected groups", "Select Processes personal data", "Applicability readiness gate: human-reviewed"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("output missing %q:\n%s", expected, output.String())
+		}
+	}
+}
+
+func TestRelevantEUContextSkipsIrrelevantPeopleAndDataQuestions(t *testing.T) {
+	system := basicApplicabilityTestSystem()
+	system.DecisionImpact = profile.ImpactLow
+	input := strings.NewReader("10\n1\n6\n\n")
+	var output bytes.Buffer
+	prompt := promptSession{reader: bufio.NewReader(input), output: &output}
+	if err := collectRelevantEUApplicabilityContext(prompt, &system, time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	assessment := profile.AssessEUAIAct([]profile.System{system}).Systems[0]
+	if assessment.MappingReadiness != profile.MappingFactuallyReady || len(assessment.MissingContext) != 0 {
+		t.Fatalf("assessment = %#v", assessment)
+	}
+	for _, unexpected := range []string{"? Users", "? Potentially affected groups", "Select Processes personal data"} {
+		if strings.Contains(output.String(), unexpected) {
+			t.Errorf("output unexpectedly contains %q:\n%s", unexpected, output.String())
+		}
+	}
+	if !strings.Contains(output.String(), "Applicability readiness gate: factually-ready") {
+		t.Errorf("readiness gate missing:\n%s", output.String())
+	}
+}
+
+func basicApplicabilityTestSystem() profile.System {
+	system := profile.NewDraftSystem("example", "Example")
+	system.IntendedPurpose = "Assist developers with repository review."
+	system.LifecycleStage = profile.LifecycleDevelopment
+	system.OrganizationRoles = []profile.OrganizationRole{profile.RoleProvider}
+	system.OperatingRegions = []profile.OperatingRegion{profile.RegionEU}
+	system.DecisionImpact = profile.ImpactSignificant
+	system.HumanOversight = profile.OversightRequired
+	return system
 }
 
 func TestNISTOnlySetupSkipsEUApplicabilityDecision(t *testing.T) {
@@ -267,7 +322,7 @@ func TestPromptSetupScanModeMakesExpensiveReviewExplicit(t *testing.T) {
 
 func TestEverySetupQuestionHasDeveloperGuidance(t *testing.T) {
 	keys := []string{
-		"frameworks", "system-id", "system-name", "intended-purpose", "lifecycle-stage", "organization-roles", "organization-role-basic",
+		"applicability-context", "frameworks", "system-id", "system-name", "intended-purpose", "lifecycle-stage", "organization-roles", "organization-role-basic",
 		"operating-regions", "use-case-domains", "users", "affected-groups", "decision-impact",
 		"human-oversight", "ai-activities", "personal-data", "special-category-data", "children-data",
 		"deployment-models", "profile-reviewer", "applicability-decision", "decision-rationale",
