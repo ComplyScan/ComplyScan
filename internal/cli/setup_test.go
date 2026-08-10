@@ -232,6 +232,39 @@ func TestPromptChoicesUsesNumberedMultiSelect(t *testing.T) {
 	}
 }
 
+func TestPromptSetupScanModeMakesExpensiveReviewExplicit(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  setupScanMode
+	}{
+		{name: "quick default", input: "\n", want: setupScanQuick},
+		{name: "deep", input: "2\n", want: setupScanDeep},
+		{name: "configure only", input: "3\n", want: setupScanNone},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			prompt := promptSession{reader: bufio.NewReader(strings.NewReader(test.input)), output: &output}
+			mode, err := promptSetupScanMode(prompt, setupRepositorySummary{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode != test.want {
+				t.Fatalf("mode = %q, want %q", mode, test.want)
+			}
+			for _, expected := range []string{"1) Quick scan", "2) Deep AI review", "3) Save setup without scanning"} {
+				if !strings.Contains(output.String(), expected) {
+					t.Errorf("scan-mode output missing %q:\n%s", expected, output.String())
+				}
+			}
+			if test.want == setupScanDeep && !strings.Contains(output.String(), "may take many minutes") {
+				t.Errorf("deep review did not disclose duration uncertainty:\n%s", output.String())
+			}
+		})
+	}
+}
+
 func TestEverySetupQuestionHasDeveloperGuidance(t *testing.T) {
 	keys := []string{
 		"frameworks", "system-id", "system-name", "intended-purpose", "lifecycle-stage", "organization-roles", "organization-role-basic",
@@ -240,7 +273,7 @@ func TestEverySetupQuestionHasDeveloperGuidance(t *testing.T) {
 		"deployment-models", "profile-reviewer", "applicability-decision", "decision-rationale",
 		"applicability-reviewer", "replace-profile", "review-provider", "ollama-model", "install-ollama",
 		"path-ownership", "ownership-paths", "ownership-systems", "replace-ownership", "download-model",
-		"remote-disclosure", "remote-model", "api-key-env", "first-scan",
+		"remote-disclosure", "remote-model", "api-key-env", "first-scan", "scan-mode",
 	}
 	for _, key := range keys {
 		lines, exists := setupQuestionHelp[key]

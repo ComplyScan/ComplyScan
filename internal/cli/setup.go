@@ -112,11 +112,13 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	}
 
 	prompt := promptSession{reader: bufio.NewReader(cmd.InOrStdin()), output: stdout}
+	var repositorySummary setupRepositorySummary
 	if interactive {
 		summary, inspectErr := inspectRepositoryForSetup(cmd.Context(), stdout, target, cfg, build)
 		if inspectErr != nil {
 			return inspectErr
 		}
+		repositorySummary = summary
 		var system profile.System
 		var collectErr error
 		if options.advanced {
@@ -164,9 +166,20 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 			return err
 		}
 	}
-	modelReady, err := configureSetupReview(cmd.Context(), prompt, stdout, &cfg, interactive, options)
-	if err != nil {
-		return err
+	scanMode := setupScanNone
+	if interactive && !options.skipScan {
+		scanMode, err = promptSetupScanMode(prompt, repositorySummary)
+		if err != nil {
+			return err
+		}
+	}
+	configureReview := !interactive || options.skipScan || scanMode == setupScanDeep || setupReviewExplicit(options)
+	modelReady := true
+	if configureReview {
+		modelReady, err = configureSetupReview(cmd.Context(), prompt, stdout, &cfg, interactive, options)
+		if err != nil {
+			return err
+		}
 	}
 	if err := config.Write(path, cfg, existed); err != nil {
 		return err
@@ -178,29 +191,30 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		return err
 	}
 
-	if !interactive || options.skipScan {
-		_, err := fmt.Fprintf(stdout, "Next: complyscan scan %s\n", shellQuote(target))
+	if !interactive || options.skipScan || scanMode == setupScanNone {
+		_, err := fmt.Fprintf(stdout, "Next: complyscan scan --quick %s\nDeep review when ready: complyscan scan --deep %s\n", shellQuote(target), shellQuote(target))
 		return err
 	}
-	if cfg.AI.Provider == "ollama" && !modelReady {
-		if _, err := fmt.Fprintf(stdout, "First scan not started because Ollama model %q is not ready.\n", cfg.AI.Ollama.Model); err != nil {
+	if scanMode == setupScanDeep && cfg.AI.Provider == "none" {
+		if _, err := fmt.Fprintln(stdout, "Deep review was not started because no AI review provider was configured. The saved configuration can still run a quick scan."); err != nil {
 			return err
 		}
-		_, err := fmt.Fprintf(stdout, "After Ollama is ready, run: ollama pull %s && complyscan scan %s\n", shellQuote(cfg.AI.Ollama.Model), shellQuote(target))
+		_, err := fmt.Fprintf(stdout, "Next: complyscan scan --quick %s\n", shellQuote(target))
 		return err
 	}
-	if err := explainSetupQuestion(prompt, "first-scan"); err != nil {
+	if scanMode == setupScanDeep && !modelReady {
+		if _, err := fmt.Fprintln(stdout, "Deep review was not started because the selected model or provider is not ready. The setup and preliminary scan remain available."); err != nil {
+			return err
+		}
+		_, err := fmt.Fprintf(stdout, "Next: complyscan scan --quick %s\nDeep review when ready: complyscan scan --deep %s\n", shellQuote(target), shellQuote(target))
 		return err
 	}
-	runFirst, err := prompt.confirm("Run the first scan now", true)
-	if err != nil {
-		return err
-	}
-	if !runFirst {
-		_, err := fmt.Fprintf(stdout, "Next: complyscan scan %s\n", shellQuote(target))
-		return err
-	}
-	return runFirstScan(cmd, stdout, build, target)
+	return runFirstScan(cmd, stdout, build, target, scanMode)
+}
+
+func setupReviewExplicit(options setupOptions) bool {
+	return options.reviewProvider != "" || options.ollamaModel != "" || options.remoteModel != "" || options.remoteAPIKeyEnv != "" ||
+		options.allowRemoteReview || options.pullModel || options.skipModelPull || options.installOllama || options.skipOllamaInstall
 }
 
 func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.Writer, cfg *config.Config, interactive bool, options setupOptions) (bool, error) {
@@ -679,8 +693,14 @@ func systemIndex(systems []profile.System, id string) int {
 	return -1
 }
 
-func runFirstScan(parent *cobra.Command, stdout io.Writer, build BuildInfo, target string) error {
-	if _, err := fmt.Fprintln(stdout, "\nStarting first scan..."); err != nil {
+func runFirstScan(parent *cobra.Command, stdout io.Writer, build BuildInfo, target string, mode setupScanMode) error {
+	label := "quick preliminary scan"
+	args := []string{"--quick", target}
+	if mode == setupScanDeep {
+		label = "deep AI-assisted scan"
+		args = []string{"--deep", target}
+	}
+	if _, err := fmt.Fprintf(stdout, "\nStarting first %s...\n", label); err != nil {
 		return err
 	}
 	command := newScanCommand(stdout, build)
@@ -689,7 +709,7 @@ func runFirstScan(parent *cobra.Command, stdout io.Writer, build BuildInfo, targ
 	command.SetIn(parent.InOrStdin())
 	command.SetOut(stdout)
 	command.SetErr(parent.ErrOrStderr())
-	command.SetArgs([]string{target})
+	command.SetArgs(args)
 	err := command.ExecuteContext(parent.Context())
 	var status *exitError
 	if errors.As(err, &status) && status.code == 1 {

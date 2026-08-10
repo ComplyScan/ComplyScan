@@ -190,6 +190,10 @@ var setupQuestionHelp = map[string][]string{
 		"The first scan reads eligible repository files locally, prints findings, and writes local Markdown and JSON reports under .complyscan/reports.",
 		"Choose no if you want to review .complyscan.yml or commit the setup configuration before scanning.",
 	},
+	"scan-mode": {
+		"A quick scan creates the local inventory, deterministic findings, and preliminary technical mapping without waiting for a model.",
+		"Deep review adds advisory model reasoning and can take many minutes on local hardware. Saving setup lets you inspect the configuration before either scan.",
+	},
 }
 
 func explainSetupQuestion(prompt promptSession, key string) error {

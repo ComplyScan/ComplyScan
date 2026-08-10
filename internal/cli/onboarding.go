@@ -26,6 +26,39 @@ type setupRepositorySummary struct {
 	Configuration int
 }
 
+type setupScanMode string
+
+const (
+	setupScanQuick setupScanMode = "quick"
+	setupScanDeep  setupScanMode = "deep"
+	setupScanNone  setupScanMode = "none"
+)
+
+func promptSetupScanMode(prompt promptSession, summary setupRepositorySummary) (setupScanMode, error) {
+	if err := explainSetupQuestion(prompt, "scan-mode"); err != nil {
+		return setupScanNone, err
+	}
+	quick := "Quick scan — deterministic discovery and checks; no model"
+	deep := "Deep AI review — bounded semantic review after the preliminary report"
+	none := "Save setup without scanning"
+	selected, err := promptChoice(prompt, "first-run action", quick, quick, deep, none)
+	if err != nil {
+		return setupScanNone, err
+	}
+	switch selected {
+	case deep:
+		if _, err := fmt.Fprintf(prompt.output,
+			"\nDeep review will inspect model-generated context for this repository after saving the preliminary report. Local duration depends on hardware, model, and the number of evidence targets; it may take many minutes.\n"); err != nil {
+			return setupScanNone, err
+		}
+		return setupScanDeep, nil
+	case none:
+		return setupScanNone, nil
+	default:
+		return setupScanQuick, nil
+	}
+}
+
 func inspectRepositoryForSetup(ctx context.Context, output io.Writer, target string, cfg config.Config, build BuildInfo) (setupRepositorySummary, error) {
 	if _, err := fmt.Fprintln(output, "Inspecting the repository before asking setup questions..."); err != nil {
 		return setupRepositorySummary{}, err

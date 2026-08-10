@@ -46,6 +46,65 @@ func TestScanExitCodes(t *testing.T) {
 	}
 }
 
+func TestScanModesControlConfiguredAIReview(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.AI.Provider = "ollama"
+	cfg.AI.Ollama.Endpoint = "http://127.0.0.1:1"
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--quick", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("quick scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+
+	cfg.AI.Provider = "none"
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := Execute([]string{"scan", "--deep", "--no-report", target}, &stdout, &stderr, testBuild); code != 2 || !strings.Contains(stderr.String(), "--deep requires an AI review provider") {
+		t.Fatalf("deep scan code=%d stderr=%q", code, stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Execute([]string{"scan", "--quick", "--deep", "--no-report", target}, &stdout, &stderr, testBuild); code != 2 || !strings.Contains(stderr.String(), "cannot be used together") {
+		t.Fatalf("conflicting scan modes code=%d stderr=%q", code, stderr.String())
+	}
+}
+
+func TestRootCommandScansConfiguredCurrentRepository(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Write(filepath.Join(target, config.FileName), config.Default(), false); err != nil {
+		t.Fatal(err)
+	}
+	current, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(target); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(current) })
+
+	var stdout, stderr bytes.Buffer
+	if code := executeWithInput(nil, strings.NewReader(""), &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("default command code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "ComplyScan scanning .") || !strings.Contains(stdout.String(), "Reports saved:") {
+		t.Fatalf("default command did not scan configured repository:\n%s", stdout.String())
+	}
+}
+
 func TestValidateVerificationPlansRejectsUnknownAndDuplicateIDs(t *testing.T) {
 	evidence := framework.TechnicalEvidenceReport{Objectives: []framework.ObjectiveAssessment{{ID: "known"}}}
 	base := verification.Options{RecipeID: "tests", Objectives: []string{"known"}}

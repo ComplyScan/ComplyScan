@@ -65,9 +65,21 @@ func newRootCommand(stdout, stderr io.Writer, build BuildInfo) *cobra.Command {
 		Short:         "Scan repositories for potential AI compliance engineering risks",
 		SilenceErrors: true,
 		SilenceUsage:  true,
+		Args:          cobra.NoArgs,
 	}
 	root.SetOut(stdout)
 	root.SetErr(stderr)
+	root.RunE = func(cmd *cobra.Command, _ []string) error {
+		if _, err := os.Stat(config.FileName); err == nil {
+			return runDefaultSubcommand(cmd, newScanCommand(stdout, build))
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect %s: %w", config.FileName, err)
+		}
+		if _, err := fmt.Fprint(stdout, "Welcome to ComplyScan\n\nNo configuration was found. ComplyScan will inspect this repository before asking setup questions.\n\n"); err != nil {
+			return err
+		}
+		return runDefaultSubcommand(cmd, newSetupCommand(stdout, build))
+	}
 	root.AddCommand(newScanCommand(stdout, build))
 	root.AddCommand(newInventoryCommand(stdout, build))
 	root.AddCommand(newGenerateCommand(stdout, build))
@@ -81,6 +93,16 @@ func newRootCommand(stdout, stderr io.Writer, build BuildInfo) *cobra.Command {
 	root.AddCommand(newVerifyCommand(stdout))
 	root.AddCommand(newVersionCommand(stdout, build))
 	return root
+}
+
+func runDefaultSubcommand(parent, command *cobra.Command) error {
+	command.SilenceErrors = true
+	command.SilenceUsage = true
+	command.SetIn(parent.InOrStdin())
+	command.SetOut(parent.OutOrStdout())
+	command.SetErr(parent.ErrOrStderr())
+	command.SetContext(parent.Context())
+	return command.RunE(command, nil)
 }
 
 func newGenerateCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
@@ -253,6 +275,8 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 		verifyTimeout             time.Duration
 		verifyConfigured          bool
 		verifySystems             []string
+		quickScan                 bool
+		deepScan                  bool
 	)
 	command := &cobra.Command{
 		Use:   "scan [path]",
@@ -274,6 +298,15 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			cfg, _, err := config.Resolve(target, configPath)
 			if err != nil {
 				return err
+			}
+			if quickScan && deepScan {
+				return errors.New("--quick and --deep cannot be used together")
+			}
+			if quickScan {
+				cfg.AI.Provider = "none"
+			}
+			if deepScan && cfg.AI.Provider == "none" && !cmd.Flags().Changed("review") {
+				return errors.New("--deep requires an AI review provider; run complyscan setup or pass --review")
 			}
 			previousReviewProvider := cfg.AI.Provider
 			if cmd.Flags().Changed("review") {
@@ -594,6 +627,8 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().StringVar(&reportDirectory, "report-dir", report.DefaultDirectory, "directory for latest.md and latest.json (relative to the scan target)")
 	command.Flags().BoolVar(&noReport, "no-report", false, "do not save local Markdown and JSON reports")
 	command.Flags().BoolVar(&refreshReview, "refresh-review", false, "ignore cached technical observations and run the configured provider again")
+	command.Flags().BoolVar(&quickScan, "quick", false, "run deterministic discovery and checks without AI review")
+	command.Flags().BoolVar(&deepScan, "deep", false, "require the configured AI review provider for a deep scan")
 	command.Flags().BoolVar(&verifyConfigured, "verify", false, "run verification recipes from .complyscan.yml in isolated containers")
 	command.Flags().StringVar(&verifyRuntime, "verify-runtime", "docker", "local container runtime for opt-in execution: docker or podman")
 	command.Flags().StringVar(&verifyImage, "verify-image", "", "preloaded local container image for opt-in execution")

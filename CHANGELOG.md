@@ -6,6 +6,8 @@
 
 - Interactive setup now uses numbered menus for framework, profile, review-provider, ownership, and verification choices; multi-select questions accept comma-separated numbers instead of requiring internal values.
 - First-run setup now inspects and summarizes the repository before asking questions, uses a short factual profile by default, recommends a technical framework mapping from declared regions, and keeps the complete questionnaire available through `complyscan setup --advanced`.
+- First-run setup now offers an explicit quick scan, deep AI review, or configure-only choice. `complyscan scan --quick` guarantees a model-free preliminary scan, while `--deep` requires a configured review provider.
+- Running `complyscan` without a subcommand now starts discovery-first setup when no repository configuration exists and scans immediately when the current repository is already configured.
 
 ## 0.1.4 - 2026-08-08
 
