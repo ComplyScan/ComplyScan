@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.5 - 2026-08-10
+
 ### Changed
 
 - The recommended Ollama default is now `qwen3.5:9b`; `qwen3:8b` remains selectable as the previously validated model, and the new default is explicitly marked as pending the maintained live quality gate.
