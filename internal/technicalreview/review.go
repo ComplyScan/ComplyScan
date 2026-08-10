@@ -31,6 +31,7 @@ type Options struct {
 	Cache            *Cache
 	Refresh          bool
 	MaxCandidates    int
+	MaxPerObjective  int
 	OnProgress       func(Progress) error
 	RetrieveFollowUp FollowUpRetriever
 }
@@ -53,6 +54,13 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 	if options.MaxCandidates > 0 && len(selected) > options.MaxCandidates {
 		selected = selected[:options.MaxCandidates]
 		base.Notes = append(base.Notes, fmt.Sprintf("Technical evidence investigation was limited to the first %d of %d targets.", len(selected), len(request.Candidates)))
+	}
+	if options.MaxPerObjective > 0 {
+		var omitted int
+		selected, omitted = limitCandidatesPerObjective(selected, options.MaxPerObjective)
+		if omitted > 0 {
+			base.Notes = append(base.Notes, fmt.Sprintf("AI review used representative evidence: %d repetitive candidate(s) were omitted after retaining up to %d candidate(s) per system and technical objective. All deterministic evidence remains in the report.", omitted, options.MaxPerObjective))
+		}
 	}
 	cacheEnabled := options.Cache != nil
 	cacheHits := 0
@@ -82,7 +90,7 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 		baseCandidate := candidate
 		plan := providers.TechnicalSearchPlan{Queries: []providers.TechnicalSearchQuery{}}
 		followUpExcerpts := 0
-		if planner, ok := reviewer.(SearchPlanner); ok && options.RetrieveFollowUp != nil {
+		if planner, ok := reviewer.(SearchPlanner); ok && options.RetrieveFollowUp != nil && needsModelDirectedFollowUp(baseCandidate) {
 			var plannerUsage providers.Usage
 			plan, plannerUsage, err = planner.PlanTechnicalSearch(ctx, baseCandidate)
 			if err != nil {
@@ -135,6 +143,35 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 		base.Notes = append(base.Notes, fmt.Sprintf("Reused %d of %d technical observation(s) from the local source-free review cache.", cacheHits, len(selected)))
 	}
 	return base, nil
+}
+
+func limitCandidatesPerObjective(candidates []providers.TechnicalCandidate, maximum int) ([]providers.TechnicalCandidate, int) {
+	if maximum <= 0 {
+		return candidates, 0
+	}
+	counts := make(map[string]int)
+	selected := make([]providers.TechnicalCandidate, 0, len(candidates))
+	omitted := 0
+	for _, candidate := range candidates {
+		key := candidate.SystemID + "\x00" + candidate.ObjectiveID
+		if counts[key] >= maximum {
+			omitted++
+			continue
+		}
+		counts[key]++
+		selected = append(selected, candidate)
+	}
+	return selected, omitted
+}
+
+func needsModelDirectedFollowUp(candidate providers.TechnicalCandidate) bool {
+	if candidate.InvestigationMode == "extended-search" {
+		return candidate.SearchCoverage.Excerpts == 0
+	}
+	if candidate.InvestigationMode == "candidate-validation" {
+		return len(candidate.SourceContexts) == 0
+	}
+	return false
 }
 
 func candidateFailureNote(candidate providers.TechnicalCandidate, stage string, err error) string {

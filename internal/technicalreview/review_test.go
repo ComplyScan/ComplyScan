@@ -121,6 +121,8 @@ func TestRunPlansAndCachesOneBoundedFollowUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	candidate := testCandidate("return evaluate(output)")
+	candidate.InvestigationMode = "extended-search"
+	candidate.SearchCoverage.Excerpts = 0
 	request := providers.TechnicalReviewRequest{Candidates: []providers.TechnicalCandidate{candidate}}
 	retrievalCalls := 0
 	reviewer := &planningReviewer{}
@@ -156,6 +158,53 @@ func TestRunPlansAndCachesOneBoundedFollowUp(t *testing.T) {
 	}
 	if cachedReviewer.plans != 0 || cachedReviewer.calls != 0 || !cached.Observations[0].FollowUpRequested {
 		t.Fatalf("cached follow-up was not reused: reviewer=%#v result=%#v", cachedReviewer, cached)
+	}
+}
+
+func TestRunSkipsModelSearchPlanningWhenDeterministicContextExists(t *testing.T) {
+	candidate := testCandidate("return evaluate(output)")
+	candidate.InvestigationMode = "candidate-validation"
+	reviewer := &planningReviewer{}
+	result, err := Run(context.Background(), reviewer, providers.TechnicalReviewRequest{Candidates: []providers.TechnicalCandidate{candidate}}, Options{
+		Identity: testIdentity(), MaxCandidates: 20,
+		RetrieveFollowUp: func(value providers.TechnicalCandidate, _ providers.TechnicalSearchPlan) (providers.TechnicalCandidate, int) {
+			t.Fatal("deterministically contextualized candidate requested model-directed retrieval")
+			return value, 0
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reviewer.plans != 0 || reviewer.calls != 1 || result.Reviewed != 1 {
+		t.Fatalf("unexpected planning or review calls: plans=%d reviews=%d result=%#v", reviewer.plans, reviewer.calls, result)
+	}
+}
+
+func TestRunLimitsRepetitiveCandidatesPerSystemObjective(t *testing.T) {
+	candidates := make([]providers.TechnicalCandidate, 0, 4)
+	for index, character := range []string{"b", "c", "d"} {
+		candidate := testCandidate(character)
+		candidate.Path = character + ".go"
+		candidate.EvidenceFingerprint = strings.Repeat(character, 64)
+		candidate.StartLine = index + 1
+		candidates = append(candidates, candidate)
+	}
+	other := testCandidate("other objective")
+	other.ObjectiveID = "eu-aia-15-robustness"
+	other.EvidenceFingerprint = strings.Repeat("e", 64)
+	candidates = append(candidates, other)
+	reviewer := &fakeReviewer{}
+	result, err := Run(context.Background(), reviewer, providers.TechnicalReviewRequest{Candidates: candidates}, Options{
+		Identity: testIdentity(), MaxCandidates: 20, MaxPerObjective: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reviewer.calls != 3 || result.InputCandidates != 4 || result.Reviewed != 3 {
+		t.Fatalf("representative limit was not applied: calls=%d result=%#v", reviewer.calls, result)
+	}
+	if !strings.Contains(strings.Join(result.Notes, "\n"), "1 repetitive candidate") {
+		t.Fatalf("representative omission was not disclosed: %#v", result.Notes)
 	}
 }
 

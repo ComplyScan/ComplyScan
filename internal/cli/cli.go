@@ -829,7 +829,7 @@ func runTechnicalReview(
 			Provider: kind, Model: model, PromptVersion: providers.TechnicalReviewPromptVersion,
 			PackID: evidence.Pack.ID, PackVersion: evidence.Pack.Version, PackDigest: evidence.Pack.Digest,
 		},
-		Cache: cache, Refresh: refresh, MaxCandidates: maxFindings, OnProgress: onProgress,
+		Cache: cache, Refresh: refresh, MaxCandidates: maxFindings, MaxPerObjective: 2, OnProgress: onProgress,
 		RetrieveFollowUp: func(candidate providers.TechnicalCandidate, plan providers.TechnicalSearchPlan) (providers.TechnicalCandidate, int) {
 			return reviewcontext.ApplyFollowUp(candidate, plan, repository)
 		},

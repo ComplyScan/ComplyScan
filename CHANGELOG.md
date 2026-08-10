@@ -10,6 +10,8 @@
 - Running `complyscan` without a subcommand now starts discovery-first setup when no repository configuration exists and scans immediately when the current repository is already configured.
 - Deep scans now save a complete preliminary Markdown and JSON report before the first model request, checkpoint completed framework reviews, and preserve deterministic results when advisory finding review is unavailable.
 - A failed or invalid model response now marks only that technical target as incomplete and continues with the remaining evidence investigations instead of aborting the entire scan.
+- Deep review now reuses deterministic graph and source retrieval directly, asks the model to plan follow-up searches only for context-poor investigations, and bounds local-model output budgets to reduce unnecessary generation time.
+- Advisory review now inspects at most two representative code candidates per system and technical objective, while retaining every deterministic match in the report and disclosing any omitted repetitive model targets.
 
 ## 0.1.4 - 2026-08-08
 
