@@ -39,6 +39,10 @@ var setupQuestionHelp = map[string][]string{
 		"product-manufacturer — your organisation puts the AI system on the market together with a product under its own name or trademark",
 		"unknown — ownership and supply-chain roles have not been confirmed; select unknown alone",
 	},
+	"organization-role-basic": {
+		"Choose the closest description of your organisation's relationship to this system, not your personal job title.",
+		"The quick setup records provider and deployer roles only. Importer, distributor, and product-manufacturer details remain available in advanced setup.",
+	},
 	"operating-regions": {
 		"Select where the system is offered, professionally used, or intended to have effects—not merely where the repository or developer is located.",
 		"eu — one or more European Union countries; eea — EU plus Iceland, Liechtenstein, or Norway",

@@ -5,6 +5,7 @@
 ### Changed
 
 - Interactive setup now uses numbered menus for framework, profile, review-provider, ownership, and verification choices; multi-select questions accept comma-separated numbers instead of requiring internal values.
+- First-run setup now inspects and summarizes the repository before asking questions, uses a short factual profile by default, recommends a technical framework mapping from declared regions, and keeps the complete questionnaire available through `complyscan setup --advanced`.
 
 ## 0.1.4 - 2026-08-08
 

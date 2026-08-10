@@ -24,6 +24,7 @@ type setupOptions struct {
 	configPath        string
 	forceInteractive  bool
 	nonInteractive    bool
+	advanced          bool
 	reviewProvider    string
 	ollamaModel       string
 	remoteModel       string
@@ -74,6 +75,7 @@ func newSetupCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().StringVar(&options.configPath, "config", "", "configuration file (defaults to <path>/.complyscan.yml)")
 	command.Flags().BoolVar(&options.forceInteractive, "interactive", false, "run the setup wizard even when input is redirected")
 	command.Flags().BoolVar(&options.nonInteractive, "non-interactive", false, "create or update configuration without asking questions")
+	command.Flags().BoolVar(&options.advanced, "advanced", false, "collect the complete system, data, deployment, and reviewed-applicability profile")
 	command.Flags().StringVar(&options.reviewProvider, "review", "", "advisory review provider: none, ollama, openai, anthropic, or gemini")
 	command.Flags().StringVar(&options.ollamaModel, "ollama-model", "", "Ollama model name")
 	command.Flags().StringVar(&options.remoteModel, "model", "", "remote-provider model name")
@@ -110,11 +112,25 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	}
 
 	prompt := promptSession{reader: bufio.NewReader(cmd.InOrStdin()), output: stdout}
-	if err := configureFrameworkSelection(prompt, &cfg, interactive, options.frameworks); err != nil {
-		return err
-	}
 	if interactive {
-		system, collectErr := collectSystemProfileWithPrompt(prompt, target, time.Now(), cfg.Frameworks...)
+		summary, inspectErr := inspectRepositoryForSetup(cmd.Context(), stdout, target, cfg, build)
+		if inspectErr != nil {
+			return inspectErr
+		}
+		var system profile.System
+		var collectErr error
+		if options.advanced {
+			if err := configureFrameworkSelection(prompt, &cfg, true, options.frameworks); err != nil {
+				return err
+			}
+			system, collectErr = collectSystemProfileWithPrompt(prompt, target, time.Now(), cfg.Frameworks...)
+		} else {
+			system, collectErr = collectBasicSystemProfile(prompt, target, time.Now(), summary)
+			if collectErr == nil {
+				collectErr = configureRecommendedFrameworks(prompt, &cfg, system, options.frameworks)
+				applyFrameworksToSystem(&system, cfg.Frameworks)
+			}
+		}
 		if collectErr != nil {
 			return collectErr
 		}
@@ -137,7 +153,14 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 			return err
 		}
 	} else if !existed {
+		if err := configureFrameworkSelection(prompt, &cfg, false, options.frameworks); err != nil {
+			return err
+		}
 		if _, err := fmt.Fprintln(stdout, "Non-interactive setup: no system profile was collected."); err != nil {
+			return err
+		}
+	} else if len(options.frameworks) > 0 {
+		if err := configureFrameworkSelection(prompt, &cfg, false, options.frameworks); err != nil {
 			return err
 		}
 	}

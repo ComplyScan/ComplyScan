@@ -68,24 +68,18 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 	if cfg.AI.Provider != "ollama" || cfg.AI.Ollama.Model != defaultSetupModel {
 		t.Fatalf("AI configuration = %#v", cfg.AI)
 	}
-	for _, expected := range []string{"ComplyScan setup", "System applicability setup", "Local model setup", "Saved", "Next: complyscan scan"} {
+	for _, expected := range []string{"ComplyScan setup", "Repository inspected", "Quick system setup", "Local model setup", "Saved", "Next: complyscan scan"} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("output missing %q:\n%s", expected, stdout.String())
 		}
 	}
 	for _, expected := range []string{
-		"1) EU AI Act",
-		"2) NIST AI RMF",
-		"3) Both",
 		"Select Lifecycle stage (1-5)",
-		"Organization roles numbers (comma-separated)",
-		"A short, stable machine-readable identifier",
-		"provider — your organisation develops it",
-		"biometrics — identifies people",
+		"Operating regions numbers (comma-separated)",
+		"Select organisation role (1-4)",
 		"advisory — AI suggests or drafts",
-		"inference — sends inputs to a model",
-		"private-customer — a dedicated customer deployment",
-		"Most developers should keep needs-review",
+		"Detailed fields remain explicitly unknown",
+		"EU AI Act technical mapping is recommended",
 		"Ollama to keep model context on this machine",
 	} {
 		if !strings.Contains(stdout.String(), expected) {
@@ -240,7 +234,7 @@ func TestPromptChoicesUsesNumberedMultiSelect(t *testing.T) {
 
 func TestEverySetupQuestionHasDeveloperGuidance(t *testing.T) {
 	keys := []string{
-		"frameworks", "system-id", "system-name", "intended-purpose", "lifecycle-stage", "organization-roles",
+		"frameworks", "system-id", "system-name", "intended-purpose", "lifecycle-stage", "organization-roles", "organization-role-basic",
 		"operating-regions", "use-case-domains", "users", "affected-groups", "decision-impact",
 		"human-oversight", "ai-activities", "personal-data", "special-category-data", "children-data",
 		"deployment-models", "profile-reviewer", "applicability-decision", "decision-rationale",
