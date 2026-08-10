@@ -79,13 +79,13 @@ complyscan doctor .
 complyscan version
 ```
 
-Running `complyscan` is the recommended first command. With no configuration it inspects the repository before asking questions, summarizes languages, source/test/documentation composition, and detected AI components, then starts factual setup. A short screening establishes purpose, operating regions, organisation role, decision impact, lifecycle, and human oversight. After recommending a framework mapping, EU setup asks for use-case, AI-activity, and deployment facts, then branches into people and data questions only when earlier answers make them relevant to the current technical control pack. Use `unknown` when a fact has not been established. `complyscan setup --advanced` remains available for the complete unbranched profile and an attributed human applicability decision.
+Running `complyscan` is the recommended first command. With no configuration it first asks the operator to choose local AI, explicitly consented cloud AI, or fast model-free analysis. It then discovers the repository once, summarizes languages and detected AI components, and—when a ready model was selected—requests a bounded, secret-redacted profile draft before showing factual questions. Suggested answers display confidence, rationale, and cited repository paths; pressing Enter confirms the editable default, while the operator can change it or retain `unknown`. Jurisdiction, organisation role, actual production use, legal applicability, and legal risk class are never inferred. After recommending a framework mapping, setup asks only the remaining relevant technical, people, and data facts. `complyscan setup --advanced` remains available for the complete unbranched profile and an attributed human applicability decision.
 
 In an interactive terminal, fixed single-answer questions use an arrow-controlled radio menu, multiple-answer questions use checkboxes, and confirmations show a highlighted Yes/No choice. Move with ↑/↓, tick or untick with Space where applicable, and press Enter to confirm. Local and remote model pickers use the same menus and include an explicit custom-model option before asking for free text. These controls also cover the system, test-command, and objective choices in verification setup. Redirected setup scripts keep the stable numbered or text interface. Set `COMPLYSCAN_ACCESSIBLE=1` to force that interface for screen readers or terminals where cursor-based controls are unsuitable.
 
 The EU setup ends with an applicability-readiness gate. `incomplete` means one or more facts used by the current technical mapping are still unknown; `factually-ready` means those inputs are present but have no named factual reviewer; `human-reviewed` means the factual profile has a named reviewer. These statuses describe input quality only. They do not decide that the EU AI Act applies and do not replace the separate legal applicability decision, which remains `needs-review` unless an accountable human records otherwise. An incomplete profile never prevents repository discovery: the scan continues and labels its requirement mapping as provisional.
 
-First-run setup offers three explicit actions: a quick deterministic scan, a deep AI-assisted review, or saving configuration without scanning. Quick is the default and never invokes a model. Deep review lets the user choose local Ollama or an explicitly consented BYOK OpenAI, Anthropic, or Gemini reviewer. Ollama setup lists installed models plus recommendations, accepts any exact tag, and offers installation or model download separately. Remote setup explains external processing and possible cost, asks for the model, and saves only the API-key environment-variable name.
+First-run setup finishes by offering a quick deterministic scan, a deep AI-assisted review, or saving configuration without scanning. Deep is the default only after a selected reviewer is ready; otherwise quick remains the default and never invokes a model. The final scan reuses the repository discovery already completed for onboarding instead of reading and classifying every file again. Ollama setup lists installed models plus recommendations, accepts any exact tag, and offers installation or model download separately. Remote setup explains external processing and possible cost, asks for the model, and saves only the API-key environment-variable name.
 
 `doctor` checks the installed build, repository configuration, Git detection, report-directory permissions, local Ollama readiness, and the presence—not the value—of a configured remote credential. `complyscan doctor --probe-review` makes a separate live synthetic structured-output request; remote probes may incur a small provider charge and never contain repository data.
 
@@ -294,7 +294,7 @@ For an existing repository, `complyscan baseline .` records the current findings
 
 ## Optional model review
 
-The built-in scan default remains deterministic. Interactive `complyscan setup` offers local Ollama first and performs each installation step only after confirmation. It lists models already installed by Ollama, labels `qwen3.5:9b` as the recommended default candidate, retains `qwen3:8b` as the previously validated option, shows a small recommendation set, and accepts any exact Ollama tag. Manual setup remains available:
+The built-in scan default remains deterministic. Interactive `complyscan setup` offers local Ollama first, before repository analysis, and performs each installation step only after confirmation. When the selected model is ready, setup uses one separate bounded structured request to draft repository-evident questionnaire answers; those drafts do not become configuration until reviewed through the prompts. The picker lists models already installed by Ollama, labels `qwen3.5:9b` as the recommended default candidate, retains `qwen3:8b` as the previously validated option, shows a small recommendation set, and accepts any exact Ollama tag. Manual setup remains available:
 
 ```bash
 ollama serve
@@ -415,7 +415,7 @@ The action also accepts `review`, `ollama-model`, `ollama-endpoint`, `model`, an
 
 ## Privacy and security guarantees
 
-In the default deterministic mode, the ComplyScan v0.1.5 CLI:
+In the default deterministic mode, the ComplyScan CLI:
 
 - runs entirely on the local machine;
 - makes no network requests;
@@ -424,11 +424,11 @@ In the default deterministic mode, the ComplyScan v0.1.5 CLI:
 - does not require an API key; and
 - never prints a complete detected secret.
 
-`complyscan setup` is a separate provisioning boundary. After explicit confirmations it may invoke Homebrew, download and run Ollama's official Linux installer, start the Homebrew Ollama service, and use `ollama pull` to download the selected model. The setup questionnaire itself makes no network request, profiles are not sent to these installers, and non-interactive setup performs none of those actions unless the corresponding install or pull flag is supplied.
+`complyscan setup` is a separate provisioning boundary. After explicit confirmations it may invoke Homebrew, download and run Ollama's official Linux installer, start the Homebrew Ollama service, and use `ollama pull` to download the selected model. If model-assisted onboarding is chosen and ready, setup makes a bounded profile-draft request after the local or remote privacy boundary has been selected; human answers and the resulting system profile are not submitted. Non-interactive setup performs no installation or model download unless the corresponding install or pull flag is supplied.
 
 Permission errors are reported as warnings where scanning can safely continue. Source excerpts are short and pass through credential redaction before appearing as evidence.
 
-When model review is explicitly enabled, ComplyScan sends only the bounded finding and technical-context records described above. Ollama requests use a validated loopback endpoint; BYOK requests use the fixed official endpoint for the selected provider after setup disclosure and consent. Submitted source-context records are not stored in the evidence bundle or OS user-cache. Model rationales, questions, and suggested actions may describe repository details; they are re-redacted and length-limited before reporting or caching. System profiles are not sent to any reviewer. Generated reports and cached observations remain local unless a future dashboard connection is explicitly enabled.
+When model review is explicitly enabled, ComplyScan sends only the bounded profile-draft, finding, and technical-context records described above. Profile drafting selects at most 24 relevant README, manifest, configuration, governance, deployment, or AI-linked source contexts and limits each to 2,500 characters after secret redaction. Ollama requests use a validated loopback endpoint; BYOK requests use the fixed official endpoint after setup disclosure and consent. Submitted source-context records are not stored in the evidence bundle or OS user-cache. Model rationales, questions, and suggested actions may describe repository details; they are re-redacted and length-limited before reporting or caching. Human answers and system profiles are not sent to any reviewer. Generated reports and cached observations remain local unless a future dashboard connection is explicitly enabled.
 
 The optional GitHub Action uploads SARIF metadata to GitHub code scanning when `upload-results` is enabled. That SARIF contains finding messages, repository-relative paths, line numbers, and fingerprints, but not source excerpts or detected credentials. When a job explicitly enables any model reviewer, SARIF also contains the advisory verdict, confidence, rationale, suggested action, provider, and model for reviewed findings.
 
@@ -453,7 +453,7 @@ ComplyScan applies the same evidence discipline to itself. Its maintained [AI ap
 
 Future releases may add:
 
-- broader source-cited onboarding suggestions for technical facts beyond the currently detected AI components and runtime inference candidate;
+- resumable onboarding drafts for repositories where model-assisted setup is interrupted before human confirmation;
 - broader labelled coverage for more languages, frameworks, model gateways, and data flows;
 - model and AI dependency supply-chain inventory;
 - a reviewed South Korean AI Basic Act code-only pack, with jurisdiction-specific applicability kept outside the shared scanner controls;
@@ -465,7 +465,7 @@ Future releases may add:
 - richer, rule-specific local review prompts and measured live-model evaluation corpora;
 - optional ComplyScan Cloud integrations.
 
-Ollama, OpenAI, Anthropic, and Gemini are implemented review providers. The built-in scan default remains `none`; interactive setup presents Ollama first because it can keep bounded context on the local machine. Every remote provider requires an explicit external-processing confirmation, an environment-only API key, and a user-selected model.
+Ollama, OpenAI, Anthropic, and Gemini are implemented review providers. The built-in scan default remains `none`; interactive setup presents Ollama first because it can keep bounded context on the local machine. Every remote provider requires an explicit external-processing confirmation, an environment-only API key, and a user-selected model before any profile-draft context is submitted.
 
 ## Disclaimer
 
