@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const ProfileDraftPromptVersion = 1
+const ProfileDraftPromptVersion = 2
 
 const (
 	maxProfileDraftContexts     = 24
@@ -248,39 +248,56 @@ func profileDraftSchema() map[string]any {
 		fields = append(fields, field)
 	}
 	sort.Strings(fields)
+	suggestionSchemas := make([]any, 0, len(fields))
+	for _, field := range fields {
+		valueItems := map[string]any{"type": "string"}
+		if allowed := profileDraftAllowedValues[field]; allowed != nil {
+			values := make([]string, 0, len(allowed))
+			for value := range allowed {
+				values = append(values, value)
+			}
+			sort.Strings(values)
+			valueItems["enum"] = values
+		}
+		suggestionSchemas = append(suggestionSchemas, map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"field":      map[string]any{"type": "string", "const": field},
+				"values":     map[string]any{"type": "array", "items": valueItems},
+				"confidence": map[string]any{"type": "string", "enum": []string{"low", "medium", "high"}},
+				"rationale":  map[string]any{"type": "string"},
+				"evidence":   profileDraftEvidenceSchema(),
+			},
+			"required":             []string{"field", "values", "confidence", "rationale", "evidence"},
+			"additionalProperties": false,
+		})
+	}
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"suggestions": map[string]any{
-				"type": "array",
-				"items": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"field":      map[string]any{"type": "string", "enum": fields},
-						"values":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-						"confidence": map[string]any{"type": "string", "enum": []string{"low", "medium", "high"}},
-						"rationale":  map[string]any{"type": "string"},
-						"evidence": map[string]any{
-							"type": "array",
-							"items": map[string]any{
-								"type": "object",
-								"properties": map[string]any{
-									"path":    map[string]any{"type": "string"},
-									"line":    map[string]any{"type": "integer"},
-									"summary": map[string]any{"type": "string"},
-								},
-								"required":             []string{"path", "line", "summary"},
-								"additionalProperties": false,
-							},
-						},
-					},
-					"required":             []string{"field", "values", "confidence", "rationale", "evidence"},
-					"additionalProperties": false,
-				},
+				"type":  "array",
+				"items": map[string]any{"oneOf": suggestionSchemas},
 			},
 		},
 		"required":             []string{"suggestions"},
 		"additionalProperties": false,
+	}
+}
+
+func profileDraftEvidenceSchema() map[string]any {
+	return map[string]any{
+		"type": "array",
+		"items": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path":    map[string]any{"type": "string"},
+				"line":    map[string]any{"type": "integer", "minimum": 0},
+				"summary": map[string]any{"type": "string"},
+			},
+			"required":             []string{"path", "line", "summary"},
+			"additionalProperties": false,
+		},
 	}
 }
 
@@ -299,4 +316,11 @@ You may suggest only these fields:
 - users and affected-groups
 - personal-data, special-category-data, and children-data: yes only when positive code or schema evidence exists; never infer no from absence
 
-Omit a field unless supplied repository evidence directly supports it. Never infer operating regions, organisation role, actual production use, contracts, legal applicability, legal risk class, or compliance. A deployment file can support a deployment mechanism but cannot prove that deployment is active. A policy or README claim is weaker than executable code or configuration. Every suggestion must cite one or more supplied paths and explain uncertainty. Return only the requested structured object.`
+Interpret the controlled values narrowly:
+- agent-tool-use means a model request is configured with callable functions or tools, or model output is dispatched to a tool; a static helper alone is insufficient
+- advisory decision impact means the model drafts or recommends and a human must approve before the result is acted on
+- significant decision impact requires evidence that the system affects consequential access, eligibility, employment, education, credit, health, legal, or safety outcomes; ordinary customer support does not establish it
+- autonomous decision impact requires evidence that consequential outcomes execute without human approval
+- essential-services requires an actual workflow concerning access to an essential public or private service; an ordinary service API or customer-support workflow does not establish it
+
+Omit a field unless supplied repository evidence directly supports it. Never return unknown, no, none, or another placeholder: omit that field instead. Never infer operating regions, organisation role, actual production use, contracts, legal applicability, legal risk class, or compliance. A deployment file can support a deployment mechanism but cannot prove that deployment is active. A policy or README claim is weaker than executable code or configuration. Every suggestion must cite the supplied path and actual line that supports the value; describe only what that evidence shows and explain uncertainty. Return only the requested structured object.`

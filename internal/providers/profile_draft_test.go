@@ -77,3 +77,29 @@ func TestDraftProfileReturnsNoSuggestionsWithoutContext(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 }
+
+func TestProfileDraftSchemaConstrainsValuesByField(t *testing.T) {
+	schema := profileDraftSchema()
+	properties := schema["properties"].(map[string]any)
+	suggestions := properties["suggestions"].(map[string]any)
+	items := suggestions["items"].(map[string]any)
+	variants := items["oneOf"].([]any)
+	foundDataField := false
+	for _, rawVariant := range variants {
+		variant := rawVariant.(map[string]any)
+		variantProperties := variant["properties"].(map[string]any)
+		field := variantProperties["field"].(map[string]any)["const"].(string)
+		if field != "personal-data" {
+			continue
+		}
+		foundDataField = true
+		values := variantProperties["values"].(map[string]any)
+		enum := values["items"].(map[string]any)["enum"].([]string)
+		if len(enum) != 1 || enum[0] != "yes" {
+			t.Fatalf("personal-data schema values = %v, want [yes]", enum)
+		}
+	}
+	if !foundDataField {
+		t.Fatal("personal-data schema variant not found")
+	}
+}
