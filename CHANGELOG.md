@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Multi-select setup questions now use keyboard-controlled checkboxes in interactive terminals; redirected input, dumb terminals, and `COMPLYSCAN_ACCESSIBLE=1` retain the numbered text fallback.
+- Guided setup now uses keyboard-controlled radio menus for fixed single choices, checkboxes for multiple choices, highlighted Yes/No confirmations, and selectable local or remote model lists with an explicit custom-model entry. This also covers system, test-command, and objective selection in verification setup; redirected input, dumb terminals, and `COMPLYSCAN_ACCESSIBLE=1` retain the stable numbered or text fallback.
 
 ## 0.1.5 - 2026-08-10
 
