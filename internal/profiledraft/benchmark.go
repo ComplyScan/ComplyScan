@@ -23,6 +23,17 @@ type Drafter interface {
 	DraftProfile(context.Context, providers.ProfileDraftRequest) (providers.ProfileDraftResult, error)
 }
 
+type BenchmarkProgress struct {
+	CaseID     string
+	Index      int
+	Total      int
+	Done       bool
+	DurationMS int64
+	Err        error
+}
+
+type BenchmarkProgressHandler func(BenchmarkProgress)
+
 type BenchmarkManifest struct {
 	SchemaVersion   int                 `json:"schema_version"`
 	Description     string              `json:"description"`
@@ -117,6 +128,10 @@ func LoadBenchmarkManifest(path string) (BenchmarkManifest, error) {
 }
 
 func RunBenchmark(ctx context.Context, manifestPath string, manifest BenchmarkManifest, model string, drafter Drafter) (BenchmarkReport, error) {
+	return RunBenchmarkWithProgress(ctx, manifestPath, manifest, model, drafter, nil)
+}
+
+func RunBenchmarkWithProgress(ctx context.Context, manifestPath string, manifest BenchmarkManifest, model string, drafter Drafter, onProgress BenchmarkProgressHandler) (BenchmarkReport, error) {
 	if drafter == nil {
 		return BenchmarkReport{}, errors.New("profile-draft benchmark requires a drafter")
 	}
@@ -131,13 +146,22 @@ func RunBenchmark(ctx context.Context, manifestPath string, manifest BenchmarkMa
 		Acceptance: manifest.Acceptance, Cases: make([]BenchmarkCaseResult, 0, len(manifest.Cases)),
 	}
 	evaluated := stringSet(manifest.EvaluatedFields)
-	for _, benchmarkCase := range manifest.Cases {
+	for index, benchmarkCase := range manifest.Cases {
+		if onProgress != nil {
+			onProgress(BenchmarkProgress{CaseID: benchmarkCase.ID, Index: index + 1, Total: len(manifest.Cases)})
+		}
 		caseResult, runErr := runBenchmarkCase(ctx, base, benchmarkCase, evaluated, manifest.Acceptance.MaximumCaseSeconds, drafter)
 		if runErr != nil {
 			caseResult.Error = runErr.Error()
 			caseResult.Passed = false
 		}
 		report.Cases = append(report.Cases, caseResult)
+		if onProgress != nil {
+			onProgress(BenchmarkProgress{
+				CaseID: benchmarkCase.ID, Index: index + 1, Total: len(manifest.Cases), Done: true,
+				DurationMS: caseResult.DurationMS, Err: runErr,
+			})
+		}
 	}
 	report.Summary = summarizeBenchmark(report.Cases)
 	report.Passed = report.Summary.Completed == len(manifest.Cases) &&

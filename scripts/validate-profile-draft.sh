@@ -67,14 +67,14 @@ done
 printf 'Validating profile drafts with %s...\n' "$model"
 case "$(uname -s)" in
 Darwin)
-	if /usr/bin/time -l "$binary" --manifest "$manifest" --model "$model" --endpoint "$endpoint" --output "$result_path" "$@" >"$summary_path" 2>>"$metrics_path"; then
+	if /usr/bin/time -l -a -o "$metrics_path" "$binary" --manifest "$manifest" --model "$model" --endpoint "$endpoint" --output "$result_path" "$@" >"$summary_path"; then
 		status=0
 	else
 		status=$?
 	fi
 	;;
 Linux)
-	if /usr/bin/time -v "$binary" --manifest "$manifest" --model "$model" --endpoint "$endpoint" --output "$result_path" "$@" >"$summary_path" 2>>"$metrics_path"; then
+	if /usr/bin/time -v -a -o "$metrics_path" "$binary" --manifest "$manifest" --model "$model" --endpoint "$endpoint" --output "$result_path" "$@" >"$summary_path"; then
 		status=0
 	else
 		status=$?

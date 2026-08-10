@@ -70,7 +70,7 @@ func run() int {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 2
 	}
-	report, err := profiledraft.RunBenchmark(context.Background(), resolvedManifest, manifest, *model, provider)
+	report, err := profiledraft.RunBenchmarkWithProgress(context.Background(), resolvedManifest, manifest, *model, provider, writeProgress)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 2
@@ -89,6 +89,18 @@ func run() int {
 		return 1
 	}
 	return 0
+}
+
+func writeProgress(progress profiledraft.BenchmarkProgress) {
+	if !progress.Done {
+		fmt.Fprintf(os.Stderr, "[%d/%d] Drafting %s...\n", progress.Index, progress.Total, progress.CaseID)
+		return
+	}
+	status := "done"
+	if progress.Err != nil {
+		status = "error: " + progress.Err.Error()
+	}
+	fmt.Fprintf(os.Stderr, "[%d/%d] %s %s (%d ms)\n", progress.Index, progress.Total, progress.CaseID, status, progress.DurationMS)
 }
 
 func filterCases(cases []profiledraft.BenchmarkCase, selected []string) ([]profiledraft.BenchmarkCase, error) {
