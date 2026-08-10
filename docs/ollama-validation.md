@@ -2,7 +2,7 @@
 
 ComplyScan's model transport, redaction, schema, timeout, identifier-binding, and prompt-injection boundaries are tested offline. Model quality and resource use still require a real local model.
 
-After `qwen3:8b` is available, run from the repository root:
+After the current default candidate `qwen3.5:9b` is available, run from the repository root:
 
 ```sh
 ./scripts/validate-ollama.sh
@@ -25,6 +25,8 @@ Each fixture uses the generated 360-second Ollama timeout because inference time
 Validation passes for each language only when both the EU and NIST production-routed candidates receive `partial` or `strong`, while every test-only candidate under both frameworks receives `weak` or `not_supported`. ComplyScan binds each identifier-free model decision to the sole submitted candidate in trusted code, and a deterministic guardrail correction does not count as a clean model-quality pass. A missing framework result also fails the gate.
 
 Generated per-language JSON, resource metrics, and the combined validation summary are saved under `.complyscan/validation/ollama/` and are ignored by Git. The metrics distinguish each ComplyScan CLI process measured by `/usr/bin/time` from the separately running model allocation reported by `ollama ps`. Review all JSON reports and the metrics before recording a qualified release result. Override the defaults with `COMPLYSCAN_OLLAMA_MODEL` or `COMPLYSCAN_VALIDATION_DIR` when needed. To run only selected fixtures during development, provide a space-separated list such as `COMPLYSCAN_VALIDATION_FIXTURES="typescript"` or `COMPLYSCAN_VALIDATION_FIXTURES="python typescript"`.
+
+The harness now defaults to `qwen3.5:9b`. The results below are retained historical baselines for `qwen3:8b` and must not be presented as validation of the new default. A fresh `qwen3.5:9b` run should be recorded here before publishing a release that describes it as validated.
 
 ## Recorded development validation
 

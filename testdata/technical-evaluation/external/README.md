@@ -39,7 +39,7 @@ The five rejected candidates are deliberately left visible as regression pressur
 
 PyRIT's general scorer evaluator is retained because it executes labelled harm-evaluation datasets, including the fairness-bias definition. Its adversarial conversation-manager tests are retained under both safe-failure and security objectives where the file exercises bounded retry behavior and adversarial-input routing. These are candidate-review judgments, not claims that the repositories implement NIST outcomes effectively.
 
-To evaluate the EU deterministic candidates with the configured local model, start Ollama, ensure `qwen3:8b` is installed, and run:
+To evaluate the EU deterministic candidates with the configured local model, start Ollama, ensure the model in `semantic.json`—currently `qwen3.5:9b`—is installed, and run:
 
 ```sh
 ./scripts/evaluate-external-repositories.sh --review ollama

@@ -67,7 +67,7 @@ complyscan scan . --severity high --no-color
 complyscan scan . --tracked-only
 complyscan scan . --exclude fixtures --max-files 10000
 complyscan scan . --changed-since main
-complyscan scan . --review ollama --ollama-model qwen3:8b
+complyscan scan . --review ollama --ollama-model qwen3.5:9b
 complyscan scan . --report-dir .complyscan/reports
 complyscan scan . --no-report
 complyscan inventory .
@@ -87,9 +87,9 @@ First-run setup offers three explicit actions: a quick deterministic scan, a dee
 
 `doctor` checks the installed build, repository configuration, Git detection, report-directory permissions, local Ollama readiness, and the presence—not the value—of a configured remote credential. `complyscan doctor --probe-review` makes a separate live synthetic structured-output request; remote probes may incur a small provider charge and never contain repository data.
 
-Maintainers can run the repeatable live-model quality and resource gate with `./scripts/validate-ollama.sh` after `qwen3:8b` is available. See [Ollama live-model validation](docs/ollama-validation.md) for the enforced production/test-only expectations and saved artifacts.
+Maintainers can run the repeatable live-model quality and resource gate with `./scripts/validate-ollama.sh` after `qwen3.5:9b` is available. See [Ollama live-model validation](docs/ollama-validation.md) for the enforced production/test-only expectations and saved artifacts.
 
-Interactive setup selects `qwen3:8b` as the tested local default, lists other installed models, and accepts any Ollama tag. Automation never installs software or downloads a model unless `--install-ollama` or `--pull-model` is explicitly passed. Non-interactive remote setup additionally requires `--allow-remote-review`; use `--non-interactive --review none` for a network-free starter configuration.
+Interactive setup selects `qwen3.5:9b` as the recommended local default candidate, lists the previously validated `qwen3:8b` option and other installed models, and accepts any Ollama tag. The new default must pass the maintained live gate before it inherits the previous model's validation claim. Automation never installs software or downloads a model unless `--install-ollama` or `--pull-model` is explicitly passed. Non-interactive remote setup additionally requires `--allow-remote-review`; use `--non-interactive --review none` for a network-free starter configuration.
 
 `scan` defaults to the current directory, so `complyscan scan` and `complyscan scan .` are equivalent. Routine scans are deterministic and fast even when a reviewer is configured; `--quick` makes that intent explicit, while `--deep` requires and invokes the configured reviewer. Passing an explicit one-off `--review` also invokes that provider. Findings still print as they are discovered. The default completion is concise, while `--verbose` prints every framework objective and model observation in the terminal. Use `unknown` rather than guessing. Redirected or CI initialization is non-interactive and can be made explicit with `--non-interactive`.
 
@@ -232,7 +232,7 @@ ai:
   provider: none
   ollama:
     endpoint: http://127.0.0.1:11434
-    model: qwen3:8b
+    model: qwen3.5:9b
     timeout-seconds: 360
     max-findings: 20
 
@@ -292,12 +292,12 @@ For an existing repository, `complyscan baseline .` records the current findings
 
 ## Optional model review
 
-The built-in scan default remains deterministic. Interactive `complyscan setup` offers local Ollama first and performs each installation step only after confirmation. It lists models already installed by Ollama, labels `qwen3:8b` as the tested default, shows a small recommendation set, and accepts any exact Ollama tag. Manual setup remains available:
+The built-in scan default remains deterministic. Interactive `complyscan setup` offers local Ollama first and performs each installation step only after confirmation. It lists models already installed by Ollama, labels `qwen3.5:9b` as the recommended default candidate, retains `qwen3:8b` as the previously validated option, shows a small recommendation set, and accepts any exact Ollama tag. Manual setup remains available:
 
 ```bash
 ollama serve
-ollama pull qwen3:8b
-complyscan scan . --review ollama --ollama-model qwen3:8b
+ollama pull qwen3.5:9b
+complyscan scan . --review ollama --ollama-model qwen3.5:9b
 ```
 
 You can instead set `ai.provider: ollama` in `.complyscan.yml`. `--review none` disables a configured reviewer for one scan. If explicitly enabled review cannot connect, times out, cannot find the model, or returns invalid structured output, the scan exits with code `2` rather than silently omitting the requested review.
@@ -327,7 +327,7 @@ Remote review sends bounded secret-redacted finding records and selected source 
 
 Technical investigations are cached in the operating system's private user-cache directory, not in the scanned repository. The cache stores the same bounded, redacted observation used in reports plus hashes of submitted context; it does not store the submitted source-context records. Model rationales and evidence summaries are instructed not to quote code, but may still describe repository details and should be treated as potentially sensitive data. Reuse requires the same provider, model tag, prompt version, control-pack ID/version/digest, objective, evidence fingerprint, complete bounded input digest, and full discovered-repository digest. Any repository code, context, pack, prompt, provider, or model-name change therefore triggers a new request. Use `--refresh-review` to deliberately bypass existing technical observations.
 
-The experimental default is the official Ollama `qwen3:8b` model. Ollama does not currently publish a `qwen3-coder:8b` tag; its official Qwen3-Coder family starts at `30b`, which has a substantially larger installation footprint. The model remains configurable. Setup may install Ollama, start its Homebrew service, or pull the selected model only after explicit confirmation; normal scans never install software or models. Fake-transport tests enforce the structured-output, redaction, injection, system/objective binding, grounded-path, bounded-retrieval, and isolated-test interpretation contracts. A two-target prompt-version-8 smoke run passed on 2026-08-06. The strengthened prompt-version 10 gate passed across Go, Python, and TypeScript with separate EU and NIST objectives, bounded prompt-injection fixtures, and no semantic guardrail corrections. A controlled awake TypeScript rerun completed in 592.9 seconds on 2026-08-08. Broader representative quality and performance evaluation, plus the maintained applicability reassessment, remain open before Ollama investigation can leave experimental status.
+The experimental default candidate is the official Ollama `qwen3.5:9b` model. The previously validated `qwen3:8b` remains selectable, and the official `qwen3-coder:30b` is available as a substantially larger unvalidated option. The model remains configurable. Setup may install Ollama, start its Homebrew service, or pull the selected model only after explicit confirmation; normal scans never install software or models. Fake-transport tests enforce the structured-output, redaction, injection, system/objective binding, grounded-path, bounded-retrieval, and isolated-test interpretation contracts. The recorded prompt-version 10 fixture gate and timing results were produced with `qwen3:8b`; they do not transfer automatically to `qwen3.5:9b`. Broader representative quality and performance evaluation, plus the maintained applicability reassessment, remain open before Ollama investigation can leave experimental status.
 
 ComplyScan uses two separate review flows, both bounded by `max-findings`, regardless of provider. The finding flow sends visible, unsuppressed deterministic finding records with re-redacted metadata such as the rule ID, fingerprint, title, message, relative path, line, short evidence, remediation, severity, and confidence. The technical flow can make a search-planning request followed by one final decision request per system-specific existing candidate or likely-required missing-evidence investigation target. Candidate targets include reachability, imports, graph relationships, unresolved questions, a bounded match window, and connected symbol excerpts. Extended-search targets include deterministic search terms, coverage counts, up to six ranked excerpts, and at most 200 eligible repository paths from that system's scope. A requested follow-up can add at most three 2,000-character excerpts from the same allowed paths. The evidence fingerprint is withheld. ComplyScan never sends a complete repository or an unbounded file. Input excerpts are re-redacted and are not copied into the saved report. Shared evidence may create a separately bound target for each owning system, so remote investigation may produce multiple billable API calls per objective.
 
@@ -443,7 +443,7 @@ The pipeline has two independent inputs: declared system configuration determine
 
 The labelled detector corpus lives under `testdata/evaluation`. Its test reports precision, recall, true positives, false positives, false negatives, and negative cases; the build fails if precision drops below 95% or recall below 90%.
 
-The separate technical-evidence benchmarks live under `testdata/technical-evaluation`. Source-specific EU and NIST manifests label complete objective candidates plus their expected anchor, production/test reachability, required or forbidden graph relationships, and indexed language. Run `./scripts/evaluate-technical-evidence.sh` for EU and add `--manifest testdata/technical-evaluation/nist-manifest.json` for NIST; `--format json` produces a machine-readable result. CI enforces both versioned synthetic thresholds. A manual `./scripts/evaluate-external-repositories.sh` study checks source-free EU labels against ten pinned permissively licensed public repositories without committing third-party code; add `--manifest testdata/technical-evaluation/external/nist-manifest.json` for the independently reviewed NIST labels. Add `--review ollama` for the slower EU `qwen3:8b` semantic gate. The prompt-version 10 EU/NIST fixture gate has passed; broader model evaluation remains open. These are regression gates and tuning evidence, not claims of general real-world accuracy. See [the benchmark guide](docs/technical-evidence-benchmark.md).
+The separate technical-evidence benchmarks live under `testdata/technical-evaluation`. Source-specific EU and NIST manifests label complete objective candidates plus their expected anchor, production/test reachability, required or forbidden graph relationships, and indexed language. Run `./scripts/evaluate-technical-evidence.sh` for EU and add `--manifest testdata/technical-evaluation/nist-manifest.json` for NIST; `--format json` produces a machine-readable result. CI enforces both versioned synthetic thresholds. A manual `./scripts/evaluate-external-repositories.sh` study checks source-free EU labels against ten pinned permissively licensed public repositories without committing third-party code; add `--manifest testdata/technical-evaluation/external/nist-manifest.json` for the independently reviewed NIST labels. Add `--review ollama` for the slower semantic gate, which now defaults to `qwen3.5:9b`; dated benchmark results remain explicitly attributed to `qwen3:8b`. These are regression gates and tuning evidence, not claims of general real-world accuracy. See [the benchmark guide](docs/technical-evidence-benchmark.md).
 
 ComplyScan applies the same evidence discipline to itself. Its maintained [AI applicability assessment](docs/AI_SYSTEM.md) distinguishes the default deterministic mode from local and remote inference-enabled configurations and records the required pre-release reassessment. The companion [technical risk assessment](docs/risk-assessment.md) records foreseeable harms, controls, residual risks, and review expectations. These documents support governance; they are not self-certification.
 

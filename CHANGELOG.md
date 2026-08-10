@@ -4,6 +4,7 @@
 
 ### Changed
 
+- The recommended Ollama default is now `qwen3.5:9b`; `qwen3:8b` remains selectable as the previously validated model, and the new default is explicitly marked as pending the maintained live quality gate.
 - Interactive setup now uses numbered menus for framework, profile, review-provider, ownership, and verification choices; multi-select questions accept comma-separated numbers instead of requiring internal values.
 - First-run setup now inspects and summarizes the repository before asking questions, recommends a technical framework mapping from declared regions, and follows the short screening with only the additional EU applicability questions made relevant by earlier answers. The complete unbranched questionnaire and attributed legal decision record remain available through `complyscan setup --advanced`.
 - EU reports now label technical mapping context as `incomplete`, `factually-ready`, or `human-reviewed`, list unresolved facts, and keep requirement mappings explicitly provisional when inputs are missing.
