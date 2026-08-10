@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const ProfileDraftPromptVersion = 3
+const ProfileDraftPromptVersion = 4
 
 const (
 	maxProfileDraftContexts     = 24
@@ -292,7 +292,7 @@ var profileDraftPositiveOnlyFields = map[string]struct{}{
 }
 
 var profileDraftPositiveEvidenceFields = map[string]struct{}{
-	"lifecycle-stage": {}, "decision-impact": {}, "human-oversight": {},
+	"lifecycle-stage": {}, "decision-impact": {}, "human-oversight": {}, "deployment-models": {},
 }
 
 func profileDraftSchema() map[string]any {
@@ -369,16 +369,18 @@ You may suggest only these fields:
 - users and affected-groups
 - personal-data, special-category-data, and children-data: yes only when positive code or schema evidence exists; never infer no from absence
 
-Return a sparse set of only directly evidenced fields, usually two to five suggestions. Do not try to fill the questionnaire. For a multi-value field, return every directly evidenced value in one suggestion.
+Return only directly evidenced fields. Do not try to fill the questionnaire from absence or speculation. For a multi-value field, return every directly evidenced value in one suggestion; do not stop after the first applicable value.
 
 Interpret the controlled values narrowly:
 - agent-tool-use means a model request is configured with callable functions or tools, or model output is dispatched to a tool; a static helper alone is insufficient
 - every executable model API call supports inference in addition to any more specific activity such as agent-tool-use
+- Trainer.train supports training, Trainer.evaluate supports evaluation, and generated AI media or text supports synthetic-content in addition to inference
 - advisory decision impact means the model drafts or recommends and a human must approve before the result is acted on
 - significant decision impact requires evidence that the system affects consequential access, eligibility, employment, education, credit, health, legal, or safety outcomes; ordinary customer support does not establish it
 - autonomous decision impact requires evidence that consequential outcomes execute without human approval
 - essential-services requires an actual workflow concerning access to an essential public or private service; an ordinary service API or customer-support workflow does not establish it
 - software-development means the AI system assists programming or software-engineering work; the mere fact that the repository contains software does not establish it
 - other is appropriate when the repository positively identifies a domain, such as ordinary customer support, that is outside the named categories
+- api and public may both apply when executable code defines a network endpoint and repository evidence explicitly describes it as public
 
 Omit a field unless supplied repository evidence directly supports it. Never return unknown, no, none, or another placeholder: omit that field instead. Never infer operating regions, organisation role, actual production use, contracts, legal applicability, legal risk class, or compliance. A deployment file can support a deployment mechanism but cannot prove that deployment is active. A policy or README claim is weaker than executable code or configuration. Every suggestion must cite the supplied path and actual line that supports the value; describe only what that evidence shows and explain uncertainty. Return only the requested structured object.`
