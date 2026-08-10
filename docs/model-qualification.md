@@ -1,0 +1,41 @@
+# Automatic model qualification
+
+ComplyScan accepts arbitrary exact Ollama tags and model IDs supported by its OpenAI, Anthropic, and Gemini adapters. A model does not need to be manually approved by the ComplyScan maintainers before a user tries it.
+
+Before an unseen model receives repository context, ComplyScan sends one small synthetic record through the configured provider. The record contains no repository data and includes instruction-shaped untrusted text. A model is marked **compatible** only when it returns the required structured object, preserves the trusted record binding, and does not create an extra record from the untrusted instruction.
+
+Interactive setup runs this check automatically after the selected local model is installed or the selected remote credential is available. A deep scan also runs it automatically when the current model has no valid cached result. Non-interactive setup does not contact a provider unless `--qualify-model` is explicitly supplied; remote qualification may incur a small provider charge.
+
+Successful results are cached under the operating system's private user-cache directory for 30 days. The cache key binds:
+
+- provider and exact model ID;
+- the Ollama model digest when the local service exposes it; and
+- the finding-review, profile-draft, and technical-review prompt contract versions.
+
+A changed model, digest, or prompt contract therefore requires a new check. Failed checks are not cached because availability, credentials, rate limits, and provider behavior can recover. The cache contains only identity, timestamps, token counts, and the fixed compatibility description; it contains no credential, synthetic response text, repository source, or human profile answer.
+
+Use the configured model's cached status with:
+
+```sh
+complyscan doctor .
+```
+
+Force a fresh check with:
+
+```sh
+complyscan doctor --probe-review .
+```
+
+If qualification fails during setup, setup continues with deterministic suggestions and human questions. If it fails before deep review, ComplyScan preserves the deterministic report and skips repository submission to that model.
+
+## Compatibility is not validation
+
+The automatic check deliberately answers only: “Can this provider/model obey ComplyScan's minimum structured and binding contract right now?” It does not measure general reasoning quality, evidence precision or recall, legal accuracy, latency across realistic workloads, or suitability for a particular repository.
+
+ComplyScan uses separate labels:
+
+- **compatible** — passed the automatic synthetic contract;
+- **benchmark recorded** — passed a maintained, versioned task-specific corpus with published limitations; and
+- **experimental/unqualified** — selectable, but no current automatic result exists or the check failed.
+
+Official recommendations still require maintained benchmarks. All model output remains advisory and human-confirmed regardless of status.

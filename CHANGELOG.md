@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Automatic one-request model qualification for arbitrary Ollama tags and supported BYOK model IDs, with no repository data, strict structured-record binding, an instruction-shaped hard negative, a private 30-day cache keyed by model/digest and prompt contracts, setup/deep-scan enforcement, doctor status, and deterministic fallback.
+
 ### Changed
 
 - Guided setup now uses keyboard-controlled radio menus for fixed single choices, checkboxes for multiple choices, highlighted Yes/No confirmations, and selectable local or remote model lists with an explicit custom-model entry. This also covers system, test-command, and objective selection in verification setup; redirected input, dumb terminals, and `COMPLYSCAN_ACCESSIBLE=1` retain the stable numbered or text fallback.
