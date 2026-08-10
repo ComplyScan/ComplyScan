@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/config"
+	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 )
 
@@ -125,6 +126,34 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 	}
 	if !strings.Contains(string(ignored), reportGitIgnoreEntry) {
 		t.Fatalf("generated reports are not ignored:\n%s", ignored)
+	}
+}
+
+func TestFastSetupUsesDeterministicDraftWithoutModel(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "requirements.txt"), []byte("openai==2.0.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\nclient = OpenAI()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	input := strings.NewReader("\nDraft support replies for agents.\n4\n1\n1\n1\n1\n\n8\n")
+	var stdout, stderr bytes.Buffer
+	code := executeWithInput([]string{
+		"setup", "--interactive", "--review", "none", "--framework", framework.NISTAIRMFTechnicalEvidencePackID, "--skip-scan", target,
+	}, input, &stdout, &stderr, testBuild)
+	if code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	cfg, err := config.Load(filepath.Join(target, config.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Systems) != 1 || len(cfg.Systems[0].AIActivities) != 1 || cfg.Systems[0].AIActivities[0] != profile.ActivityInference {
+		t.Fatalf("systems = %#v", cfg.Systems)
+	}
+	if cfg.AI.Provider != "none" || !strings.Contains(stdout.String(), "Prepared 1 repository-evident setup suggestion(s) without a model") || !strings.Contains(stdout.String(), "editable draft") {
+		t.Fatalf("fast setup output:\n%s", stdout.String())
 	}
 }
 
