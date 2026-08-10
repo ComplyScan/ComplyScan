@@ -15,9 +15,7 @@ import (
 	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/config"
-	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/report"
-	"github.com/ComplyScan/ComplyScan/internal/rules"
 	"github.com/spf13/cobra"
 )
 
@@ -28,6 +26,12 @@ var doctorHTTPClient = newDoctorHTTPClient()
 type doctorOutput struct {
 	writer   io.Writer
 	failures int
+}
+
+type ollamaModelRecord struct {
+	Name   string `json:"name"`
+	Model  string `json:"model"`
+	Digest string `json:"digest"`
 }
 
 func newDoctorCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
@@ -172,7 +176,7 @@ func runDoctor(ctx context.Context, stdout io.Writer, build BuildInfo, target, c
 		} else if err := output.write("PASS", "remote credential", cfg.AI.Remote.APIKeyEnv+" is set (value hidden)"); err != nil {
 			return err
 		}
-		if err := output.write("PASS", "remote model", fmt.Sprintf("%s via %s (live compatibility not tested by doctor)", cfg.AI.Remote.Model, reviewProviderLabel(cfg.AI.Provider))); err != nil {
+		if err := output.write("PASS", "remote model", fmt.Sprintf("%s via %s (qualification status reported below)", cfg.AI.Remote.Model, reviewProviderLabel(cfg.AI.Provider))); err != nil {
 			return err
 		}
 	}
@@ -187,40 +191,38 @@ func runDoctor(ctx context.Context, stdout io.Writer, build BuildInfo, target, c
 				return err
 			}
 		} else {
-			if err := probeConfiguredReviewer(ctx, cfg.AI); err != nil {
-				if writeErr := output.write("FAIL", "review compatibility", err.Error()); writeErr != nil {
+			outcome, qualificationErr := qualifyConfiguredModel(ctx, cfg.AI, true)
+			if qualificationErr != nil {
+				if writeErr := output.write("FAIL", "review compatibility", qualificationErr.Error()); writeErr != nil {
 					return writeErr
 				}
-			} else if err := output.write("PASS", "review compatibility", fmt.Sprintf("%s returned one correctly bound structured observation for synthetic input", reviewProviderLabel(cfg.AI.Provider))); err != nil {
+			} else if err := output.write("PASS", "review compatibility", fmt.Sprintf("compatible; checked with synthetic input and cached until %s", outcome.Result.ExpiresAt.Format("2006-01-02"))); err != nil {
 				return err
 			}
+			if qualificationErr == nil && outcome.CacheWarning != nil {
+				if err := output.write("WARN", "qualification cache", outcome.CacheWarning.Error()); err != nil {
+					return err
+				}
+			}
 		}
-	} else if err := output.write("SKIP", "review compatibility", "not requested; run doctor --probe-review to make a live synthetic request"); err != nil {
+	} else if configErr == nil && cfg.AI.Provider != "none" {
+		outcome, found, lookupErr := lookupConfiguredQualification(ctx, cfg.AI)
+		if lookupErr != nil {
+			if err := output.write("WARN", "review compatibility", "cached status unavailable: "+lookupErr.Error()+"; run doctor --probe-review"); err != nil {
+				return err
+			}
+		} else if found {
+			if err := output.write("PASS", "review compatibility", fmt.Sprintf("compatible; cached check valid until %s", outcome.Result.ExpiresAt.Format("2006-01-02"))); err != nil {
+				return err
+			}
+		} else if err := output.write("WARN", "review compatibility", "model has not passed the current automatic contract; run doctor --probe-review"); err != nil {
+			return err
+		}
+	} else if err := output.write("SKIP", "review compatibility", "no advisory review provider is configured"); err != nil {
 		return err
 	}
 
 	return output.finish()
-}
-
-func probeConfiguredReviewer(ctx context.Context, settings config.AIConfig) error {
-	reviewer, timeout, _, _, _, err := configuredReviewer(settings)
-	if err != nil {
-		return err
-	}
-	probeContext, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	result, err := reviewer.Review(probeContext, providers.ReviewRequest{Findings: []rules.Finding{{
-		Fingerprint: strings.Repeat("a", 64), RuleID: "AI-DOC-001", Title: "Synthetic compatibility probe",
-		Severity: rules.SeverityInfo, Category: "compatibility", Message: "Synthetic input used only to validate structured advisory output.",
-		Remediation: "No repository action is required.", Confidence: "high",
-	}}})
-	if err != nil {
-		return err
-	}
-	if result.Reviewed != 1 || len(result.Observations) != 1 || result.Observations[0].Fingerprint != strings.Repeat("a", 64) {
-		return errors.New("provider did not return one correctly bound structured observation")
-	}
-	return nil
 }
 
 func (output *doctorOutput) write(status, name, detail string) error {
@@ -289,6 +291,18 @@ func probeReportDestination(target string) error {
 }
 
 func fetchOllamaModels(ctx context.Context, endpoint string) ([]string, error) {
+	records, err := fetchOllamaModelRecords(ctx, endpoint)
+	if err != nil {
+		return nil, err
+	}
+	models := make([]string, 0, len(records)*2)
+	for _, model := range records {
+		models = append(models, model.Name, model.Model)
+	}
+	return models, nil
+}
+
+func fetchOllamaModelRecords(ctx context.Context, endpoint string) ([]ollamaModelRecord, error) {
 	tagsURL, err := ollamaTagsURL(endpoint)
 	if err != nil {
 		return nil, err
@@ -306,20 +320,13 @@ func fetchOllamaModels(ctx context.Context, endpoint string) ([]string, error) {
 		return nil, fmt.Errorf("%s returned HTTP %d", tagsURL, response.StatusCode)
 	}
 	var payload struct {
-		Models []struct {
-			Name  string `json:"name"`
-			Model string `json:"model"`
-		} `json:"models"`
+		Models []ollamaModelRecord `json:"models"`
 	}
 	decoder := json.NewDecoder(io.LimitReader(response.Body, doctorHTTPResponseLimit))
 	if err := decoder.Decode(&payload); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", tagsURL, err)
 	}
-	models := make([]string, 0, len(payload.Models)*2)
-	for _, model := range payload.Models {
-		models = append(models, model.Name, model.Model)
-	}
-	return models, nil
+	return payload.Models, nil
 }
 
 func newDoctorHTTPClient() *http.Client {
