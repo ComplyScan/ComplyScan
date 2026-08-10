@@ -415,22 +415,33 @@ func frameworkEnabled(enabled []string, wanted string) bool {
 }
 
 type promptSession struct {
-	reader     *bufio.Reader
-	output     io.Writer
-	selectMany func(label string, defaults, allowed []string) ([]string, error)
+	reader      *bufio.Reader
+	output      io.Writer
+	selectOne   func(label, defaultValue string, options []terminalChoice) (string, error)
+	selectMany  func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error)
+	confirmBool func(label string, defaultValue bool) (bool, error)
 }
 
 func newPromptSession(input io.Reader, output io.Writer) promptSession {
 	session := promptSession{reader: bufio.NewReader(input), output: output}
 	if terminalPromptAvailable(input, output) {
-		session.selectMany = func(label string, defaults, allowed []string) ([]string, error) {
-			return runTerminalMultiSelect(input, output, label, defaults, allowed)
+		session.selectOne = func(label, defaultValue string, options []terminalChoice) (string, error) {
+			return runTerminalSelect(input, output, label, defaultValue, options)
+		}
+		session.selectMany = func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error) {
+			return runTerminalMultiSelect(input, output, label, defaults, options, exclusive)
+		}
+		session.confirmBool = func(label string, defaultValue bool) (bool, error) {
+			return runTerminalConfirm(input, output, label, defaultValue)
 		}
 	}
 	return session
 }
 
 func (session promptSession) confirm(label string, defaultValue bool) (bool, error) {
+	if session.confirmBool != nil {
+		return session.confirmBool(label, defaultValue)
+	}
 	defaultText := "y/N"
 	if defaultValue {
 		defaultText = "Y/n"
@@ -496,6 +507,20 @@ func promptChoice[T ~string](session promptSession, label string, defaultValue T
 	if len(allowed) == 0 {
 		return defaultValue, fmt.Errorf("%s has no available choices", strings.ToLower(label))
 	}
+	if session.selectOne != nil {
+		options := make([]terminalChoice, len(allowed))
+		for index, candidate := range allowed {
+			options[index] = terminalChoice{Label: string(candidate), Value: string(candidate)}
+		}
+		selected, err := session.selectOne(label, string(defaultValue), options)
+		if err != nil {
+			return defaultValue, err
+		}
+		if index, matched := choiceIndex(selected, allowed); matched {
+			return allowed[index], nil
+		}
+		return defaultValue, fmt.Errorf("%s selector returned unsupported value %q", strings.ToLower(label), selected)
+	}
 	defaultIndex := 0
 	for index, candidate := range allowed {
 		if strings.EqualFold(string(defaultValue), string(candidate)) {
@@ -528,11 +553,15 @@ func promptChoices[T ~string](session promptSession, label string, defaultValue 
 		for index, value := range defaultValue {
 			defaultStrings[index] = string(value)
 		}
-		allowedStrings := make([]string, len(allowed))
+		options := make([]terminalChoice, len(allowed))
+		exclusive := []string{}
 		for index, value := range allowed {
-			allowedStrings[index] = string(value)
+			options[index] = terminalChoice{Label: string(value), Value: string(value)}
+			if strings.EqualFold(string(value), "unknown") {
+				exclusive = append(exclusive, string(value))
+			}
 		}
-		selected, err := session.selectMany(label, defaultStrings, allowedStrings)
+		selected, err := session.selectMany(label, defaultStrings, options, exclusive)
 		if err != nil {
 			return nil, err
 		}

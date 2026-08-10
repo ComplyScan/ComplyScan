@@ -438,6 +438,24 @@ func configureRemoteReview(prompt promptSession, stdout io.Writer, cfg *config.C
 
 func promptRemoteModel(prompt promptSession, provider string) (string, error) {
 	models := remoteModelOptions(provider)
+	if len(models) == 0 {
+		return "", fmt.Errorf("unsupported remote review provider %q", provider)
+	}
+	if prompt.selectOne != nil {
+		options := make([]terminalChoice, 0, len(models)+1)
+		for _, model := range models {
+			options = append(options, terminalChoice{Label: model, Value: model})
+		}
+		options = append(options, terminalChoice{Label: "Enter a custom model ID", Value: customModelChoice})
+		selected, err := prompt.selectOne("Remote model", models[0], options)
+		if err != nil {
+			return "", err
+		}
+		if selected == customModelChoice {
+			return promptCustomModel(prompt, "Custom remote model ID")
+		}
+		return selected, nil
+	}
 	if _, err := fmt.Fprintf(prompt.output, "  Suggested %s models (you may also type another exact model ID):\n", reviewProviderLabel(provider)); err != nil {
 		return "", err
 	}
@@ -598,6 +616,8 @@ type setupModelOption struct {
 	detail string
 }
 
+const customModelChoice = "__complyscan_custom_model__"
+
 func promptOllamaModel(prompt promptSession, current string, installed []string) (string, error) {
 	options := []setupModelOption{
 		{tag: defaultSetupModel, detail: "recommended default; live ComplyScan validation pending"},
@@ -609,6 +629,25 @@ func promptOllamaModel(prompt promptSession, current string, installed []string)
 	}
 	for _, model := range installed {
 		options = appendUniqueModel(options, setupModelOption{tag: model, detail: modelStatus(model, installed)})
+	}
+	if prompt.selectOne != nil {
+		choices := make([]terminalChoice, 0, len(options)+1)
+		for _, option := range options {
+			choices = append(choices, terminalChoice{Label: option.tag + " — " + option.detail, Value: option.tag})
+		}
+		choices = append(choices, terminalChoice{Label: "Enter a custom Ollama model tag", Value: customModelChoice})
+		defaultModel := current
+		if defaultModel == "" {
+			defaultModel = options[0].tag
+		}
+		selected, err := prompt.selectOne("Ollama model", defaultModel, choices)
+		if err != nil {
+			return "", err
+		}
+		if selected == customModelChoice {
+			return promptCustomModel(prompt, "Custom Ollama model tag")
+		}
+		return selected, nil
 	}
 	if _, err := fmt.Fprintln(prompt.output, "  Select an installed or recommended model, or type any Ollama model tag:"); err != nil {
 		return "", err
@@ -644,6 +683,22 @@ func promptOllamaModel(prompt promptSession, current string, installed []string)
 			continue
 		}
 		return strings.TrimSpace(value), nil
+	}
+}
+
+func promptCustomModel(prompt promptSession, label string) (string, error) {
+	for {
+		value, err := prompt.text(label, "")
+		if err != nil {
+			return "", err
+		}
+		value = strings.TrimSpace(value)
+		if value != "" && !strings.ContainsAny(value, "\r\n\x00") {
+			return value, nil
+		}
+		if _, err := fmt.Fprintln(prompt.output, "  Enter a valid model name."); err != nil {
+			return "", err
+		}
 	}
 }
 

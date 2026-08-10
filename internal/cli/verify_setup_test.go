@@ -137,3 +137,85 @@ func TestParseObjectiveSelectionRequiresDisplayedNumbers(t *testing.T) {
 		t.Fatal("out-of-range objective selection was accepted")
 	}
 }
+
+func TestVerificationPickersUseTerminalSelectors(t *testing.T) {
+	var output bytes.Buffer
+	systems := []profile.System{
+		{ID: "assistant", Name: "Support assistant"},
+		{ID: "ranking", Name: "Candidate ranking"},
+	}
+	prompt := promptSession{
+		output: &output,
+		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
+			switch label {
+			case "System this recipe verifies":
+				if defaultValue != "assistant" || len(options) != 2 || options[1].Value != "ranking" {
+					t.Fatalf("system selector: default=%q options=%#v", defaultValue, options)
+				}
+				return "ranking", nil
+			case "Detected test system":
+				if defaultValue != "go" || len(options) != 2 || options[1].Value != "python" {
+					t.Fatalf("test selector: default=%q options=%#v", defaultValue, options)
+				}
+				return "python", nil
+			default:
+				t.Fatalf("unexpected selector label %q", label)
+				return "", nil
+			}
+		},
+	}
+	selectedSystem, err := promptVerificationSystem(prompt, systems)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selectedSystem.ID != "ranking" {
+		t.Fatalf("system = %#v", selectedSystem)
+	}
+	commands := []detectedTestCommand{
+		{ID: "go", Name: "Go test", Command: "go", Args: []string{"test", "./..."}},
+		{ID: "python", Name: "Python pytest", Command: "python", Args: []string{"-m", "pytest"}},
+	}
+	selectedCommand, err := promptDetectedTestCommand(prompt, commands)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selectedCommand.ID != "python" {
+		t.Fatalf("command = %#v", selectedCommand)
+	}
+	if strings.Contains(output.String(), "1)") {
+		t.Fatalf("numbered choices were unexpectedly rendered: %q", output.String())
+	}
+}
+
+func TestVerificationObjectivesUseTerminalCheckboxes(t *testing.T) {
+	var output bytes.Buffer
+	choices := []verificationObjectiveChoice{
+		{Objective: framework.ObjectiveAssessment{ID: "eu-logging", Title: "Technical logging", SourceReference: "Article 12", Description: "Record system events", Status: framework.ObjectiveCandidate}, Framework: "EU AI Act"},
+		{Objective: framework.ObjectiveAssessment{ID: "nist-monitor", Title: "Production monitoring", SourceReference: "MEASURE 2.6", Description: "Monitor deployed behavior", Status: framework.ObjectiveNotDetected}, Framework: "NIST AI RMF"},
+	}
+	prompt := promptSession{
+		output: &output,
+		selectMany: func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error) {
+			if label != "Technical objectives this exact test command exercises" || strings.Join(defaults, ",") != noVerificationObjectivesChoice {
+				t.Fatalf("objective selector: label=%q defaults=%#v", label, defaults)
+			}
+			if len(options) != 3 || options[0].Value != noVerificationObjectivesChoice || options[2].Value != "nist-monitor" {
+				t.Fatalf("objective options = %#v", options)
+			}
+			if len(exclusive) != 1 || exclusive[0] != noVerificationObjectivesChoice {
+				t.Fatalf("exclusive values = %#v", exclusive)
+			}
+			return []string{"nist-monitor", "eu-logging"}, nil
+		},
+	}
+	selected, err := promptVerificationObjectives(prompt, choices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(selected, ",") != "nist-monitor,eu-logging" {
+		t.Fatalf("objectives = %#v", selected)
+	}
+	if !strings.Contains(output.String(), "Developer meaning:") || strings.Contains(output.String(), "1)") {
+		t.Fatalf("objective guidance output = %q", output.String())
+	}
+}

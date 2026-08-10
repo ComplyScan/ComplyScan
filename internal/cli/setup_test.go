@@ -41,6 +41,34 @@ func TestPromptOllamaModelListsInstalledModelsAndAcceptsCustomTag(t *testing.T) 
 	}
 }
 
+func TestPromptOllamaModelUsesTerminalSelectorAndCustomEntry(t *testing.T) {
+	var output bytes.Buffer
+	var choices []terminalChoice
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("account-model:latest\n")), output: &output,
+		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
+			if label != "Ollama model" || defaultValue != defaultSetupModel {
+				t.Fatalf("selector arguments: label=%q default=%q", label, defaultValue)
+			}
+			choices = append([]terminalChoice(nil), options...)
+			return customModelChoice, nil
+		},
+	}
+	model, err := promptOllamaModel(prompt, defaultSetupModel, []string{"codestral:22b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model != "account-model:latest" {
+		t.Fatalf("model = %q", model)
+	}
+	if len(choices) < 2 || choices[len(choices)-1].Value != customModelChoice || !strings.Contains(choices[len(choices)-1].Label, "custom") {
+		t.Fatalf("terminal choices = %#v", choices)
+	}
+	if !strings.Contains(output.String(), "Custom Ollama model tag") || strings.Contains(output.String(), "1)") {
+		t.Fatalf("custom-model output = %q", output.String())
+	}
+}
+
 func TestOllamaInstalledModelsParsesListOutput(t *testing.T) {
 	executable := filepath.Join(t.TempDir(), "ollama")
 	if err := os.WriteFile(executable, []byte("#!/bin/sh\nprintf 'NAME ID SIZE MODIFIED\\nqwen3:8b abc 5GB now\\nQWEN3:8B duplicate 5GB now\\ncodestral:22b def 12GB now\\n'\n"), 0o755); err != nil {
@@ -251,6 +279,59 @@ func TestPromptChoiceUsesNumberedMenu(t *testing.T) {
 	}
 }
 
+func TestPromptChoiceUsesTerminalSelectorWhenAvailable(t *testing.T) {
+	var output bytes.Buffer
+	called := false
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("")), output: &output,
+		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
+			called = true
+			if label != "example" || defaultValue != "beta" {
+				t.Fatalf("selector arguments: label=%q default=%q", label, defaultValue)
+			}
+			if len(options) != 3 || options[0] != (terminalChoice{Label: "alpha", Value: "alpha"}) {
+				t.Fatalf("selector options = %#v", options)
+			}
+			return "gamma", nil
+		},
+	}
+	selected, err := promptChoice(prompt, "example", "beta", "alpha", "beta", "gamma")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called || selected != "gamma" {
+		t.Fatalf("selected = %q; called=%t", selected, called)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("numbered fallback was unexpectedly rendered: %q", output.String())
+	}
+}
+
+func TestConfirmUsesTerminalSelectorWhenAvailable(t *testing.T) {
+	var output bytes.Buffer
+	called := false
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("")), output: &output,
+		confirmBool: func(label string, defaultValue bool) (bool, error) {
+			called = true
+			if label != "Continue setup" || !defaultValue {
+				t.Fatalf("selector arguments: label=%q default=%t", label, defaultValue)
+			}
+			return false, nil
+		},
+	}
+	confirmed, err := prompt.confirm("Continue setup", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called || confirmed {
+		t.Fatalf("confirmed = %t; called=%t", confirmed, called)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("text fallback was unexpectedly rendered: %q", output.String())
+	}
+}
+
 func TestPromptChoicesUsesNumberedMultiSelect(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -292,10 +373,14 @@ func TestPromptChoicesUsesTerminalMultiSelectWhenAvailable(t *testing.T) {
 	called := false
 	prompt := promptSession{
 		reader: bufio.NewReader(strings.NewReader("")), output: &output,
-		selectMany: func(label string, defaults, allowed []string) ([]string, error) {
+		selectMany: func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error) {
 			called = true
-			if label != "Operating regions" || strings.Join(defaults, ",") != "unknown" || strings.Join(allowed, ",") != "eu,us,unknown" {
-				t.Fatalf("selector arguments: label=%q defaults=%#v allowed=%#v", label, defaults, allowed)
+			values := make([]string, len(options))
+			for index, option := range options {
+				values[index] = option.Value
+			}
+			if label != "Operating regions" || strings.Join(defaults, ",") != "unknown" || strings.Join(values, ",") != "eu,us,unknown" || strings.Join(exclusive, ",") != "unknown" {
+				t.Fatalf("selector arguments: label=%q defaults=%#v options=%#v exclusive=%#v", label, defaults, options, exclusive)
 			}
 			return []string{"eu", "us"}, nil
 		},
@@ -447,6 +532,34 @@ func TestPromptRemoteModelOffersProviderChoicesAndCustomID(t *testing.T) {
 	model, err = promptRemoteModel(prompt, "gemini")
 	if err != nil || model != "account-specific-model" {
 		t.Fatalf("custom model = %q, error = %v", model, err)
+	}
+}
+
+func TestPromptRemoteModelUsesTerminalSelectorAndCustomEntry(t *testing.T) {
+	var output bytes.Buffer
+	var choices []terminalChoice
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("account-specific-model\n")), output: &output,
+		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
+			if label != "Remote model" || defaultValue != "claude-sonnet-5" {
+				t.Fatalf("selector arguments: label=%q default=%q", label, defaultValue)
+			}
+			choices = append([]terminalChoice(nil), options...)
+			return customModelChoice, nil
+		},
+	}
+	model, err := promptRemoteModel(prompt, "anthropic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model != "account-specific-model" {
+		t.Fatalf("model = %q", model)
+	}
+	if len(choices) != 4 || choices[0].Value != "claude-sonnet-5" || choices[len(choices)-1].Value != customModelChoice {
+		t.Fatalf("terminal choices = %#v", choices)
+	}
+	if !strings.Contains(output.String(), "Custom remote model ID") || strings.Contains(output.String(), "1)") {
+		t.Fatalf("custom-model output = %q", output.String())
 	}
 }
 

@@ -121,14 +121,7 @@ func runVerifySetup(cmd *cobra.Command, stdout io.Writer, target, configPath str
 	if err != nil {
 		return err
 	}
-	if err := writeVerificationObjectiveChoices(stdout, objectives); err != nil {
-		return err
-	}
-	selection, err := prompt.text("Objective numbers this exact test command exercises (comma-separated, or none)", "none")
-	if err != nil {
-		return err
-	}
-	selectedObjectives, err := parseObjectiveSelection(selection, objectives)
+	selectedObjectives, err := promptVerificationObjectives(prompt, objectives)
 	if err != nil {
 		return err
 	}
@@ -278,6 +271,22 @@ func promptVerificationSystem(prompt promptSession, systems []profile.System) (p
 	if _, err := fmt.Fprintln(prompt.output, "Choose the product whose technical mechanism this test command actually verifies. ComplyScan will not infer ownership from paths."); err != nil {
 		return profile.System{}, err
 	}
+	if prompt.selectOne != nil {
+		options := make([]terminalChoice, 0, len(systems))
+		for _, system := range systems {
+			options = append(options, terminalChoice{Label: fmt.Sprintf("%s (%s)", system.Name, system.ID), Value: system.ID})
+		}
+		selected, err := prompt.selectOne("System this recipe verifies", systems[0].ID, options)
+		if err != nil {
+			return profile.System{}, err
+		}
+		for _, system := range systems {
+			if system.ID == selected {
+				return system, nil
+			}
+		}
+		return profile.System{}, fmt.Errorf("system selector returned unsupported value %q", selected)
+	}
 	for index, system := range systems {
 		if _, err := fmt.Fprintf(prompt.output, "  %d) %s (%s)\n", index+1, system.Name, system.ID); err != nil {
 			return profile.System{}, err
@@ -300,6 +309,25 @@ func promptDetectedTestCommand(prompt promptSession, commands []detectedTestComm
 	}
 	if _, err := fmt.Fprintln(prompt.output, "Detected test systems:"); err != nil {
 		return detectedTestCommand{}, err
+	}
+	if prompt.selectOne != nil {
+		options := make([]terminalChoice, 0, len(commands))
+		for _, command := range commands {
+			options = append(options, terminalChoice{
+				Label: fmt.Sprintf("%s — %s", command.Name, commandText(command.Command, command.Args)),
+				Value: command.ID,
+			})
+		}
+		selected, err := prompt.selectOne("Detected test system", commands[0].ID, options)
+		if err != nil {
+			return detectedTestCommand{}, err
+		}
+		for _, command := range commands {
+			if command.ID == selected {
+				return command, nil
+			}
+		}
+		return detectedTestCommand{}, fmt.Errorf("test-system selector returned unsupported value %q", selected)
 	}
 	for index, command := range commands {
 		if _, err := fmt.Fprintf(prompt.output, "  %d) %s — %s\n", index+1, command.Name, commandText(command.Command, command.Args)); err != nil {
@@ -372,13 +400,71 @@ func verificationObjectivesForSystem(mapping reconciliation.Report, technical fr
 	return nil, fmt.Errorf("system %q was not found in reconciliation", systemID)
 }
 
-func writeVerificationObjectiveChoices(output io.Writer, choices []verificationObjectiveChoice) error {
+const noVerificationObjectivesChoice = "__complyscan_no_verification_objectives__"
+
+func promptVerificationObjectives(prompt promptSession, choices []verificationObjectiveChoice) ([]string, error) {
+	if prompt.selectMany != nil {
+		if err := writeVerificationObjectiveChoices(prompt.output, choices, false); err != nil {
+			return nil, err
+		}
+		options := make([]terminalChoice, 0, len(choices)+1)
+		options = append(options, terminalChoice{Label: "None — do not save a verification recipe", Value: noVerificationObjectivesChoice})
+		valid := make(map[string]struct{}, len(choices))
+		for _, choice := range choices {
+			id := choice.Objective.ID
+			valid[id] = struct{}{}
+			options = append(options, terminalChoice{
+				Label: fmt.Sprintf("%s (%s) — %s — %s", choice.Objective.Title, choice.Objective.SourceReference, choice.Framework, choice.Objective.Status),
+				Value: id,
+			})
+		}
+		selected, err := prompt.selectMany(
+			"Technical objectives this exact test command exercises",
+			[]string{noVerificationObjectivesChoice}, options, []string{noVerificationObjectivesChoice},
+		)
+		if err != nil {
+			return nil, err
+		}
+		if len(selected) == 1 && selected[0] == noVerificationObjectivesChoice {
+			return []string{}, nil
+		}
+		result := make([]string, 0, len(selected))
+		seen := make(map[string]struct{}, len(selected))
+		for _, id := range selected {
+			if id == noVerificationObjectivesChoice {
+				return nil, errors.New("none must be selected alone")
+			}
+			if _, exists := valid[id]; !exists {
+				return nil, fmt.Errorf("objective selector returned unsupported value %q", id)
+			}
+			if _, duplicate := seen[id]; !duplicate {
+				result = append(result, id)
+				seen[id] = struct{}{}
+			}
+		}
+		return result, nil
+	}
+	if err := writeVerificationObjectiveChoices(prompt.output, choices, true); err != nil {
+		return nil, err
+	}
+	selection, err := prompt.text("Objective numbers this exact test command exercises (comma-separated, or none)", "none")
+	if err != nil {
+		return nil, err
+	}
+	return parseObjectiveSelection(selection, choices)
+}
+
+func writeVerificationObjectiveChoices(output io.Writer, choices []verificationObjectiveChoice, numbered bool) error {
 	if _, err := fmt.Fprintln(output, "\nApplicable or recommended technical objectives\nLegal requirements and voluntary framework recommendations remain distinct. Select only mechanisms this exact test command genuinely exercises."); err != nil {
 		return err
 	}
 	for index, choice := range choices {
-		if _, err := fmt.Fprintf(output, "\n  %d) %s (%s)\n     Framework: %s\n     Developer meaning: %s\n     Current repository signal: %s",
-			index+1, choice.Objective.Title, choice.Objective.SourceReference, choice.Framework, choice.Objective.Description, choice.Objective.Status); err != nil {
+		marker := "-"
+		if numbered {
+			marker = fmt.Sprintf("%d)", index+1)
+		}
+		if _, err := fmt.Fprintf(output, "\n  %s %s (%s)\n     Framework: %s\n     Developer meaning: %s\n     Current repository signal: %s",
+			marker, choice.Objective.Title, choice.Objective.SourceReference, choice.Framework, choice.Objective.Description, choice.Objective.Status); err != nil {
 			return err
 		}
 		if len(choice.Objective.Matches) > 0 {

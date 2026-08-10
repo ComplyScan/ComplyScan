@@ -12,6 +12,11 @@ import (
 
 const accessiblePromptEnvironment = "COMPLYSCAN_ACCESSIBLE"
 
+type terminalChoice struct {
+	Label string
+	Value string
+}
+
 func terminalPromptAvailable(input io.Reader, output io.Writer) bool {
 	if strings.TrimSpace(os.Getenv(accessiblePromptEnvironment)) != "" || strings.EqualFold(strings.TrimSpace(os.Getenv("TERM")), "dumb") {
 		return false
@@ -28,15 +33,52 @@ func terminalFile(stream any) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
-func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, defaults, allowed []string) ([]string, error) {
+func runTerminalSelect(input io.Reader, output io.Writer, label, defaultValue string, choices []terminalChoice) (string, error) {
+	options := make([]huh.Option[string], 0, len(choices))
+	for _, choice := range choices {
+		options = append(options, huh.NewOption(choice.Label, choice.Value))
+	}
+	selected := defaultValue
+	field := huh.NewSelect[string]().
+		Title(label).
+		Description("Use ↑/↓ to move and Enter to confirm.").
+		Options(options...).
+		Value(&selected)
+	form := huh.NewForm(huh.NewGroup(field)).WithInput(input).WithOutput(output)
+	if err := form.Run(); err != nil {
+		return "", fmt.Errorf("select %s: %w", strings.ToLower(label), err)
+	}
+	return selected, nil
+}
+
+func runTerminalConfirm(input io.Reader, output io.Writer, label string, defaultValue bool) (bool, error) {
+	selected := defaultValue
+	field := huh.NewConfirm().
+		Title(label).
+		Description("Use ←/→ to choose and Enter to confirm.").
+		Affirmative("Yes").
+		Negative("No").
+		Value(&selected)
+	form := huh.NewForm(huh.NewGroup(field)).WithInput(input).WithOutput(output)
+	if err := form.Run(); err != nil {
+		return false, fmt.Errorf("confirm %s: %w", strings.ToLower(label), err)
+	}
+	return selected, nil
+}
+
+func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, defaults []string, choices []terminalChoice, exclusive []string) ([]string, error) {
 	selectedDefaults := make(map[string]struct{}, len(defaults))
 	for _, value := range defaults {
 		selectedDefaults[strings.ToLower(strings.TrimSpace(value))] = struct{}{}
 	}
-	options := make([]huh.Option[string], 0, len(allowed))
-	for _, value := range allowed {
-		_, selected := selectedDefaults[strings.ToLower(value)]
-		options = append(options, huh.NewOption(value, value).Selected(selected))
+	options := make([]huh.Option[string], 0, len(choices))
+	for _, choice := range choices {
+		_, selected := selectedDefaults[strings.ToLower(choice.Value)]
+		options = append(options, huh.NewOption(choice.Label, choice.Value).Selected(selected))
+	}
+	exclusiveValues := make(map[string]struct{}, len(exclusive))
+	for _, value := range exclusive {
+		exclusiveValues[strings.ToLower(strings.TrimSpace(value))] = struct{}{}
 	}
 	selected := append([]string(nil), defaults...)
 	field := huh.NewMultiSelect[string]().
@@ -50,8 +92,8 @@ func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, def
 			}
 			if len(values) > 1 {
 				for _, value := range values {
-					if strings.EqualFold(strings.TrimSpace(value), "unknown") {
-						return errors.New("unknown must be selected alone")
+					if _, isExclusive := exclusiveValues[strings.ToLower(strings.TrimSpace(value))]; isExclusive {
+						return fmt.Errorf("%s must be selected alone", value)
 					}
 				}
 			}
