@@ -167,7 +167,7 @@ var setupQuestionHelp = map[string][]string{
 		"Every model result is advisory: it cannot decide legal compliance, change deterministic findings, or change the scan exit status.",
 	},
 	"ollama-model": {
-		"Choose the local Ollama model used for advisory code-context review. Setup lists installed models and a small set of recommendations; qwen3:8b is the tested default.",
+		"Choose the local Ollama model used for advisory code-context review. Setup lists installed models and recommendations; qwen3.5:9b is the default candidate, while qwen3:8b retains the previous live-validation baseline.",
 		"You may enter any exact Ollama tag. A different model may use more memory, run more slowly, or fail ComplyScan's structured-output contract until independently validated.",
 	},
 	"install-ollama": {

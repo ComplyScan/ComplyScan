@@ -16,7 +16,7 @@ import (
 
 func TestPromptOllamaModelListsInstalledModelsAndAcceptsCustomTag(t *testing.T) {
 	var output bytes.Buffer
-	prompt := promptSession{reader: bufio.NewReader(strings.NewReader("3\n")), output: &output}
+	prompt := promptSession{reader: bufio.NewReader(strings.NewReader("4\n")), output: &output}
 	model, err := promptOllamaModel(prompt, defaultSetupModel, []string{"codestral:22b"})
 	if err != nil {
 		t.Fatal(err)
@@ -24,7 +24,7 @@ func TestPromptOllamaModelListsInstalledModelsAndAcceptsCustomTag(t *testing.T) 
 	if model != "codestral:22b" {
 		t.Fatalf("model = %q", model)
 	}
-	for _, expected := range []string{"qwen3:8b", "qwen3-coder:30b", "codestral:22b", "installed; compatibility not yet validated"} {
+	for _, expected := range []string{"qwen3.5:9b", "live validation pending", "qwen3:8b", "previously validated", "qwen3-coder:30b", "codestral:22b", "installed; compatibility not yet validated"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("picker output missing %q:\n%s", expected, output.String())
 		}

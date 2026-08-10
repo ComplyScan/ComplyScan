@@ -19,7 +19,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultSetupModel = "qwen3:8b"
+const defaultSetupModel = "qwen3.5:9b"
 
 type setupOptions struct {
 	configPath        string
@@ -601,7 +601,8 @@ type setupModelOption struct {
 
 func promptOllamaModel(prompt promptSession, current string, installed []string) (string, error) {
 	options := []setupModelOption{
-		{tag: defaultSetupModel, detail: "tested default; balanced local review"},
+		{tag: defaultSetupModel, detail: "recommended default; live ComplyScan validation pending"},
+		{tag: "qwen3:8b", detail: "smaller previously validated model"},
 		{tag: "qwen3-coder:30b", detail: "larger coding model; substantially more memory; unvalidated"},
 	}
 	if current = strings.TrimSpace(current); current != "" {
@@ -670,13 +671,19 @@ func modelStatus(model string, installed []string) string {
 	for _, candidate := range installed {
 		if strings.EqualFold(candidate, model) {
 			if strings.EqualFold(model, defaultSetupModel) {
-				return "installed; tested default"
+				return "installed; recommended default; live validation pending"
+			}
+			if strings.EqualFold(model, "qwen3:8b") {
+				return "installed; previously validated model"
 			}
 			return "installed; compatibility not yet validated by ComplyScan"
 		}
 	}
 	if strings.EqualFold(model, defaultSetupModel) {
-		return "tested default; not currently installed"
+		return "recommended default; not currently installed; live validation pending"
+	}
+	if strings.EqualFold(model, "qwen3:8b") {
+		return "previously validated model; not currently installed"
 	}
 	return "configured; not currently installed or validated"
 }

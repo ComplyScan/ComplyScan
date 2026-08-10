@@ -667,7 +667,7 @@ func TestDoctorChecksConfiguredOllamaModel(t *testing.T) {
 		if request.URL.Path != "/api/tags" {
 			t.Errorf("request path = %q", request.URL.Path)
 		}
-		return doctorHTTPResponse(http.StatusOK, `{"models":[{"name":"qwen3:8b","model":"qwen3:8b"}]}`), nil
+		return doctorHTTPResponse(http.StatusOK, `{"models":[{"name":"qwen3.5:9b","model":"qwen3.5:9b"}]}`), nil
 	})
 
 	cfg := config.Default()
@@ -686,7 +686,7 @@ func TestDoctorChecksConfiguredOllamaModel(t *testing.T) {
 	if code := Execute([]string{"doctor", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
-	for _, expected := range []string{"[PASS] ollama executable:", "[PASS] ollama service:", "[PASS] ollama model: qwen3:8b"} {
+	for _, expected := range []string{"[PASS] ollama executable:", "[PASS] ollama service:", "[PASS] ollama model: qwen3.5:9b"} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("doctor output missing %q:\n%s", expected, stdout.String())
 		}
@@ -714,7 +714,7 @@ func TestDoctorFailsWhenConfiguredOllamaModelIsMissing(t *testing.T) {
 	if code := Execute([]string{"doctor", target}, &stdout, &stderr, testBuild); code != 1 {
 		t.Fatalf("exit code = %d, want 1; stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "[FAIL] ollama model: qwen3:8b is not installed") {
+	if !strings.Contains(stdout.String(), "[FAIL] ollama model: qwen3.5:9b is not installed") {
 		t.Fatalf("missing model was not reported:\n%s", stdout.String())
 	}
 }
