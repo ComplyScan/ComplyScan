@@ -571,7 +571,37 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 					investigationRequests[index] = reviewcontext.AttachVerifications(investigationRequests[index], verificationResults)
 					candidateCount += len(investigationRequests[index].Candidates)
 				}
-				if outputFormat == "terminal" {
+				progressWriter := io.Writer(stdout)
+				if outputFormat != "terminal" {
+					progressWriter = cmd.ErrOrStderr()
+				}
+				modelQualified := true
+				if len(visible) > 0 || candidateCount > 0 {
+					if _, err := fmt.Fprintf(progressWriter, "Checking model compatibility before repository review...\n"); err != nil {
+						return fmt.Errorf("write model qualification progress: %w", err)
+					}
+					outcome, qualificationErr := qualifyConfiguredModel(cmd.Context(), cfg.AI, false)
+					if qualificationErr != nil {
+						modelQualified = false
+						warning := fmt.Sprintf("%s review was incomplete because model qualification failed: %v. Deterministic findings and evidence remain available.", reviewProviderLabel(cfg.AI.Provider), qualificationErr)
+						reportValue.Warnings = append(reportValue.Warnings, warning)
+						if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
+							return fmt.Errorf("write model qualification warning: %w", err)
+						}
+					} else {
+						source := "live"
+						if outcome.Result.FromCache {
+							source = "cached"
+						}
+						if _, err := fmt.Fprintf(progressWriter, "Model compatibility: compatible (%s check; not a quality or legal approval).\n\n", source); err != nil {
+							return fmt.Errorf("write model qualification result: %w", err)
+						}
+						if outcome.CacheWarning != nil {
+							reportValue.Warnings = append(reportValue.Warnings, "Model compatibility passed but its private cache could not be updated: "+outcome.CacheWarning.Error())
+						}
+					}
+				}
+				if modelQualified && outputFormat == "terminal" {
 					if _, err := fmt.Fprintf(stdout, "%s advisory review requested for %d finding(s) and %d technical evidence investigation target(s) with %s...\n\n", reviewProviderLabel(cfg.AI.Provider), len(visible), candidateCount, configuredReviewModel(cfg.AI)); err != nil {
 						return fmt.Errorf("write terminal report: %w", err)
 					}
@@ -581,11 +611,10 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 						}
 					}
 				}
-				progressWriter := io.Writer(stdout)
-				if outputFormat != "terminal" {
-					progressWriter = cmd.ErrOrStderr()
-				}
 				for index := range frameworkResults {
+					if !modelQualified {
+						break
+					}
 					var technicalReview providers.TechnicalReviewResult
 					if index == 0 {
 						review, reviewErr := reviewFindingsWithProvider(cmd.Context(), cfg.AI, target, visible)
