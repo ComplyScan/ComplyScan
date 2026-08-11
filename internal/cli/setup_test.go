@@ -56,7 +56,7 @@ func TestSetupStepTitleShowsPositionAndPreservesPlainFallback(t *testing.T) {
 
 func TestPromptOllamaModelListsInstalledModelsAndAcceptsCustomTag(t *testing.T) {
 	var output bytes.Buffer
-	prompt := promptSession{reader: bufio.NewReader(strings.NewReader("2\n")), output: &output}
+	prompt := promptSession{reader: bufio.NewReader(strings.NewReader("1\n")), output: &output}
 	model, err := promptOllamaModel(prompt, defaultSetupModel, []ollamaInstalledModel{{tag: "codestral:22b", sizeGB: 12.4}})
 	if err != nil {
 		t.Fatal(err)
@@ -65,6 +65,7 @@ func TestPromptOllamaModelListsInstalledModelsAndAcceptsCustomTag(t *testing.T) 
 		t.Fatalf("model = %q", model)
 	}
 	for _, expected := range []string{
+		"Installed models — ready to use", "Suggested models to download", "Custom Ollama model",
 		"qwen3.5:9b", "onboarding benchmark recorded", "qwen3:8b", "technical-review baseline",
 		"qwen3-coder:30b", "qwen2.5-coder:7b", "deepseek-coder-v2:16b", "codestral:22b", "compatibility checked automatically",
 		"~6.6 GB", "~5.2 GB", "~18.6 GB", "~4.7 GB", "~8.9 GB", "12.4 GB",
@@ -105,11 +106,13 @@ func TestPromptOllamaModelUsesTerminalSelectorAndCustomEntry(t *testing.T) {
 	if model != "account-model:latest" {
 		t.Fatalf("model = %q", model)
 	}
-	if len(choices) < 7 || choices[0].Value != defaultSetupModel || choices[1].Value != customModelChoice || !strings.Contains(choices[1].Label, "shown in GB") {
+	if len(choices) < 7 || choices[0].Value != "codestral:22b" || !strings.HasPrefix(choices[0].Label, "Installed · ") ||
+		choices[1].Value != defaultSetupModel || !strings.HasPrefix(choices[1].Label, "Suggested download · ") ||
+		choices[len(choices)-1].Value != customModelChoice || !strings.HasPrefix(choices[len(choices)-1].Label, "Custom model · ") {
 		t.Fatalf("terminal choices = %#v", choices)
 	}
 	for _, choice := range choices {
-		if choice.Value != customModelChoice && !strings.Contains(choice.Label, "GB") {
+		if choice.Value != customModelChoice && (!strings.Contains(choice.Label, "GB") || (!strings.HasPrefix(choice.Label, "Installed · ") && !strings.HasPrefix(choice.Label, "Suggested download · "))) {
 			t.Errorf("model choice does not show a GB size: %#v", choice)
 		}
 	}
@@ -127,6 +130,34 @@ func TestPromptOllamaModelUsesTerminalSelectorAndCustomEntry(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "Custom Ollama model tag") || strings.Contains(output.String(), "1)") {
 		t.Fatalf("custom-model output = %q", output.String())
+	}
+}
+
+func TestPromptOllamaModelGroupsInstalledModelsBeforeDownloads(t *testing.T) {
+	var choices []terminalChoice
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("")), output: &bytes.Buffer{},
+		selectOne: func(_ string, defaultValue string, options []terminalChoice) (string, error) {
+			choices = append([]terminalChoice(nil), options...)
+			return defaultValue, nil
+		},
+	}
+	installed := []ollamaInstalledModel{{tag: defaultSetupModel, sizeGB: 6.6}, {tag: "qwen3:8b", sizeGB: 5.2}}
+	model, err := promptOllamaModel(prompt, defaultSetupModel, installed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model != defaultSetupModel {
+		t.Fatalf("model = %q", model)
+	}
+	if len(choices) < 4 || choices[0].Value != defaultSetupModel || choices[1].Value != "qwen3:8b" {
+		t.Fatalf("choices = %#v", choices)
+	}
+	if !strings.HasPrefix(choices[0].Label, "Installed · ") || !strings.HasPrefix(choices[1].Label, "Installed · ") || !strings.HasPrefix(choices[2].Label, "Suggested download · ") {
+		t.Fatalf("model categories = %#v", choices[:3])
+	}
+	if choices[len(choices)-1].Value != customModelChoice {
+		t.Fatalf("custom choice is not last: %#v", choices)
 	}
 }
 

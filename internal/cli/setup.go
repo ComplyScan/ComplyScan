@@ -976,6 +976,7 @@ type setupModelOption struct {
 	detail          string
 	downloadSizeGB  float64
 	sizeApproximate bool
+	installed       bool
 }
 
 const customModelChoice = "__complyscan_custom_model__"
@@ -998,21 +999,24 @@ func promptOllamaModel(prompt promptSession, current string, installed []ollamaI
 	}
 	options := []setupModelOption{modelOption(current, modelStatus(current, installed), installed)}
 	for _, model := range installed {
-		options = appendUniqueModel(options, setupModelOption{tag: model.tag, detail: modelStatus(model.tag, installed), downloadSizeGB: model.sizeGB})
+		options = appendUniqueModel(options, setupModelOption{tag: model.tag, detail: modelStatus(model.tag, installed), downloadSizeGB: model.sizeGB, installed: true})
 	}
 	for _, recommendation := range recommendedOllamaModels() {
 		options = appendUniqueModel(options, recommendation)
 	}
+	options = groupOllamaModelOptions(options)
+	if _, err := fmt.Fprintln(prompt.output, "  All choices below run through Ollama. Installed models are ready now; suggested models require a download."); err != nil {
+		return "", err
+	}
 	if prompt.selectOne != nil {
 		choices := make([]terminalChoice, 0, len(options)+1)
-		choices = append(choices, terminalChoice{Label: modelOptionLabel(options[0]), Value: options[0].tag})
+		for _, option := range options {
+			choices = append(choices, terminalChoice{Label: categorizedModelOptionLabel(option), Value: option.tag})
+		}
 		choices = append(choices, terminalChoice{
-			Label: "Use another Ollama model — enter any exact tag; its download size will be shown in GB after selection",
+			Label: "Custom model · Enter any exact Ollama tag; its download size will be shown after selection",
 			Value: customModelChoice,
 		})
-		for _, option := range options[1:] {
-			choices = append(choices, terminalChoice{Label: modelOptionLabel(option), Value: option.tag})
-		}
 		selected, err := prompt.chooseOne("Ollama model", current, choices)
 		if err != nil {
 			return "", err
@@ -1022,17 +1026,31 @@ func promptOllamaModel(prompt promptSession, current string, installed []ollamaI
 		}
 		return selected, nil
 	}
-	if _, err := fmt.Fprintln(prompt.output, "  Select an installed or recommended model, or type any Ollama model tag:"); err != nil {
-		return "", err
-	}
 	defaultIndex := 1
+	showingInstalled := false
+	showingSuggested := false
 	for index, option := range options {
+		if option.installed && !showingInstalled {
+			if _, err := fmt.Fprintln(prompt.output, "\n  Installed models — ready to use:"); err != nil {
+				return "", err
+			}
+			showingInstalled = true
+		}
+		if !option.installed && !showingSuggested {
+			if _, err := fmt.Fprintln(prompt.output, "\n  Suggested models to download:"); err != nil {
+				return "", err
+			}
+			showingSuggested = true
+		}
 		if strings.EqualFold(option.tag, current) {
 			defaultIndex = index + 1
 		}
 		if _, err := fmt.Fprintf(prompt.output, "    %d) %s\n", index+1, modelOptionLabel(option)); err != nil {
 			return "", err
 		}
+	}
+	if _, err := fmt.Fprintln(prompt.output, "\n  Custom Ollama model — type any exact model tag instead of a number."); err != nil {
+		return "", err
 	}
 	for {
 		value, err := prompt.text("Ollama model number or tag", fmt.Sprintf("%d", defaultIndex))
@@ -1064,6 +1082,7 @@ func modelOption(model, detail string, installed []ollamaInstalledModel) setupMo
 	for _, candidate := range installed {
 		if strings.EqualFold(candidate.tag, model) {
 			option.downloadSizeGB = candidate.sizeGB
+			option.installed = true
 			return option
 		}
 	}
@@ -1087,6 +1106,29 @@ func modelOptionLabel(option setupModelOption) string {
 		size = fmt.Sprintf("%s%.1f GB", prefix, option.downloadSizeGB)
 	}
 	return fmt.Sprintf("%s — %s — %s", option.tag, size, option.detail)
+}
+
+func categorizedModelOptionLabel(option setupModelOption) string {
+	category := "Suggested download"
+	if option.installed {
+		category = "Installed"
+	}
+	return category + " · " + modelOptionLabel(option)
+}
+
+func groupOllamaModelOptions(options []setupModelOption) []setupModelOption {
+	grouped := make([]setupModelOption, 0, len(options))
+	for _, option := range options {
+		if option.installed {
+			grouped = append(grouped, option)
+		}
+	}
+	for _, option := range options {
+		if !option.installed {
+			grouped = append(grouped, option)
+		}
+	}
+	return grouped
 }
 
 func promptCustomModel(prompt promptSession, label string) (string, error) {
@@ -1118,21 +1160,21 @@ func modelStatus(model string, installed []ollamaInstalledModel) string {
 	for _, candidate := range installed {
 		if strings.EqualFold(candidate.tag, model) {
 			if strings.EqualFold(model, defaultSetupModel) {
-				return "installed; recommended default; onboarding benchmark recorded; compatibility checked after selection"
+				return "recommended default; onboarding benchmark recorded; compatibility checked after selection"
 			}
 			if strings.EqualFold(model, "qwen3:8b") {
-				return "installed; technical-review baseline recorded; compatibility checked after selection"
+				return "technical-review baseline recorded; compatibility checked after selection"
 			}
-			return "installed; compatibility checked automatically after selection"
+			return "compatibility checked automatically after selection"
 		}
 	}
 	if strings.EqualFold(model, defaultSetupModel) {
-		return "recommended default; not currently installed; onboarding benchmark recorded"
+		return "recommended default; onboarding benchmark recorded"
 	}
 	if strings.EqualFold(model, "qwen3:8b") {
-		return "technical-review baseline recorded; not currently installed"
+		return "technical-review baseline recorded"
 	}
-	return "configured; not currently installed; compatibility checked after installation"
+	return "configured choice; compatibility checked after download"
 }
 
 func setupModelDefault(value string) string {
