@@ -10,6 +10,7 @@
 - Guided setup now presents a final summary of analysis privacy, model readiness, frameworks, systems, evidence ownership, and first-run behavior before writing configuration; users can revisit any major section or cancel without saving.
 - Interactive terminals now default to concise, progressive question guidance and offer a detailed mode with all category definitions and examples; `--detailed-guidance` makes the complete explanations directly selectable for later runs and accessible text-mode sessions retain them by default.
 - Setup review and completion now use a consistent status vocabulary—ready, needs review, and not configured—with compact visual markers in styled terminals and explicit text markers in accessible or redirected output.
+- Guided setup now saves private, source-free recovery checkpoints in the operating system's user-cache directory after each major stage, offers to resume or discard them on the next terminal run, and removes the draft after configuration is saved.
 
 ## 0.1.6 - 2026-08-11
 

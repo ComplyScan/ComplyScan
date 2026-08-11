@@ -127,15 +127,54 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	profileDraft := newSetupProfileDraft()
 	modelReady := true
 	reviewConfigured := false
+	scanMode := setupScanNone
+	resumeStage := setupDraftStage("")
+	draftPath := ""
+	if interactive && terminalFile(cmd.InOrStdin()) {
+		draftPath, err = defaultSetupDraftPath(target)
+		if err != nil {
+			_ = prompt.status(setupStatusReview, "Automatic setup recovery is unavailable: "+err.Error())
+			draftPath = ""
+		} else {
+			stored, found, loadErr := loadSetupDraft(draftPath, target, time.Now())
+			if loadErr != nil {
+				_ = prompt.status(setupStatusReview, "The previous setup draft could not be used; recovery will retry at the next checkpoint: "+loadErr.Error())
+			} else if found {
+				resume, resumeErr := promptSetupDraftResume(prompt, stored)
+				if resumeErr != nil {
+					return resumeErr
+				}
+				if resume {
+					cfg = stored.Config
+					modelReady = stored.ModelReady
+					scanMode = stored.ScanMode
+					resumeStage = stored.Stage
+				} else if removeErr := removeSetupDraft(draftPath); removeErr != nil {
+					return removeErr
+				}
+			}
+		}
+	}
+	if options.skipScan {
+		scanMode = setupScanNone
+	}
 	if interactive {
 		if err := setupStepTitle(prompt, 1, 5, "Analysis and privacy mode", false); err != nil {
 			return err
 		}
-		modelReady, err = configureSetupReview(cmd.Context(), prompt, stdout, &cfg, true, options)
-		if err != nil {
-			return err
+		if setupDraftStageRank(resumeStage) >= setupDraftStageRank(setupDraftAnalysis) {
+			if err := prompt.status(setupStatusReady, "Resumed the saved analysis and privacy selection."); err != nil {
+				return err
+			}
+			reviewConfigured = true
+		} else {
+			modelReady, err = configureSetupReview(cmd.Context(), prompt, stdout, &cfg, true, options)
+			if err != nil {
+				return err
+			}
+			reviewConfigured = true
+			checkpointSetupDraft(prompt, draftPath, target, setupDraftAnalysis, cfg, scanMode, modelReady)
 		}
-		reviewConfigured = true
 		if _, err := fmt.Fprintln(stdout); err != nil {
 			return err
 		}
@@ -150,14 +189,21 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		if err := setupStepTitle(prompt, 3, 5, "System and framework context", true); err != nil {
 			return err
 		}
-		if !options.advanced {
-			profileDraft = draftProfileForSetup(cmd.Context(), stdout, target, cfg, summary, modelReady)
-		}
-		if err := setupStepTitle(prompt, 4, 5, "Applicability and evidence ownership", true); err != nil {
-			return err
-		}
-		if err := collectInteractiveSetupContext(prompt, target, &cfg, options, summary, profileDraft, true); err != nil {
-			return err
+		if setupDraftStageRank(resumeStage) >= setupDraftStageRank(setupDraftContext) {
+			if err := prompt.status(setupStatusReady, "Resumed the saved system, framework, applicability, and ownership answers."); err != nil {
+				return err
+			}
+		} else {
+			if !options.advanced {
+				profileDraft = draftProfileForSetup(cmd.Context(), stdout, target, cfg, summary, modelReady)
+			}
+			if err := setupStepTitle(prompt, 4, 5, "Applicability and evidence ownership", true); err != nil {
+				return err
+			}
+			if err := collectInteractiveSetupContext(prompt, target, &cfg, options, summary, profileDraft, true); err != nil {
+				return err
+			}
+			checkpointSetupDraft(prompt, draftPath, target, setupDraftContext, cfg, scanMode, modelReady)
 		}
 	} else if !existed {
 		if err := configureFrameworkSelection(prompt, &cfg, false, options.frameworks); err != nil {
@@ -171,12 +217,11 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 			return err
 		}
 	}
-	scanMode := setupScanNone
 	if interactive {
 		if err := setupStepTitle(prompt, 5, 5, "Review, save, and first scan", true); err != nil {
 			return err
 		}
-		if !options.skipScan {
+		if !options.skipScan && setupDraftStageRank(resumeStage) < setupDraftStageRank(setupDraftReview) {
 			scanMode, err = promptSetupScanMode(prompt, repositorySummary, cfg.AI.Provider, modelReady)
 			if err != nil {
 				return err
@@ -191,17 +236,28 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		}
 	}
 	if interactive {
+		checkpointSetupDraft(prompt, draftPath, target, setupDraftReview, cfg, scanMode, modelReady)
 		save, reviewErr := reviewSetupBeforeSave(cmd.Context(), prompt, stdout, target, &cfg, options, repositorySummary, profileDraft, &scanMode, &modelReady)
 		if reviewErr != nil {
 			return reviewErr
 		}
+		checkpointSetupDraft(prompt, draftPath, target, setupDraftReview, cfg, scanMode, modelReady)
 		if !save {
-			_, err := fmt.Fprintln(stdout, "\nSetup cancelled; no configuration file was written.")
+			message := "\nSetup cancelled; no configuration file was written."
+			if draftPath != "" {
+				message += " Run `complyscan setup` again to resume these answers."
+			}
+			_, err := fmt.Fprintln(stdout, message)
 			return err
 		}
 	}
 	if err := config.Write(path, cfg, existed); err != nil {
 		return err
+	}
+	if draftPath != "" {
+		if removeErr := removeSetupDraft(draftPath); removeErr != nil {
+			_ = prompt.status(setupStatusReview, "Configuration was saved, but its recovery draft could not be removed: "+removeErr.Error())
+		}
 	}
 	if err := ensureReportGitIgnore(target); err != nil {
 		return fmt.Errorf("saved %s but could not ignore generated reports: %w", path, err)

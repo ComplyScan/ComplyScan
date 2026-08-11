@@ -617,7 +617,7 @@ func TestReviewSetupBeforeSaveCanCancelWithoutWriting(t *testing.T) {
 
 func TestEverySetupQuestionHasDeveloperGuidance(t *testing.T) {
 	keys := []string{
-		"applicability-context", "frameworks", "system-id", "system-name", "intended-purpose", "lifecycle-stage", "organization-roles", "organization-role-basic",
+		"resume-setup", "applicability-context", "frameworks", "system-id", "system-name", "intended-purpose", "lifecycle-stage", "organization-roles", "organization-role-basic",
 		"operating-regions", "use-case-domains", "users", "affected-groups", "decision-impact",
 		"human-oversight", "ai-activities", "personal-data", "special-category-data", "children-data",
 		"deployment-models", "profile-reviewer", "applicability-decision", "decision-rationale",

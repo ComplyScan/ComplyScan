@@ -5,6 +5,10 @@ import (
 )
 
 var setupQuestionHelp = map[string][]string{
+	"resume-setup": {
+		"A private setup draft from this repository is available in your operating system's user-cache directory. It contains configuration answers, but no API-key value or repository source code.",
+		"Resume to continue from the last completed major stage, or start over to delete the draft and collect fresh answers.",
+	},
 	"applicability-context": {
 		"ComplyScan now asks only the remaining facts used by the selected EU technical control pack. Later questions appear only when an earlier answer makes them relevant.",
 		"You may answer unknown, but the report will then label requirement mapping as provisional. Completing these facts does not itself decide that the EU AI Act applies.",
