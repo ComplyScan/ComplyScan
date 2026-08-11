@@ -72,6 +72,8 @@ type OllamaConfig struct {
 // environment variable read at request time, so repository configuration can
 // be committed without embedding a provider secret.
 type RemoteConfig struct {
+	ProviderName   string `yaml:"provider-name,omitempty"`
+	BaseURL        string `yaml:"base-url,omitempty"`
 	Model          string `yaml:"model"`
 	APIKeyEnv      string `yaml:"api-key-env"`
 	TimeoutSeconds int    `yaml:"timeout-seconds"`
@@ -182,13 +184,13 @@ func (c Config) Validate() error {
 		return errors.New("ai.provider must not be empty")
 	}
 	if !validAIProvider(c.AI.Provider) {
-		return fmt.Errorf("ai.provider %q is not available; use none, ollama, openai, anthropic, or gemini", c.AI.Provider)
+		return fmt.Errorf("ai.provider %q is not available; use none, ollama, openai, anthropic, gemini, xai, groq, mistral, openrouter, or openai-compatible", c.AI.Provider)
 	}
 	if err := c.AI.Ollama.Validate(); err != nil {
 		return fmt.Errorf("ai.ollama: %w", err)
 	}
 	if isRemoteProvider(c.AI.Provider) {
-		if err := c.AI.Remote.Validate(); err != nil {
+		if err := c.AI.Remote.ValidateForProvider(c.AI.Provider); err != nil {
 			return fmt.Errorf("ai.remote: %w", err)
 		}
 	}
@@ -351,6 +353,18 @@ func (c OllamaConfig) Validate() error {
 }
 
 func (c RemoteConfig) Validate() error {
+	if strings.TrimSpace(c.ProviderName) != "" && (!validDisplayName(c.ProviderName) || len([]rune(c.ProviderName)) > 80) {
+		return errors.New("provider-name must contain 1-80 printable characters")
+	}
+	if strings.TrimSpace(c.BaseURL) != "" {
+		endpoint, err := url.Parse(c.BaseURL)
+		if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" {
+			return errors.New("base-url must be an absolute HTTPS URL")
+		}
+		if endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+			return errors.New("base-url must not contain credentials, query parameters, or a fragment")
+		}
+	}
 	if strings.TrimSpace(c.Model) == "" {
 		return errors.New("model must not be empty")
 	}
@@ -366,9 +380,22 @@ func (c RemoteConfig) Validate() error {
 	return nil
 }
 
+func (c RemoteConfig) ValidateForProvider(provider string) error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	if isOpenAICompatibleProvider(provider) && strings.TrimSpace(c.BaseURL) == "" {
+		return errors.New("base-url is required for an OpenAI-compatible provider")
+	}
+	if provider == "openai-compatible" && strings.TrimSpace(c.ProviderName) == "" {
+		return errors.New("provider-name is required for a custom OpenAI-compatible provider")
+	}
+	return nil
+}
+
 func validAIProvider(value string) bool {
 	switch value {
-	case "none", "ollama", "openai", "anthropic", "gemini":
+	case "none", "ollama", "openai", "anthropic", "gemini", "xai", "groq", "mistral", "openrouter", "openai-compatible":
 		return true
 	default:
 		return false
@@ -376,7 +403,25 @@ func validAIProvider(value string) bool {
 }
 
 func isRemoteProvider(value string) bool {
-	return value == "openai" || value == "anthropic" || value == "gemini"
+	return value == "openai" || value == "anthropic" || value == "gemini" || isOpenAICompatibleProvider(value)
+}
+
+func isOpenAICompatibleProvider(value string) bool {
+	switch value {
+	case "xai", "groq", "mistral", "openrouter", "openai-compatible":
+		return true
+	default:
+		return false
+	}
+}
+
+func validDisplayName(value string) bool {
+	for _, character := range strings.TrimSpace(value) {
+		if unicode.IsControl(character) {
+			return false
+		}
+	}
+	return strings.TrimSpace(value) != ""
 }
 
 func validEnvironmentName(value string) bool {

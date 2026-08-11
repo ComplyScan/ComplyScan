@@ -99,7 +99,7 @@ func TestPromptAnalysisProviderGroupsHostedProviders(t *testing.T) {
 				}
 				return options[1].Value, nil
 			case 2:
-				if label != "Hosted provider" || defaultValue != "anthropic" || len(options) != 3 {
+				if label != "Hosted provider" || defaultValue != "anthropic" || len(options) != 8 || options[3].Value != "xai" || options[4].Value != "groq" || options[5].Value != "mistral" || options[6].Value != "openrouter" || options[7].Value != customCompatibleProvider {
 					t.Fatalf("provider selector: label=%q default=%q options=%#v", label, defaultValue, options)
 				}
 				return "gemini", nil
@@ -1077,6 +1077,34 @@ func TestNonInteractiveSetupConfiguresRemoteReviewWithoutSavingCredential(t *tes
 	}
 	if cfg.AI.Provider != "openai" || cfg.AI.Remote.Model != "gpt-test" {
 		t.Fatalf("AI configuration = %#v", cfg.AI)
+	}
+}
+
+func TestNonInteractiveSetupConfiguresCustomCompatibleProvider(t *testing.T) {
+	target := t.TempDir()
+	t.Setenv("COMPLYSCAN_TEST_GATEWAY_KEY", "test-secret-value")
+	var stdout, stderr bytes.Buffer
+	code := executeWithInput([]string{
+		"setup", "--non-interactive", "--review", customCompatibleProvider, "--allow-remote-review",
+		"--provider-name", "Acme model gateway", "--base-url", "https://models.example.com/v1",
+		"--model", "acme-review-v2", "--api-key-env", "COMPLYSCAN_TEST_GATEWAY_KEY", "--skip-scan", target,
+	}, strings.NewReader(""), &stdout, &stderr, testBuild)
+	if code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	cfg, err := config.Load(filepath.Join(target, config.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AI.Provider != customCompatibleProvider || cfg.AI.Remote.ProviderName != "Acme model gateway" || cfg.AI.Remote.BaseURL != "https://models.example.com/v1" || cfg.AI.Remote.Model != "acme-review-v2" {
+		t.Fatalf("AI configuration = %#v", cfg.AI)
+	}
+	data, err := os.ReadFile(filepath.Join(target, config.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "test-secret-value") {
+		t.Fatalf("credential leaked into configuration:\n%s", data)
 	}
 }
 

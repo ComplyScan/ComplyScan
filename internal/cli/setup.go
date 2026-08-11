@@ -24,23 +24,25 @@ import (
 const defaultSetupModel = "qwen3.5:9b"
 
 type setupOptions struct {
-	configPath        string
-	forceInteractive  bool
-	nonInteractive    bool
-	advanced          bool
-	reviewProvider    string
-	ollamaModel       string
-	remoteModel       string
-	remoteAPIKeyEnv   string
-	frameworks        []string
-	allowRemoteReview bool
-	pullModel         bool
-	skipModelPull     bool
-	qualifyModel      bool
-	installOllama     bool
-	skipOllamaInstall bool
-	skipScan          bool
-	detailedGuidance  bool
+	configPath         string
+	forceInteractive   bool
+	nonInteractive     bool
+	advanced           bool
+	reviewProvider     string
+	ollamaModel        string
+	remoteModel        string
+	remoteAPIKeyEnv    string
+	remoteProviderName string
+	remoteBaseURL      string
+	frameworks         []string
+	allowRemoteReview  bool
+	pullModel          bool
+	skipModelPull      bool
+	qualifyModel       bool
+	installOllama      bool
+	skipOllamaInstall  bool
+	skipScan           bool
+	detailedGuidance   bool
 }
 
 func newSetupCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
@@ -81,10 +83,12 @@ func newSetupCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().BoolVar(&options.forceInteractive, "interactive", false, "run the setup wizard even when input is redirected")
 	command.Flags().BoolVar(&options.nonInteractive, "non-interactive", false, "create or update configuration without asking questions")
 	command.Flags().BoolVar(&options.advanced, "advanced", false, "collect the complete system, data, deployment, and reviewed-applicability profile")
-	command.Flags().StringVar(&options.reviewProvider, "review", "", "advisory review provider: none, ollama, openai, anthropic, or gemini")
+	command.Flags().StringVar(&options.reviewProvider, "review", "", "advisory review provider: none, ollama, openai, anthropic, gemini, xai, groq, mistral, openrouter, or openai-compatible")
 	command.Flags().StringVar(&options.ollamaModel, "ollama-model", "", "Ollama model name")
 	command.Flags().StringVar(&options.remoteModel, "model", "", "remote-provider model name")
 	command.Flags().StringVar(&options.remoteAPIKeyEnv, "api-key-env", "", "environment-variable name containing the remote-provider API key")
+	command.Flags().StringVar(&options.remoteProviderName, "provider-name", "", "display name for a custom OpenAI-compatible provider")
+	command.Flags().StringVar(&options.remoteBaseURL, "base-url", "", "HTTPS API base URL for an OpenAI-compatible provider")
 	command.Flags().StringSliceVar(&options.frameworks, "framework", nil, "built-in technical evidence pack to enable (repeatable)")
 	command.Flags().BoolVar(&options.allowRemoteReview, "allow-remote-review", false, "confirm that bounded repository context may be sent to the selected remote provider")
 	command.Flags().BoolVar(&options.pullModel, "pull-model", false, "download the configured Ollama model (requires --review ollama in non-interactive mode)")
@@ -378,6 +382,8 @@ func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.
 			revisit.ollamaModel = ""
 			revisit.remoteModel = ""
 			revisit.remoteAPIKeyEnv = ""
+			revisit.remoteProviderName = ""
+			revisit.remoteBaseURL = ""
 			revisit.allowRemoteReview = false
 			revisit.pullModel = false
 			revisit.qualifyModel = false
@@ -498,7 +504,7 @@ func setupStepTitle(prompt promptSession, current, total int, title string, lead
 }
 
 func setupReviewExplicit(options setupOptions) bool {
-	return options.reviewProvider != "" || options.ollamaModel != "" || options.remoteModel != "" || options.remoteAPIKeyEnv != "" ||
+	return options.reviewProvider != "" || options.ollamaModel != "" || options.remoteModel != "" || options.remoteAPIKeyEnv != "" || options.remoteProviderName != "" || options.remoteBaseURL != "" ||
 		options.allowRemoteReview || options.pullModel || options.skipModelPull || options.qualifyModel || options.installOllama || options.skipOllamaInstall
 }
 
@@ -518,7 +524,7 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 		provider = cfg.AI.Provider
 	}
 	if provider != "none" && provider != "ollama" && !isRemoteReviewProvider(provider) {
-		return false, fmt.Errorf("invalid review provider %q (want none, ollama, openai, anthropic, or gemini)", provider)
+		return false, fmt.Errorf("invalid review provider %q", provider)
 	}
 	if options.ollamaModel != "" && provider != "ollama" {
 		return false, errors.New("--ollama-model requires --review ollama or an interactive Ollama selection")
@@ -530,13 +536,16 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 		return false, errors.New("--install-ollama requires --review ollama")
 	}
 	if options.remoteModel != "" && !isRemoteReviewProvider(provider) {
-		return false, errors.New("--model requires --review openai, anthropic, or gemini")
+		return false, errors.New("--model requires a hosted review provider")
 	}
 	if options.remoteAPIKeyEnv != "" && !isRemoteReviewProvider(provider) {
-		return false, errors.New("--api-key-env requires --review openai, anthropic, or gemini")
+		return false, errors.New("--api-key-env requires a hosted review provider")
 	}
 	if options.allowRemoteReview && !isRemoteReviewProvider(provider) {
-		return false, errors.New("--allow-remote-review requires --review openai, anthropic, or gemini")
+		return false, errors.New("--allow-remote-review requires a hosted review provider")
+	}
+	if (options.remoteProviderName != "" || options.remoteBaseURL != "") && !isOpenAICompatibleProvider(provider) {
+		return false, errors.New("--provider-name and --base-url require an OpenAI-compatible review provider")
 	}
 	if options.qualifyModel && provider == "none" {
 		return false, errors.New("--qualify-model requires an advisory review provider")
@@ -678,10 +687,10 @@ func promptAnalysisProvider(prompt promptSession, current string) (string, error
 }
 
 func promptHostedProvider(prompt promptSession, current string) (string, error) {
-	choices := []terminalChoice{
-		{Label: "OpenAI", Value: "openai"},
-		{Label: "Anthropic", Value: "anthropic"},
-		{Label: "Google Gemini", Value: "gemini"},
+	profiles := hostedProviderProfiles()
+	choices := make([]terminalChoice, 0, len(profiles))
+	for _, profile := range profiles {
+		choices = append(choices, terminalChoice{Label: profile.Label, Value: profile.ID})
 	}
 	defaultProvider := current
 	if !isRemoteReviewProvider(defaultProvider) {
@@ -692,6 +701,32 @@ func promptHostedProvider(prompt promptSession, current string) (string, error) 
 
 func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.Writer, cfg *config.Config, interactive bool, options setupOptions) (bool, error) {
 	provider := cfg.AI.Provider
+	profile, exists := hostedProviderProfileFor(provider)
+	if !exists {
+		return false, fmt.Errorf("unsupported hosted review provider %q", provider)
+	}
+	providerName := strings.TrimSpace(options.remoteProviderName)
+	baseURL := strings.TrimSpace(options.remoteBaseURL)
+	if provider != customCompatibleProvider {
+		providerName = profile.Label
+		baseURL = profile.BaseURL
+	} else if interactive {
+		var err error
+		if providerName == "" {
+			providerName, err = prompt.text("Provider name", "")
+			if err != nil {
+				return false, err
+			}
+		}
+		if baseURL == "" {
+			baseURL, err = prompt.text("API base URL", "https://")
+			if err != nil {
+				return false, err
+			}
+		}
+	}
+	cfg.AI.Remote.ProviderName = providerName
+	cfg.AI.Remote.BaseURL = baseURL
 	allowed := options.allowRemoteReview
 	if interactive {
 		if err := prompt.sectionTitle("Cloud model setup", true); err != nil {
@@ -701,7 +736,7 @@ func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.
 			return false, err
 		}
 		if !allowed {
-			confirmed, err := prompt.confirm(fmt.Sprintf("Allow bounded repository context to be sent to %s", reviewProviderLabel(provider)), false)
+			confirmed, err := prompt.confirm(fmt.Sprintf("Allow bounded repository context to be sent to %s", remoteProviderName(cfg.AI)), false)
 			if err != nil {
 				return false, err
 			}
@@ -748,9 +783,9 @@ func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.
 		keyEnvironment = defaultRemoteAPIKeyEnvironment(provider)
 	}
 	cfg.AI.Remote = config.RemoteConfig{
-		Model: model, APIKeyEnv: keyEnvironment, TimeoutSeconds: 360, MaxFindings: 20,
+		ProviderName: providerName, BaseURL: baseURL, Model: model, APIKeyEnv: keyEnvironment, TimeoutSeconds: 360, MaxFindings: 20,
 	}
-	if err := cfg.AI.Remote.Validate(); err != nil {
+	if err := cfg.AI.Remote.ValidateForProvider(provider); err != nil {
 		return false, fmt.Errorf("remote review configuration: %w", err)
 	}
 	if value, exists := os.LookupEnv(keyEnvironment); !exists || strings.TrimSpace(value) == "" {
@@ -768,7 +803,7 @@ func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.
 func promptRemoteModel(prompt promptSession, provider string) (string, error) {
 	models := remoteModelOptions(provider)
 	if len(models) == 0 {
-		return "", fmt.Errorf("unsupported remote review provider %q", provider)
+		return promptCustomModel(prompt, "Remote model ID")
 	}
 	if prompt.selectOne != nil {
 		options := make([]terminalChoice, 0, len(models)+1)
@@ -815,16 +850,11 @@ func promptRemoteModel(prompt promptSession, provider string) (string, error) {
 }
 
 func remoteModelOptions(provider string) []string {
-	switch provider {
-	case "openai":
-		return []string{"gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna"}
-	case "anthropic":
-		return []string{"claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5"}
-	case "gemini":
-		return []string{"gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.5-flash"}
-	default:
+	profile, exists := hostedProviderProfileFor(provider)
+	if !exists {
 		return nil
 	}
+	return append([]string(nil), profile.Models...)
 }
 
 func defaultRemoteModel(provider string) string {
@@ -836,16 +866,11 @@ func defaultRemoteModel(provider string) string {
 }
 
 func defaultRemoteAPIKeyEnvironment(provider string) string {
-	switch provider {
-	case "openai":
-		return "OPENAI_API_KEY"
-	case "anthropic":
-		return "ANTHROPIC_API_KEY"
-	case "gemini":
-		return "GEMINI_API_KEY"
-	default:
+	profile, exists := hostedProviderProfileFor(provider)
+	if !exists {
 		return ""
 	}
+	return profile.APIKeyEnv
 }
 
 func installOllama(ctx context.Context, stdout io.Writer) (string, error) {

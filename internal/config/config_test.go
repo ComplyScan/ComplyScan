@@ -141,6 +141,47 @@ ai:
 	}
 }
 
+func TestLoadAcceptsOpenAICompatibleProviderProfiles(t *testing.T) {
+	tests := []struct {
+		provider string
+		name     string
+		baseURL  string
+	}{
+		{provider: "xai", name: "xAI — Grok models", baseURL: "https://api.x.ai/v1"},
+		{provider: "groq", name: "Groq", baseURL: "https://api.groq.com/openai/v1"},
+		{provider: "mistral", name: "Mistral", baseURL: "https://api.mistral.ai/v1"},
+		{provider: "openrouter", name: "OpenRouter", baseURL: "https://openrouter.ai/api/v1"},
+		{provider: "openai-compatible", name: "Private gateway", baseURL: "https://models.example.com/v1"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.provider, func(t *testing.T) {
+			cfg := Default()
+			cfg.AI.Provider = testCase.provider
+			cfg.AI.Remote = RemoteConfig{
+				ProviderName: testCase.name, BaseURL: testCase.baseURL, Model: "review-model",
+				APIKeyEnv: "REVIEW_API_KEY", TimeoutSeconds: 120, MaxFindings: 10,
+			}
+			if err := cfg.Validate(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestOpenAICompatibleProviderRequiresSafeBaseURL(t *testing.T) {
+	for _, baseURL := range []string{"", "http://models.example.com/v1", "https://user:secret@models.example.com/v1", "https://models.example.com/v1?key=secret"} {
+		cfg := Default()
+		cfg.AI.Provider = "openai-compatible"
+		cfg.AI.Remote = RemoteConfig{
+			ProviderName: "Private gateway", BaseURL: baseURL, Model: "review-model",
+			APIKeyEnv: "REVIEW_API_KEY", TimeoutSeconds: 120, MaxFindings: 10,
+		}
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("expected unsafe base URL %q to fail", baseURL)
+		}
+	}
+}
+
 func TestLoadAcceptsExplicitPathOwnership(t *testing.T) {
 	path := filepath.Join(t.TempDir(), FileName)
 	cfg := Default()

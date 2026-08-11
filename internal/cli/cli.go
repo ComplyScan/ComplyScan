@@ -960,7 +960,8 @@ func configuredReviewer(settings config.AIConfig) (*providers.OllamaProvider, ti
 }
 
 func isRemoteReviewProvider(value string) bool {
-	return value == "openai" || value == "anthropic" || value == "gemini"
+	_, exists := hostedProviderProfileFor(value)
+	return exists
 }
 
 func configuredReviewModel(settings config.AIConfig) string {
@@ -981,8 +982,18 @@ func reviewProviderLabel(value string) string {
 	case "gemini":
 		return "Gemini"
 	default:
+		if profile, exists := hostedProviderProfileFor(value); exists {
+			return profile.Label
+		}
 		return value
 	}
+}
+
+func remoteProviderName(settings config.AIConfig) string {
+	if strings.TrimSpace(settings.Remote.ProviderName) != "" {
+		return settings.Remote.ProviderName
+	}
+	return reviewProviderLabel(settings.Provider)
 }
 
 func technicalReviewProgress(output io.Writer, provider string, started time.Time, now func() time.Time) func(technicalreview.Progress) error {
