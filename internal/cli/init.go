@@ -258,28 +258,28 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 	if err := explainSetupQuestion(prompt, "lifecycle-stage"); err != nil {
 		return profile.System{}, err
 	}
-	if value.LifecycleStage, err = promptChoice(prompt, "Lifecycle stage", profile.LifecycleDevelopment,
+	if value.LifecycleStage, err = promptRequiredChoice(prompt, "Lifecycle stage",
 		profile.LifecycleDevelopment, profile.LifecycleTesting, profile.LifecycleProduction, profile.LifecycleRetired, profile.LifecycleUnknown); err != nil {
 		return profile.System{}, err
 	}
 	if err := explainSetupQuestion(prompt, "organization-roles"); err != nil {
 		return profile.System{}, err
 	}
-	if value.OrganizationRoles, err = promptChoices(prompt, "Organization roles", []profile.OrganizationRole{profile.RoleUnknown},
+	if value.OrganizationRoles, err = promptRequiredChoices(prompt, "Organization roles",
 		profile.RoleProvider, profile.RoleDeployer, profile.RoleImporter, profile.RoleDistributor, profile.RoleProductManufacturer, profile.RoleUnknown); err != nil {
 		return profile.System{}, err
 	}
 	if err := explainSetupQuestion(prompt, "operating-regions"); err != nil {
 		return profile.System{}, err
 	}
-	if value.OperatingRegions, err = promptChoices(prompt, "Operating regions", []profile.OperatingRegion{profile.RegionUnknown},
+	if value.OperatingRegions, err = promptRequiredChoices(prompt, "Operating regions",
 		profile.RegionEU, profile.RegionEEA, profile.RegionUK, profile.RegionUS, profile.RegionGlobal, profile.RegionOther, profile.RegionUnknown); err != nil {
 		return profile.System{}, err
 	}
 	if err := explainSetupQuestion(prompt, "use-case-domains"); err != nil {
 		return profile.System{}, err
 	}
-	if value.UseCaseDomains, err = promptChoices(prompt, "Use-case domains", []profile.UseCaseDomain{profile.DomainUnknown},
+	if value.UseCaseDomains, err = promptRequiredChoices(prompt, "Use-case domains",
 		profile.DomainBiometrics, profile.DomainCriticalInfrastructure, profile.DomainEducation, profile.DomainEmployment,
 		profile.DomainEssentialServices, profile.DomainLawEnforcement, profile.DomainMigrationBorderControl,
 		profile.DomainJusticeDemocraticProcess, profile.DomainHealthcare, profile.DomainSoftwareDevelopment,
@@ -301,21 +301,21 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 	if err := explainSetupQuestion(prompt, "decision-impact"); err != nil {
 		return profile.System{}, err
 	}
-	if value.DecisionImpact, err = promptChoice(prompt, "Decision impact", profile.ImpactUnknown,
+	if value.DecisionImpact, err = promptRequiredChoice(prompt, "Decision impact",
 		profile.ImpactAdvisory, profile.ImpactLow, profile.ImpactSignificant, profile.ImpactAutonomous, profile.ImpactUnknown); err != nil {
 		return profile.System{}, err
 	}
 	if err := explainSetupQuestion(prompt, "human-oversight"); err != nil {
 		return profile.System{}, err
 	}
-	if value.HumanOversight, err = promptChoice(prompt, "Human oversight", profile.OversightUnknown,
+	if value.HumanOversight, err = promptRequiredChoice(prompt, "Human oversight",
 		profile.OversightRequired, profile.OversightAvailable, profile.OversightLimited, profile.OversightNone, profile.OversightUnknown); err != nil {
 		return profile.System{}, err
 	}
 	if err := explainSetupQuestion(prompt, "ai-activities"); err != nil {
 		return profile.System{}, err
 	}
-	if value.AIActivities, err = promptChoices(prompt, "AI activities", []profile.AIActivity{profile.ActivityInference},
+	if value.AIActivities, err = promptRequiredChoices(prompt, "AI activities",
 		profile.ActivityInference, profile.ActivityTraining, profile.ActivityFineTuning, profile.ActivityEvaluation,
 		profile.ActivityAutomatedDecision, profile.ActivityAgentToolUse, profile.ActivitySyntheticContent, profile.ActivityUnknown); err != nil {
 		return profile.System{}, err
@@ -323,25 +323,25 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 	if err := explainSetupQuestion(prompt, "personal-data"); err != nil {
 		return profile.System{}, err
 	}
-	if value.Data.PersonalData, err = promptChoice(prompt, "Processes personal data", profile.TriUnknown, profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
+	if value.Data.PersonalData, err = promptRequiredChoice(prompt, "Processes personal data", profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
 		return profile.System{}, err
 	}
 	if err := explainSetupQuestion(prompt, "special-category-data"); err != nil {
 		return profile.System{}, err
 	}
-	if value.Data.SpecialCategoryData, err = promptChoice(prompt, "Processes special-category or similarly sensitive data", profile.TriUnknown, profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
+	if value.Data.SpecialCategoryData, err = promptRequiredChoice(prompt, "Processes special-category or similarly sensitive data", profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
 		return profile.System{}, err
 	}
 	if err := explainSetupQuestion(prompt, "children-data"); err != nil {
 		return profile.System{}, err
 	}
-	if value.Data.ChildrenData, err = promptChoice(prompt, "Processes children's data", profile.TriUnknown, profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
+	if value.Data.ChildrenData, err = promptRequiredChoice(prompt, "Processes children's data", profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
 		return profile.System{}, err
 	}
 	if err := explainSetupQuestion(prompt, "deployment-models"); err != nil {
 		return profile.System{}, err
 	}
-	if value.DeploymentModels, err = promptChoices(prompt, "Deployment models", []profile.DeploymentModel{profile.DeploymentUnknown},
+	if value.DeploymentModels, err = promptRequiredChoices(prompt, "Deployment models",
 		profile.DeploymentInternal, profile.DeploymentPrivateCustomer, profile.DeploymentPublic, profile.DeploymentOpenSource,
 		profile.DeploymentEmbedded, profile.DeploymentAPI, profile.DeploymentLocalCLI, profile.DeploymentUnknown); err != nil {
 		return profile.System{}, err
@@ -371,7 +371,7 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 		if err := explainSetupQuestion(prompt, "applicability-decision"); err != nil {
 			return profile.System{}, err
 		}
-		decisionStatus, err := promptChoice(prompt, "Human EU AI Act applicability decision", profile.ApplicabilityNeedsReview,
+		decisionStatus, err := promptRequiredChoice(prompt, "Human EU AI Act applicability decision",
 			profile.ApplicabilityNeedsReview, profile.ApplicabilityApplicable, profile.ApplicabilityNotApplicable, profile.ApplicabilityUncertain)
 		if err != nil {
 			return profile.System{}, err
@@ -534,7 +534,11 @@ func (session promptSession) readText(label, defaultValue string) (string, error
 		}
 	}
 	for {
-		if _, err := fmt.Fprintf(session.output, "? %s [%s]: ", label, defaultValue); err != nil {
+		promptSuffix := " [" + defaultValue + "]"
+		if defaultValue == "" {
+			promptSuffix = " (answer required)"
+		}
+		if _, err := fmt.Fprintf(session.output, "? %s%s: ", label, promptSuffix); err != nil {
 			return "", err
 		}
 		line, err := session.reader.ReadString('\n')
@@ -611,6 +615,49 @@ func promptChoice[T ~string](session promptSession, label string, defaultValue T
 	}
 }
 
+func promptRequiredChoice[T ~string](session promptSession, label string, allowed ...T) (T, error) {
+	var zero T
+	if len(allowed) == 0 {
+		return zero, fmt.Errorf("%s has no available choices", strings.ToLower(label))
+	}
+	label = session.nextQuestionLabel(label)
+	if session.selectOne != nil {
+		options := make([]terminalChoice, 0, len(allowed)+1)
+		options = append(options, terminalChoice{
+			Label: "Choose an answer — no option is preselected",
+			Value: requiredAnswerChoiceValue,
+		})
+		for _, candidate := range allowed {
+			options = append(options, terminalChoice{Label: string(candidate), Value: string(candidate)})
+		}
+		selected, err := session.chooseOne(label, requiredAnswerChoiceValue, options)
+		if err != nil {
+			return zero, err
+		}
+		if index, matched := choiceIndex(selected, allowed); matched {
+			return allowed[index], nil
+		}
+		return zero, fmt.Errorf("%s selector returned unsupported value %q", strings.ToLower(label), selected)
+	}
+	for index, candidate := range allowed {
+		if _, err := fmt.Fprintf(session.output, "  %d) %s\n", index+1, candidate); err != nil {
+			return zero, err
+		}
+	}
+	for {
+		value, err := session.readText(fmt.Sprintf("Select %s (1-%d)", label, len(allowed)), "")
+		if err != nil {
+			return zero, err
+		}
+		if index, matched := choiceIndex(value, allowed); matched {
+			return allowed[index], nil
+		}
+		if _, err := fmt.Fprintf(session.output, "  Enter a number from 1 to %d.\n", len(allowed)); err != nil {
+			return zero, err
+		}
+	}
+}
+
 func promptChoices[T ~string](session promptSession, label string, defaultValue []T, allowed ...T) ([]T, error) {
 	if len(allowed) == 0 {
 		return nil, fmt.Errorf("%s has no available choices", strings.ToLower(label))
@@ -665,9 +712,6 @@ func promptChoices[T ~string](session promptSession, label string, defaultValue 
 			}
 		}
 	}
-	if len(defaultIndexes) == 0 {
-		defaultIndexes = []string{"1"}
-	}
 	for {
 		value, err := session.readText(label+" numbers (comma-separated)", strings.Join(defaultIndexes, ","))
 		if err != nil {
@@ -695,6 +739,10 @@ func promptChoices[T ~string](session promptSession, label string, defaultValue 
 			return nil, err
 		}
 	}
+}
+
+func promptRequiredChoices[T ~string](session promptSession, label string, allowed ...T) ([]T, error) {
+	return promptChoices(session, label, nil, allowed...)
 }
 
 func choiceIndex[T ~string](value string, allowed []T) (int, bool) {

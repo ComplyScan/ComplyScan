@@ -179,7 +179,7 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 	if err := explainSetupQuestion(prompt, "operating-regions"); err != nil {
 		return profile.System{}, err
 	}
-	if value.OperatingRegions, err = promptChoices(prompt, "Operating regions", []profile.OperatingRegion{profile.RegionUnknown},
+	if value.OperatingRegions, err = promptRequiredChoices(prompt, "Operating regions",
 		profile.RegionEU, profile.RegionEEA, profile.RegionUK, profile.RegionUS, profile.RegionGlobal, profile.RegionOther, profile.RegionUnknown); err != nil {
 		return profile.System{}, err
 	}
@@ -193,7 +193,7 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 		bothOption     = "We both provide and professionally use the system"
 		unknownOption  = "The organisational role has not been established"
 	)
-	role, err := promptChoice(prompt, "organisation role", unknownOption, providerOption, deployerOption, bothOption, unknownOption)
+	role, err := promptRequiredChoice(prompt, "organisation role", providerOption, deployerOption, bothOption, unknownOption)
 	if err != nil {
 		return profile.System{}, err
 	}
@@ -214,7 +214,7 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 	if err := draft.explain(prompt.output, "decision-impact"); err != nil {
 		return profile.System{}, err
 	}
-	if value.DecisionImpact, err = promptChoice(prompt, "Decision impact", draft.decisionImpact(profile.ImpactUnknown),
+	if value.DecisionImpact, err = promptRequiredChoice(prompt, "Decision impact",
 		profile.ImpactAdvisory, profile.ImpactLow, profile.ImpactSignificant, profile.ImpactAutonomous, profile.ImpactUnknown); err != nil {
 		return profile.System{}, err
 	}
@@ -224,7 +224,7 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 	if err := draft.explain(prompt.output, "lifecycle-stage"); err != nil {
 		return profile.System{}, err
 	}
-	if value.LifecycleStage, err = promptChoice(prompt, "Lifecycle stage", draft.lifecycle(profile.LifecycleDevelopment),
+	if value.LifecycleStage, err = promptRequiredChoice(prompt, "Lifecycle stage",
 		profile.LifecycleDevelopment, profile.LifecycleTesting, profile.LifecycleProduction, profile.LifecycleRetired, profile.LifecycleUnknown); err != nil {
 		return profile.System{}, err
 	}
@@ -234,7 +234,7 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 	if err := draft.explain(prompt.output, "human-oversight"); err != nil {
 		return profile.System{}, err
 	}
-	if value.HumanOversight, err = promptChoice(prompt, "Human oversight", draft.humanOversight(profile.OversightUnknown),
+	if value.HumanOversight, err = promptRequiredChoice(prompt, "Human oversight",
 		profile.OversightRequired, profile.OversightAvailable, profile.OversightLimited, profile.OversightNone, profile.OversightUnknown); err != nil {
 		return profile.System{}, err
 	}
@@ -308,7 +308,7 @@ func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile
 		if err = draft.explain(prompt.output, "personal-data"); err != nil {
 			return err
 		}
-		if system.Data.PersonalData, err = promptChoice(prompt, "Processes personal data", draft.triState("personal-data", system.Data.PersonalData), profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
+		if system.Data.PersonalData, err = promptRequiredChoice(prompt, "Processes personal data", profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
 			return err
 		}
 		if err = explainSetupQuestion(prompt, "special-category-data"); err != nil {
@@ -317,7 +317,7 @@ func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile
 		if err = draft.explain(prompt.output, "special-category-data"); err != nil {
 			return err
 		}
-		if system.Data.SpecialCategoryData, err = promptChoice(prompt, "Processes special-category or similarly sensitive data", draft.triState("special-category-data", system.Data.SpecialCategoryData), profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
+		if system.Data.SpecialCategoryData, err = promptRequiredChoice(prompt, "Processes special-category or similarly sensitive data", profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
 			return err
 		}
 		if err = explainSetupQuestion(prompt, "children-data"); err != nil {
@@ -326,7 +326,7 @@ func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile
 		if err = draft.explain(prompt.output, "children-data"); err != nil {
 			return err
 		}
-		if system.Data.ChildrenData, err = promptChoice(prompt, "Processes children's data", draft.triState("children-data", system.Data.ChildrenData), profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
+		if system.Data.ChildrenData, err = promptRequiredChoice(prompt, "Processes children's data", profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
 			return err
 		}
 	}
@@ -377,7 +377,7 @@ func collectTechnicalSystemContext(prompt promptSession, system *profile.System,
 		if err = draft.explain(prompt.output, "use-case-domains"); err != nil {
 			return err
 		}
-		if system.UseCaseDomains, err = promptChoices(prompt, "Use-case domains", draft.useCaseDomains(system.UseCaseDomains),
+		if system.UseCaseDomains, err = promptRequiredChoices(prompt, "Use-case domains",
 			profile.DomainBiometrics, profile.DomainCriticalInfrastructure, profile.DomainEducation, profile.DomainEmployment,
 			profile.DomainEssentialServices, profile.DomainLawEnforcement, profile.DomainMigrationBorderControl,
 			profile.DomainJusticeDemocraticProcess, profile.DomainHealthcare, profile.DomainSoftwareDevelopment,
@@ -391,7 +391,7 @@ func collectTechnicalSystemContext(prompt promptSession, system *profile.System,
 	if err = draft.explain(prompt.output, "ai-activities"); err != nil {
 		return err
 	}
-	if system.AIActivities, err = promptChoices(prompt, "AI activities", draft.aiActivities([]profile.AIActivity{profile.ActivityInference}),
+	if system.AIActivities, err = promptRequiredChoices(prompt, "AI activities",
 		profile.ActivityInference, profile.ActivityTraining, profile.ActivityFineTuning, profile.ActivityEvaluation,
 		profile.ActivityAutomatedDecision, profile.ActivityAgentToolUse, profile.ActivitySyntheticContent, profile.ActivityUnknown); err != nil {
 		return err
@@ -402,7 +402,7 @@ func collectTechnicalSystemContext(prompt promptSession, system *profile.System,
 	if err = draft.explain(prompt.output, "deployment-models"); err != nil {
 		return err
 	}
-	if system.DeploymentModels, err = promptChoices(prompt, "Deployment models", draft.deploymentModels(system.DeploymentModels),
+	if system.DeploymentModels, err = promptRequiredChoices(prompt, "Deployment models",
 		profile.DeploymentInternal, profile.DeploymentPrivateCustomer, profile.DeploymentPublic, profile.DeploymentOpenSource,
 		profile.DeploymentEmbedded, profile.DeploymentAPI, profile.DeploymentLocalCLI, profile.DeploymentUnknown); err != nil {
 		return err

@@ -159,7 +159,13 @@ func TestOllamaResourceEstimateUsesTransparentRanges(t *testing.T) {
 
 func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 	target := t.TempDir()
-	input := strings.NewReader(strings.Repeat("\n", 20))
+	input := strings.NewReader(strings.Join([]string{
+		"", "", "", "", // analysis mode, Ollama model, system name, intended purpose
+		"7", "4", "5", "1", "5", // regions, role, impact, lifecycle, oversight
+		"",             // recommended framework mapping
+		"13", "1", "8", // use case, AI activities, deployment
+		"", "", // reviewer, save configuration
+	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	code := executeWithInput([]string{"setup", "--interactive", "--skip-ollama-install", "--skip-model-pull", "--skip-scan", target}, input, &stdout, &stderr, testBuild)
 	if code != 0 {
@@ -176,7 +182,7 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 		t.Fatalf("AI configuration = %#v", cfg.AI)
 	}
 	if cfg.Systems[0].LifecycleStage != profile.LifecycleDevelopment {
-		t.Fatalf("lifecycle default = %q", cfg.Systems[0].LifecycleStage)
+		t.Fatalf("lifecycle answer = %q", cfg.Systems[0].LifecycleStage)
 	}
 	for _, expected := range []string{"ComplyScan setup", "Step 1 of 5 — Analysis, privacy, and model", "Step 2 of 5 — Repository inspection", "Step 3 of 5 — Questionnaire preparation", "Step 4 of 5 — Questionnaire, frameworks, and evidence ownership", "Step 5 of 5 — Review, save, and first scan", "Repository inspected", "System questionnaire — 7 questions", "Step 4 of 5 · Question 1 of 7 — System name", "Step 4 of 5 · Question 7 of 7 — Human oversight", "Local model setup", "Saved", "Next: complyscan scan"} {
 		if !strings.Contains(stdout.String(), expected) {
@@ -219,7 +225,7 @@ func TestFastSetupUsesDeterministicDraftWithoutModel(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\nclient = OpenAI()\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	input := strings.NewReader("\nDraft support replies for agents.\n4\n1\n1\n1\n1\n\n8\n")
+	input := strings.NewReader("\nDraft support replies for agents.\n4\n1\n1\n1\n1\n1\n8\n")
 	var stdout, stderr bytes.Buffer
 	code := executeWithInput([]string{
 		"setup", "--interactive", "--review", "none", "--framework", framework.NISTAIRMFTechnicalEvidencePackID, "--skip-scan", target,
@@ -234,7 +240,7 @@ func TestFastSetupUsesDeterministicDraftWithoutModel(t *testing.T) {
 	if len(cfg.Systems) != 1 || len(cfg.Systems[0].AIActivities) != 1 || cfg.Systems[0].AIActivities[0] != profile.ActivityInference {
 		t.Fatalf("systems = %#v", cfg.Systems)
 	}
-	if cfg.AI.Provider != "none" || !strings.Contains(stdout.String(), "Prepared 1 repository-evident setup suggestion(s) without a model") || !strings.Contains(stdout.String(), "editable draft") {
+	if cfg.AI.Provider != "none" || !strings.Contains(stdout.String(), "Prepared 1 repository-evident setup suggestion(s) without a model") || !strings.Contains(stdout.String(), "advisory suggestion") {
 		t.Fatalf("fast setup output:\n%s", stdout.String())
 	}
 }
@@ -323,7 +329,12 @@ func basicApplicabilityTestSystem() profile.System {
 
 func TestNISTOnlySetupSkipsEUApplicabilityDecision(t *testing.T) {
 	target := t.TempDir()
-	input := strings.NewReader(strings.Repeat("\n", 18))
+	input := strings.NewReader(strings.Join([]string{
+		"", "", // system name, intended purpose
+		"7", "4", "5", "1", "5", // regions, role, impact, lifecycle, oversight
+		"1", "8", // AI activities, deployment
+		"", // save configuration
+	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	code := executeWithInput([]string{
 		"setup", "--interactive", "--framework", "nist-ai-rmf-technical-evidence", "--review", "none", "--skip-scan", target,
@@ -447,6 +458,31 @@ func TestPromptChoiceUsesTerminalSelectorWhenAvailable(t *testing.T) {
 	}
 }
 
+func TestPromptRequiredChoiceHasNoPreselectedAnswer(t *testing.T) {
+	var output bytes.Buffer
+	called := false
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("")), output: &output,
+		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
+			called = true
+			if label != "Lifecycle stage" || defaultValue != requiredAnswerChoiceValue {
+				t.Fatalf("selector arguments: label=%q default=%q", label, defaultValue)
+			}
+			if len(options) != 3 || options[0].Value != requiredAnswerChoiceValue || options[1].Value != string(profile.LifecycleDevelopment) {
+				t.Fatalf("selector options = %#v", options)
+			}
+			return string(profile.LifecycleUnknown), nil
+		},
+	}
+	selected, err := promptRequiredChoice(prompt, "Lifecycle stage", profile.LifecycleDevelopment, profile.LifecycleUnknown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called || selected != profile.LifecycleUnknown {
+		t.Fatalf("selected = %q; called=%t", selected, called)
+	}
+}
+
 func TestConfirmUsesTerminalSelectorWhenAvailable(t *testing.T) {
 	var output bytes.Buffer
 	called := false
@@ -535,6 +571,31 @@ func TestPromptChoicesUsesTerminalMultiSelectWhenAvailable(t *testing.T) {
 	}
 	if output.Len() != 0 {
 		t.Fatalf("numbered fallback was unexpectedly rendered: %q", output.String())
+	}
+}
+
+func TestPromptRequiredChoicesHaveNoPreselectedAnswers(t *testing.T) {
+	var output bytes.Buffer
+	called := false
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("")), output: &output,
+		selectMany: func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error) {
+			called = true
+			if label != "AI activities" || len(defaults) != 0 {
+				t.Fatalf("selector arguments: label=%q defaults=%#v", label, defaults)
+			}
+			if len(options) != 2 || options[0].Value != string(profile.ActivityInference) || strings.Join(exclusive, ",") != "unknown" {
+				t.Fatalf("selector options=%#v exclusive=%#v", options, exclusive)
+			}
+			return []string{string(profile.ActivityInference)}, nil
+		},
+	}
+	selected, err := promptRequiredChoices(prompt, "AI activities", profile.ActivityInference, profile.ActivityUnknown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called || len(selected) != 1 || selected[0] != profile.ActivityInference {
+		t.Fatalf("selected = %#v; called=%t", selected, called)
 	}
 }
 

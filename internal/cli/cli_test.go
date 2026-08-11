@@ -904,17 +904,17 @@ func TestInitCommandProtectsExistingConfig(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"init"}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"init", "--non-interactive"}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("first init exit code = %d: %s", code, stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := Execute([]string{"init"}, &stdout, &stderr, testBuild); code != 2 {
+	if code := Execute([]string{"init", "--non-interactive"}, &stdout, &stderr, testBuild); code != 2 {
 		t.Fatalf("second init exit code = %d, want 2", code)
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := Execute([]string{"init", "--force"}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"init", "--force", "--non-interactive"}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("forced init exit code = %d: %s", code, stderr.String())
 	}
 }
@@ -1017,7 +1017,14 @@ func TestProfileSetupAddsContextToExistingConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	input := strings.NewReader(strings.Repeat("\n", 17))
+	input := strings.NewReader(strings.Join([]string{
+		"", "", "", // system ID, name, intended purpose
+		"1", "6", "7", "13", // lifecycle, roles, regions, use case
+		"", "", // users, affected groups
+		"5", "5", "1", // impact, oversight, AI activities
+		"3", "3", "3", "8", // data questions, deployment
+		"", "1", // reviewer, applicability decision
+	}, "\n") + "\n")
 	code := executeWithInput([]string{"profile", "setup", "--interactive", target}, input, &stdout, &stderr, testBuild)
 	if code != 0 {
 		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())

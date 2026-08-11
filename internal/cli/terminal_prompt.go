@@ -13,6 +13,7 @@ import (
 const accessiblePromptEnvironment = "COMPLYSCAN_ACCESSIBLE"
 
 const moreGuidanceChoiceValue = "\x00complyscan-more-guidance"
+const requiredAnswerChoiceValue = "\x00complyscan-required-answer"
 
 type terminalChoice struct {
 	Label    string
@@ -185,6 +186,9 @@ func runTerminalSelect(input io.Reader, output io.Writer, label, defaultValue st
 		Validate(func(value string) error {
 			if value == moreGuidanceChoiceValue {
 				return errors.New("read the explanation, then choose an answer in this menu")
+			}
+			if value == requiredAnswerChoiceValue {
+				return errors.New("choose an answer; no option is selected automatically")
 			}
 			return nil
 		})

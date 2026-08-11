@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/config"
-	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/profiledraft"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 )
@@ -62,75 +61,8 @@ func (draft setupProfileDraft) explain(output io.Writer, field string) error {
 			return err
 		}
 	}
-	_, err := fmt.Fprintln(output, "  This is an editable draft, not a confirmed fact. Review it before continuing.")
+	_, err := fmt.Fprintln(output, "  This is an advisory suggestion, not a confirmed fact. Select the answer yourself.")
 	return err
-}
-
-func (draft setupProfileDraft) lifecycle(fallback profile.LifecycleStage) profile.LifecycleStage {
-	return profile.LifecycleStage(draft.first("lifecycle-stage", string(fallback)))
-}
-
-func (draft setupProfileDraft) decisionImpact(fallback profile.DecisionImpact) profile.DecisionImpact {
-	return profile.DecisionImpact(draft.first("decision-impact", string(fallback)))
-}
-
-func (draft setupProfileDraft) humanOversight(fallback profile.HumanOversight) profile.HumanOversight {
-	return profile.HumanOversight(draft.first("human-oversight", string(fallback)))
-}
-
-func (draft setupProfileDraft) useCaseDomains(fallback []profile.UseCaseDomain) []profile.UseCaseDomain {
-	values := draft.values("use-case-domains", stringUseCaseDomains(fallback))
-	result := make([]profile.UseCaseDomain, len(values))
-	for index, value := range values {
-		result[index] = profile.UseCaseDomain(value)
-	}
-	return result
-}
-
-func (draft setupProfileDraft) aiActivities(fallback []profile.AIActivity) []profile.AIActivity {
-	values := draft.values("ai-activities", stringAIActivities(fallback))
-	result := make([]profile.AIActivity, len(values))
-	for index, value := range values {
-		result[index] = profile.AIActivity(value)
-	}
-	return result
-}
-
-func (draft setupProfileDraft) deploymentModels(fallback []profile.DeploymentModel) []profile.DeploymentModel {
-	values := draft.values("deployment-models", stringDeploymentModels(fallback))
-	result := make([]profile.DeploymentModel, len(values))
-	for index, value := range values {
-		result[index] = profile.DeploymentModel(value)
-	}
-	return result
-}
-
-func (draft setupProfileDraft) triState(field string, fallback profile.TriState) profile.TriState {
-	return profile.TriState(draft.first(field, string(fallback)))
-}
-
-func stringUseCaseDomains(values []profile.UseCaseDomain) []string {
-	result := make([]string, len(values))
-	for index, value := range values {
-		result[index] = string(value)
-	}
-	return result
-}
-
-func stringAIActivities(values []profile.AIActivity) []string {
-	result := make([]string, len(values))
-	for index, value := range values {
-		result[index] = string(value)
-	}
-	return result
-}
-
-func stringDeploymentModels(values []profile.DeploymentModel) []string {
-	result := make([]string, len(values))
-	for index, value := range values {
-		result[index] = string(value)
-	}
-	return result
 }
 
 func draftProfileForSetup(
