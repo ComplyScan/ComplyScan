@@ -17,6 +17,11 @@ const (
 	OpenAI      Kind = "openai"
 	Anthropic   Kind = "anthropic"
 	Gemini      Kind = "gemini"
+	XAI         Kind = "xai"
+	Groq        Kind = "groq"
+	Mistral     Kind = "mistral"
+	OpenRouter  Kind = "openrouter"
+	Compatible  Kind = "openai-compatible"
 	ComplyCloud Kind = "complyscan-cloud"
 )
 

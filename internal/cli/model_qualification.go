@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strings"
 	"time"
@@ -100,6 +101,8 @@ func configuredQualificationIdentity(ctx context.Context, settings config.AIConf
 				}
 			}
 		}
+	} else if isOpenAICompatibleProvider(settings.Provider) {
+		digest = fmt.Sprintf("endpoint-sha256:%x", sha256.Sum256([]byte(strings.TrimRight(strings.TrimSpace(settings.Remote.BaseURL), "/"))))
 	}
 	return modelqualification.CurrentIdentity(kind, model, digest), nil
 }

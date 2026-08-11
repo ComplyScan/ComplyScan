@@ -91,6 +91,30 @@ func TestConfiguredQualificationIdentityIncludesOllamaDigest(t *testing.T) {
 	}
 }
 
+func TestConfiguredQualificationIdentitySeparatesCompatibleEndpoints(t *testing.T) {
+	settings := config.Default().AI
+	settings.Provider = "openai-compatible"
+	settings.Remote = config.RemoteConfig{
+		ProviderName: "Acme", BaseURL: "https://models.example.com/v1/", Model: "review-v2",
+		APIKeyEnv: "ACME_API_KEY", TimeoutSeconds: 60, MaxFindings: 10,
+	}
+	identity, err := configuredQualificationIdentity(context.Background(), settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.Provider != providers.Compatible || !strings.HasPrefix(identity.ModelDigest, "endpoint-sha256:") {
+		t.Fatalf("identity = %#v", identity)
+	}
+	settings.Remote.BaseURL = "https://other.example.com/v1"
+	other, err := configuredQualificationIdentity(context.Background(), settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.ModelDigest == other.ModelDigest {
+		t.Fatalf("endpoint identity was reused: %#v %#v", identity, other)
+	}
+}
+
 func TestDoctorProbeRefreshesAutomaticQualification(t *testing.T) {
 	target := t.TempDir()
 	cfg := config.Default()

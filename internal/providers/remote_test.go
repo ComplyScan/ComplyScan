@@ -129,3 +129,64 @@ func TestRemoteProviderRequiresCredential(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestOpenAICompatibleProviderUsesConfiguredEndpointAndStructuredChat(t *testing.T) {
+	fingerprint := strings.Repeat("b", 64)
+	structured, err := json.Marshal(ollamaReviewPayload{Observations: []ollamaObservation{{
+		Fingerprint: fingerprint, RuleID: "AI-LOG-001", Verdict: VerdictConfirmed,
+		Confidence: "high", Rationale: "The bounded evidence supports the finding.",
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.String() != "https://models.example.com/v1/chat/completions" || request.Method != http.MethodPost {
+			t.Fatalf("request = %s %s", request.Method, request.URL)
+		}
+		if request.Header.Get("Authorization") != "Bearer test-key" {
+			t.Fatalf("authorization = %q", request.Header.Get("Authorization"))
+		}
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		responseFormat, ok := body["response_format"].(map[string]any)
+		if !ok || responseFormat["type"] != "json_schema" || body["model"] != "custom-review-model" {
+			t.Fatalf("request body = %#v", body)
+		}
+		return testJSONResponse(http.StatusOK, map[string]any{
+			"choices": []any{map[string]any{
+				"finish_reason": "stop", "message": map[string]any{"role": "assistant", "content": string(structured)},
+			}},
+			"usage": map[string]any{"prompt_tokens": 13, "completion_tokens": 8},
+		}), nil
+	})}
+	provider, err := NewOpenAICompatible(Compatible, "Acme gateway", RemoteOptions{
+		APIKey: "test-key", BaseURL: "https://models.example.com/v1/", Model: "custom-review-model",
+		Timeout: time.Second, MaxFindings: 10, HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := provider.Review(context.Background(), ReviewRequest{Findings: []rules.Finding{{
+		Fingerprint: fingerprint, RuleID: "AI-LOG-001", Title: "Logging", Severity: rules.SeverityMedium,
+		Category: "observability", Message: "Review logging.", Remediation: "Add review.", Confidence: "high",
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Provider != Compatible || result.Model != "custom-review-model" || result.Reviewed != 1 || result.Usage.PromptTokens != 13 {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestOpenAICompatibleProviderRejectsUnsafeEndpoint(t *testing.T) {
+	for _, baseURL := range []string{"", "http://models.example.com/v1", "https://user:secret@models.example.com/v1", "https://models.example.com/v1?key=secret"} {
+		_, err := NewOpenAICompatible(Compatible, "Acme", RemoteOptions{
+			APIKey: "test-key", BaseURL: baseURL, Model: "test", Timeout: time.Second, MaxFindings: 1,
+		})
+		if err == nil {
+			t.Fatalf("expected base URL %q to fail", baseURL)
+		}
+	}
+}

@@ -940,7 +940,7 @@ func configuredReviewer(settings config.AIConfig) (*providers.OllamaProvider, ti
 		return nil, 0, 0, "", providers.None, fmt.Errorf("%s is not set; export it before using %s review", settings.Remote.APIKeyEnv, reviewProviderLabel(settings.Provider))
 	}
 	options := providers.RemoteOptions{
-		APIKey: key, Model: settings.Remote.Model,
+		APIKey: key, BaseURL: settings.Remote.BaseURL, Model: settings.Remote.Model,
 		Timeout: time.Duration(settings.Remote.TimeoutSeconds) * time.Second, MaxFindings: settings.Remote.MaxFindings,
 	}
 	var reviewer *providers.OllamaProvider
@@ -953,6 +953,8 @@ func configuredReviewer(settings config.AIConfig) (*providers.OllamaProvider, ti
 		reviewer, err = providers.NewAnthropic(options)
 	case providers.Gemini:
 		reviewer, err = providers.NewGemini(options)
+	case providers.XAI, providers.Groq, providers.Mistral, providers.OpenRouter, providers.Compatible:
+		reviewer, err = providers.NewOpenAICompatible(kind, remoteProviderName(settings), options)
 	default:
 		return nil, 0, 0, "", providers.None, fmt.Errorf("unsupported review provider %q", settings.Provider)
 	}

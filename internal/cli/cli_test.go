@@ -559,6 +559,23 @@ func TestConfiguredRemoteReviewerReadsOnlyNamedEnvironmentVariable(t *testing.T)
 	}
 }
 
+func TestConfiguredCompatibleReviewerUsesSavedProviderProfile(t *testing.T) {
+	settings := config.Default().AI
+	settings.Provider = "openai-compatible"
+	settings.Remote = config.RemoteConfig{
+		ProviderName: "Acme gateway", BaseURL: "https://models.example.com/v1", Model: "review-v2",
+		APIKeyEnv: "COMPLYSCAN_TEST_GATEWAY_KEY", TimeoutSeconds: 45, MaxFindings: 4,
+	}
+	t.Setenv("COMPLYSCAN_TEST_GATEWAY_KEY", "secret-in-process-only")
+	provider, timeout, maximum, model, kind, err := configuredReviewer(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider == nil || timeout != 45*time.Second || maximum != 4 || model != "review-v2" || kind != providers.Compatible {
+		t.Fatalf("configured reviewer = %#v, %s, %d, %q, %q", provider, timeout, maximum, model, kind)
+	}
+}
+
 func TestTechnicalReviewProgressDistinguishesModelAndCache(t *testing.T) {
 	var output bytes.Buffer
 	started := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
