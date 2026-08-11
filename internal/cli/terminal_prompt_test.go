@@ -103,4 +103,15 @@ func TestBackHelpFooterRemainsVisibleWhenValidationHidesOriginalHelp(t *testing.
 	if got := replaceOrAppendHelpFooter(validationView, styledCurrent, styledBack); got != want {
 		t.Fatalf("validation footer = %q, want %q", got, want)
 	}
+	if got := replaceOrAppendHelpFooter(validationView, "", styledBack); got != want {
+		t.Fatalf("missing native footer = %q, want %q", got, want)
+	}
+}
+
+func TestBackHelpFooterIsNotDuplicated(t *testing.T) {
+	styledBack := "\x1b[2m↑ up • ← back • enter submit\x1b[0m"
+	view := "choices\n" + styledBack + "\n"
+	if got := replaceOrAppendHelpFooter(view, "", styledBack); got != view {
+		t.Fatalf("duplicated footer = %q, want %q", got, view)
+	}
 }

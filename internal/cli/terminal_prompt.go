@@ -315,16 +315,21 @@ func (form *backNavigableForm) View() string {
 	help := form.form.Help()
 	bindings := form.form.KeyBinds()
 	currentFooter := help.ShortHelpView(bindings)
-	if currentFooter == "" {
+	footerWithBack := help.ShortHelpView(withBackHelpBinding(bindings))
+	if footerWithBack == "" {
 		return view
 	}
-	footerWithBack := help.ShortHelpView(withBackHelpBinding(bindings))
 	return replaceOrAppendHelpFooter(view, currentFooter, footerWithBack)
 }
 
 func replaceOrAppendHelpFooter(view, currentFooter, footerWithBack string) string {
-	if footer := strings.LastIndex(view, currentFooter); footer >= 0 {
-		return view[:footer] + footerWithBack + view[footer+len(currentFooter):]
+	if footerWithBack == "" || strings.Contains(view, footerWithBack) {
+		return view
+	}
+	if currentFooter != "" {
+		if footer := strings.LastIndex(view, currentFooter); footer >= 0 {
+			return view[:footer] + footerWithBack + view[footer+len(currentFooter):]
+		}
 	}
 	trailingNewlines := len(view) - len(strings.TrimRight(view, "\n"))
 	view = strings.TrimRight(view, "\n")
