@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 )
@@ -310,19 +311,35 @@ func (form *backNavigableForm) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (form *backNavigableForm) View() string {
-	return appendBackShortcut(form.form.View())
+	view := form.form.View()
+	help := form.form.Help()
+	bindings := form.form.KeyBinds()
+	currentFooter := help.ShortHelpView(bindings)
+	if currentFooter == "" {
+		return view
+	}
+	footerWithBack := help.ShortHelpView(withBackHelpBinding(bindings))
+	if footer := strings.LastIndex(view, currentFooter); footer >= 0 {
+		return view[:footer] + footerWithBack + view[footer+len(currentFooter):]
+	}
+	return view
 }
 
-func appendBackShortcut(view string) string {
-	trailingNewlines := len(view) - len(strings.TrimRight(view, "\n"))
-	view = strings.TrimRight(view, "\n")
-	const ansiReset = "\x1b[0m"
-	if reset := strings.LastIndex(view, ansiReset); reset >= 0 {
-		view = view[:reset] + " • ← back" + view[reset:]
-	} else {
-		view += " • ← back"
+func withBackHelpBinding(bindings []key.Binding) []key.Binding {
+	back := key.NewBinding(key.WithKeys("left"), key.WithHelp("←", "back"))
+	result := make([]key.Binding, 0, len(bindings)+1)
+	inserted := false
+	for _, binding := range bindings {
+		result = append(result, binding)
+		if !inserted && binding.Enabled() && binding.Help().Desc == "down" {
+			result = append(result, back)
+			inserted = true
+		}
 	}
-	return view + strings.Repeat("\n", trailingNewlines)
+	if !inserted {
+		result = append(result, back)
+	}
+	return result
 }
 
 func runTerminalForm(form *huh.Form, input io.Reader, output io.Writer, allowBack bool) error {
