@@ -9,6 +9,7 @@
 - Local model selection now shows transparent download/runtime-memory ranges, model pulls retain Ollama's live progress and report elapsed time, and qualification, profile drafting, finding review, and framework evidence investigation report elapsed and target progress with the actual provider name.
 - Guided setup now presents a final summary of analysis privacy, model readiness, frameworks, systems, evidence ownership, and first-run behavior before writing configuration; users can revisit any major section or cancel without saving.
 - Interactive terminals now default to concise, progressive question guidance and offer a detailed mode with all category definitions and examples; `--detailed-guidance` makes the complete explanations directly selectable for later runs and accessible text-mode sessions retain them by default.
+- Setup review and completion now use a consistent status vocabulary—ready, needs review, and not configured—with compact visual markers in styled terminals and explicit text markers in accessible or redirected output.
 
 ## 0.1.6 - 2026-08-11
 

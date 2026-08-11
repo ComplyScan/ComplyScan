@@ -215,7 +215,10 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 			return fmt.Errorf("refresh setup repository snapshot: %w", err)
 		}
 	}
-	if _, err := fmt.Fprintf(stdout, "\nSaved %s with %d system profile(s).\n", path, len(cfg.Systems)); err != nil {
+	if _, err := fmt.Fprintln(stdout); err != nil {
+		return err
+	}
+	if err := prompt.status(setupStatusReady, fmt.Sprintf("Saved %s with %d system profile(s).", path, len(cfg.Systems))); err != nil {
 		return err
 	}
 
@@ -386,13 +389,6 @@ func writeSetupReviewSummary(prompt promptSession, cfg config.Config, scanMode s
 	} else if cfg.AI.Provider != "none" {
 		analysis = fmt.Sprintf("%s cloud — %s", reviewProviderLabel(cfg.AI.Provider), cfg.AI.Remote.Model)
 	}
-	readiness := "not required"
-	if cfg.AI.Provider != "none" {
-		readiness = "needs attention"
-		if modelReady {
-			readiness = "ready"
-		}
-	}
 	frameworks := make([]string, 0, len(cfg.Frameworks))
 	for _, id := range cfg.Frameworks {
 		switch id {
@@ -424,9 +420,40 @@ func writeSetupReviewSummary(prompt promptSession, cfg config.Config, scanMode s
 	} else if scanMode == setupScanDeep {
 		firstRun = "deep AI-assisted scan"
 	}
-	_, err := fmt.Fprintf(prompt.output,
-		"  Analysis: %s (%s)\n  Frameworks: %s\n  Systems: %s\n  Evidence ownership: %s\n  First run: %s\n\n",
-		analysis, readiness, strings.Join(frameworks, ", "), systems, ownership, firstRun)
+	analysisStatus := setupStatusReady
+	if cfg.AI.Provider != "none" && !modelReady {
+		analysisStatus = setupStatusReview
+	}
+	if err := prompt.status(analysisStatus, "Analysis: "+analysis); err != nil {
+		return err
+	}
+	if err := prompt.status(setupStatusReady, "Frameworks: "+strings.Join(frameworks, ", ")); err != nil {
+		return err
+	}
+	systemStatus := setupStatusMissing
+	if len(cfg.Systems) > 0 {
+		systemStatus = setupStatusReady
+		for _, system := range cfg.Systems {
+			if system.ProfileReview.Status != profile.ReviewConfirmed {
+				systemStatus = setupStatusReview
+				break
+			}
+		}
+	}
+	if err := prompt.status(systemStatus, "Systems: "+systems); err != nil {
+		return err
+	}
+	ownershipStatus := setupStatusReady
+	if len(cfg.Systems) == 0 || (len(cfg.Systems) > 1 && len(cfg.Ownership) == 0) {
+		ownershipStatus = setupStatusMissing
+	}
+	if err := prompt.status(ownershipStatus, "Evidence ownership: "+ownership); err != nil {
+		return err
+	}
+	if err := prompt.status(setupStatusReady, "First run: "+firstRun); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintln(prompt.output)
 	return err
 }
 

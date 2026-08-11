@@ -17,6 +17,34 @@ type terminalChoice struct {
 	Value string
 }
 
+type setupStatusKind string
+
+const (
+	setupStatusReady   setupStatusKind = "ready"
+	setupStatusReview  setupStatusKind = "review"
+	setupStatusMissing setupStatusKind = "missing"
+)
+
+func (session promptSession) status(kind setupStatusKind, message string) error {
+	marker := map[setupStatusKind]string{
+		setupStatusReady:   "[READY]",
+		setupStatusReview:  "[NEEDS REVIEW]",
+		setupStatusMissing: "[NOT CONFIGURED]",
+	}[kind]
+	if session.styleTitles {
+		marker = map[setupStatusKind]string{
+			setupStatusReady:   "✓",
+			setupStatusReview:  "!",
+			setupStatusMissing: "—",
+		}[kind]
+	}
+	if marker == "" {
+		return fmt.Errorf("unsupported setup status %q", kind)
+	}
+	_, err := fmt.Fprintf(session.output, "  %s %s\n", marker, message)
+	return err
+}
+
 func terminalPromptAvailable(input io.Reader, output io.Writer) bool {
 	if strings.TrimSpace(os.Getenv(accessiblePromptEnvironment)) != "" || strings.EqualFold(strings.TrimSpace(os.Getenv("TERM")), "dumb") {
 		return false

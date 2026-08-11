@@ -560,12 +560,34 @@ func TestWriteSetupReviewSummaryShowsDecisionsBeforeSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"Review setup", "OpenAI cloud — gpt-test (ready)", "EU AI Act technical evidence",
+		"Review setup", "[READY] Analysis: OpenAI cloud — gpt-test", "EU AI Act technical evidence",
 		"NIST AI RMF technical evidence", "Checkout assistant (checkout-ai)",
 		"single-system inference", "deep AI-assisted scan",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("review summary missing %q:\n%s", expected, output.String())
+		}
+	}
+}
+
+func TestSetupStatusUsesSemanticTextFallback(t *testing.T) {
+	var output bytes.Buffer
+	prompt := promptSession{output: &output}
+	for _, test := range []struct {
+		kind setupStatusKind
+		want string
+	}{
+		{setupStatusReady, "[READY] Model is available"},
+		{setupStatusReview, "[NEEDS REVIEW] Profile is still a draft"},
+		{setupStatusMissing, "[NOT CONFIGURED] Ownership rules"},
+	} {
+		if err := prompt.status(test.kind, strings.TrimPrefix(test.want, map[setupStatusKind]string{
+			setupStatusReady: "[READY] ", setupStatusReview: "[NEEDS REVIEW] ", setupStatusMissing: "[NOT CONFIGURED] ",
+		}[test.kind])); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(output.String(), test.want) {
+			t.Fatalf("status output missing %q: %s", test.want, output.String())
 		}
 	}
 }
