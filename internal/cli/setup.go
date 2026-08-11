@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -577,7 +578,7 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 	ollamaPath, _ := exec.LookPath("ollama")
 	model := strings.TrimSpace(options.ollamaModel)
 	if model == "" && interactive {
-		installed := []string{}
+		installed := []ollamaInstalledModel{}
 		if ollamaPath != "" {
 			installed = ollamaInstalledModels(ctx, ollamaPath)
 		}
@@ -896,21 +897,26 @@ func runSetupCommand(ctx context.Context, output io.Writer, executable string, a
 
 func ollamaModelInstalled(ctx context.Context, executable, model string) bool {
 	for _, installed := range ollamaInstalledModels(ctx, executable) {
-		if strings.EqualFold(installed, strings.TrimSpace(model)) {
+		if strings.EqualFold(installed.tag, strings.TrimSpace(model)) {
 			return true
 		}
 	}
 	return false
 }
 
-func ollamaInstalledModels(ctx context.Context, executable string) []string {
+type ollamaInstalledModel struct {
+	tag    string
+	sizeGB float64
+}
+
+func ollamaInstalledModels(ctx context.Context, executable string) []ollamaInstalledModel {
 	command := exec.CommandContext(ctx, executable, "list")
 	output, err := command.Output()
 	if err != nil {
 		return nil
 	}
 	lines := strings.Split(string(output), "\n")
-	models := make([]string, 0, len(lines))
+	models := make([]ollamaInstalledModel, 0, len(lines))
 	seen := map[string]struct{}{}
 	for index, line := range lines {
 		fields := strings.Fields(line)
@@ -920,51 +926,88 @@ func ollamaInstalledModels(ctx context.Context, executable string) []string {
 		key := strings.ToLower(fields[0])
 		if _, duplicate := seen[key]; !duplicate {
 			seen[key] = struct{}{}
-			models = append(models, fields[0])
+			sizeFields := []string{}
+			if len(fields) > 2 {
+				sizeFields = fields[2:]
+			}
+			models = append(models, ollamaInstalledModel{tag: fields[0], sizeGB: parseOllamaSizeGB(sizeFields)})
 		}
 	}
 	return models
 }
 
+func parseOllamaSizeGB(fields []string) float64 {
+	for index, field := range fields {
+		value := strings.ToUpper(strings.TrimSpace(field))
+		for _, unit := range []struct {
+			suffix string
+			factor float64
+		}{
+			{suffix: "TB", factor: 1000},
+			{suffix: "GB", factor: 1},
+			{suffix: "MB", factor: 0.001},
+			{suffix: "KB", factor: 0.000001},
+			{suffix: "B", factor: 0.000000001},
+		} {
+			if value == unit.suffix && index > 0 {
+				number, err := strconv.ParseFloat(strings.ReplaceAll(fields[index-1], ",", ""), 64)
+				if err == nil {
+					return number * unit.factor
+				}
+			}
+			if !strings.HasSuffix(value, unit.suffix) || value == unit.suffix {
+				continue
+			}
+			number, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSuffix(value, unit.suffix), ",", ""), 64)
+			if err == nil {
+				return number * unit.factor
+			}
+		}
+	}
+	return 0
+}
+
 type setupModelOption struct {
-	tag    string
-	detail string
+	tag             string
+	detail          string
+	downloadSizeGB  float64
+	sizeApproximate bool
 }
 
 const customModelChoice = "__complyscan_custom_model__"
 
 func recommendedOllamaModels() []setupModelOption {
 	return []setupModelOption{
-		{tag: defaultSetupModel, detail: "recommended default; onboarding benchmark recorded; automatic compatibility check after selection"},
-		{tag: "qwen3:8b", detail: "smaller general model; technical-review baseline recorded; automatic compatibility check after selection"},
-		{tag: "qwen3-coder:30b", detail: "larger coding model; substantially more memory; no maintained quality baseline"},
-		{tag: "qwen2.5-coder:7b", detail: "smaller coding model; lower resource use; no maintained quality baseline"},
-		{tag: "deepseek-coder-v2:16b", detail: "mid-sized coding model; no maintained quality baseline"},
-		{tag: "codestral:22b", detail: "larger coding model; no maintained quality baseline"},
+		{tag: defaultSetupModel, detail: "recommended default; onboarding benchmark recorded; automatic compatibility check after selection", downloadSizeGB: 6.6, sizeApproximate: true},
+		{tag: "qwen3:8b", detail: "smaller general model; technical-review baseline recorded; automatic compatibility check after selection", downloadSizeGB: 5.2, sizeApproximate: true},
+		{tag: "qwen3-coder:30b", detail: "larger coding model; substantially more memory; no maintained quality baseline", downloadSizeGB: 18.6, sizeApproximate: true},
+		{tag: "qwen2.5-coder:7b", detail: "smaller coding model; lower resource use; no maintained quality baseline", downloadSizeGB: 4.7, sizeApproximate: true},
+		{tag: "deepseek-coder-v2:16b", detail: "mid-sized coding model; no maintained quality baseline", downloadSizeGB: 8.9, sizeApproximate: true},
+		{tag: "codestral:22b", detail: "larger coding model; no maintained quality baseline", downloadSizeGB: 12.6, sizeApproximate: true},
 	}
 }
 
-func promptOllamaModel(prompt promptSession, current string, installed []string) (string, error) {
+func promptOllamaModel(prompt promptSession, current string, installed []ollamaInstalledModel) (string, error) {
 	current = strings.TrimSpace(current)
 	if current == "" {
 		current = defaultSetupModel
 	}
-	options := []setupModelOption{{tag: current, detail: modelStatus(current, installed)}}
+	options := []setupModelOption{modelOption(current, modelStatus(current, installed), installed)}
 	for _, model := range installed {
-		options = appendUniqueModel(options, setupModelOption{tag: model, detail: modelStatus(model, installed)})
+		options = appendUniqueModel(options, setupModelOption{tag: model.tag, detail: modelStatus(model.tag, installed), downloadSizeGB: model.sizeGB})
 	}
 	for _, recommendation := range recommendedOllamaModels() {
 		options = appendUniqueModel(options, recommendation)
 	}
 	if prompt.selectOne != nil {
 		choices := make([]terminalChoice, 0, len(options)+1)
-		choices = append(choices, terminalChoice{Label: options[0].tag + " — " + options[0].detail, Value: options[0].tag})
+		choices = append(choices, terminalChoice{Label: modelOptionLabel(options[0]), Value: options[0].tag})
 		choices = append(choices, terminalChoice{
-			Label: "Use another Ollama model — enter any exact installed or Ollama library tag",
+			Label: "Use another Ollama model — enter any exact tag; its download size will be shown in GB after selection",
 			Value: customModelChoice,
 		})
 		for _, option := range options[1:] {
-			choices = append(choices, terminalChoice{Label: option.tag + " — " + option.detail, Value: option.tag})
+			choices = append(choices, terminalChoice{Label: modelOptionLabel(option), Value: option.tag})
 		}
 		selected, err := prompt.chooseOne("Ollama model", current, choices)
 		if err != nil {
@@ -983,7 +1026,7 @@ func promptOllamaModel(prompt promptSession, current string, installed []string)
 		if strings.EqualFold(option.tag, current) {
 			defaultIndex = index + 1
 		}
-		if _, err := fmt.Fprintf(prompt.output, "    %d) %s — %s\n", index+1, option.tag, option.detail); err != nil {
+		if _, err := fmt.Fprintf(prompt.output, "    %d) %s\n", index+1, modelOptionLabel(option)); err != nil {
 			return "", err
 		}
 	}
@@ -1012,6 +1055,36 @@ func promptOllamaModel(prompt promptSession, current string, installed []string)
 	}
 }
 
+func modelOption(model, detail string, installed []ollamaInstalledModel) setupModelOption {
+	option := setupModelOption{tag: model, detail: detail}
+	for _, candidate := range installed {
+		if strings.EqualFold(candidate.tag, model) {
+			option.downloadSizeGB = candidate.sizeGB
+			return option
+		}
+	}
+	for _, recommendation := range recommendedOllamaModels() {
+		if strings.EqualFold(recommendation.tag, model) {
+			option.downloadSizeGB = recommendation.downloadSizeGB
+			option.sizeApproximate = true
+			return option
+		}
+	}
+	return option
+}
+
+func modelOptionLabel(option setupModelOption) string {
+	size := "size unavailable until Ollama resolves this tag"
+	if option.downloadSizeGB > 0 {
+		prefix := ""
+		if option.sizeApproximate {
+			prefix = "~"
+		}
+		size = fmt.Sprintf("%s%.1f GB", prefix, option.downloadSizeGB)
+	}
+	return fmt.Sprintf("%s — %s — %s", option.tag, size, option.detail)
+}
+
 func promptCustomModel(prompt promptSession, label string) (string, error) {
 	for {
 		value, err := prompt.text(label, "")
@@ -1037,9 +1110,9 @@ func appendUniqueModel(options []setupModelOption, option setupModelOption) []se
 	return append(options, option)
 }
 
-func modelStatus(model string, installed []string) string {
+func modelStatus(model string, installed []ollamaInstalledModel) string {
 	for _, candidate := range installed {
-		if strings.EqualFold(candidate, model) {
+		if strings.EqualFold(candidate.tag, model) {
 			if strings.EqualFold(model, defaultSetupModel) {
 				return "installed; recommended default; onboarding benchmark recorded; compatibility checked after selection"
 			}

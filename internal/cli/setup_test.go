@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,7 +50,7 @@ func TestSetupStepTitleShowsPositionAndPreservesPlainFallback(t *testing.T) {
 func TestPromptOllamaModelListsInstalledModelsAndAcceptsCustomTag(t *testing.T) {
 	var output bytes.Buffer
 	prompt := promptSession{reader: bufio.NewReader(strings.NewReader("2\n")), output: &output}
-	model, err := promptOllamaModel(prompt, defaultSetupModel, []string{"codestral:22b"})
+	model, err := promptOllamaModel(prompt, defaultSetupModel, []ollamaInstalledModel{{tag: "codestral:22b", sizeGB: 12.4}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,6 +60,7 @@ func TestPromptOllamaModelListsInstalledModelsAndAcceptsCustomTag(t *testing.T) 
 	for _, expected := range []string{
 		"qwen3.5:9b", "onboarding benchmark recorded", "qwen3:8b", "technical-review baseline",
 		"qwen3-coder:30b", "qwen2.5-coder:7b", "deepseek-coder-v2:16b", "codestral:22b", "compatibility checked automatically",
+		"~6.6 GB", "~5.2 GB", "~18.6 GB", "~4.7 GB", "~8.9 GB", "12.4 GB",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("picker output missing %q:\n%s", expected, output.String())
@@ -89,15 +91,20 @@ func TestPromptOllamaModelUsesTerminalSelectorAndCustomEntry(t *testing.T) {
 			return customModelChoice, nil
 		},
 	}
-	model, err := promptOllamaModel(prompt, defaultSetupModel, []string{"codestral:22b"})
+	model, err := promptOllamaModel(prompt, defaultSetupModel, []ollamaInstalledModel{{tag: "codestral:22b", sizeGB: 12.4}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if model != "account-model:latest" {
 		t.Fatalf("model = %q", model)
 	}
-	if len(choices) < 7 || choices[0].Value != defaultSetupModel || choices[1].Value != customModelChoice || !strings.Contains(choices[1].Label, "any exact") {
+	if len(choices) < 7 || choices[0].Value != defaultSetupModel || choices[1].Value != customModelChoice || !strings.Contains(choices[1].Label, "shown in GB") {
 		t.Fatalf("terminal choices = %#v", choices)
+	}
+	for _, choice := range choices {
+		if choice.Value != customModelChoice && !strings.Contains(choice.Label, "GB") {
+			t.Errorf("model choice does not show a GB size: %#v", choice)
+		}
 	}
 	for _, expected := range []string{"codestral:22b", "qwen2.5-coder:7b", "deepseek-coder-v2:16b"} {
 		found := false
@@ -118,11 +125,11 @@ func TestPromptOllamaModelUsesTerminalSelectorAndCustomEntry(t *testing.T) {
 
 func TestOllamaInstalledModelsParsesListOutput(t *testing.T) {
 	executable := filepath.Join(t.TempDir(), "ollama")
-	if err := os.WriteFile(executable, []byte("#!/bin/sh\nprintf 'NAME ID SIZE MODIFIED\\nqwen3:8b abc 5GB now\\nQWEN3:8B duplicate 5GB now\\ncodestral:22b def 12GB now\\n'\n"), 0o755); err != nil {
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\nprintf 'NAME ID SIZE MODIFIED\\nqwen3:8b abc 5.2 GB now\\nQWEN3:8B duplicate 5.2 GB now\\ncodestral:22b def 12GB now\\nsmall:latest ghi 950 MB now\\n'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	models := ollamaInstalledModels(context.Background(), executable)
-	if strings.Join(models, ",") != "qwen3:8b,codestral:22b" {
+	if len(models) != 3 || models[0].tag != "qwen3:8b" || models[0].sizeGB != 5.2 || models[1].tag != "codestral:22b" || models[1].sizeGB != 12 || models[2].tag != "small:latest" || math.Abs(models[2].sizeGB-0.95) > 0.0001 {
 		t.Fatalf("models = %#v", models)
 	}
 }

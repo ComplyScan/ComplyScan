@@ -294,7 +294,7 @@ For an existing repository, `complyscan baseline .` records the current findings
 
 ## Optional model review
 
-The built-in scan default remains deterministic. Interactive `complyscan setup` offers local Ollama first, before repository analysis, and performs each installation step only after confirmation. When the selected model is ready, setup first runs or reuses its source-free automatic compatibility check, then uses one separate bounded structured request to draft repository-evident questionnaire answers; those drafts do not become configuration until reviewed through the prompts. The picker lists models already installed by Ollama, labels `qwen3.5:9b` as the recommended default with an onboarding benchmark, identifies `qwen3:8b` as having a recorded technical-review baseline, shows a small recommendation set, and accepts any exact Ollama tag. Manual setup remains available:
+The built-in scan default remains deterministic. Interactive `complyscan setup` offers local Ollama first, before repository analysis, and performs each installation step only after confirmation. When the selected model is ready, setup first runs or reuses its source-free automatic compatibility check, then uses one separate bounded structured request to draft repository-evident questionnaire answers; those drafts do not become configuration until reviewed through the prompts. The picker lists models already installed by Ollama with their reported size in GB, labels `qwen3.5:9b` as the recommended default with an onboarding benchmark, identifies `qwen3:8b` as having a recorded technical-review baseline, shows approximate GB download sizes for its recommendation set, and accepts any exact Ollama tag. Manual setup remains available:
 
 ```bash
 ollama serve
