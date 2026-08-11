@@ -16,6 +16,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
+	"github.com/ComplyScan/ComplyScan/internal/providers"
 )
 
 func TestWriteSectionTitleUsesBoldOnlyWhenEnabled(t *testing.T) {
@@ -860,7 +861,7 @@ func TestEverySetupQuestionHasDeveloperGuidance(t *testing.T) {
 		"deployment-models", "profile-reviewer", "applicability-decision", "decision-rationale",
 		"applicability-reviewer", "replace-profile", "review-provider", "ollama-model", "install-ollama",
 		"path-ownership", "ownership-paths", "ownership-systems", "replace-ownership", "download-model",
-		"remote-disclosure", "remote-model", "api-key-env", "first-scan", "scan-mode",
+		"remote-disclosure", "remote-provider-name", "remote-base-url", "remote-model", "api-key-env", "first-scan", "scan-mode",
 	}
 	for _, key := range keys {
 		lines, exists := setupQuestionHelp[key]
@@ -1150,6 +1151,67 @@ func TestPromptRemoteModelUsesTerminalSelectorAndCustomEntry(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "Custom remote model ID") || strings.Contains(output.String(), "1)") {
 		t.Fatalf("custom-model output = %q", output.String())
+	}
+}
+
+func TestPromptRemoteModelCatalogueUsesAccountModelsAndSearchableSelector(t *testing.T) {
+	previous := listRemoteModels
+	listRemoteModels = func(_ context.Context, options providers.ModelListOptions) ([]providers.RemoteModel, error) {
+		if options.Provider != providers.Anthropic || options.APIKey != "test-key" || options.Label != "Anthropic" {
+			t.Fatalf("list options = %#v", options)
+		}
+		return []providers.RemoteModel{
+			{ID: "claude-opus-5", DisplayName: "Claude Opus 5"},
+			{ID: "claude-sonnet-5", DisplayName: "Claude Sonnet 5"},
+		}, nil
+	}
+	t.Cleanup(func() { listRemoteModels = previous })
+	var choices []terminalChoice
+	var output bytes.Buffer
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("")), output: &output,
+		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
+			if label != "Hosted model" || defaultValue != "claude-sonnet-5" {
+				t.Fatalf("selector label=%q default=%q", label, defaultValue)
+			}
+			choices = append([]terminalChoice(nil), options...)
+			return "claude-opus-5", nil
+		},
+	}
+	model, err := promptRemoteModelCatalogue(context.Background(), prompt, "anthropic", config.RemoteConfig{ProviderName: "Anthropic"}, "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model != "claude-opus-5" || len(choices) != 3 || choices[0].Label != "Claude Opus 5 · claude-opus-5" || choices[2].Value != customModelChoice {
+		t.Fatalf("model=%q choices=%#v", model, choices)
+	}
+	if !strings.Contains(output.String(), "Loaded 2 model(s) available to this API key") || !strings.Contains(output.String(), "Use / to filter") {
+		t.Fatalf("output:\n%s", output.String())
+	}
+}
+
+func TestPromptRemoteModelCatalogueFallsBackWhenDiscoveryUnavailable(t *testing.T) {
+	previous := listRemoteModels
+	listRemoteModels = func(context.Context, providers.ModelListOptions) ([]providers.RemoteModel, error) {
+		return nil, errors.New("endpoint does not provide model discovery")
+	}
+	t.Cleanup(func() { listRemoteModels = previous })
+	var output bytes.Buffer
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("")), output: &output,
+		selectOne: func(label, defaultValue string, _ []terminalChoice) (string, error) {
+			if label != "Remote model" {
+				t.Fatalf("fallback label = %q", label)
+			}
+			return defaultValue, nil
+		},
+	}
+	model, err := promptRemoteModelCatalogue(context.Background(), prompt, "openai", config.RemoteConfig{ProviderName: "OpenAI"}, "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model != "gpt-5.6-terra" || !strings.Contains(output.String(), "Live model catalogue unavailable") || !strings.Contains(output.String(), "suggested models and exact-ID entry") {
+		t.Fatalf("model=%q output:\n%s", model, output.String())
 	}
 }
 

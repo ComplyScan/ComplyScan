@@ -40,7 +40,7 @@ inputs:
     required: false
     default: ""
   review:
-    description: Optional advisory review provider (ollama, openai, anthropic, or gemini); leave empty to use repository configuration.
+    description: Optional advisory review provider; leave empty to use repository configuration.
     required: false
     default: ""
   ollama-model:
@@ -57,6 +57,14 @@ inputs:
     default: ""
   api-key-env:
     description: Optional environment-variable name containing the remote-provider API key; never pass the key value here.
+    required: false
+    default: ""
+  provider-name:
+    description: Optional display name for a custom OpenAI-compatible provider.
+    required: false
+    default: ""
+  base-url:
+    description: Optional HTTPS API base URL for an OpenAI-compatible provider; prefer repository configuration.
     required: false
     default: ""
 
@@ -83,11 +91,13 @@ runs:
       env:
         INPUT_CHANGED_SINCE: ${{ inputs.changed-since }}
         INPUT_API_KEY_ENV: ${{ inputs.api-key-env }}
+        INPUT_BASE_URL: ${{ inputs.base-url }}
         INPUT_CONFIG: ${{ inputs.config }}
         INPUT_MODEL: ${{ inputs.model }}
         INPUT_OLLAMA_ENDPOINT: ${{ inputs.ollama-endpoint }}
         INPUT_OLLAMA_MODEL: ${{ inputs.ollama-model }}
         INPUT_PATH: ${{ inputs.path }}
+        INPUT_PROVIDER_NAME: ${{ inputs.provider-name }}
         INPUT_REVIEW: ${{ inputs.review }}
         INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
         INPUT_SEVERITY: ${{ inputs.severity }}
@@ -124,6 +134,12 @@ runs:
         fi
         if [[ -n "$INPUT_API_KEY_ENV" ]]; then
           arguments+=(--api-key-env "$INPUT_API_KEY_ENV")
+        fi
+        if [[ -n "$INPUT_PROVIDER_NAME" ]]; then
+          arguments+=(--provider-name "$INPUT_PROVIDER_NAME")
+        fi
+        if [[ -n "$INPUT_BASE_URL" ]]; then
+          arguments+=(--base-url "$INPUT_BASE_URL")
         fi
         if [[ -n "$INPUT_CONFIG" ]]; then
           config="$INPUT_CONFIG"

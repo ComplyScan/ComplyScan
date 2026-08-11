@@ -190,8 +190,16 @@ var setupQuestionHelp = map[string][]string{
 		"Remote review sends bounded, secret-redacted finding records and selected source-code excerpts to the chosen provider. The complete repository and system profile are not uploaded.",
 		"The provider may charge for usage and processes data under your account settings and its terms. Confirm only if your organisation permits this external processing.",
 	},
+	"remote-provider-name": {
+		"Enter a short name that will identify this custom API in setup, diagnostics, and reports.",
+		"This is a display label only, such as 'Company model gateway'. Do not enter an API key, account identifier, personal name, or secret.",
+	},
+	"remote-base-url": {
+		"Enter the HTTPS base URL of an API that implements OpenAI-compatible Chat Completions and preferably the Models endpoint.",
+		"Example: https://models.example.com/v1. ComplyScan rejects HTTP, embedded credentials, query parameters, and fragments, then appends /models or /chat/completions.",
+	},
 	"remote-model": {
-		"Choose the exact remote model used for advisory review. Suggested IDs are current starting points, not a guarantee of availability for your account or region.",
+		"Choose the exact remote model used for advisory review. When the API key is available, setup loads the models currently available to that account; otherwise it shows suggested IDs and manual entry.",
 		"Models differ in cost, latency, structured-output behavior, and review quality. ComplyScan applies the same bounded schema and guardrails to every provider.",
 	},
 	"api-key-env": {

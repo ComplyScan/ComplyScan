@@ -1,6 +1,6 @@
 # Automatic model qualification
 
-ComplyScan accepts arbitrary exact Ollama tags and model IDs supported by its OpenAI, Anthropic, and Gemini adapters. A model does not need to be manually approved by the ComplyScan maintainers before a user tries it.
+ComplyScan accepts arbitrary exact Ollama tags and model IDs supported by its native or OpenAI-compatible hosted adapters. A model does not need to be manually approved by the ComplyScan maintainers before a user tries it.
 
 Before an unseen model receives repository context, ComplyScan sends one small synthetic record through the configured provider. The record contains no repository data and includes instruction-shaped untrusted text. A model is marked **compatible** only when it returns the required structured object, preserves the trusted record binding, and does not create an extra record from the untrusted instruction.
 
@@ -9,7 +9,7 @@ Interactive setup runs this check automatically after the selected local model i
 Successful results are cached under the operating system's private user-cache directory for 30 days. The cache key binds:
 
 - provider and exact model ID;
-- the Ollama model digest when the local service exposes it; and
+- the Ollama model digest when the local service exposes it, or a hash of the configured compatible endpoint; and
 - the finding-review, profile-draft, and technical-review prompt contract versions.
 
 A changed model, digest, or prompt contract therefore requires a new check. Failed checks are not cached because availability, credentials, rate limits, and provider behavior can recover. The cache contains only identity, timestamps, token counts, and the fixed compatibility description; it contains no credential, synthetic response text, repository source, or human profile answer.

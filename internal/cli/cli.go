@@ -273,6 +273,8 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 		ollamaEndpoint            string
 		remoteModel               string
 		remoteAPIKeyEnv           string
+		remoteProviderName        string
+		remoteBaseURL             string
 		reportDirectory           string
 		noReport                  bool
 		refreshReview             bool
@@ -322,7 +324,9 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 			if cmd.Flags().Changed("review") {
 				cfg.AI.Provider = strings.ToLower(strings.TrimSpace(reviewProvider))
 				if isRemoteReviewProvider(cfg.AI.Provider) && previousReviewProvider != cfg.AI.Provider {
+					profile, _ := hostedProviderProfileFor(cfg.AI.Provider)
 					cfg.AI.Remote = config.RemoteConfig{
+						ProviderName: profile.Label, BaseURL: profile.BaseURL,
 						Model: defaultRemoteModel(cfg.AI.Provider), APIKeyEnv: defaultRemoteAPIKeyEnvironment(cfg.AI.Provider),
 						TimeoutSeconds: 360, MaxFindings: 20,
 					}
@@ -340,11 +344,20 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 			if cmd.Flags().Changed("api-key-env") {
 				cfg.AI.Remote.APIKeyEnv = strings.TrimSpace(remoteAPIKeyEnv)
 			}
+			if cmd.Flags().Changed("provider-name") {
+				cfg.AI.Remote.ProviderName = strings.TrimSpace(remoteProviderName)
+			}
+			if cmd.Flags().Changed("base-url") {
+				cfg.AI.Remote.BaseURL = strings.TrimSpace(remoteBaseURL)
+			}
 			if (cmd.Flags().Changed("ollama-model") || cmd.Flags().Changed("ollama-endpoint")) && cfg.AI.Provider != "ollama" {
 				return errors.New("--ollama-model and --ollama-endpoint require --review ollama or ai.provider: ollama")
 			}
-			if (cmd.Flags().Changed("model") || cmd.Flags().Changed("api-key-env")) && !isRemoteReviewProvider(cfg.AI.Provider) {
-				return errors.New("--model and --api-key-env require --review openai, anthropic, or gemini")
+			if (cmd.Flags().Changed("model") || cmd.Flags().Changed("api-key-env") || cmd.Flags().Changed("provider-name") || cmd.Flags().Changed("base-url")) && !isRemoteReviewProvider(cfg.AI.Provider) {
+				return errors.New("--model, --api-key-env, --provider-name, and --base-url require a hosted review provider")
+			}
+			if (cmd.Flags().Changed("provider-name") || cmd.Flags().Changed("base-url")) && !isOpenAICompatibleProvider(cfg.AI.Provider) {
+				return errors.New("--provider-name and --base-url require an OpenAI-compatible review provider")
 			}
 			if refreshReview && cfg.AI.Provider == "none" {
 				return errors.New("--refresh-review requires an enabled advisory review provider")
@@ -725,11 +738,13 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 	command.Flags().StringVar(&baselinePath, "baseline", "", "baseline file (relative to the scan target)")
 	command.Flags().BoolVar(&noBaseline, "no-baseline", false, "do not apply a configured baseline")
 	command.Flags().StringVar(&changedSince, "changed-since", "", "scan code files changed since a Git reference; governance checks remain repository-wide")
-	command.Flags().StringVar(&reviewProvider, "review", "", "advisory review provider: none, ollama, openai, anthropic, or gemini (defaults to configuration)")
+	command.Flags().StringVar(&reviewProvider, "review", "", "advisory review provider: none, ollama, openai, anthropic, gemini, xai, groq, mistral, openrouter, or openai-compatible")
 	command.Flags().StringVar(&ollamaModel, "ollama-model", "", "Ollama model name (overrides ai.ollama.model)")
 	command.Flags().StringVar(&ollamaEndpoint, "ollama-endpoint", "", "local Ollama base URL (overrides ai.ollama.endpoint)")
 	command.Flags().StringVar(&remoteModel, "model", "", "remote-provider model name (overrides ai.remote.model)")
 	command.Flags().StringVar(&remoteAPIKeyEnv, "api-key-env", "", "environment-variable name containing the remote-provider API key")
+	command.Flags().StringVar(&remoteProviderName, "provider-name", "", "display name for a custom OpenAI-compatible provider")
+	command.Flags().StringVar(&remoteBaseURL, "base-url", "", "HTTPS API base URL for an OpenAI-compatible provider")
 	command.Flags().StringVar(&reportDirectory, "report-dir", report.DefaultDirectory, "directory for latest.md and latest.json (relative to the scan target)")
 	command.Flags().BoolVar(&noReport, "no-report", false, "do not save local Markdown and JSON reports")
 	command.Flags().BoolVar(&refreshReview, "refresh-review", false, "ignore cached technical observations and run the configured provider again")

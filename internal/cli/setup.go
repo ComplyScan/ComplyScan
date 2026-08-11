@@ -18,10 +18,13 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
+	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/spf13/cobra"
 )
 
 const defaultSetupModel = "qwen3.5:9b"
+
+var listRemoteModels = providers.ListModels
 
 type setupOptions struct {
 	configPath         string
@@ -705,6 +708,11 @@ func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.
 	if !exists {
 		return false, fmt.Errorf("unsupported hosted review provider %q", provider)
 	}
+	if interactive {
+		if err := prompt.sectionTitle("Hosted model setup", true); err != nil {
+			return false, err
+		}
+	}
 	providerName := strings.TrimSpace(options.remoteProviderName)
 	baseURL := strings.TrimSpace(options.remoteBaseURL)
 	if provider != customCompatibleProvider {
@@ -713,12 +721,18 @@ func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.
 	} else if interactive {
 		var err error
 		if providerName == "" {
+			if err := explainSetupQuestion(prompt, "remote-provider-name"); err != nil {
+				return false, err
+			}
 			providerName, err = prompt.text("Provider name", "")
 			if err != nil {
 				return false, err
 			}
 		}
 		if baseURL == "" {
+			if err := explainSetupQuestion(prompt, "remote-base-url"); err != nil {
+				return false, err
+			}
 			baseURL, err = prompt.text("API base URL", "https://")
 			if err != nil {
 				return false, err
@@ -729,9 +743,6 @@ func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.
 	cfg.AI.Remote.BaseURL = baseURL
 	allowed := options.allowRemoteReview
 	if interactive {
-		if err := prompt.sectionTitle("Cloud model setup", true); err != nil {
-			return false, err
-		}
 		if err := explainSetupQuestion(prompt, "remote-disclosure"); err != nil {
 			return false, err
 		}
@@ -754,20 +765,6 @@ func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.
 		return true, nil
 	}
 
-	model := strings.TrimSpace(options.remoteModel)
-	if model == "" && interactive {
-		if err := explainSetupQuestion(prompt, "remote-model"); err != nil {
-			return false, err
-		}
-		var err error
-		model, err = promptRemoteModel(prompt, provider)
-		if err != nil {
-			return false, err
-		}
-	}
-	if model == "" {
-		model = defaultRemoteModel(provider)
-	}
 	keyEnvironment := strings.TrimSpace(options.remoteAPIKeyEnv)
 	if keyEnvironment == "" && interactive {
 		if err := explainSetupQuestion(prompt, "api-key-env"); err != nil {
@@ -782,22 +779,91 @@ func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.
 	if keyEnvironment == "" {
 		keyEnvironment = defaultRemoteAPIKeyEnvironment(provider)
 	}
+	key, keyAvailable := os.LookupEnv(keyEnvironment)
+	key = strings.TrimSpace(key)
+	keyAvailable = keyAvailable && key != ""
+	model := strings.TrimSpace(options.remoteModel)
+	if model == "" && interactive {
+		if err := explainSetupQuestion(prompt, "remote-model"); err != nil {
+			return false, err
+		}
+		var err error
+		if keyAvailable {
+			model, err = promptRemoteModelCatalogue(ctx, prompt, provider, config.RemoteConfig{
+				ProviderName: providerName, BaseURL: baseURL, TimeoutSeconds: 360,
+			}, key)
+		} else {
+			model, err = promptRemoteModel(prompt, provider)
+		}
+		if err != nil {
+			return false, err
+		}
+	}
+	if model == "" {
+		model = defaultRemoteModel(provider)
+	}
 	cfg.AI.Remote = config.RemoteConfig{
 		ProviderName: providerName, BaseURL: baseURL, Model: model, APIKeyEnv: keyEnvironment, TimeoutSeconds: 360, MaxFindings: 20,
 	}
 	if err := cfg.AI.Remote.ValidateForProvider(provider); err != nil {
 		return false, fmt.Errorf("remote review configuration: %w", err)
 	}
-	if value, exists := os.LookupEnv(keyEnvironment); !exists || strings.TrimSpace(value) == "" {
+	if !keyAvailable {
 		if _, err := fmt.Fprintf(stdout, "%s is not currently set. Add it to your shell or CI secret store before scanning; the key itself is never written to .complyscan.yml.\n", keyEnvironment); err != nil {
 			return false, err
 		}
 		return false, nil
 	}
-	if _, err := fmt.Fprintf(stdout, "%s review configured with model %q. The credential was found in %s and was not saved.\n", reviewProviderLabel(provider), model, keyEnvironment); err != nil {
+	if _, err := fmt.Fprintf(stdout, "%s review configured with model %q. The credential was found in %s and was not saved.\n", remoteProviderName(cfg.AI), model, keyEnvironment); err != nil {
 		return false, err
 	}
 	return finishSetupModelQualification(ctx, stdout, cfg.AI, interactive || options.qualifyModel)
+}
+
+func promptRemoteModelCatalogue(ctx context.Context, prompt promptSession, provider string, remote config.RemoteConfig, apiKey string) (string, error) {
+	kind := providers.Kind(provider)
+	models, err := listRemoteModels(ctx, providers.ModelListOptions{
+		Provider: kind, Label: remoteProviderName(config.AIConfig{Provider: provider, Remote: remote}),
+		APIKey: apiKey, BaseURL: remote.BaseURL, Timeout: 15 * time.Second,
+	})
+	if err != nil {
+		if _, writeErr := fmt.Fprintf(prompt.output, "  Live model catalogue unavailable: %v\n  Showing suggested models and exact-ID entry instead.\n", err); writeErr != nil {
+			return "", writeErr
+		}
+		return promptRemoteModel(prompt, provider)
+	}
+	choices := make([]terminalChoice, 0, len(models)+1)
+	for _, model := range models {
+		label := model.ID
+		if model.DisplayName != "" && !strings.EqualFold(model.DisplayName, model.ID) {
+			label = model.DisplayName + " · " + model.ID
+		}
+		choices = append(choices, terminalChoice{Label: label, Value: model.ID})
+	}
+	choices = append(choices, terminalChoice{Label: "Exact model ID · Enter a model not shown above", Value: customModelChoice})
+	defaultModel := models[0].ID
+	for _, recommended := range remoteModelOptions(provider) {
+		for _, available := range models {
+			if strings.EqualFold(recommended, available.ID) {
+				defaultModel = available.ID
+				break
+			}
+		}
+		if strings.EqualFold(defaultModel, recommended) {
+			break
+		}
+	}
+	if _, err := fmt.Fprintf(prompt.output, "  Loaded %d model(s) available to this API key. Use / to filter the list.\n", len(models)); err != nil {
+		return "", err
+	}
+	selected, err := chooseSetupOption(prompt, "Hosted model", choices, defaultModel)
+	if err != nil {
+		return "", err
+	}
+	if selected == customModelChoice {
+		return promptCustomModel(prompt, "Exact remote model ID")
+	}
+	return selected, nil
 }
 
 func promptRemoteModel(prompt promptSession, provider string) (string, error) {
