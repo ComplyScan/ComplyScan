@@ -76,6 +76,9 @@ suppressions:
   - rule: AI-SEC-001
     path: internal/rules/secrets_test.go
     reason: Unit tests contain unmistakably synthetic credentials to verify redaction.
+  - rule: AI-SEC-001
+    path: internal/providers/profile_draft_test.go
+    reason: Provider tests intentionally contain a synthetic credential to verify profile-context redaction.
   - rule: AI-LOG-001
     path: internal/codegraph/javascript_test.go
     reason: Parser tests intentionally embed synthetic JavaScript logging calls inside Go string fixtures.
