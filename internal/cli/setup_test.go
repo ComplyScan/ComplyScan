@@ -16,6 +16,24 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 )
 
+func TestWriteSetupSectionHeadingUsesBoldOnlyWhenEnabled(t *testing.T) {
+	var output bytes.Buffer
+	if err := writeSetupSectionHeading(&output, "Analysis and privacy mode", true); err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "\x1b[1mAnalysis and privacy mode\x1b[0m\n" {
+		t.Fatalf("bold heading = %q", output.String())
+	}
+
+	output.Reset()
+	if err := writeSetupSectionHeading(&output, "Analysis and privacy mode", false); err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "Analysis and privacy mode\n" {
+		t.Fatalf("plain heading = %q", output.String())
+	}
+}
+
 func TestPromptOllamaModelListsInstalledModelsAndAcceptsCustomTag(t *testing.T) {
 	var output bytes.Buffer
 	prompt := promptSession{reader: bufio.NewReader(strings.NewReader("4\n")), output: &output}

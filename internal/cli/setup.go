@@ -120,7 +120,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	modelReady := true
 	reviewConfigured := false
 	if interactive {
-		if _, err := fmt.Fprintln(stdout, "Analysis and privacy mode"); err != nil {
+		if err := writeSetupSectionHeading(stdout, "Analysis and privacy mode", prompt.selectOne != nil && os.Getenv("NO_COLOR") == ""); err != nil {
 			return err
 		}
 		modelReady, err = configureSetupReview(cmd.Context(), prompt, stdout, &cfg, true, options)
@@ -244,6 +244,15 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		return err
 	}
 	return runFirstScan(cmd, stdout, build, target, scanMode, repositorySummary.Discovery)
+}
+
+func writeSetupSectionHeading(output io.Writer, title string, bold bool) error {
+	if bold {
+		_, err := fmt.Fprintf(output, "\x1b[1m%s\x1b[0m\n", title)
+		return err
+	}
+	_, err := fmt.Fprintln(output, title)
+	return err
 }
 
 func setupReviewExplicit(options setupOptions) bool {
