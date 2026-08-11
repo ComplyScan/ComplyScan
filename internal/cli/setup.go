@@ -130,6 +130,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	scanMode := setupScanNone
 	resumeStage := setupDraftStage("")
 	draftPath := ""
+	draftSaved := false
 	if interactive && terminalFile(cmd.InOrStdin()) {
 		draftPath, err = defaultSetupDraftPath(target)
 		if err != nil {
@@ -149,6 +150,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 					modelReady = stored.ModelReady
 					scanMode = stored.ScanMode
 					resumeStage = stored.Stage
+					draftSaved = true
 				} else if removeErr := removeSetupDraft(draftPath); removeErr != nil {
 					return removeErr
 				}
@@ -173,7 +175,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 				return err
 			}
 			reviewConfigured = true
-			checkpointSetupDraft(prompt, draftPath, target, setupDraftAnalysis, cfg, scanMode, modelReady)
+			draftSaved = checkpointSetupDraft(prompt, draftPath, target, setupDraftAnalysis, cfg, scanMode, modelReady) || draftSaved
 		}
 		if _, err := fmt.Fprintln(stdout); err != nil {
 			return err
@@ -203,7 +205,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 			if err := collectInteractiveSetupContext(prompt, target, &cfg, options, summary, profileDraft, true); err != nil {
 				return err
 			}
-			checkpointSetupDraft(prompt, draftPath, target, setupDraftContext, cfg, scanMode, modelReady)
+			draftSaved = checkpointSetupDraft(prompt, draftPath, target, setupDraftContext, cfg, scanMode, modelReady) || draftSaved
 		}
 	} else if !existed {
 		if err := configureFrameworkSelection(prompt, &cfg, false, options.frameworks); err != nil {
@@ -236,16 +238,16 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		}
 	}
 	if interactive {
-		checkpointSetupDraft(prompt, draftPath, target, setupDraftReview, cfg, scanMode, modelReady)
+		draftSaved = checkpointSetupDraft(prompt, draftPath, target, setupDraftReview, cfg, scanMode, modelReady) || draftSaved
 		save, reviewErr := reviewSetupBeforeSave(cmd.Context(), prompt, stdout, target, &cfg, options, repositorySummary, profileDraft, &scanMode, &modelReady)
 		if reviewErr != nil {
 			return reviewErr
 		}
-		checkpointSetupDraft(prompt, draftPath, target, setupDraftReview, cfg, scanMode, modelReady)
+		draftSaved = checkpointSetupDraft(prompt, draftPath, target, setupDraftReview, cfg, scanMode, modelReady) || draftSaved
 		if !save {
 			message := "\nSetup cancelled; no configuration file was written."
-			if draftPath != "" {
-				message += " Run `complyscan setup` again to resume these answers."
+			if draftSaved {
+				message += " Run `complyscan setup` again to resume from the last saved checkpoint."
 			}
 			_, err := fmt.Fprintln(stdout, message)
 			return err

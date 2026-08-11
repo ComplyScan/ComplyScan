@@ -119,3 +119,24 @@ func TestRemoveSetupDraftDeletesRegularFile(t *testing.T) {
 		t.Fatalf("draft still exists: %v", err)
 	}
 }
+
+func TestCheckpointSetupDraftReportsWhetherRecoveryWasSaved(t *testing.T) {
+	target := t.TempDir()
+	var output bytes.Buffer
+	prompt := promptSession{output: &output}
+	validPath := filepath.Join(t.TempDir(), "draft.json")
+	if !checkpointSetupDraft(prompt, validPath, target, setupDraftAnalysis, config.Default(), setupScanNone, true) {
+		t.Fatalf("valid checkpoint was not reported as saved: %s", output.String())
+	}
+	output.Reset()
+	blockedParent := filepath.Join(t.TempDir(), "regular-file")
+	if err := os.WriteFile(blockedParent, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if checkpointSetupDraft(prompt, filepath.Join(blockedParent, "draft.json"), target, setupDraftAnalysis, config.Default(), setupScanNone, true) {
+		t.Fatal("invalid checkpoint was reported as saved")
+	}
+	if !strings.Contains(output.String(), "[NEEDS REVIEW] Setup recovery checkpoint could not be saved") {
+		t.Fatalf("checkpoint failure was not explained: %s", output.String())
+	}
+}

@@ -229,11 +229,13 @@ func promptSetupDraftResume(prompt promptSession, draft setupDraft) (bool, error
 	return false, nil
 }
 
-func checkpointSetupDraft(prompt promptSession, path, target string, stage setupDraftStage, cfg config.Config, scanMode setupScanMode, modelReady bool) {
+func checkpointSetupDraft(prompt promptSession, path, target string, stage setupDraftStage, cfg config.Config, scanMode setupScanMode, modelReady bool) bool {
 	if path == "" {
-		return
+		return false
 	}
 	if err := writeSetupDraft(path, target, stage, cfg, scanMode, modelReady, time.Now()); err != nil {
 		_ = prompt.status(setupStatusReview, "Setup recovery checkpoint could not be saved: "+err.Error())
+		return false
 	}
+	return true
 }
