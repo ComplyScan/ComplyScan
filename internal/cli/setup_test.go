@@ -16,9 +16,9 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 )
 
-func TestWriteSetupSectionHeadingUsesBoldOnlyWhenEnabled(t *testing.T) {
+func TestWriteSectionTitleUsesBoldOnlyWhenEnabled(t *testing.T) {
 	var output bytes.Buffer
-	if err := writeSetupSectionHeading(&output, "Analysis and privacy mode", true); err != nil {
+	if err := writeSectionTitle(&output, "Analysis and privacy mode", true, false); err != nil {
 		t.Fatal(err)
 	}
 	if output.String() != "\x1b[1mAnalysis and privacy mode\x1b[0m\n" {
@@ -26,10 +26,10 @@ func TestWriteSetupSectionHeadingUsesBoldOnlyWhenEnabled(t *testing.T) {
 	}
 
 	output.Reset()
-	if err := writeSetupSectionHeading(&output, "Analysis and privacy mode", false); err != nil {
+	if err := writeSectionTitle(&output, "Analysis and privacy mode", false, true); err != nil {
 		t.Fatal(err)
 	}
-	if output.String() != "Analysis and privacy mode\n" {
+	if output.String() != "\nAnalysis and privacy mode\n" {
 		t.Fatalf("plain heading = %q", output.String())
 	}
 }

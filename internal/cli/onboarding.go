@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"io"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -63,8 +62,8 @@ func promptSetupScanMode(prompt promptSession, summary setupRepositorySummary, p
 	}
 }
 
-func inspectRepositoryForSetup(ctx context.Context, output io.Writer, target string, cfg config.Config, build BuildInfo) (setupRepositorySummary, error) {
-	if _, err := fmt.Fprintln(output, "Inspecting the repository before asking setup questions..."); err != nil {
+func inspectRepositoryForSetup(ctx context.Context, prompt promptSession, target string, cfg config.Config, build BuildInfo) (setupRepositorySummary, error) {
+	if _, err := fmt.Fprintln(prompt.output, "Inspecting the repository before asking setup questions..."); err != nil {
 		return setupRepositorySummary{}, err
 	}
 	excludes := withGeneratedReportExclusion(append([]string(nil), cfg.Scan.Exclude...))
@@ -107,36 +106,37 @@ func inspectRepositoryForSetup(ctx context.Context, output io.Writer, target str
 		summary.Languages = append(summary.Languages, language)
 	}
 	sort.Strings(summary.Languages)
-	if err := writeSetupRepositorySummary(output, summary); err != nil {
+	if err := writeSetupRepositorySummary(prompt, summary); err != nil {
 		return setupRepositorySummary{}, err
 	}
 	return summary, nil
 }
 
-func writeSetupRepositorySummary(output io.Writer, summary setupRepositorySummary) error {
+func writeSetupRepositorySummary(prompt promptSession, summary setupRepositorySummary) error {
 	languages := "not identified"
 	if len(summary.Languages) > 0 {
 		languages = strings.Join(summary.Languages, ", ")
 	}
-	if _, err := fmt.Fprintf(output,
-		"\nRepository inspected: %d files, %s\n"+
-			"  Languages: %s\n"+
+	if err := prompt.sectionTitle(fmt.Sprintf("Repository inspected: %d files, %s", summary.Discovery.Stats.FilesRead, formatByteCount(summary.Discovery.Stats.BytesRead)), true); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(prompt.output,
+		"  Languages: %s\n"+
 			"  Source: %d  Tests: %d  Documentation: %d  Configuration/other: %d\n"+
 			"  AI components: %d  Technical AI signals: %d\n",
-		summary.Discovery.Stats.FilesRead, formatByteCount(summary.Discovery.Stats.BytesRead), languages,
-		summary.SourceFiles, summary.TestFiles, summary.Documentation, summary.Configuration,
+		languages, summary.SourceFiles, summary.TestFiles, summary.Documentation, summary.Configuration,
 		summary.Inventory.Summary.Components, summary.Inventory.Summary.Signals); err != nil {
 		return err
 	}
 	if len(summary.Inventory.Components) == 0 {
-		_, err := fmt.Fprintln(output, "  No supported AI provider or framework was identified during preliminary discovery.")
+		_, err := fmt.Fprintln(prompt.output, "  No supported AI provider or framework was identified during preliminary discovery.")
 		return err
 	}
 	names := make([]string, 0, len(summary.Inventory.Components))
 	for _, component := range summary.Inventory.Components {
 		names = append(names, component.Name)
 	}
-	_, err := fmt.Fprintf(output, "  Detected AI components: %s\n", strings.Join(names, ", "))
+	_, err := fmt.Fprintf(prompt.output, "  Detected AI components: %s\n", strings.Join(names, ", "))
 	return err
 }
 
@@ -151,9 +151,11 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 		id = "system"
 	}
 	value := profile.NewDraftSystem(id, name)
+	if err := prompt.sectionTitle("Quick system setup", true); err != nil {
+		return profile.System{}, err
+	}
 	if _, err := fmt.Fprintln(prompt.output,
-		"\nQuick system setup\n"+
-			"Repository-evident technical facts are shown separately. These short questions collect facts that source code cannot reliably establish.\n"+
+		"Repository-evident technical facts are shown separately. These short questions collect facts that source code cannot reliably establish.\n"+
 			"Use the advanced setup later for detailed data, deployment, supply-chain, and reviewed applicability records."); err != nil {
 		return profile.System{}, err
 	}
@@ -252,7 +254,7 @@ func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile
 	if err := explainSetupQuestion(prompt, "applicability-context"); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(prompt.output, "\nRelevant EU AI Act context"); err != nil {
+	if err := prompt.sectionTitle("Relevant EU AI Act context", true); err != nil {
 		return err
 	}
 	if err := collectTechnicalSystemContext(prompt, system, draft, true); err != nil {
@@ -324,12 +326,14 @@ func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile
 	if err := system.Validate(); err != nil {
 		return fmt.Errorf("validate relevant applicability context: %w", err)
 	}
-	return writeApplicabilityReadinessGate(prompt.output, *system)
+	return writeApplicabilityReadinessGate(prompt, *system)
 }
 
 func collectNonEUTechnicalContext(prompt promptSession, system *profile.System, draft setupProfileDraft) error {
-	if _, err := fmt.Fprintln(prompt.output,
-		"\nRepository technical context\nThese answers prioritize voluntary technical recommendations. They remain factual engineering context, not a legal assessment."); err != nil {
+	if err := prompt.sectionTitle("Repository technical context", true); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(prompt.output, "These answers prioritize voluntary technical recommendations. They remain factual engineering context, not a legal assessment."); err != nil {
 		return err
 	}
 	if err := collectTechnicalSystemContext(prompt, system, draft, false); err != nil {
@@ -383,24 +387,24 @@ func collectTechnicalSystemContext(prompt promptSession, system *profile.System,
 	return nil
 }
 
-func writeApplicabilityReadinessGate(output io.Writer, system profile.System) error {
+func writeApplicabilityReadinessGate(prompt promptSession, system profile.System) error {
 	assessment := profile.AssessEUAIAct([]profile.System{system}).Systems[0]
-	if _, err := fmt.Fprintf(output, "\nApplicability readiness gate: %s\n", assessment.MappingReadiness); err != nil {
+	if err := prompt.sectionTitle(fmt.Sprintf("Applicability readiness gate: %s", assessment.MappingReadiness), true); err != nil {
 		return err
 	}
 	switch assessment.MappingReadiness {
 	case profile.MappingHumanReviewed:
-		_, err := fmt.Fprintln(output, "  The factual inputs needed by the current EU technical control pack are present and have a named human reviewer.")
+		_, err := fmt.Fprintln(prompt.output, "  The factual inputs needed by the current EU technical control pack are present and have a named human reviewer.")
 		return err
 	case profile.MappingFactuallyReady:
-		_, err := fmt.Fprintln(output, "  The needed factual inputs are present, but the profile and legal applicability decision still require accountable human review.")
+		_, err := fmt.Fprintln(prompt.output, "  The needed factual inputs are present, but the profile and legal applicability decision still require accountable human review.")
 		return err
 	default:
-		if _, err := fmt.Fprintln(output, "  Technical scanning can continue, but requirement mapping remains provisional because these facts are unresolved:"); err != nil {
+		if _, err := fmt.Fprintln(prompt.output, "  Technical scanning can continue, but requirement mapping remains provisional because these facts are unresolved:"); err != nil {
 			return err
 		}
 		for _, missing := range assessment.MissingContext {
-			if _, err := fmt.Fprintf(output, "  - %s\n", missing); err != nil {
+			if _, err := fmt.Fprintf(prompt.output, "  - %s\n", missing); err != nil {
 				return err
 			}
 		}
@@ -446,7 +450,10 @@ func configureRecommendedFrameworks(prompt promptSession, cfg *config.Config, sy
 		return nil
 	}
 	recommended, reason := recommendFrameworks(system)
-	if _, err := fmt.Fprintf(prompt.output, "\nRecommended technical mapping\n  %s\n", reason); err != nil {
+	if err := prompt.sectionTitle("Recommended technical mapping", true); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(prompt.output, "  %s\n", reason); err != nil {
 		return err
 	}
 	useRecommended, err := prompt.confirm("Use the recommended mapping", true)

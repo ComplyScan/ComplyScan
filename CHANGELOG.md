@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Interactive setup now renders the “Analysis and privacy mode” section title as a bold terminal heading while preserving plain output for accessible, dumb, redirected, and `NO_COLOR` modes.
+- Interactive setup, profile, ownership, and verification wizards now render their main section titles as consistent bold terminal headings while preserving plain output for accessible, dumb, redirected, and `NO_COLOR` modes.
 
 ## 0.1.6 - 2026-08-11
 

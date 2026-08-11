@@ -71,7 +71,11 @@ func newVerifySetupCommand(stdout io.Writer) *cobra.Command {
 }
 
 func runVerifySetup(cmd *cobra.Command, stdout io.Writer, target, configPath string, cfg config.Config) error {
-	if _, err := fmt.Fprintf(stdout, "ComplyScan verification setup\nRepository: %s\n\n", target); err != nil {
+	prompt := newPromptSession(cmd.InOrStdin(), stdout)
+	if err := prompt.sectionTitle("ComplyScan verification setup", false); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(stdout, "Repository: %s\n\n", target); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintln(stdout, "This wizard saves test recipes. It does not run tests, build images, decide whether a control is legally required, or establish compliance."); err != nil {
@@ -94,7 +98,6 @@ func runVerifySetup(cmd *cobra.Command, stdout io.Writer, target, configPath str
 	if len(detected) == 0 {
 		return errors.New("no supported test command was detected; add a test manifest or configure a recipe directly in .complyscan.yml")
 	}
-	prompt := newPromptSession(cmd.InOrStdin(), stdout)
 	selectedSystem, err := promptVerificationSystem(prompt, cfg.Systems)
 	if err != nil {
 		return err
@@ -103,7 +106,10 @@ func runVerifySetup(cmd *cobra.Command, stdout io.Writer, target, configPath str
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(stdout, "\nDetected test command\n  %s\n  Evidence: %s\n\nThe command is only a suggestion. Confirm the exact executable and arguments used by your project.\n",
+	if err := prompt.sectionTitle("Detected test command", true); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(stdout, "  %s\n  Evidence: %s\n\nThe command is only a suggestion. Confirm the exact executable and arguments used by your project.\n",
 		commandText(selectedCommand.Command, selectedCommand.Args), strings.Join(selectedCommand.Evidence, ", ")); err != nil {
 		return err
 	}
@@ -130,7 +136,10 @@ func runVerifySetup(cmd *cobra.Command, stdout io.Writer, target, configPath str
 		return err
 	}
 
-	if _, err := fmt.Fprintln(stdout, "\nContainer boundary\n  The image must already exist locally and contain the project's test dependencies.\n  ComplyScan will not build or pull it. The later run is read-only and network-disabled."); err != nil {
+	if err := prompt.sectionTitle("Container boundary", true); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(stdout, "  The image must already exist locally and contain the project's test dependencies.\n  ComplyScan will not build or pull it. The later run is read-only and network-disabled."); err != nil {
 		return err
 	}
 	runtime, err := promptChoice(prompt, "Container runtime", "docker", "docker", "podman")
@@ -142,7 +151,10 @@ func runVerifySetup(cmd *cobra.Command, stdout io.Writer, target, configPath str
 		return err
 	}
 	defaultID := verificationRecipeID(selectedSystem.ID, selectedCommand.ID)
-	if _, err := fmt.Fprintln(stdout, "\nRecipe identity\n  This stable label connects future test runs to reports. Reusing an existing ID replaces that recipe after confirmation."); err != nil {
+	if err := prompt.sectionTitle("Recipe identity", true); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(stdout, "  This stable label connects future test runs to reports. Reusing an existing ID replaces that recipe after confirmation."); err != nil {
 		return err
 	}
 	recipeID, err := prompt.text("Recipe ID", defaultID)
@@ -167,7 +179,10 @@ func runVerifySetup(cmd *cobra.Command, stdout io.Writer, target, configPath str
 	if err := validateVerificationRecipeInConfig(cfg, recipe); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(stdout, "\nRecipe summary\n  ID: %s\n  System: %s\n  Objectives: %s\n  Command: %s\n  Image: %s\n",
+	if err := prompt.sectionTitle("Recipe summary", true); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(stdout, "  ID: %s\n  System: %s\n  Objectives: %s\n  Command: %s\n  Image: %s\n",
 		recipe.ID, selectedSystem.ID, strings.Join(recipe.Objectives, ", "), commandText(recipe.Command, recipe.Arguments), recipe.Image); err != nil {
 		return err
 	}
@@ -404,7 +419,7 @@ const noVerificationObjectivesChoice = "__complyscan_no_verification_objectives_
 
 func promptVerificationObjectives(prompt promptSession, choices []verificationObjectiveChoice) ([]string, error) {
 	if prompt.selectMany != nil {
-		if err := writeVerificationObjectiveChoices(prompt.output, choices, false); err != nil {
+		if err := writeVerificationObjectiveChoices(prompt, choices, false); err != nil {
 			return nil, err
 		}
 		options := make([]terminalChoice, 0, len(choices)+1)
@@ -444,7 +459,7 @@ func promptVerificationObjectives(prompt promptSession, choices []verificationOb
 		}
 		return result, nil
 	}
-	if err := writeVerificationObjectiveChoices(prompt.output, choices, true); err != nil {
+	if err := writeVerificationObjectiveChoices(prompt, choices, true); err != nil {
 		return nil, err
 	}
 	selection, err := prompt.text("Objective numbers this exact test command exercises (comma-separated, or none)", "none")
@@ -454,8 +469,11 @@ func promptVerificationObjectives(prompt promptSession, choices []verificationOb
 	return parseObjectiveSelection(selection, choices)
 }
 
-func writeVerificationObjectiveChoices(output io.Writer, choices []verificationObjectiveChoice, numbered bool) error {
-	if _, err := fmt.Fprintln(output, "\nApplicable or recommended technical objectives\nLegal requirements and voluntary framework recommendations remain distinct. Select only mechanisms this exact test command genuinely exercises."); err != nil {
+func writeVerificationObjectiveChoices(prompt promptSession, choices []verificationObjectiveChoice, numbered bool) error {
+	if err := prompt.sectionTitle("Applicable or recommended technical objectives", true); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(prompt.output, "Legal requirements and voluntary framework recommendations remain distinct. Select only mechanisms this exact test command genuinely exercises."); err != nil {
 		return err
 	}
 	for index, choice := range choices {
@@ -463,7 +481,7 @@ func writeVerificationObjectiveChoices(output io.Writer, choices []verificationO
 		if numbered {
 			marker = fmt.Sprintf("%d)", index+1)
 		}
-		if _, err := fmt.Fprintf(output, "\n  %s %s (%s)\n     Framework: %s\n     Developer meaning: %s\n     Current repository signal: %s",
+		if _, err := fmt.Fprintf(prompt.output, "\n  %s %s (%s)\n     Framework: %s\n     Developer meaning: %s\n     Current repository signal: %s",
 			marker, choice.Objective.Title, choice.Objective.SourceReference, choice.Framework, choice.Objective.Description, choice.Objective.Status); err != nil {
 			return err
 		}
@@ -472,11 +490,11 @@ func writeVerificationObjectiveChoices(output io.Writer, choices []verificationO
 			for _, match := range choice.Objective.Matches {
 				paths = append(paths, match.Path)
 			}
-			if _, err := fmt.Fprintf(output, " at %s", strings.Join(paths, ", ")); err != nil {
+			if _, err := fmt.Fprintf(prompt.output, " at %s", strings.Join(paths, ", ")); err != nil {
 				return err
 			}
 		}
-		if _, err := fmt.Fprintln(output); err != nil {
+		if _, err := fmt.Fprintln(prompt.output); err != nil {
 			return err
 		}
 	}

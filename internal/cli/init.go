@@ -88,7 +88,7 @@ func newInitCommand(stdout io.Writer) *cobra.Command {
 
 func configureFrameworkSelection(prompt promptSession, cfg *config.Config, interactive bool, explicit []string) error {
 	if interactive {
-		if _, err := fmt.Fprintln(prompt.output, "\nFramework selection"); err != nil {
+		if err := prompt.sectionTitle("Framework selection", true); err != nil {
 			return err
 		}
 		if err := explainSetupQuestion(prompt, "frameworks"); err != nil {
@@ -218,7 +218,7 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 	if !frameworkEnabled(enabledFrameworks, framework.EUAIActTechnicalEvidencePackID) {
 		value.Applicability = nil
 	}
-	if _, err := fmt.Fprintln(output, "\nSystem applicability setup"); err != nil {
+	if err := prompt.sectionTitle("System applicability setup", true); err != nil {
 		return profile.System{}, err
 	}
 	if _, err := fmt.Fprintln(output, "Answer factual questions. Use `unknown` when context has not been established; do not enter secrets or personal records."); err != nil {
@@ -357,7 +357,7 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 		value.ProfileReview = profile.ProfileReview{Status: profile.ReviewConfirmed, ReviewedBy: reviewer, ReviewedAt: now.Format(time.DateOnly)}
 	}
 	if frameworkEnabled(enabledFrameworks, framework.EUAIActTechnicalEvidencePackID) {
-		if _, err := fmt.Fprintln(output, "\nProvisional screening for the EU AI Act from the declared facts:"); err != nil {
+		if err := prompt.sectionTitle("Provisional screening for the EU AI Act", true); err != nil {
 			return profile.System{}, err
 		}
 		if err := profile.WriteTerminal(output, profile.AssessEUAIAct([]profile.System{value})); err != nil {
@@ -417,6 +417,7 @@ func frameworkEnabled(enabled []string, wanted string) bool {
 type promptSession struct {
 	reader      *bufio.Reader
 	output      io.Writer
+	styleTitles bool
 	selectOne   func(label, defaultValue string, options []terminalChoice) (string, error)
 	selectMany  func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error)
 	confirmBool func(label string, defaultValue bool) (bool, error)
@@ -425,6 +426,7 @@ type promptSession struct {
 func newPromptSession(input io.Reader, output io.Writer) promptSession {
 	session := promptSession{reader: bufio.NewReader(input), output: output}
 	if terminalPromptAvailable(input, output) {
+		session.styleTitles = os.Getenv("NO_COLOR") == ""
 		session.selectOne = func(label, defaultValue string, options []terminalChoice) (string, error) {
 			return runTerminalSelect(input, output, label, defaultValue, options)
 		}

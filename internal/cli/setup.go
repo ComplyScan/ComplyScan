@@ -108,19 +108,19 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		}
 	}
 
-	if _, err := fmt.Fprintln(stdout, "ComplyScan setup"); err != nil {
+	prompt := newPromptSession(cmd.InOrStdin(), stdout)
+	if err := prompt.sectionTitle("ComplyScan setup", false); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(stdout, "Repository: %s\n\n", target); err != nil {
 		return err
 	}
 
-	prompt := newPromptSession(cmd.InOrStdin(), stdout)
 	var repositorySummary setupRepositorySummary
 	modelReady := true
 	reviewConfigured := false
 	if interactive {
-		if err := writeSetupSectionHeading(stdout, "Analysis and privacy mode", prompt.selectOne != nil && os.Getenv("NO_COLOR") == ""); err != nil {
+		if err := prompt.sectionTitle("Analysis and privacy mode", false); err != nil {
 			return err
 		}
 		modelReady, err = configureSetupReview(cmd.Context(), prompt, stdout, &cfg, true, options)
@@ -131,7 +131,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		if _, err := fmt.Fprintln(stdout); err != nil {
 			return err
 		}
-		summary, inspectErr := inspectRepositoryForSetup(cmd.Context(), stdout, target, cfg, build)
+		summary, inspectErr := inspectRepositoryForSetup(cmd.Context(), prompt, target, cfg, build)
 		if inspectErr != nil {
 			return inspectErr
 		}
@@ -246,15 +246,6 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	return runFirstScan(cmd, stdout, build, target, scanMode, repositorySummary.Discovery)
 }
 
-func writeSetupSectionHeading(output io.Writer, title string, bold bool) error {
-	if bold {
-		_, err := fmt.Fprintf(output, "\x1b[1m%s\x1b[0m\n", title)
-		return err
-	}
-	_, err := fmt.Fprintln(output, title)
-	return err
-}
-
 func setupReviewExplicit(options setupOptions) bool {
 	return options.reviewProvider != "" || options.ollamaModel != "" || options.remoteModel != "" || options.remoteAPIKeyEnv != "" ||
 		options.allowRemoteReview || options.pullModel || options.skipModelPull || options.qualifyModel || options.installOllama || options.skipOllamaInstall
@@ -344,7 +335,7 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 		if ollamaPath != "" {
 			installed = ollamaInstalledModels(ctx, ollamaPath)
 		}
-		if _, err := fmt.Fprintln(stdout, "\nLocal model setup"); err != nil {
+		if err := prompt.sectionTitle("Local model setup", true); err != nil {
 			return false, err
 		}
 		if err := explainSetupQuestion(prompt, "ollama-model"); err != nil {
@@ -434,6 +425,9 @@ func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.
 	provider := cfg.AI.Provider
 	allowed := options.allowRemoteReview
 	if interactive {
+		if err := prompt.sectionTitle("Cloud model setup", true); err != nil {
+			return false, err
+		}
 		if err := explainSetupQuestion(prompt, "remote-disclosure"); err != nil {
 			return false, err
 		}

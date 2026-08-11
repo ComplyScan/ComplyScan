@@ -43,7 +43,7 @@ func newOwnershipShowCommand(stdout io.Writer) *cobra.Command {
 			}
 			switch strings.ToLower(strings.TrimSpace(format)) {
 			case "terminal":
-				return writeOwnershipTerminal(stdout, cfg.Ownership)
+				return writeOwnershipTerminal(stdout, cfg.Ownership, false)
 			case "json":
 				encoder := json.NewEncoder(stdout)
 				encoder.SetIndent("", "  ")
@@ -177,14 +177,14 @@ func collectOwnershipRules(prompt promptSession, cfg *config.Config, alreadyConf
 		return false, fmt.Errorf("validate path ownership: %w", err)
 	}
 	cfg.Ownership = rules
-	if err := writeOwnershipTerminal(prompt.output, rules); err != nil {
+	if err := writeOwnershipTerminal(prompt.output, rules, prompt.styleTitles); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func writeOwnershipTerminal(output io.Writer, rules []ownership.Rule) error {
-	if _, err := fmt.Fprintln(output, "\nPath ownership"); err != nil {
+func writeOwnershipTerminal(output io.Writer, rules []ownership.Rule, bold bool) error {
+	if err := writeSectionTitle(output, "Path ownership", bold, true); err != nil {
 		return err
 	}
 	if len(rules) == 0 {

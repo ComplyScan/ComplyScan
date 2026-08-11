@@ -33,6 +33,23 @@ func terminalFile(stream any) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
+func (session promptSession) sectionTitle(title string, leadingBlank bool) error {
+	return writeSectionTitle(session.output, title, session.styleTitles, leadingBlank)
+}
+
+func writeSectionTitle(output io.Writer, title string, bold, leadingBlank bool) error {
+	prefix := ""
+	if leadingBlank {
+		prefix = "\n"
+	}
+	if bold {
+		_, err := fmt.Fprintf(output, "%s\x1b[1m%s\x1b[0m\n", prefix, title)
+		return err
+	}
+	_, err := fmt.Fprintf(output, "%s%s\n", prefix, title)
+	return err
+}
+
 func runTerminalSelect(input io.Reader, output io.Writer, label, defaultValue string, choices []terminalChoice) (string, error) {
 	options := make([]huh.Option[string], 0, len(choices))
 	for _, choice := range choices {
