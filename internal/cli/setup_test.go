@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -52,6 +53,64 @@ func TestSetupStepTitleShowsPositionAndPreservesPlainFallback(t *testing.T) {
 	}
 	if label := prompt.nextQuestionLabel("Repository type"); label != "Step 2 of 5 · Question 1 of 2 — Repository type" {
 		t.Fatalf("question breadcrumb = %q", label)
+	}
+}
+
+func TestRunSetupPromptStepsReturnsAndPreservesEarlierAnswers(t *testing.T) {
+	var calls []string
+	first := "draft"
+	secondCalls := 0
+	prompt := promptSession{guidance: &questionGuidance{}, questions: &questionProgress{total: 2}}
+	err := runSetupPromptSteps(prompt, false,
+		func(step promptSession) error {
+			calls = append(calls, "first:"+first)
+			first = "confirmed"
+			return nil
+		},
+		func(step promptSession) error {
+			secondCalls++
+			calls = append(calls, "second")
+			if secondCalls == 1 {
+				return errPromptBack
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"first:draft", "second", "first:confirmed", "second"}
+	if strings.Join(calls, ",") != strings.Join(want, ",") {
+		t.Fatalf("calls = %#v, want %#v", calls, want)
+	}
+}
+
+func TestBackControlsAreAddedOnlyWhenNavigationIsAvailable(t *testing.T) {
+	var selectedOptions []terminalChoice
+	prompt := promptSession{
+		guidance:      &questionGuidance{},
+		backAvailable: true,
+		selectOne: func(_ string, _ string, options []terminalChoice) (string, error) {
+			selectedOptions = append([]terminalChoice(nil), options...)
+			return backChoiceValue, nil
+		},
+	}
+	_, err := promptChoice(prompt, "Example", "one", "one", "two")
+	if !errors.Is(err, errPromptBack) {
+		t.Fatalf("error = %v, want back signal", err)
+	}
+	if !containsTerminalChoice(selectedOptions, backChoiceValue) {
+		t.Fatalf("back option missing from %#v", selectedOptions)
+	}
+
+	textPrompt := promptSession{
+		reader:        bufio.NewReader(strings.NewReader("back\n")),
+		output:        io.Discard,
+		guidance:      &questionGuidance{},
+		backAvailable: true,
+	}
+	if _, err := textPrompt.text("Name", "draft"); !errors.Is(err, errPromptBack) {
+		t.Fatalf("text back error = %v", err)
 	}
 }
 

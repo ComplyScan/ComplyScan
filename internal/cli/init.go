@@ -431,6 +431,7 @@ type promptSession struct {
 	guidance       *questionGuidance
 	questions      *questionProgress
 	step           *setupStepProgress
+	backAvailable  bool
 	selectOne      func(label, defaultValue string, options []terminalChoice) (string, error)
 	selectMany     func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error)
 	confirmBool    func(label string, defaultValue bool) (bool, error)
@@ -465,7 +466,7 @@ func newPromptSession(input io.Reader, output io.Writer) promptSession {
 
 func (session promptSession) confirm(label string, defaultValue bool) (bool, error) {
 	label = session.nextQuestionLabel(label)
-	if session.hasQuestionGuidance() && session.selectOne != nil {
+	if (session.hasQuestionGuidance() || session.backAvailable) && session.selectOne != nil {
 		defaultChoice := "No"
 		if defaultValue {
 			defaultChoice = "Yes"
@@ -488,7 +489,11 @@ func (session promptSession) confirm(label string, defaultValue bool) (bool, err
 		defaultText = "Y/n"
 	}
 	for {
-		if _, err := fmt.Fprintf(session.output, "? %s [%s]: ", label, defaultText); err != nil {
+		backHint := ""
+		if session.backAvailable {
+			backHint = " or `back`"
+		}
+		if _, err := fmt.Fprintf(session.output, "? %s [%s%s]: ", label, defaultText, backHint); err != nil {
 			return false, err
 		}
 		line, err := session.reader.ReadString('\n')
@@ -496,6 +501,10 @@ func (session promptSession) confirm(label string, defaultValue bool) (bool, err
 			return false, fmt.Errorf("read %s: %w", strings.ToLower(label), err)
 		}
 		value := strings.ToLower(strings.TrimSpace(line))
+		if session.backAvailable && value == "back" {
+			session.clearQuestionGuidance()
+			return false, errPromptBack
+		}
 		if value == "?" && session.hasQuestionGuidance() {
 			if err := session.showQuestionGuidance(); err != nil {
 				return false, err
@@ -538,7 +547,11 @@ func (session promptSession) readText(label, defaultValue string) (string, error
 		if defaultValue == "" {
 			promptSuffix = " (answer required)"
 		}
-		if _, err := fmt.Fprintf(session.output, "? %s%s: ", label, promptSuffix); err != nil {
+		backHint := ""
+		if session.backAvailable {
+			backHint = " — type `back` to return"
+		}
+		if _, err := fmt.Fprintf(session.output, "? %s%s%s: ", label, promptSuffix, backHint); err != nil {
 			return "", err
 		}
 		line, err := session.reader.ReadString('\n')
@@ -546,6 +559,10 @@ func (session promptSession) readText(label, defaultValue string) (string, error
 			return "", fmt.Errorf("read %s: %w", strings.ToLower(label), err)
 		}
 		value := strings.TrimSpace(line)
+		if session.backAvailable && strings.EqualFold(value, "back") {
+			session.clearQuestionGuidance()
+			return "", errPromptBack
+		}
 		if value == "?" && session.hasQuestionGuidance() {
 			if err := session.showQuestionGuidance(); err != nil {
 				return "", err
