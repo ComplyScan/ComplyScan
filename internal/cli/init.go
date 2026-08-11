@@ -258,7 +258,7 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 	if err := explainSetupQuestion(prompt, "lifecycle-stage"); err != nil {
 		return profile.System{}, err
 	}
-	if value.LifecycleStage, err = promptChoice(prompt, "Lifecycle stage", profile.LifecycleUnknown,
+	if value.LifecycleStage, err = promptChoice(prompt, "Lifecycle stage", profile.LifecycleDevelopment,
 		profile.LifecycleDevelopment, profile.LifecycleTesting, profile.LifecycleProduction, profile.LifecycleRetired, profile.LifecycleUnknown); err != nil {
 		return profile.System{}, err
 	}
@@ -315,7 +315,7 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 	if err := explainSetupQuestion(prompt, "ai-activities"); err != nil {
 		return profile.System{}, err
 	}
-	if value.AIActivities, err = promptChoices(prompt, "AI activities", []profile.AIActivity{profile.ActivityUnknown},
+	if value.AIActivities, err = promptChoices(prompt, "AI activities", []profile.AIActivity{profile.ActivityInference},
 		profile.ActivityInference, profile.ActivityTraining, profile.ActivityFineTuning, profile.ActivityEvaluation,
 		profile.ActivityAutomatedDecision, profile.ActivityAgentToolUse, profile.ActivitySyntheticContent, profile.ActivityUnknown); err != nil {
 		return profile.System{}, err

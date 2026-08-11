@@ -175,6 +175,9 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 	if cfg.AI.Provider != "ollama" || cfg.AI.Ollama.Model != defaultSetupModel {
 		t.Fatalf("AI configuration = %#v", cfg.AI)
 	}
+	if cfg.Systems[0].LifecycleStage != profile.LifecycleDevelopment {
+		t.Fatalf("lifecycle default = %q", cfg.Systems[0].LifecycleStage)
+	}
 	for _, expected := range []string{"ComplyScan setup", "Step 1 of 5 — Analysis, privacy, and model", "Step 2 of 5 — Repository inspection", "Step 3 of 5 — Questionnaire preparation", "Step 4 of 5 — Questionnaire, frameworks, and evidence ownership", "Step 5 of 5 — Review, save, and first scan", "Repository inspected", "System questionnaire — 7 questions", "Step 4 of 5 · Question 1 of 7 — System name", "Step 4 of 5 · Question 7 of 7 — Human oversight", "Local model setup", "Saved", "Next: complyscan scan"} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("output missing %q:\n%s", expected, stdout.String())

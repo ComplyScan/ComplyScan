@@ -224,7 +224,7 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 	if err := draft.explain(prompt.output, "lifecycle-stage"); err != nil {
 		return profile.System{}, err
 	}
-	if value.LifecycleStage, err = promptChoice(prompt, "Lifecycle stage", draft.lifecycle(profile.LifecycleUnknown),
+	if value.LifecycleStage, err = promptChoice(prompt, "Lifecycle stage", draft.lifecycle(profile.LifecycleDevelopment),
 		profile.LifecycleDevelopment, profile.LifecycleTesting, profile.LifecycleProduction, profile.LifecycleRetired, profile.LifecycleUnknown); err != nil {
 		return profile.System{}, err
 	}
@@ -391,7 +391,7 @@ func collectTechnicalSystemContext(prompt promptSession, system *profile.System,
 	if err = draft.explain(prompt.output, "ai-activities"); err != nil {
 		return err
 	}
-	if system.AIActivities, err = promptChoices(prompt, "AI activities", draft.aiActivities(system.AIActivities),
+	if system.AIActivities, err = promptChoices(prompt, "AI activities", draft.aiActivities([]profile.AIActivity{profile.ActivityInference}),
 		profile.ActivityInference, profile.ActivityTraining, profile.ActivityFineTuning, profile.ActivityEvaluation,
 		profile.ActivityAutomatedDecision, profile.ActivityAgentToolUse, profile.ActivitySyntheticContent, profile.ActivityUnknown); err != nil {
 		return err

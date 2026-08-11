@@ -48,3 +48,18 @@ func TestTechnicalContextConfirmsDraftedActivitiesAndDeployment(t *testing.T) {
 		t.Fatalf("system = %#v", system)
 	}
 }
+
+func TestTechnicalContextUsesInferenceAsEditableStartingPoint(t *testing.T) {
+	system := profile.NewDraftSystem("assistant", "Assistant")
+	var output bytes.Buffer
+	prompt := promptSession{reader: bufio.NewReader(strings.NewReader("\n\n")), output: &output}
+	if err := collectTechnicalSystemContext(prompt, &system, newSetupProfileDraft(), false); err != nil {
+		t.Fatal(err)
+	}
+	if len(system.AIActivities) != 1 || system.AIActivities[0] != profile.ActivityInference {
+		t.Fatalf("AI activity default = %#v", system.AIActivities)
+	}
+	if len(system.DeploymentModels) != 1 || system.DeploymentModels[0] != profile.DeploymentUnknown {
+		t.Fatalf("deployment default = %#v", system.DeploymentModels)
+	}
+}
