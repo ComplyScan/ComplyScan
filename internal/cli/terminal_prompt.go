@@ -131,6 +131,30 @@ func (session promptSession) sectionTitle(title string, leadingBlank bool) error
 	return writeSectionTitle(session.output, title, session.styleTitles, leadingBlank)
 }
 
+func (session promptSession) startQuestionGroup(title string, total int, leadingBlank bool) (promptSession, error) {
+	if total < 1 {
+		return session, fmt.Errorf("question group %q must contain at least one question", title)
+	}
+	session.questions = &questionProgress{total: total}
+	unit := "questions"
+	if total == 1 {
+		unit = "question"
+	}
+	return session, session.sectionTitle(fmt.Sprintf("%s — %d %s", title, total, unit), leadingBlank)
+}
+
+func (session promptSession) nextQuestionLabel(label string) string {
+	if session.questions == nil || session.questions.total < 1 {
+		return label
+	}
+	session.questions.current++
+	prefix := ""
+	if session.step != nil && session.step.current > 0 && session.step.total > 0 {
+		prefix = fmt.Sprintf("Step %d of %d · ", session.step.current, session.step.total)
+	}
+	return fmt.Sprintf("%sQuestion %d of %d — %s", prefix, session.questions.current, session.questions.total, label)
+}
+
 func writeSectionTitle(output io.Writer, title string, bold, leadingBlank bool) error {
 	prefix := ""
 	if leadingBlank {

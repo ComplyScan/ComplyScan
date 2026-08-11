@@ -218,7 +218,8 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 	if !frameworkEnabled(enabledFrameworks, framework.EUAIActTechnicalEvidencePackID) {
 		value.Applicability = nil
 	}
-	if err := prompt.sectionTitle("System applicability setup", true); err != nil {
+	prompt, err = prompt.startQuestionGroup("Advanced system questionnaire", 17, true)
+	if err != nil {
 		return profile.System{}, err
 	}
 	if _, err := fmt.Fprintln(output, "Answer factual questions. Use `unknown` when context has not been established; do not enter secrets or personal records."); err != nil {
@@ -363,6 +364,10 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 		if err := profile.WriteTerminal(output, profile.AssessEUAIAct([]profile.System{value})); err != nil {
 			return profile.System{}, err
 		}
+		prompt, err = prompt.startQuestionGroup("Applicability decision", 1, true)
+		if err != nil {
+			return profile.System{}, err
+		}
 		if err := explainSetupQuestion(prompt, "applicability-decision"); err != nil {
 			return profile.System{}, err
 		}
@@ -373,6 +378,10 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 		}
 		decision := profile.ApplicabilityDecision{Framework: profile.FrameworkEUAIAct, Status: decisionStatus}
 		if decisionStatus != profile.ApplicabilityNeedsReview {
+			prompt, err = prompt.startQuestionGroup("Applicability review details", 2, true)
+			if err != nil {
+				return profile.System{}, err
+			}
 			if err := explainSetupQuestion(prompt, "decision-rationale"); err != nil {
 				return profile.System{}, err
 			}
@@ -420,13 +429,25 @@ type promptSession struct {
 	styleTitles    bool
 	alwaysDetailed bool
 	guidance       *questionGuidance
+	questions      *questionProgress
+	step           *setupStepProgress
 	selectOne      func(label, defaultValue string, options []terminalChoice) (string, error)
 	selectMany     func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error)
 	confirmBool    func(label string, defaultValue bool) (bool, error)
 }
 
+type questionProgress struct {
+	current int
+	total   int
+}
+
+type setupStepProgress struct {
+	current int
+	total   int
+}
+
 func newPromptSession(input io.Reader, output io.Writer) promptSession {
-	session := promptSession{reader: bufio.NewReader(input), output: output, guidance: &questionGuidance{}}
+	session := promptSession{reader: bufio.NewReader(input), output: output, guidance: &questionGuidance{}, step: &setupStepProgress{}}
 	if terminalPromptAvailable(input, output) {
 		session.styleTitles = os.Getenv("NO_COLOR") == ""
 		session.selectOne = func(label, defaultValue string, options []terminalChoice) (string, error) {
@@ -443,6 +464,7 @@ func newPromptSession(input io.Reader, output io.Writer) promptSession {
 }
 
 func (session promptSession) confirm(label string, defaultValue bool) (bool, error) {
+	label = session.nextQuestionLabel(label)
 	if session.hasQuestionGuidance() && session.selectOne != nil {
 		defaultChoice := "No"
 		if defaultValue {
@@ -502,6 +524,10 @@ func (session promptSession) confirm(label string, defaultValue bool) (bool, err
 }
 
 func (session promptSession) text(label, defaultValue string) (string, error) {
+	return session.readText(session.nextQuestionLabel(label), defaultValue)
+}
+
+func (session promptSession) readText(label, defaultValue string) (string, error) {
 	if session.hasQuestionGuidance() && session.selectOne != nil {
 		if _, err := fmt.Fprintln(session.output, "  Enter ? for more guidance about this question."); err != nil {
 			return "", err
@@ -547,6 +573,7 @@ func promptChoice[T ~string](session promptSession, label string, defaultValue T
 	if len(allowed) == 0 {
 		return defaultValue, fmt.Errorf("%s has no available choices", strings.ToLower(label))
 	}
+	label = session.nextQuestionLabel(label)
 	if session.selectOne != nil {
 		options := make([]terminalChoice, len(allowed))
 		for index, candidate := range allowed {
@@ -571,7 +598,7 @@ func promptChoice[T ~string](session promptSession, label string, defaultValue T
 		}
 	}
 	for {
-		value, err := session.text(fmt.Sprintf("Select %s (1-%d)", label, len(allowed)), strconv.Itoa(defaultIndex+1))
+		value, err := session.readText(fmt.Sprintf("Select %s (1-%d)", label, len(allowed)), strconv.Itoa(defaultIndex+1))
 		if err != nil {
 			return defaultValue, err
 		}
@@ -588,6 +615,7 @@ func promptChoices[T ~string](session promptSession, label string, defaultValue 
 	if len(allowed) == 0 {
 		return nil, fmt.Errorf("%s has no available choices", strings.ToLower(label))
 	}
+	label = session.nextQuestionLabel(label)
 	if session.selectMany != nil {
 		defaultStrings := make([]string, len(defaultValue))
 		for index, value := range defaultValue {
@@ -641,7 +669,7 @@ func promptChoices[T ~string](session promptSession, label string, defaultValue 
 		defaultIndexes = []string{"1"}
 	}
 	for {
-		value, err := session.text(label+" numbers (comma-separated)", strings.Join(defaultIndexes, ","))
+		value, err := session.readText(label+" numbers (comma-separated)", strings.Join(defaultIndexes, ","))
 		if err != nil {
 			return nil, err
 		}

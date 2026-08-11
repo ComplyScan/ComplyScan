@@ -38,12 +38,19 @@ func TestWriteSectionTitleUsesBoldOnlyWhenEnabled(t *testing.T) {
 
 func TestSetupStepTitleShowsPositionAndPreservesPlainFallback(t *testing.T) {
 	var output bytes.Buffer
-	prompt := promptSession{output: &output}
+	prompt := promptSession{output: &output, step: &setupStepProgress{}}
 	if err := setupStepTitle(prompt, 2, 5, "Repository inspection", true); err != nil {
 		t.Fatal(err)
 	}
 	if output.String() != "\nStep 2 of 5 — Repository inspection\n" {
 		t.Fatalf("step heading = %q", output.String())
+	}
+	prompt, err := prompt.startQuestionGroup("Repository questions", 2, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if label := prompt.nextQuestionLabel("Repository type"); label != "Step 2 of 5 · Question 1 of 2 — Repository type" {
+		t.Fatalf("question breadcrumb = %q", label)
 	}
 }
 
@@ -168,15 +175,15 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 	if cfg.AI.Provider != "ollama" || cfg.AI.Ollama.Model != defaultSetupModel {
 		t.Fatalf("AI configuration = %#v", cfg.AI)
 	}
-	for _, expected := range []string{"ComplyScan setup", "Step 1 of 5 — Analysis and privacy mode", "Step 2 of 5 — Repository inspection", "Step 3 of 5 — System and framework context", "Step 4 of 5 — Applicability and evidence ownership", "Step 5 of 5 — Review, save, and first scan", "Repository inspected", "Quick system setup", "Local model setup", "Saved", "Next: complyscan scan"} {
+	for _, expected := range []string{"ComplyScan setup", "Step 1 of 5 — Analysis, privacy, and model", "Step 2 of 5 — Repository inspection", "Step 3 of 5 — Questionnaire preparation", "Step 4 of 5 — Questionnaire, frameworks, and evidence ownership", "Step 5 of 5 — Review, save, and first scan", "Repository inspected", "System questionnaire — 7 questions", "Step 4 of 5 · Question 1 of 7 — System name", "Step 4 of 5 · Question 7 of 7 — Human oversight", "Local model setup", "Saved", "Next: complyscan scan"} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("output missing %q:\n%s", expected, stdout.String())
 		}
 	}
 	for _, expected := range []string{
-		"Select Lifecycle stage (1-5)",
-		"Operating regions numbers (comma-separated)",
-		"Select organisation role (1-4)",
+		"Step 4 of 5 · Question 6 of 7 — Lifecycle stage",
+		"Step 4 of 5 · Question 3 of 7 — Operating regions",
+		"Step 4 of 5 · Question 4 of 7 — organisation role",
 		"Enter ? at the next prompt for more guidance",
 		"remaining conditionally relevant facts",
 		"EU AI Act technical mapping is recommended",
@@ -267,7 +274,7 @@ func TestRelevantEUContextAsksHighRiskFollowUpQuestions(t *testing.T) {
 	if assessment.MappingReadiness != profile.MappingHumanReviewed || len(assessment.MissingContext) != 0 {
 		t.Fatalf("assessment = %#v", assessment)
 	}
-	for _, expected := range []string{"? Users", "? Potentially affected groups", "Select Processes personal data", "Applicability readiness gate: human-reviewed"} {
+	for _, expected := range []string{"Technical context — 3 questions", "Conditional EU follow-up — 6 questions", "Question 1 of 6 — Users", "Question 2 of 6 — Potentially affected groups", "Question 3 of 6 — Processes personal data", "Question 6 of 6 — Factual profile reviewer", "Applicability readiness gate: human-reviewed"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("output missing %q:\n%s", expected, output.String())
 		}
@@ -287,13 +294,16 @@ func TestRelevantEUContextSkipsIrrelevantPeopleAndDataQuestions(t *testing.T) {
 	if assessment.MappingReadiness != profile.MappingFactuallyReady || len(assessment.MissingContext) != 0 {
 		t.Fatalf("assessment = %#v", assessment)
 	}
-	for _, unexpected := range []string{"? Users", "? Potentially affected groups", "Select Processes personal data"} {
+	for _, unexpected := range []string{"Users (comma-separated)", "Potentially affected groups (comma-separated)", "Processes personal data"} {
 		if strings.Contains(output.String(), unexpected) {
 			t.Errorf("output unexpectedly contains %q:\n%s", unexpected, output.String())
 		}
 	}
 	if !strings.Contains(output.String(), "Applicability readiness gate: factually-ready") {
 		t.Errorf("readiness gate missing:\n%s", output.String())
+	}
+	if !strings.Contains(output.String(), "Conditional EU follow-up — 1 question") || !strings.Contains(output.String(), "Question 1 of 1 — Factual profile reviewer") {
+		t.Errorf("conditional progress missing:\n%s", output.String())
 	}
 }
 

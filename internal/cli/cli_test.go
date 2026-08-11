@@ -948,7 +948,7 @@ func TestInteractiveInitCollectsAttributedSystemContext(t *testing.T) {
 	if len(system.Applicability) != 1 || system.Applicability[0].Status != profile.ApplicabilityApplicable || system.Applicability[0].Rationale == "" {
 		t.Fatalf("unexpected applicability: %#v", system.Applicability)
 	}
-	for _, expected := range []string{"System applicability setup", "Human EU AI Act applicability decision", "1 system profile"} {
+	for _, expected := range []string{"Advanced system questionnaire — 17 questions", "Question 17 of 17 — Profile reviewer", "Applicability decision — 1 question", "Human EU AI Act applicability decision", "1 system profile"} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("output missing %q:\n%s", expected, stdout.String())
 		}

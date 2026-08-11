@@ -5,6 +5,7 @@
 ### Changed
 
 - Guided setup now shows concise help automatically and offers a question-specific `Further explanation` row that expands inside the active terminal selector; text and accessible prompts accept `?` to expand only the current explanation. The optional `--detailed-guidance` flag remains available for showing every explanation in full.
+- Guided setup now presents five clearly named overall steps and labels every short or advanced questionnaire prompt as `Question X of Y`; conditional EU follow-up totals are calculated only after the relevant technical answers are known.
 - Local model setup now keeps `Use another Ollama model` directly below the configured default, accepts any exact Ollama library or installed tag, lists every model reported by `ollama list` with its reported size in GB, and includes additional clearly unvalidated coding-model starting points with approximate GB download sizes. Every unseen model still has to pass the source-free compatibility check before repository context is sent.
 
 ## 0.1.7 - 2026-08-11

@@ -158,7 +158,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		scanMode = setupScanNone
 	}
 	if interactive {
-		if err := setupStepTitle(prompt, 1, 5, "Analysis and privacy mode", false); err != nil {
+		if err := setupStepTitle(prompt, 1, 5, "Analysis, privacy, and model", false); err != nil {
 			return err
 		}
 		if setupDraftStageRank(resumeStage) >= setupDraftStageRank(setupDraftAnalysis) {
@@ -185,7 +185,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 			return inspectErr
 		}
 		repositorySummary = summary
-		if err := setupStepTitle(prompt, 3, 5, "System and framework context", true); err != nil {
+		if err := setupStepTitle(prompt, 3, 5, "Questionnaire preparation", true); err != nil {
 			return err
 		}
 		if setupDraftStageRank(resumeStage) >= setupDraftStageRank(setupDraftContext) {
@@ -196,7 +196,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 			if !options.advanced {
 				profileDraft = draftProfileForSetup(cmd.Context(), stdout, target, cfg, summary, modelReady)
 			}
-			if err := setupStepTitle(prompt, 4, 5, "Applicability and evidence ownership", true); err != nil {
+			if err := setupStepTitle(prompt, 4, 5, "Questionnaire, frameworks, and evidence ownership", true); err != nil {
 				return err
 			}
 			if err := collectInteractiveSetupContext(prompt, target, &cfg, options, summary, profileDraft, true); err != nil {
@@ -490,6 +490,10 @@ func writeSetupReviewSummary(prompt promptSession, cfg config.Config, scanMode s
 }
 
 func setupStepTitle(prompt promptSession, current, total int, title string, leadingBlank bool) error {
+	if prompt.step != nil {
+		prompt.step.current = current
+		prompt.step.total = total
+	}
 	return prompt.sectionTitle(fmt.Sprintf("Step %d of %d — %s", current, total, title), leadingBlank)
 }
 

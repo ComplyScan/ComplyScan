@@ -151,7 +151,8 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 		id = "system"
 	}
 	value := profile.NewDraftSystem(id, name)
-	if err := prompt.sectionTitle("Quick system setup", true); err != nil {
+	prompt, err = prompt.startQuestionGroup("System questionnaire", 7, true)
+	if err != nil {
 		return profile.System{}, err
 	}
 	if _, err := fmt.Fprintln(prompt.output,
@@ -257,13 +258,30 @@ func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile
 	if err := prompt.sectionTitle("Relevant EU AI Act context", true); err != nil {
 		return err
 	}
+	var err error
+	prompt, err = prompt.startQuestionGroup("Technical context", 3, true)
+	if err != nil {
+		return err
+	}
 	if err := collectTechnicalSystemContext(prompt, system, draft, true); err != nil {
 		return err
 	}
 
 	assessment := profile.AssessEUAIAct([]profile.System{*system}).Systems[0]
-	var err error
-	if needsPeopleContext(*system, assessment.HighRiskScreening) {
+	peopleContext := needsPeopleContext(*system, assessment.HighRiskScreening)
+	dataContext := needsDataContext(*system, assessment.HighRiskScreening)
+	followUpQuestions := 1
+	if peopleContext {
+		followUpQuestions += 2
+	}
+	if dataContext {
+		followUpQuestions += 3
+	}
+	prompt, err = prompt.startQuestionGroup("Conditional EU follow-up", followUpQuestions, true)
+	if err != nil {
+		return err
+	}
+	if peopleContext {
 		if err = explainSetupQuestion(prompt, "users"); err != nil {
 			return err
 		}
@@ -283,7 +301,7 @@ func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile
 			return err
 		}
 	}
-	if needsDataContext(*system, assessment.HighRiskScreening) {
+	if dataContext {
 		if err = explainSetupQuestion(prompt, "personal-data"); err != nil {
 			return err
 		}
@@ -334,6 +352,11 @@ func collectNonEUTechnicalContext(prompt promptSession, system *profile.System, 
 		return err
 	}
 	if _, err := fmt.Fprintln(prompt.output, "These answers prioritize voluntary technical recommendations. They remain factual engineering context, not a legal assessment."); err != nil {
+		return err
+	}
+	var err error
+	prompt, err = prompt.startQuestionGroup("Technical questionnaire", 2, true)
+	if err != nil {
 		return err
 	}
 	if err := collectTechnicalSystemContext(prompt, system, draft, false); err != nil {
