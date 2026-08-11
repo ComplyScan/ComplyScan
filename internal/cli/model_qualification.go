@@ -114,9 +114,10 @@ func finishSetupModelQualification(ctx context.Context, output interface {
 	if _, err := fmt.Fprintf(output, "Checking %s model %q with a small synthetic compatibility request (no repository data)...\n", reviewProviderLabel(settings.Provider), configuredReviewModel(settings)); err != nil {
 		return false, err
 	}
+	qualificationStarted := time.Now()
 	outcome, err := qualifyConfiguredModel(ctx, settings, false)
 	if err != nil {
-		if _, writeErr := fmt.Fprintf(output, "Model qualification failed: %v\nDeterministic setup will continue; choose another model or retry with `complyscan doctor --probe-review`.\n", err); writeErr != nil {
+		if _, writeErr := fmt.Fprintf(output, "Model qualification failed after %s: %v\nDeterministic setup will continue; choose another model or retry with `complyscan doctor --probe-review`.\n", formatElapsed(time.Since(qualificationStarted)), err); writeErr != nil {
 			return false, writeErr
 		}
 		return false, nil
@@ -125,7 +126,7 @@ func finishSetupModelQualification(ctx context.Context, output interface {
 	if outcome.Result.FromCache {
 		source = "cached check"
 	}
-	if _, err := fmt.Fprintf(output, "Model status: compatible (%s; expires %s). This checks the ComplyScan contract, not model accuracy or legal correctness.\n", source, outcome.Result.ExpiresAt.Format("2006-01-02")); err != nil {
+	if _, err := fmt.Fprintf(output, "Model status: compatible in %s (%s; expires %s). This checks the ComplyScan contract, not model accuracy or legal correctness.\n", formatElapsed(time.Since(qualificationStarted)), source, outcome.Result.ExpiresAt.Format("2006-01-02")); err != nil {
 		return false, err
 	}
 	if outcome.CacheWarning != nil {

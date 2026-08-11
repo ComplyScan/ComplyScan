@@ -111,6 +111,19 @@ func TestOllamaInstalledModelsParsesListOutput(t *testing.T) {
 	}
 }
 
+func TestOllamaResourceEstimateUsesTransparentRanges(t *testing.T) {
+	tests := map[string]string{
+		"qwen3.5:9b":      "5–8 GB",
+		"qwen3-coder:30b": "18–24 GB",
+		"custom:latest":   "model- and quantization-dependent",
+	}
+	for model, expected := range tests {
+		if estimate := ollamaResourceEstimate(model); !strings.Contains(estimate, expected) || !strings.Contains(estimate, "memory") {
+			t.Errorf("estimate for %q = %q", model, estimate)
+		}
+	}
+}
+
 func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 	target := t.TempDir()
 	input := strings.NewReader(strings.Repeat("\n", 20))

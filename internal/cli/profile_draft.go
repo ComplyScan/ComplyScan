@@ -6,6 +6,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/config"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
@@ -154,19 +155,20 @@ func draftProfileForSetup(
 	}
 	_, _ = fmt.Fprintf(output, "\nDrafting setup answers with %s using %d bounded, secret-redacted repository context(s)...\n",
 		reviewProviderLabel(cfg.AI.Provider), len(request.Contexts))
+	draftStarted := time.Now()
 	reviewer, timeout, _, _, _, err := configuredReviewer(cfg.AI)
 	if err != nil {
-		_, _ = fmt.Fprintf(output, "Warning: AI-assisted profile drafting was unavailable: %v. Continuing with repository signals and human questions.\n", err)
+		_, _ = fmt.Fprintf(output, "Warning: AI-assisted profile drafting was unavailable after %s: %v. Continuing with repository signals and human questions.\n", formatElapsed(time.Since(draftStarted)), err)
 		return draft
 	}
 	draftContext, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	result, err := reviewer.DraftProfile(draftContext, request)
 	if err != nil {
-		_, _ = fmt.Fprintf(output, "Warning: AI-assisted profile drafting was incomplete: %v. Continuing with repository signals and human questions.\n", err)
+		_, _ = fmt.Fprintf(output, "Warning: AI-assisted profile drafting was incomplete after %s: %v. Continuing with repository signals and human questions.\n", formatElapsed(time.Since(draftStarted)), err)
 		return draft
 	}
 	draft.Suggestions = profiledraft.MergeSuggestions(draft.Suggestions, result.Suggestions)
-	_, _ = fmt.Fprintf(output, "Prepared %d editable setup suggestion(s). Business, jurisdictional, and legal facts still require your answer.\n", len(draft.Suggestions))
+	_, _ = fmt.Fprintf(output, "Prepared %d editable setup suggestion(s) in %s. Business, jurisdictional, and legal facts still require your answer.\n", len(draft.Suggestions), formatElapsed(time.Since(draftStarted)))
 	return draft
 }

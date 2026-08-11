@@ -372,6 +372,11 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 		model = setupModelDefault(cfg.AI.Ollama.Model)
 	}
 	cfg.AI.Ollama.Model = model
+	if interactive {
+		if _, err := fmt.Fprintf(stdout, "Estimated local resources for %q: %s\n", model, ollamaResourceEstimate(model)); err != nil {
+			return false, err
+		}
+	}
 
 	var err error
 	if ollamaPath == "" {
@@ -427,17 +432,21 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 		}
 		return false, nil
 	}
-	if _, err := fmt.Fprintf(stdout, "Downloading %s with Ollama...\n", model); err != nil {
+	if _, err := fmt.Fprintf(stdout, "Downloading %s with Ollama; live progress is shown below...\n", model); err != nil {
 		return false, err
 	}
+	pullStarted := time.Now()
 	command := exec.CommandContext(ctx, ollamaPath, "pull", model)
 	command.Stdout = stdout
 	command.Stderr = stdout
 	if err := command.Run(); err != nil {
-		if _, writeErr := fmt.Fprintf(stdout, "Model download did not complete: %v\nStart Ollama with `ollama serve`, then run: ollama pull %s\n", err, shellQuote(model)); writeErr != nil {
+		if _, writeErr := fmt.Fprintf(stdout, "Model download did not complete after %s: %v\nStart Ollama with `ollama serve`, then run: ollama pull %s\n", formatElapsed(time.Since(pullStarted)), err, shellQuote(model)); writeErr != nil {
 			return false, writeErr
 		}
 		return false, nil
+	}
+	if _, err := fmt.Fprintf(stdout, "Model download completed in %s.\n", formatElapsed(time.Since(pullStarted))); err != nil {
+		return false, err
 	}
 	return finishSetupModelQualification(ctx, stdout, cfg.AI, interactive || options.qualifyModel)
 }
@@ -828,6 +837,20 @@ func setupModelDefault(value string) string {
 		return value
 	}
 	return defaultSetupModel
+}
+
+func ollamaResourceEstimate(model string) string {
+	value := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case strings.Contains(value, "70b") || strings.Contains(value, "72b"):
+		return "roughly 40–50 GB to download and 48–64 GB of runtime memory; actual use varies by quantization and context"
+	case strings.Contains(value, "30b") || strings.Contains(value, "32b"):
+		return "roughly 18–24 GB to download and 20–32 GB of runtime memory; actual use varies by quantization and context"
+	case strings.EqualFold(value, defaultSetupModel), strings.Contains(value, "8b"), strings.Contains(value, "9b"):
+		return "roughly 5–8 GB to download and 6–10 GB of runtime memory; actual use varies by quantization and context"
+	default:
+		return "size is model- and quantization-dependent; Ollama will show live download progress and the model page should be checked for memory requirements"
+	}
 }
 
 type setupGeneratedFile struct {

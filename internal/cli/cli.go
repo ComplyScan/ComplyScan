@@ -617,28 +617,50 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 					}
 					var technicalReview providers.TechnicalReviewResult
 					if index == 0 {
+						findingReviewStarted := time.Now()
+						if len(visible) > 0 {
+							if _, err := fmt.Fprintf(progressWriter, "Finding review: %d item(s) with %s %q...\n", len(visible), reviewProviderLabel(cfg.AI.Provider), configuredReviewModel(cfg.AI)); err != nil {
+								return fmt.Errorf("write finding review progress: %w", err)
+							}
+						}
 						review, reviewErr := reviewFindingsWithProvider(cmd.Context(), cfg.AI, target, visible)
 						if reviewErr != nil {
-							warning := fmt.Sprintf("%s finding review was incomplete: %v. Deterministic findings remain unchanged.", reviewProviderLabel(cfg.AI.Provider), reviewErr)
+							warning := fmt.Sprintf("%s finding review was incomplete after %s: %v. Deterministic findings remain unchanged.", reviewProviderLabel(cfg.AI.Provider), formatElapsed(time.Since(findingReviewStarted)), reviewErr)
 							reportValue.Warnings = append(reportValue.Warnings, warning)
 							if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
 								return fmt.Errorf("write review warning: %w", err)
 							}
 						} else {
 							reportValue.Review = &review
+							if len(visible) > 0 {
+								if _, err := fmt.Fprintf(progressWriter, "Finding review completed in %s.\n", formatElapsed(time.Since(findingReviewStarted))); err != nil {
+									return fmt.Errorf("write finding review completion: %w", err)
+								}
+							}
+						}
+					}
+					technicalReviewStarted := time.Now()
+					if len(investigationRequests[index].Candidates) > 0 {
+						if _, err := fmt.Fprintf(progressWriter, "Starting %s evidence investigation with up to %d target(s)...\n", frameworkResults[index].Name, len(investigationRequests[index].Candidates)); err != nil {
+							return fmt.Errorf("write technical review start: %w", err)
 						}
 					}
 					technicalReview, reviewErr := reviewTechnicalWithProvider(
 						cmd.Context(), cfg.AI, frameworkResults[index].TechnicalEvidence, investigationRequests[index], result.FullRepository,
-						refreshReview, technicalReviewProgress(progressWriter),
+						refreshReview, technicalReviewProgress(progressWriter, cfg.AI.Provider, technicalReviewStarted, time.Now),
 					)
 					if reviewErr != nil {
-						warning := fmt.Sprintf("%s technical evidence review for %s was incomplete: %v. Deterministic evidence remains available.", reviewProviderLabel(cfg.AI.Provider), frameworkResults[index].Name, reviewErr)
+						warning := fmt.Sprintf("%s technical evidence review for %s was incomplete after %s: %v. Deterministic evidence remains available.", reviewProviderLabel(cfg.AI.Provider), frameworkResults[index].Name, formatElapsed(time.Since(technicalReviewStarted)), reviewErr)
 						reportValue.Warnings = append(reportValue.Warnings, warning)
 						if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
 							return fmt.Errorf("write technical review warning: %w", err)
 						}
 						continue
+					}
+					if len(investigationRequests[index].Candidates) > 0 {
+						if _, err := fmt.Fprintf(progressWriter, "%s evidence investigation completed in %s.\n", frameworkResults[index].Name, formatElapsed(time.Since(technicalReviewStarted))); err != nil {
+							return fmt.Errorf("write technical review completion: %w", err)
+						}
 					}
 					frameworkResults[index].TechnicalReview = &technicalReview
 					reconciliation.AttachTechnicalInvestigations(&frameworkResults[index].Reconciliation, technicalReview)
@@ -963,9 +985,9 @@ func reviewProviderLabel(value string) string {
 	}
 }
 
-func technicalReviewProgress(output io.Writer) func(technicalreview.Progress) error {
+func technicalReviewProgress(output io.Writer, provider string, started time.Time, now func() time.Time) func(technicalreview.Progress) error {
 	return func(progress technicalreview.Progress) error {
-		status := "reviewing with Ollama"
+		status := "reviewing with " + reviewProviderLabel(provider)
 		if progress.Cached {
 			status = "using cached observation"
 		}
@@ -973,9 +995,16 @@ func technicalReviewProgress(output io.Writer) func(technicalreview.Progress) er
 		if progress.Candidate.SystemID != "" {
 			scope = fmt.Sprintf("system %s, %d owned file(s)", progress.Candidate.SystemID, progress.Candidate.RepositoryFiles)
 		}
-		_, err := fmt.Fprintf(output, "Evidence investigation %d/%d: %s — %s [%s] (%s)\n", progress.Current, progress.Total, progress.Candidate.ObjectiveID, progress.Candidate.Path, scope, status)
+		_, err := fmt.Fprintf(output, "Evidence investigation %d/%d [elapsed %s]: %s — %s [%s] (%s)\n", progress.Current, progress.Total, formatElapsed(now().Sub(started)), progress.Candidate.ObjectiveID, progress.Candidate.Path, scope, status)
 		return err
 	}
+}
+
+func formatElapsed(value time.Duration) string {
+	if value < time.Second {
+		return "<1s"
+	}
+	return value.Round(time.Second).String()
 }
 
 func buildTechnicalReviewRequest(evidence framework.TechnicalEvidenceReport, repository discovery.Repository) providers.TechnicalReviewRequest {

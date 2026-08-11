@@ -561,7 +561,8 @@ func TestConfiguredRemoteReviewerReadsOnlyNamedEnvironmentVariable(t *testing.T)
 
 func TestTechnicalReviewProgressDistinguishesModelAndCache(t *testing.T) {
 	var output bytes.Buffer
-	progress := technicalReviewProgress(&output)
+	started := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	progress := technicalReviewProgress(&output, "anthropic", started, func() time.Time { return started.Add(12 * time.Second) })
 	candidate := providers.TechnicalCandidate{SystemID: "ranking", RepositoryFiles: 42, ObjectiveID: "eu-aia-10-bias-evaluation", Path: "evaluation.go"}
 	if err := progress(technicalreview.Progress{Current: 1, Total: 2, Candidate: candidate}); err != nil {
 		t.Fatal(err)
@@ -569,7 +570,7 @@ func TestTechnicalReviewProgressDistinguishesModelAndCache(t *testing.T) {
 	if err := progress(technicalreview.Progress{Current: 2, Total: 2, Candidate: candidate, Cached: true}); err != nil {
 		t.Fatal(err)
 	}
-	if value := output.String(); !strings.Contains(value, "1/2") || !strings.Contains(value, "reviewing with Ollama") || !strings.Contains(value, "2/2") || !strings.Contains(value, "using cached observation") || !strings.Contains(value, "system ranking, 42 owned file(s)") {
+	if value := output.String(); !strings.Contains(value, "1/2") || !strings.Contains(value, "elapsed 12s") || !strings.Contains(value, "reviewing with Anthropic") || !strings.Contains(value, "2/2") || !strings.Contains(value, "using cached observation") || !strings.Contains(value, "system ranking, 42 owned file(s)") {
 		t.Fatalf("unexpected progress output:\n%s", value)
 	}
 }
