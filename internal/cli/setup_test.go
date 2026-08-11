@@ -100,7 +100,7 @@ func TestPromptAnalysisProviderGroupsHostedProviders(t *testing.T) {
 				}
 				return options[1].Value, nil
 			case 2:
-				if label != "Hosted provider" || defaultValue != "anthropic" || len(options) != 8 || options[3].Value != "xai" || options[4].Value != "groq" || options[5].Value != "mistral" || options[6].Value != "openrouter" || options[7].Value != customCompatibleProvider {
+				if label != "Hosted provider" || defaultValue != "anthropic" || len(options) != 8 || options[3].Value != "xai" || options[4].Value != "mistral" || options[5].Value != "groq" || options[5].Label != "GroqCloud — fast hosted models from several model makers" || options[6].Value != "openrouter" || options[7].Value != customCompatibleProvider {
 					t.Fatalf("provider selector: label=%q default=%q options=%#v", label, defaultValue, options)
 				}
 				return "gemini", nil
