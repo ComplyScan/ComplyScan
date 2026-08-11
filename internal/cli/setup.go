@@ -120,7 +120,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	modelReady := true
 	reviewConfigured := false
 	if interactive {
-		if err := prompt.sectionTitle("Analysis and privacy mode", false); err != nil {
+		if err := setupStepTitle(prompt, 1, 5, "Analysis and privacy mode", false); err != nil {
 			return err
 		}
 		modelReady, err = configureSetupReview(cmd.Context(), prompt, stdout, &cfg, true, options)
@@ -131,11 +131,17 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		if _, err := fmt.Fprintln(stdout); err != nil {
 			return err
 		}
+		if err := setupStepTitle(prompt, 2, 5, "Repository inspection", false); err != nil {
+			return err
+		}
 		summary, inspectErr := inspectRepositoryForSetup(cmd.Context(), prompt, target, cfg, build)
 		if inspectErr != nil {
 			return inspectErr
 		}
 		repositorySummary = summary
+		if err := setupStepTitle(prompt, 3, 5, "System and framework context", true); err != nil {
+			return err
+		}
 		profileDraft := newSetupProfileDraft()
 		if !options.advanced {
 			profileDraft = draftProfileForSetup(cmd.Context(), stdout, target, cfg, summary, modelReady)
@@ -153,11 +159,17 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 				collectErr = configureRecommendedFrameworks(prompt, &cfg, system, options.frameworks)
 				applyFrameworksToSystem(&system, cfg.Frameworks)
 			}
-			if collectErr == nil && frameworkEnabled(cfg.Frameworks, framework.EUAIActTechnicalEvidencePackID) {
-				collectErr = collectRelevantEUApplicabilityContext(prompt, &system, time.Now(), profileDraft)
-			} else if collectErr == nil {
-				collectErr = collectNonEUTechnicalContext(prompt, &system, profileDraft)
-			}
+		}
+		if collectErr != nil {
+			return collectErr
+		}
+		if err := setupStepTitle(prompt, 4, 5, "Applicability and evidence ownership", true); err != nil {
+			return err
+		}
+		if !options.advanced && frameworkEnabled(cfg.Frameworks, framework.EUAIActTechnicalEvidencePackID) {
+			collectErr = collectRelevantEUApplicabilityContext(prompt, &system, time.Now(), profileDraft)
+		} else if !options.advanced {
+			collectErr = collectNonEUTechnicalContext(prompt, &system, profileDraft)
 		}
 		if collectErr != nil {
 			return collectErr
@@ -193,10 +205,15 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		}
 	}
 	scanMode := setupScanNone
-	if interactive && !options.skipScan {
-		scanMode, err = promptSetupScanMode(prompt, repositorySummary, cfg.AI.Provider, modelReady)
-		if err != nil {
+	if interactive {
+		if err := setupStepTitle(prompt, 5, 5, "Review, save, and first scan", true); err != nil {
 			return err
+		}
+		if !options.skipScan {
+			scanMode, err = promptSetupScanMode(prompt, repositorySummary, cfg.AI.Provider, modelReady)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	configureReview := !reviewConfigured && (!interactive || options.skipScan || scanMode == setupScanDeep || setupReviewExplicit(options))
@@ -244,6 +261,10 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		return err
 	}
 	return runFirstScan(cmd, stdout, build, target, scanMode, repositorySummary.Discovery)
+}
+
+func setupStepTitle(prompt promptSession, current, total int, title string, leadingBlank bool) error {
+	return prompt.sectionTitle(fmt.Sprintf("Step %d of %d — %s", current, total, title), leadingBlank)
 }
 
 func setupReviewExplicit(options setupOptions) bool {

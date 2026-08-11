@@ -5,6 +5,7 @@
 ### Changed
 
 - Interactive setup, profile, ownership, and verification wizards now render their main section titles as consistent bold terminal headings while preserving plain output for accessible, dumb, redirected, and `NO_COLOR` modes.
+- Guided setup now shows five numbered stages from privacy selection through review and first scan, so users can see where they are and how much remains.
 
 ## 0.1.6 - 2026-08-11
 

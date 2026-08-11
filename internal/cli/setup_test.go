@@ -34,6 +34,17 @@ func TestWriteSectionTitleUsesBoldOnlyWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestSetupStepTitleShowsPositionAndPreservesPlainFallback(t *testing.T) {
+	var output bytes.Buffer
+	prompt := promptSession{output: &output}
+	if err := setupStepTitle(prompt, 2, 5, "Repository inspection", true); err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "\nStep 2 of 5 — Repository inspection\n" {
+		t.Fatalf("step heading = %q", output.String())
+	}
+}
+
 func TestPromptOllamaModelListsInstalledModelsAndAcceptsCustomTag(t *testing.T) {
 	var output bytes.Buffer
 	prompt := promptSession{reader: bufio.NewReader(strings.NewReader("4\n")), output: &output}
@@ -118,7 +129,7 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 	if cfg.AI.Provider != "ollama" || cfg.AI.Ollama.Model != defaultSetupModel {
 		t.Fatalf("AI configuration = %#v", cfg.AI)
 	}
-	for _, expected := range []string{"ComplyScan setup", "Repository inspected", "Quick system setup", "Local model setup", "Saved", "Next: complyscan scan"} {
+	for _, expected := range []string{"ComplyScan setup", "Step 1 of 5 — Analysis and privacy mode", "Step 2 of 5 — Repository inspection", "Step 3 of 5 — System and framework context", "Step 4 of 5 — Applicability and evidence ownership", "Step 5 of 5 — Review, save, and first scan", "Repository inspected", "Quick system setup", "Local model setup", "Saved", "Next: complyscan scan"} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("output missing %q:\n%s", expected, stdout.String())
 		}
