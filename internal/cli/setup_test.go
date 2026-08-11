@@ -452,7 +452,7 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 		"Step 4 of 5 · Question 6 of 7 — Lifecycle stage",
 		"Step 4 of 5 · Question 3 of 7 — Operating regions",
 		"Step 4 of 5 · Question 4 of 7 — organisation role",
-		"Enter ? at the next prompt for more guidance",
+		"Describe what the system is designed to do",
 		"remaining conditionally relevant facts",
 		"EU AI Act technical mapping is recommended",
 		"Local AI — Ollama keeps repository context on this machine",
@@ -499,7 +499,7 @@ func TestFastSetupUsesDeterministicDraftWithoutModel(t *testing.T) {
 	if len(cfg.Systems) != 1 || len(cfg.Systems[0].AIActivities) != 1 || cfg.Systems[0].AIActivities[0] != profile.ActivityInference {
 		t.Fatalf("systems = %#v", cfg.Systems)
 	}
-	if cfg.AI.Provider != "none" || !strings.Contains(stdout.String(), "Prepared 1 repository-evident setup suggestion(s) without a model") || !strings.Contains(stdout.String(), "advisory suggestion") {
+	if cfg.AI.Provider != "none" || !strings.Contains(stdout.String(), "Prepared 1 repository-evident setup suggestion(s) without a model") || !strings.Contains(stdout.String(), "AI suggestion") {
 		t.Fatalf("fast setup output:\n%s", stdout.String())
 	}
 }
@@ -1007,7 +1007,7 @@ func TestSetupGuidanceCanProgressFromConciseToDetailed(t *testing.T) {
 	if err := explainSetupQuestion(concisePrompt, "intended-purpose"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(conciseOutput.String(), setupQuestionHelp["intended-purpose"][0]) || strings.Contains(conciseOutput.String(), "Example:") || !strings.Contains(conciseOutput.String(), "Enter ?") {
+	if !strings.Contains(conciseOutput.String(), setupQuestionHelp["intended-purpose"][0]) || strings.Contains(conciseOutput.String(), "Example:") || strings.Contains(conciseOutput.String(), "Enter ? at the next prompt") {
 		t.Fatalf("concise guidance did not preserve only the essential explanation:\n%s", conciseOutput.String())
 	}
 	value, err := concisePrompt.text("Intended purpose", "unknown")
@@ -1023,8 +1023,9 @@ func TestSetupGuidanceCanProgressFromConciseToDetailed(t *testing.T) {
 	if err := explainSetupQuestion(detailedPrompt, "intended-purpose"); err != nil {
 		t.Fatal(err)
 	}
+	normalizedOutput := strings.Join(strings.Fields(detailedOutput.String()), " ")
 	for _, line := range setupQuestionHelp["intended-purpose"] {
-		if !strings.Contains(detailedOutput.String(), line) {
+		if !strings.Contains(normalizedOutput, strings.Join(strings.Fields(line), " ")) {
 			t.Errorf("detailed guidance missing %q", line)
 		}
 	}

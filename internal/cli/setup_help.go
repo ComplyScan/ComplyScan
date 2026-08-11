@@ -228,7 +228,7 @@ func (prompt promptSession) showQuestionGuidance() error {
 		return err
 	}
 	for _, line := range prompt.guidance.details {
-		if _, err := fmt.Fprintf(prompt.output, "  %s\n", line); err != nil {
+		if err := writePromptParagraph(prompt.output, "  ", line); err != nil {
 			return err
 		}
 	}
@@ -265,13 +265,9 @@ func explainSetupQuestion(prompt promptSession, key string) error {
 		}
 	}
 	for _, line := range visible {
-		if _, err := fmt.Fprintf(prompt.output, "  %s\n", line); err != nil {
+		if err := writePromptParagraph(prompt.output, "  ", line); err != nil {
 			return err
 		}
-	}
-	if !prompt.alwaysDetailed && len(lines) > 1 && prompt.selectOne == nil {
-		_, err := fmt.Fprintln(prompt.output, "  Enter ? at the next prompt for more guidance.")
-		return err
 	}
 	return nil
 }

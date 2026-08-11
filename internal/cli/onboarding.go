@@ -185,7 +185,7 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 			if err := explainSetupQuestion(step, "intended-purpose"); err != nil {
 				return err
 			}
-			if err := draft.explain(step.output, "intended-purpose"); err != nil {
+			if err := draft.explain(step, "intended-purpose"); err != nil {
 				return err
 			}
 			answer, err := step.text("Intended purpose", value.IntendedPurpose)
@@ -243,7 +243,7 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 			if err := explainSetupQuestion(step, "decision-impact"); err != nil {
 				return err
 			}
-			if err := draft.explain(step.output, "decision-impact"); err != nil {
+			if err := draft.explain(step, "decision-impact"); err != nil {
 				return err
 			}
 			var answer profile.DecisionImpact
@@ -264,7 +264,7 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 			if err := explainSetupQuestion(step, "lifecycle-stage"); err != nil {
 				return err
 			}
-			if err := draft.explain(step.output, "lifecycle-stage"); err != nil {
+			if err := draft.explain(step, "lifecycle-stage"); err != nil {
 				return err
 			}
 			var answer profile.LifecycleStage
@@ -285,7 +285,7 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 			if err := explainSetupQuestion(step, "human-oversight"); err != nil {
 				return err
 			}
-			if err := draft.explain(step.output, "human-oversight"); err != nil {
+			if err := draft.explain(step, "human-oversight"); err != nil {
 				return err
 			}
 			var answer profile.HumanOversight
@@ -360,7 +360,7 @@ func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile
 			if err := explainSetupQuestion(step, "users"); err != nil {
 				return err
 			}
-			if err := draft.explain(step.output, "users"); err != nil {
+			if err := draft.explain(step, "users"); err != nil {
 				return err
 			}
 			answer, err := step.textList("Users", system.Users)
@@ -377,7 +377,7 @@ func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile
 			if err := explainSetupQuestion(step, "affected-groups"); err != nil {
 				return err
 			}
-			if err := draft.explain(step.output, "affected-groups"); err != nil {
+			if err := draft.explain(step, "affected-groups"); err != nil {
 				return err
 			}
 			answer, err := step.textList("Potentially affected groups", system.AffectedGroups)
@@ -394,7 +394,7 @@ func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile
 			if err := explainSetupQuestion(step, "personal-data"); err != nil {
 				return err
 			}
-			if err := draft.explain(step.output, "personal-data"); err != nil {
+			if err := draft.explain(step, "personal-data"); err != nil {
 				return err
 			}
 			answer, err := promptRevisitableRequiredChoice(step, completed[personalIndex], system.Data.PersonalData,
@@ -410,7 +410,7 @@ func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile
 			if err := explainSetupQuestion(step, "special-category-data"); err != nil {
 				return err
 			}
-			if err := draft.explain(step.output, "special-category-data"); err != nil {
+			if err := draft.explain(step, "special-category-data"); err != nil {
 				return err
 			}
 			answer, err := promptRevisitableRequiredChoice(step, completed[specialIndex], system.Data.SpecialCategoryData,
@@ -426,7 +426,7 @@ func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile
 			if err := explainSetupQuestion(step, "children-data"); err != nil {
 				return err
 			}
-			if err := draft.explain(step.output, "children-data"); err != nil {
+			if err := draft.explain(step, "children-data"); err != nil {
 				return err
 			}
 			answer, err := promptRevisitableRequiredChoice(step, completed[childrenIndex], system.Data.ChildrenData,
@@ -493,7 +493,7 @@ func collectTechnicalSystemContext(prompt promptSession, system *profile.System,
 			if err := explainSetupQuestion(step, "use-case-domains"); err != nil {
 				return err
 			}
-			if err := draft.explain(step.output, "use-case-domains"); err != nil {
+			if err := draft.explain(step, "use-case-domains"); err != nil {
 				return err
 			}
 			allowed := []profile.UseCaseDomain{
@@ -521,7 +521,7 @@ func collectTechnicalSystemContext(prompt promptSession, system *profile.System,
 		if err := explainSetupQuestion(step, "ai-activities"); err != nil {
 			return err
 		}
-		if err := draft.explain(step.output, "ai-activities"); err != nil {
+		if err := draft.explain(step, "ai-activities"); err != nil {
 			return err
 		}
 		allowed := []profile.AIActivity{
@@ -545,7 +545,7 @@ func collectTechnicalSystemContext(prompt promptSession, system *profile.System,
 		if err := explainSetupQuestion(step, "deployment-models"); err != nil {
 			return err
 		}
-		if err := draft.explain(step.output, "deployment-models"); err != nil {
+		if err := draft.explain(step, "deployment-models"); err != nil {
 			return err
 		}
 		allowed := []profile.DeploymentModel{

@@ -29,8 +29,32 @@ func TestQuickProfileShowsDraftSuggestionsWithoutPreselecting(t *testing.T) {
 	if system.IntendedPurpose != "Draft support replies for agents." || system.DecisionImpact != profile.ImpactAdvisory || system.LifecycleStage != profile.LifecycleTesting || system.HumanOversight != profile.OversightRequired {
 		t.Fatalf("system = %#v", system)
 	}
-	if !strings.Contains(output.String(), "advisory suggestion") || !strings.Contains(output.String(), "README.md:2") {
+	if !strings.Contains(output.String(), "AI suggestion · High confidence") || strings.Contains(output.String(), "README purpose") || strings.Contains(output.String(), "README.md:2") {
 		t.Fatalf("draft explanation missing:\n%s", output.String())
+	}
+}
+
+func TestDraftSuggestionDetailsAreAvailableOnDemand(t *testing.T) {
+	draft := newSetupProfileDraft()
+	draft.Suggestions["intended-purpose"] = providers.ProfileSuggestion{
+		Field: "intended-purpose", Values: []string{"Draft support replies."}, Confidence: "medium",
+		Rationale: "README purpose", Evidence: []providers.ProfileEvidence{{Path: "README.md", Line: 2, Summary: "Describes reply drafting."}},
+	}
+	var output bytes.Buffer
+	prompt := promptSession{output: &output, guidance: &questionGuidance{details: []string{"Base question guidance."}}}
+	if err := draft.explain(prompt, "intended-purpose"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "README purpose") || strings.Contains(output.String(), "README.md:2") {
+		t.Fatalf("details leaked into concise suggestion:\n%s", output.String())
+	}
+	if err := prompt.showQuestionGuidance(); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"Base question guidance.", "AI suggestion rationale: README purpose", "README.md:2"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("expanded details missing %q:\n%s", expected, output.String())
+		}
 	}
 }
 
