@@ -15,8 +15,9 @@ const accessiblePromptEnvironment = "COMPLYSCAN_ACCESSIBLE"
 const moreGuidanceChoiceValue = "\x00complyscan-more-guidance"
 
 type terminalChoice struct {
-	Label string
-	Value string
+	Label    string
+	Value    string
+	Guidance string
 }
 
 func (session promptSession) chooseOne(label, defaultValue string, choices []terminalChoice) (string, error) {
@@ -26,7 +27,11 @@ func (session promptSession) chooseOne(label, defaultValue string, choices []ter
 	for {
 		visible := append([]terminalChoice(nil), choices...)
 		if session.hasQuestionGuidance() {
-			visible = append(visible, terminalChoice{Label: "ⓘ More guidance about this question", Value: moreGuidanceChoiceValue})
+			visible = append(visible, terminalChoice{
+				Label:    "ⓘ Further explanation — highlight to expand",
+				Value:    moreGuidanceChoiceValue,
+				Guidance: strings.Join(session.guidance.details, "\n"),
+			})
 		}
 		selected, err := session.selectOne(label, defaultValue, visible)
 		if err != nil {
@@ -50,7 +55,11 @@ func (session promptSession) chooseMany(label string, defaults []string, choices
 	for {
 		visible := append([]terminalChoice(nil), choices...)
 		if session.hasQuestionGuidance() {
-			visible = append(visible, terminalChoice{Label: "ⓘ More guidance about this question", Value: moreGuidanceChoiceValue})
+			visible = append(visible, terminalChoice{
+				Label:    "ⓘ Further explanation — press Space to expand",
+				Value:    moreGuidanceChoiceValue,
+				Guidance: strings.Join(session.guidance.details, "\n"),
+			})
 		}
 		selected, err := session.selectMany(label, defaults, visible, exclusive)
 		if err != nil {
@@ -141,11 +150,20 @@ func runTerminalSelect(input io.Reader, output io.Writer, label, defaultValue st
 		options = append(options, huh.NewOption(choice.Label, choice.Value))
 	}
 	selected := defaultValue
+	guidance := terminalChoiceGuidance(choices)
 	field := huh.NewSelect[string]().
 		Title(label).
-		Description("Use ↑/↓ to move and Enter to confirm.").
+		DescriptionFunc(func() string {
+			return terminalGuidanceDescription("Use ↑/↓ to move and Enter to confirm.", selected == moreGuidanceChoiceValue, guidance)
+		}, &selected).
 		Options(options...).
-		Value(&selected)
+		Value(&selected).
+		Validate(func(value string) error {
+			if value == moreGuidanceChoiceValue {
+				return errors.New("read the explanation, then choose an answer in this menu")
+			}
+			return nil
+		})
 	form := huh.NewForm(huh.NewGroup(field)).WithInput(input).WithOutput(output)
 	if err := form.Run(); err != nil {
 		return "", fmt.Errorf("select %s: %w", strings.ToLower(label), err)
@@ -183,17 +201,21 @@ func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, def
 		exclusiveValues[strings.ToLower(strings.TrimSpace(value))] = struct{}{}
 	}
 	selected := append([]string(nil), defaults...)
+	guidance := terminalChoiceGuidance(choices)
 	field := huh.NewMultiSelect[string]().
 		Title(label).
-		Description("Use ↑/↓ to move, Space to tick or untick, and Enter to confirm.").
+		DescriptionFunc(func() string {
+			return terminalGuidanceDescription("Use ↑/↓ to move, Space to tick or untick, and Enter to confirm.", containsTerminalValue(selected, moreGuidanceChoiceValue), guidance)
+		}, &selected).
 		Options(options...).
 		Value(&selected).
 		Validate(func(values []string) error {
-			if len(values) == 0 {
+			answers := withoutTerminalValue(values, moreGuidanceChoiceValue)
+			if len(answers) == 0 {
 				return errors.New("select at least one option")
 			}
-			if len(values) > 1 {
-				for _, value := range values {
+			if len(answers) > 1 {
+				for _, value := range answers {
 					if _, isExclusive := exclusiveValues[strings.ToLower(strings.TrimSpace(value))]; isExclusive {
 						return fmt.Errorf("%s must be selected alone", value)
 					}
@@ -205,5 +227,45 @@ func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, def
 	if err := form.Run(); err != nil {
 		return nil, fmt.Errorf("select %s: %w", strings.ToLower(label), err)
 	}
-	return selected, nil
+	return withoutTerminalValue(selected, moreGuidanceChoiceValue), nil
+}
+
+func terminalChoiceGuidance(choices []terminalChoice) string {
+	for _, choice := range choices {
+		if choice.Value == moreGuidanceChoiceValue {
+			return choice.Guidance
+		}
+	}
+	return ""
+}
+
+func terminalGuidanceDescription(instructions string, expanded bool, guidance string) string {
+	if !expanded || strings.TrimSpace(guidance) == "" {
+		return instructions
+	}
+	lines := []string{instructions, "", "Further explanation:"}
+	for _, line := range strings.Split(guidance, "\n") {
+		lines = append(lines, "• "+line)
+	}
+	lines = append(lines, "", "Move to an answer in this menu when you are ready to continue.")
+	return strings.Join(lines, "\n")
+}
+
+func containsTerminalValue(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func withoutTerminalValue(values []string, omitted string) []string {
+	filtered := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != omitted {
+			filtered = append(filtered, value)
+		}
+	}
+	return filtered
 }

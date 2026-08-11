@@ -704,7 +704,7 @@ func TestTerminalQuestionCanSelectMoreGuidance(t *testing.T) {
 		output: &output, guidance: &questionGuidance{},
 		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
 			selections++
-			if label != "Lifecycle stage" || len(options) != 3 || options[2].Value != moreGuidanceChoiceValue {
+			if label != "Lifecycle stage" || len(options) != 3 || options[2].Value != moreGuidanceChoiceValue || options[2].Guidance == "" {
 				t.Fatalf("question selector label=%q options=%#v", label, options)
 			}
 			if selections == 1 {
@@ -732,7 +732,7 @@ func TestTerminalMultiSelectCanOpenQuestionGuidance(t *testing.T) {
 		output: &output, guidance: &questionGuidance{},
 		selectMany: func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error) {
 			selections++
-			if label != "Operating regions" || options[len(options)-1].Value != moreGuidanceChoiceValue {
+			if label != "Operating regions" || options[len(options)-1].Value != moreGuidanceChoiceValue || options[len(options)-1].Guidance == "" {
 				t.Fatalf("multi-selector label=%q options=%#v", label, options)
 			}
 			if selections == 1 {
@@ -778,6 +778,26 @@ func TestTerminalConfirmationCanOpenQuestionGuidance(t *testing.T) {
 	}
 	if confirmed || selections != 2 || !strings.Contains(output.String(), "Choose no to keep deterministic scanning") {
 		t.Fatalf("confirmed=%t selections=%d output:\n%s", confirmed, selections, output.String())
+	}
+}
+
+func TestTerminalGuidanceExpandsInsideActiveSelector(t *testing.T) {
+	guidance := "advisory — supports a human decision\nautonomous — acts without prior human approval"
+	description := terminalGuidanceDescription("Use ↑/↓ to move and Enter to confirm.", true, guidance)
+	for _, expected := range []string{"Further explanation:", "advisory — supports a human decision", "autonomous — acts without prior human approval", "Move to an answer in this menu"} {
+		if !strings.Contains(description, expected) {
+			t.Errorf("expanded selector guidance missing %q:\n%s", expected, description)
+		}
+	}
+	if collapsed := terminalGuidanceDescription("instructions", false, guidance); collapsed != "instructions" {
+		t.Fatalf("collapsed guidance = %q", collapsed)
+	}
+}
+
+func TestTerminalGuidanceActionIsRemovedFromMultiSelection(t *testing.T) {
+	values := withoutTerminalValue([]string{"eu", moreGuidanceChoiceValue, "uk"}, moreGuidanceChoiceValue)
+	if strings.Join(values, ",") != "eu,uk" || !containsTerminalValue([]string{moreGuidanceChoiceValue}, moreGuidanceChoiceValue) {
+		t.Fatalf("filtered values = %#v", values)
 	}
 }
 
