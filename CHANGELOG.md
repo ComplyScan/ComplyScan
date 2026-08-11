@@ -7,6 +7,7 @@
 - Interactive setup, profile, ownership, and verification wizards now render their main section titles as consistent bold terminal headings while preserving plain output for accessible, dumb, redirected, and `NO_COLOR` modes.
 - Guided setup now shows five numbered stages from privacy selection through review and first scan, so users can see where they are and how much remains.
 - Local model selection now shows transparent download/runtime-memory ranges, model pulls retain Ollama's live progress and report elapsed time, and qualification, profile drafting, finding review, and framework evidence investigation report elapsed and target progress with the actual provider name.
+- Guided setup now presents a final summary of analysis privacy, model readiness, frameworks, systems, evidence ownership, and first-run behavior before writing configuration; users can revisit any major section or cancel without saving.
 
 ## 0.1.6 - 2026-08-11
 

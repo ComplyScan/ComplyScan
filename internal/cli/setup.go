@@ -117,6 +117,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	}
 
 	var repositorySummary setupRepositorySummary
+	profileDraft := newSetupProfileDraft()
 	modelReady := true
 	reviewConfigured := false
 	if interactive {
@@ -142,54 +143,13 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		if err := setupStepTitle(prompt, 3, 5, "System and framework context", true); err != nil {
 			return err
 		}
-		profileDraft := newSetupProfileDraft()
 		if !options.advanced {
 			profileDraft = draftProfileForSetup(cmd.Context(), stdout, target, cfg, summary, modelReady)
-		}
-		var system profile.System
-		var collectErr error
-		if options.advanced {
-			if err := configureFrameworkSelection(prompt, &cfg, true, options.frameworks); err != nil {
-				return err
-			}
-			system, collectErr = collectSystemProfileWithPrompt(prompt, target, time.Now(), cfg.Frameworks...)
-		} else {
-			system, collectErr = collectBasicSystemProfile(prompt, target, time.Now(), summary, profileDraft)
-			if collectErr == nil {
-				collectErr = configureRecommendedFrameworks(prompt, &cfg, system, options.frameworks)
-				applyFrameworksToSystem(&system, cfg.Frameworks)
-			}
-		}
-		if collectErr != nil {
-			return collectErr
 		}
 		if err := setupStepTitle(prompt, 4, 5, "Applicability and evidence ownership", true); err != nil {
 			return err
 		}
-		if !options.advanced && frameworkEnabled(cfg.Frameworks, framework.EUAIActTechnicalEvidencePackID) {
-			collectErr = collectRelevantEUApplicabilityContext(prompt, &system, time.Now(), profileDraft)
-		} else if !options.advanced {
-			collectErr = collectNonEUTechnicalContext(prompt, &system, profileDraft)
-		}
-		if collectErr != nil {
-			return collectErr
-		}
-		index := systemIndex(cfg.Systems, system.ID)
-		if index >= 0 {
-			if explainErr := explainSetupQuestion(prompt, "replace-profile"); explainErr != nil {
-				return explainErr
-			}
-			replace, confirmErr := prompt.confirm(fmt.Sprintf("Replace existing system profile %q", system.ID), true)
-			if confirmErr != nil {
-				return confirmErr
-			}
-			if replace {
-				cfg.Systems[index] = system
-			}
-		} else {
-			cfg.Systems = append(cfg.Systems, system)
-		}
-		if err := offerOwnershipSetup(prompt, &cfg); err != nil {
+		if err := collectInteractiveSetupContext(prompt, target, &cfg, options, summary, profileDraft, true); err != nil {
 			return err
 		}
 	} else if !existed {
@@ -220,6 +180,16 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	if configureReview {
 		modelReady, err = configureSetupReview(cmd.Context(), prompt, stdout, &cfg, interactive, options)
 		if err != nil {
+			return err
+		}
+	}
+	if interactive {
+		save, reviewErr := reviewSetupBeforeSave(cmd.Context(), prompt, stdout, target, &cfg, options, repositorySummary, profileDraft, &scanMode, &modelReady)
+		if reviewErr != nil {
+			return reviewErr
+		}
+		if !save {
+			_, err := fmt.Fprintln(stdout, "\nSetup cancelled; no configuration file was written.")
 			return err
 		}
 	}
@@ -261,6 +231,173 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		return err
 	}
 	return runFirstScan(cmd, stdout, build, target, scanMode, repositorySummary.Discovery)
+}
+
+func collectInteractiveSetupContext(prompt promptSession, target string, cfg *config.Config, options setupOptions, summary setupRepositorySummary, draft setupProfileDraft, confirmReplace bool) error {
+	var system profile.System
+	var err error
+	if options.advanced {
+		if err = configureFrameworkSelection(prompt, cfg, true, options.frameworks); err != nil {
+			return err
+		}
+		system, err = collectSystemProfileWithPrompt(prompt, target, time.Now(), cfg.Frameworks...)
+	} else {
+		system, err = collectBasicSystemProfile(prompt, target, time.Now(), summary, draft)
+		if err == nil {
+			err = configureRecommendedFrameworks(prompt, cfg, system, options.frameworks)
+			applyFrameworksToSystem(&system, cfg.Frameworks)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	if !options.advanced && frameworkEnabled(cfg.Frameworks, framework.EUAIActTechnicalEvidencePackID) {
+		err = collectRelevantEUApplicabilityContext(prompt, &system, time.Now(), draft)
+	} else if !options.advanced {
+		err = collectNonEUTechnicalContext(prompt, &system, draft)
+	}
+	if err != nil {
+		return err
+	}
+	index := systemIndex(cfg.Systems, system.ID)
+	if index >= 0 {
+		replace := true
+		if confirmReplace {
+			if err := explainSetupQuestion(prompt, "replace-profile"); err != nil {
+				return err
+			}
+			replace, err = prompt.confirm(fmt.Sprintf("Replace existing system profile %q", system.ID), true)
+			if err != nil {
+				return err
+			}
+		}
+		if replace {
+			cfg.Systems[index] = system
+		}
+	} else {
+		cfg.Systems = append(cfg.Systems, system)
+	}
+	return offerOwnershipSetup(prompt, cfg)
+}
+
+type setupReviewAction string
+
+const (
+	setupReviewSave     setupReviewAction = "Save configuration"
+	setupReviewAnalysis setupReviewAction = "Change analysis and privacy mode"
+	setupReviewContext  setupReviewAction = "Repeat system and framework questions"
+	setupReviewScan     setupReviewAction = "Change first-run action"
+	setupReviewCancel   setupReviewAction = "Cancel without saving"
+)
+
+func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.Writer, target string, cfg *config.Config, options setupOptions, summary setupRepositorySummary, draft setupProfileDraft, scanMode *setupScanMode, modelReady *bool) (bool, error) {
+	for {
+		if err := writeSetupReviewSummary(prompt, *cfg, *scanMode, *modelReady); err != nil {
+			return false, err
+		}
+		actions := []setupReviewAction{setupReviewSave, setupReviewAnalysis, setupReviewContext}
+		if !options.skipScan {
+			actions = append(actions, setupReviewScan)
+		}
+		actions = append(actions, setupReviewCancel)
+		action, err := promptChoice(prompt, "review action", setupReviewSave, actions...)
+		if err != nil {
+			return false, err
+		}
+		switch action {
+		case setupReviewSave:
+			return true, nil
+		case setupReviewAnalysis:
+			revisit := options
+			revisit.reviewProvider = ""
+			revisit.ollamaModel = ""
+			revisit.remoteModel = ""
+			revisit.remoteAPIKeyEnv = ""
+			revisit.allowRemoteReview = false
+			revisit.pullModel = false
+			revisit.qualifyModel = false
+			if err := prompt.sectionTitle("Analysis and privacy mode", true); err != nil {
+				return false, err
+			}
+			*modelReady, err = configureSetupReview(ctx, prompt, stdout, cfg, true, revisit)
+			if err != nil {
+				return false, err
+			}
+		case setupReviewContext:
+			revisit := options
+			revisit.frameworks = nil
+			if err := prompt.sectionTitle("System, framework, and applicability context", true); err != nil {
+				return false, err
+			}
+			if err := collectInteractiveSetupContext(prompt, target, cfg, revisit, summary, draft, false); err != nil {
+				return false, err
+			}
+		case setupReviewScan:
+			if err := prompt.sectionTitle("First-run action", true); err != nil {
+				return false, err
+			}
+			*scanMode, err = promptSetupScanMode(prompt, summary, cfg.AI.Provider, *modelReady)
+			if err != nil {
+				return false, err
+			}
+		case setupReviewCancel:
+			return false, nil
+		}
+	}
+}
+
+func writeSetupReviewSummary(prompt promptSession, cfg config.Config, scanMode setupScanMode, modelReady bool) error {
+	if err := prompt.sectionTitle("Review setup", true); err != nil {
+		return err
+	}
+	analysis := "Fast technical analysis (no model)"
+	if cfg.AI.Provider == "ollama" {
+		analysis = fmt.Sprintf("Local Ollama — %s", cfg.AI.Ollama.Model)
+	} else if cfg.AI.Provider != "none" {
+		analysis = fmt.Sprintf("%s cloud — %s", reviewProviderLabel(cfg.AI.Provider), cfg.AI.Remote.Model)
+	}
+	readiness := "not required"
+	if cfg.AI.Provider != "none" {
+		readiness = "needs attention"
+		if modelReady {
+			readiness = "ready"
+		}
+	}
+	frameworks := make([]string, 0, len(cfg.Frameworks))
+	for _, id := range cfg.Frameworks {
+		switch id {
+		case framework.EUAIActTechnicalEvidencePackID:
+			frameworks = append(frameworks, "EU AI Act technical evidence")
+		case framework.NISTAIRMFTechnicalEvidencePackID:
+			frameworks = append(frameworks, "NIST AI RMF technical evidence")
+		default:
+			frameworks = append(frameworks, id)
+		}
+	}
+	systems := "none"
+	if len(cfg.Systems) > 0 {
+		names := make([]string, 0, len(cfg.Systems))
+		for _, system := range cfg.Systems {
+			names = append(names, fmt.Sprintf("%s (%s)", system.Name, system.ID))
+		}
+		systems = strings.Join(names, ", ")
+	}
+	ownership := "single-system inference"
+	if len(cfg.Systems) == 0 {
+		ownership = "not configured"
+	} else if len(cfg.Systems) > 1 {
+		ownership = fmt.Sprintf("%d path rule(s)", len(cfg.Ownership))
+	}
+	firstRun := "save without scanning"
+	if scanMode == setupScanQuick {
+		firstRun = "quick deterministic scan"
+	} else if scanMode == setupScanDeep {
+		firstRun = "deep AI-assisted scan"
+	}
+	_, err := fmt.Fprintf(prompt.output,
+		"  Analysis: %s (%s)\n  Frameworks: %s\n  Systems: %s\n  Evidence ownership: %s\n  First run: %s\n\n",
+		analysis, readiness, strings.Join(frameworks, ", "), systems, ownership, firstRun)
+	return err
 }
 
 func setupStepTitle(prompt promptSession, current, total int, title string, leadingBlank bool) error {

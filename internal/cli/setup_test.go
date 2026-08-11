@@ -548,6 +548,51 @@ func TestPromptSetupScanModeMakesExpensiveReviewExplicit(t *testing.T) {
 	}
 }
 
+func TestWriteSetupReviewSummaryShowsDecisionsBeforeSave(t *testing.T) {
+	cfg := config.Default()
+	cfg.AI.Provider = "openai"
+	cfg.AI.Remote.Model = "gpt-test"
+	cfg.Frameworks = []string{framework.EUAIActTechnicalEvidencePackID, framework.NISTAIRMFTechnicalEvidencePackID}
+	cfg.Systems = []profile.System{{ID: "checkout-ai", Name: "Checkout assistant"}}
+	var output bytes.Buffer
+	prompt := promptSession{output: &output}
+	if err := writeSetupReviewSummary(prompt, cfg, setupScanDeep, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"Review setup", "OpenAI cloud — gpt-test (ready)", "EU AI Act technical evidence",
+		"NIST AI RMF technical evidence", "Checkout assistant (checkout-ai)",
+		"single-system inference", "deep AI-assisted scan",
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("review summary missing %q:\n%s", expected, output.String())
+		}
+	}
+}
+
+func TestReviewSetupBeforeSaveCanCancelWithoutWriting(t *testing.T) {
+	cfg := config.Default()
+	var output bytes.Buffer
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("")), output: &output,
+		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
+			if label != "review action" || defaultValue != string(setupReviewSave) {
+				t.Fatalf("selector label=%q default=%q", label, defaultValue)
+			}
+			return string(setupReviewCancel), nil
+		},
+	}
+	mode := setupScanNone
+	ready := true
+	save, err := reviewSetupBeforeSave(context.Background(), prompt, &output, t.TempDir(), &cfg, setupOptions{}, setupRepositorySummary{}, newSetupProfileDraft(), &mode, &ready)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if save {
+		t.Fatal("cancel action unexpectedly allowed configuration save")
+	}
+}
+
 func TestEverySetupQuestionHasDeveloperGuidance(t *testing.T) {
 	keys := []string{
 		"applicability-context", "frameworks", "system-id", "system-name", "intended-purpose", "lifecycle-stage", "organization-roles", "organization-role-basic",
