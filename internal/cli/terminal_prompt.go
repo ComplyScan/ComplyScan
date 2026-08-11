@@ -32,7 +32,7 @@ func (session promptSession) chooseOne(label, defaultValue string, choices []ter
 	for {
 		visible := append([]terminalChoice(nil), choices...)
 		if session.backAvailable {
-			visible = insertBackChoice(visible, defaultValue)
+			visible = append(visible, terminalChoice{Value: backChoiceValue})
 		}
 		if session.hasQuestionGuidance() {
 			visible = append(visible, terminalChoice{
@@ -67,14 +67,7 @@ func (session promptSession) chooseMany(label string, defaults []string, choices
 	for {
 		visible := append([]terminalChoice(nil), choices...)
 		if session.backAvailable {
-			anchor := ""
-			for _, choice := range choices {
-				if containsTerminalValue(defaults, choice.Value) {
-					anchor = choice.Value
-					break
-				}
-			}
-			visible = insertBackChoice(visible, anchor)
+			visible = append(visible, terminalChoice{Value: backChoiceValue})
 		}
 		if session.hasQuestionGuidance() {
 			visible = append(visible, terminalChoice{
@@ -195,8 +188,9 @@ func writeSectionTitle(output io.Writer, title string, bold, leadingBlank bool) 
 }
 
 func runTerminalSelect(input io.Reader, output io.Writer, label, defaultValue string, choices []terminalChoice) (string, error) {
-	options := make([]huh.Option[string], 0, len(choices))
-	for _, choice := range choices {
+	visibleChoices := visibleTerminalChoices(choices)
+	options := make([]huh.Option[string], 0, len(visibleChoices))
+	for _, choice := range visibleChoices {
 		options = append(options, huh.NewOption(choice.Label, choice.Value))
 	}
 	selected := defaultValue
@@ -204,7 +198,7 @@ func runTerminalSelect(input io.Reader, output io.Writer, label, defaultValue st
 	instructions := "Use ↑/↓ to move and Enter to confirm."
 	allowBack := containsTerminalChoice(choices, backChoiceValue)
 	if allowBack {
-		instructions += " Press ← or select ← Back to return."
+		instructions += " Press ← to return."
 	}
 	field := huh.NewSelect[string]().
 		Title(label).
@@ -249,8 +243,9 @@ func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, def
 	for _, value := range defaults {
 		selectedDefaults[strings.ToLower(strings.TrimSpace(value))] = struct{}{}
 	}
-	options := make([]huh.Option[string], 0, len(choices))
-	for _, choice := range choices {
+	visibleChoices := visibleTerminalChoices(choices)
+	options := make([]huh.Option[string], 0, len(visibleChoices))
+	for _, choice := range visibleChoices {
 		_, selected := selectedDefaults[strings.ToLower(choice.Value)]
 		options = append(options, huh.NewOption(choice.Label, choice.Value).Selected(selected))
 	}
@@ -263,7 +258,7 @@ func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, def
 	instructions := "Use ↑/↓ to move, Space to tick or untick, and Enter to confirm."
 	allowBack := containsTerminalChoice(choices, backChoiceValue)
 	if allowBack {
-		instructions += " Press ← or select ← Back to return."
+		instructions += " Press ← to return."
 	}
 	field := huh.NewMultiSelect[string]().
 		Title(label).
@@ -358,23 +353,14 @@ func containsTerminalChoice(choices []terminalChoice, wanted string) bool {
 	return false
 }
 
-func insertBackChoice(choices []terminalChoice, anchor string) []terminalChoice {
-	back := terminalChoice{Label: "← Back — return to the previous question", Value: backChoiceValue}
-	if len(choices) == 0 {
-		return []terminalChoice{back}
-	}
-	insertAfter := 0
-	for index, choice := range choices {
-		if choice.Value == anchor {
-			insertAfter = index
-			break
+func visibleTerminalChoices(choices []terminalChoice) []terminalChoice {
+	visible := make([]terminalChoice, 0, len(choices))
+	for _, choice := range choices {
+		if choice.Value != backChoiceValue {
+			visible = append(visible, choice)
 		}
 	}
-	result := make([]terminalChoice, 0, len(choices)+1)
-	result = append(result, choices[:insertAfter+1]...)
-	result = append(result, back)
-	result = append(result, choices[insertAfter+1:]...)
-	return result
+	return visible
 }
 
 func terminalGuidanceDescription(instructions string, expanded bool, guidance string) string {
