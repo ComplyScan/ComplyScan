@@ -3,10 +3,10 @@
 | Field | Value |
 | --- | --- |
 | Product | ComplyScan |
-| Version assessed | 0.1.5 |
-| Assessment date | 2026-08-10 |
+| Version assessed | 0.1.6 |
+| Assessment date | 2026-08-11 |
 | Owner | ComplyScan maintainers |
-| Status | Reviewed for v0.1.5; local and BYOK model review remains experimental, and `qwen3.5:9b` requires its live quality gate |
+| Status | Reviewed for v0.1.6; local and BYOK model review remains experimental, automatic compatibility is not quality validation, and `qwen3.5:9b` still requires its technical-review quality gate |
 | Next review | Before promoting any model review from experimental status, after any material product change, or by 2027-02-02 |
 
 ## Scope and method

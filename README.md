@@ -8,7 +8,7 @@ ComplyScan does **not** interpret a complete system, determine an EU AI Act clas
 
 ## Install
 
-> Current release: v0.1.5. Model review is optional and experimental; deterministic scanning remains the default.
+> Current release: v0.1.6. Model review is optional and experimental; deterministic scanning remains the default.
 
 macOS and Linux users can install ComplyScan and immediately start guided setup with one command:
 
@@ -19,7 +19,7 @@ curl -fsSL https://complyscan.github.io/ComplyScan/install.sh | sh
 The installer is published from this repository through GitHub Pages. It detects the operating system and CPU architecture, downloads the matching release archive, verifies its published SHA-256 checksum, installs `complyscan` into `~/.local/bin`, and launches `complyscan setup` through the terminal. It does not use `sudo`. Pass `--no-setup` for automation or pin both the installer and binary version:
 
 ```bash
-curl -fsSL https://github.com/ComplyScan/ComplyScan/releases/download/v0.1.5/install.sh | sh -s -- --version v0.1.5 --no-setup
+curl -fsSL https://github.com/ComplyScan/ComplyScan/releases/download/v0.1.6/install.sh | sh -s -- --version v0.1.6 --no-setup
 ```
 
 Prebuilt archives for macOS, Linux, and Windows are also available on [GitHub Releases](https://github.com/ComplyScan/ComplyScan/releases). The current stable release can be installed with Go 1.22 or newer:
@@ -39,7 +39,7 @@ go build -o complyscan ./cmd/complyscan
 Release builds can inject metadata with `-ldflags`:
 
 ```bash
-go build -ldflags "-X main.version=0.1.5 -X main.commit=$(git rev-parse --short HEAD) -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o complyscan ./cmd/complyscan
+go build -ldflags "-X main.version=0.1.6 -X main.commit=$(git rev-parse --short HEAD) -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o complyscan ./cmd/complyscan
 ```
 
 ## Quick start
@@ -391,7 +391,7 @@ steps:
   - uses: actions/checkout@v6
     with:
       fetch-depth: 0
-  - uses: ComplyScan/ComplyScan@v0.1.5
+  - uses: ComplyScan/ComplyScan@v0.1.6
     with:
       severity: medium
       changed-since: ${{ github.event.pull_request.base.sha }}

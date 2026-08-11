@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.6 - 2026-08-11
+
 ### Added
 
 - Automatic one-request model qualification for arbitrary Ollama tags and supported BYOK model IDs, with no repository data, strict structured-record binding, an instruction-shaped hard negative, a private 30-day cache keyed by model/digest and prompt contracts, setup/deep-scan enforcement, doctor status, and deterministic fallback.

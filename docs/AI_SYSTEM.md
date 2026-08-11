@@ -3,10 +3,10 @@
 | Field | Value |
 | --- | --- |
 | Product | ComplyScan |
-| Version assessed | 0.1.5 |
-| Assessment date | 2026-08-10 |
+| Version assessed | 0.1.6 |
+| Assessment date | 2026-08-11 |
 | Owner | ComplyScan maintainers |
-| Status | Reviewed for v0.1.5 with model review retained as optional experimental advisory functionality and the new `qwen3.5:9b` default candidate awaiting its live gate; not legal advice |
+| Status | Reviewed for v0.1.6 with model review retained as optional experimental advisory functionality; automatic compatibility is not quality validation, and the `qwen3.5:9b` technical-review gate remains outstanding; not legal advice |
 | Next review | Required before promoting any model review from experimental status, then before any reassessment trigger below |
 
 ## Intended purpose
