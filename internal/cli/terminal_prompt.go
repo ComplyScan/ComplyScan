@@ -346,6 +346,11 @@ func runTerminalForm(form *huh.Form, input io.Reader, output io.Writer, allowBac
 	if !allowBack {
 		return form.Run()
 	}
+	// huh.Form.RunWithContext normally installs these commands before starting
+	// Bubble Tea. The navigation wrapper starts the program directly so it can
+	// distinguish ← from Ctrl+C, and must preserve that lifecycle setup.
+	form.SubmitCmd = tea.Quit
+	form.CancelCmd = tea.Quit
 	navigator := &backNavigableForm{form: form}
 	result, err := tea.NewProgram(navigator, tea.WithInput(input), tea.WithOutput(output), tea.WithReportFocus()).Run()
 	if err != nil {

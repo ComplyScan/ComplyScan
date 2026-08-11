@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -34,6 +36,36 @@ func TestBackNavigableFormLeavesOtherArrowKeysToSelector(t *testing.T) {
 	navigator.Update(tea.KeyMsg{Type: tea.KeyDown})
 	if navigator.back {
 		t.Fatal("down arrow unexpectedly triggered back navigation")
+	}
+}
+
+func TestBackNavigableFormCanExitAfterSubmission(t *testing.T) {
+	selected := "one"
+	navigator := newTestBackNavigableForm(&selected)
+	navigator.form.SubmitCmd = tea.Quit
+	navigator.form.CancelCmd = tea.Quit
+	_, command := navigator.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if command == nil {
+		t.Fatal("submitting a navigable form did not produce an exit command")
+	}
+}
+
+func TestRunTerminalFormReturnsAfterEnter(t *testing.T) {
+	selected := "one"
+	field := huh.NewSelect[string]().
+		Options(huh.NewOption("One", "one"), huh.NewOption("Two", "two")).
+		Value(&selected)
+	done := make(chan error, 1)
+	go func() {
+		done <- runTerminalForm(huh.NewForm(huh.NewGroup(field)), strings.NewReader("\r"), io.Discard, true)
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("navigable form did not exit after Enter")
 	}
 }
 
