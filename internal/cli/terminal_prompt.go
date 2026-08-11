@@ -224,6 +224,57 @@ func runTerminalSelect(input io.Reader, output io.Writer, label, defaultValue st
 	return selected, nil
 }
 
+func runTerminalInput(input io.Reader, output io.Writer, label, defaultValue string, guidanceAvailable, allowBack bool) (string, error) {
+	selected := ""
+	instructions := "Type a replacement."
+	if strings.TrimSpace(defaultValue) != "" {
+		instructions = "Press Enter to accept the proposed answer, or type a replacement."
+	}
+	description := instructions
+	if strings.TrimSpace(defaultValue) != "" {
+		lines := []string{"Proposed answer"}
+		for _, line := range wrapPromptText(defaultValue, promptContentWidth(output)-6) {
+			lines = append(lines, "  "+line)
+		}
+		lines = append(lines, "", instructions)
+		description = strings.Join(lines, "\n")
+	}
+	field := huh.NewInput().
+		Title(label).
+		Description(description).
+		Prompt("› ").
+		Placeholder("Type a replacement").
+		Value(&selected).
+		Validate(func(value string) error {
+			if strings.TrimSpace(value) == "" && strings.TrimSpace(defaultValue) == "" {
+				return errors.New("enter an answer before continuing")
+			}
+			return nil
+		})
+	keymap := huh.NewDefaultKeyMap()
+	keymap.Input.Submit.SetHelp("enter", "accept")
+	form := huh.NewForm(huh.NewGroup(field)).WithKeyMap(keymap).WithInput(input).WithOutput(output).WithWidth(promptContentWidth(output))
+	if guidanceAvailable || allowBack {
+		navigator, err := runDecoratedTerminalForm(form, input, output, guidanceAvailable, allowBack, tea.KeyEsc)
+		if err != nil {
+			return "", fmt.Errorf("enter %s: %w", strings.ToLower(label), err)
+		}
+		if navigator.details {
+			return moreGuidanceChoiceValue, nil
+		}
+		if navigator.back {
+			return "", errPromptBack
+		}
+	} else if err := form.Run(); err != nil {
+		return "", fmt.Errorf("enter %s: %w", strings.ToLower(label), err)
+	}
+	selected = strings.TrimSpace(selected)
+	if selected == "" {
+		selected = strings.TrimSpace(defaultValue)
+	}
+	return selected, nil
+}
+
 func runTerminalConfirm(input io.Reader, output io.Writer, label string, defaultValue bool) (bool, error) {
 	selected := defaultValue
 	field := huh.NewConfirm().
@@ -290,8 +341,12 @@ func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, def
 }
 
 type backNavigableForm struct {
-	form *huh.Form
-	back bool
+	form           *huh.Form
+	back           bool
+	details        bool
+	backEnabled    bool
+	detailsEnabled bool
+	backKey        tea.KeyType
 }
 
 func (form *backNavigableForm) Init() tea.Cmd {
@@ -299,9 +354,15 @@ func (form *backNavigableForm) Init() tea.Cmd {
 }
 
 func (form *backNavigableForm) Update(message tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := message.(tea.KeyMsg); ok && key.Type == tea.KeyLeft {
-		form.back = true
-		return form, tea.Quit
+	if keyMessage, ok := message.(tea.KeyMsg); ok {
+		if form.backEnabled && keyMessage.Type == form.backKey {
+			form.back = true
+			return form, tea.Quit
+		}
+		if form.detailsEnabled && keyMessage.Type == tea.KeyRunes && string(keyMessage.Runes) == "?" {
+			form.details = true
+			return form, tea.Quit
+		}
 	}
 	updated, command := form.form.Update(message)
 	if next, ok := updated.(*huh.Form); ok {
@@ -315,11 +376,24 @@ func (form *backNavigableForm) View() string {
 	help := form.form.Help()
 	bindings := form.form.KeyBinds()
 	currentFooter := help.ShortHelpView(bindings)
-	footerWithBack := help.ShortHelpView(withBackHelpBinding(bindings))
-	if footerWithBack == "" {
+	enhancedBindings := bindings
+	if form.detailsEnabled {
+		enhancedBindings = appendHelpBinding(enhancedBindings, key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "details")))
+	}
+	if form.backEnabled {
+		back := key.NewBinding(key.WithKeys(form.backKey.String()), key.WithHelp(form.backKey.String(), "back"))
+		if form.backKey == tea.KeyLeft {
+			back = key.NewBinding(key.WithKeys("left"), key.WithHelp("←", "back"))
+			enhancedBindings = insertHelpBindingAfterDown(enhancedBindings, back)
+		} else {
+			enhancedBindings = appendHelpBinding(enhancedBindings, back)
+		}
+	}
+	enhancedFooter := help.ShortHelpView(enhancedBindings)
+	if enhancedFooter == "" {
 		return view
 	}
-	return replaceOrAppendHelpFooter(view, currentFooter, footerWithBack)
+	return replaceOrAppendHelpFooter(view, currentFooter, enhancedFooter)
 }
 
 func replaceOrAppendHelpFooter(view, currentFooter, footerWithBack string) string {
@@ -341,46 +415,63 @@ func replaceOrAppendHelpFooter(view, currentFooter, footerWithBack string) strin
 
 func withBackHelpBinding(bindings []key.Binding) []key.Binding {
 	back := key.NewBinding(key.WithKeys("left"), key.WithHelp("←", "back"))
+	return insertHelpBindingAfterDown(bindings, back)
+}
+
+func insertHelpBindingAfterDown(bindings []key.Binding, addition key.Binding) []key.Binding {
 	result := make([]key.Binding, 0, len(bindings)+1)
 	inserted := false
 	for _, binding := range bindings {
 		result = append(result, binding)
 		if !inserted && binding.Enabled() && binding.Help().Desc == "down" {
-			result = append(result, back)
+			result = append(result, addition)
 			inserted = true
 		}
 	}
 	if !inserted {
-		result = append(result, back)
+		result = append(result, addition)
 	}
 	return result
+}
+
+func appendHelpBinding(bindings []key.Binding, addition key.Binding) []key.Binding {
+	result := append([]key.Binding(nil), bindings...)
+	return append(result, addition)
 }
 
 func runTerminalForm(form *huh.Form, input io.Reader, output io.Writer, allowBack bool) error {
 	if !allowBack {
 		return form.Run()
 	}
-	// huh.Form.RunWithContext normally installs these commands before starting
-	// Bubble Tea. The navigation wrapper starts the program directly so it can
-	// distinguish ← from Ctrl+C, and must preserve that lifecycle setup.
-	form.SubmitCmd = tea.Quit
-	form.CancelCmd = tea.Quit
-	navigator := &backNavigableForm{form: form}
-	result, err := tea.NewProgram(navigator, tea.WithInput(input), tea.WithOutput(output), tea.WithReportFocus()).Run()
+	navigator, err := runDecoratedTerminalForm(form, input, output, false, true, tea.KeyLeft)
 	if err != nil {
 		return err
 	}
-	completed, ok := result.(*backNavigableForm)
-	if !ok {
-		return errors.New("terminal form returned an unexpected navigation state")
-	}
-	if completed.back {
+	if navigator.back {
 		return errPromptBack
 	}
-	if completed.form.State == huh.StateAborted {
-		return huh.ErrUserAborted
-	}
 	return nil
+}
+
+func runDecoratedTerminalForm(form *huh.Form, input io.Reader, output io.Writer, detailsEnabled, backEnabled bool, backKey tea.KeyType) (*backNavigableForm, error) {
+	// huh.Form.RunWithContext normally installs these commands before starting
+	// Bubble Tea. The navigation wrapper starts the program directly so it can
+	// distinguish setup navigation from Ctrl+C, and must preserve that lifecycle setup.
+	form.SubmitCmd = tea.Quit
+	form.CancelCmd = tea.Quit
+	navigator := &backNavigableForm{form: form, detailsEnabled: detailsEnabled, backEnabled: backEnabled, backKey: backKey}
+	result, err := tea.NewProgram(navigator, tea.WithInput(input), tea.WithOutput(output), tea.WithReportFocus()).Run()
+	if err != nil {
+		return nil, err
+	}
+	completed, ok := result.(*backNavigableForm)
+	if !ok {
+		return nil, errors.New("terminal form returned an unexpected navigation state")
+	}
+	if completed.form.State == huh.StateAborted {
+		return nil, huh.ErrUserAborted
+	}
+	return completed, nil
 }
 
 func terminalChoiceGuidance(choices []terminalChoice) string {

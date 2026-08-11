@@ -677,7 +677,7 @@ func TestPromptChoiceUsesNumberedMenu(t *testing.T) {
 			if selected != test.want {
 				t.Fatalf("selection = %q, want %q", selected, test.want)
 			}
-			for _, expected := range []string{"1) alpha", "2) beta", "3) gamma", "Select example (1-3) [2]"} {
+			for _, expected := range []string{"1) alpha", "2) beta", "3) gamma", "Select example (1-3)", "Proposed answer", "2", "enter accept"} {
 				if !strings.Contains(output.String(), expected) {
 					t.Errorf("picker output missing %q:\n%s", expected, output.String())
 				}
@@ -791,7 +791,7 @@ func TestPromptChoicesUsesNumberedMultiSelect(t *testing.T) {
 			if actual := strings.Join(selected, ","); actual != test.want {
 				t.Fatalf("selection = %q, want %q", actual, test.want)
 			}
-			for _, expected := range []string{"1) alpha", "2) beta", "3) gamma", "Examples numbers (comma-separated) [2,3]"} {
+			for _, expected := range []string{"1) alpha", "2) beta", "3) gamma", "Examples numbers (comma-separated)", "Proposed answer", "2,3", "enter accept"} {
 				if !strings.Contains(output.String(), expected) {
 					t.Errorf("picker output missing %q:\n%s", expected, output.String())
 				}
@@ -1138,7 +1138,7 @@ func TestTerminalGuidanceActionIsRemovedFromMultiSelection(t *testing.T) {
 func TestTerminalTextQuestionAdvertisesQuestionGuidance(t *testing.T) {
 	var output bytes.Buffer
 	prompt := promptSession{
-		reader: bufio.NewReader(strings.NewReader("Product name\n")),
+		reader: bufio.NewReader(strings.NewReader("?\nProduct name\n")),
 		output: &output, guidance: &questionGuidance{},
 		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
 			return "", errors.New("not used by text prompts")
@@ -1151,7 +1151,7 @@ func TestTerminalTextQuestionAdvertisesQuestionGuidance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value != "Product name" || !strings.Contains(output.String(), "Enter ? for more guidance about this question") {
+	if value != "Product name" || !strings.Contains(output.String(), "More guidance") || strings.Contains(output.String(), "Enter ? for more guidance about this question") {
 		t.Fatalf("value=%q output:\n%s", value, output.String())
 	}
 }

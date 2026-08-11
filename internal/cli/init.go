@@ -353,6 +353,7 @@ type promptSession struct {
 	questions      *questionProgress
 	step           *setupStepProgress
 	backAvailable  bool
+	inputText      func(label, defaultValue string, guidanceAvailable, allowBack bool) (string, error)
 	selectOne      func(label, defaultValue string, options []terminalChoice) (string, error)
 	selectMany     func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error)
 	confirmBool    func(label string, defaultValue bool) (bool, error)
@@ -372,6 +373,9 @@ func newPromptSession(input io.Reader, output io.Writer) promptSession {
 	session := promptSession{reader: bufio.NewReader(input), output: output, guidance: &questionGuidance{}, step: &setupStepProgress{}}
 	if terminalPromptAvailable(input, output) {
 		session.styleTitles = os.Getenv("NO_COLOR") == ""
+		session.inputText = func(label, defaultValue string, guidanceAvailable, allowBack bool) (string, error) {
+			return runTerminalInput(input, output, label, defaultValue, guidanceAvailable, allowBack)
+		}
 		session.selectOne = func(label, defaultValue string, options []terminalChoice) (string, error) {
 			return runTerminalSelect(input, output, label, defaultValue, options)
 		}
@@ -458,21 +462,48 @@ func (session promptSession) text(label, defaultValue string) (string, error) {
 }
 
 func (session promptSession) readText(label, defaultValue string) (string, error) {
-	if session.hasQuestionGuidance() && session.selectOne != nil {
-		if _, err := fmt.Fprintln(session.output, "  Enter ? for more guidance about this question."); err != nil {
+	for {
+		if session.inputText != nil {
+			value, err := session.inputText(label, defaultValue, session.hasQuestionGuidance(), session.backAvailable)
+			if err != nil {
+				return "", err
+			}
+			if value == moreGuidanceChoiceValue && session.hasQuestionGuidance() {
+				if err := session.showQuestionGuidance(); err != nil {
+					return "", err
+				}
+				continue
+			}
+			session.clearQuestionGuidance()
+			return value, nil
+		}
+		if _, err := fmt.Fprintln(session.output); err != nil {
 			return "", err
 		}
-	}
-	for {
-		promptSuffix := " [" + defaultValue + "]"
-		if defaultValue == "" {
-			promptSuffix = " (answer required)"
+		if defaultValue != "" {
+			if _, err := fmt.Fprintln(session.output, "  Proposed answer"); err != nil {
+				return "", err
+			}
+			if err := writePromptParagraph(session.output, "    ", defaultValue); err != nil {
+				return "", err
+			}
 		}
-		backHint := ""
+		actions := []string{"type a replacement"}
+		if defaultValue != "" {
+			actions = append([]string{"enter accept"}, actions...)
+		} else {
+			actions = append([]string{"answer required"}, actions...)
+		}
+		if session.hasQuestionGuidance() {
+			actions = append(actions, "? details")
+		}
 		if session.backAvailable {
-			backHint = " — type `back` to return"
+			actions = append(actions, "type `back` to return")
 		}
-		if _, err := fmt.Fprintf(session.output, "? %s%s%s: ", label, promptSuffix, backHint); err != nil {
+		if err := writePromptParagraph(session.output, "  ", strings.Join(actions, " • ")); err != nil {
+			return "", err
+		}
+		if _, err := fmt.Fprintf(session.output, "? %s\n› ", label); err != nil {
 			return "", err
 		}
 		line, err := session.reader.ReadString('\n')

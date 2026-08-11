@@ -15,7 +15,7 @@ func newTestBackNavigableForm(selected *string) *backNavigableForm {
 	field := huh.NewSelect[string]().
 		Options(huh.NewOption("One", "one"), huh.NewOption("Two", "two")).
 		Value(selected)
-	return &backNavigableForm{form: huh.NewForm(huh.NewGroup(field))}
+	return &backNavigableForm{form: huh.NewForm(huh.NewGroup(field)), backEnabled: true, backKey: tea.KeyLeft}
 }
 
 func TestBackNavigableFormTreatsLeftArrowAsBack(t *testing.T) {
@@ -36,6 +36,46 @@ func TestBackNavigableFormLeavesOtherArrowKeysToSelector(t *testing.T) {
 	navigator.Update(tea.KeyMsg{Type: tea.KeyDown})
 	if navigator.back {
 		t.Fatal("down arrow unexpectedly triggered back navigation")
+	}
+}
+
+func TestTextFormUsesEscapeForBackWithoutStealingLeftArrow(t *testing.T) {
+	selected := ""
+	field := huh.NewInput().Value(&selected)
+	navigator := &backNavigableForm{form: huh.NewForm(huh.NewGroup(field)), backEnabled: true, backKey: tea.KeyEsc}
+	navigator.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	if navigator.back {
+		t.Fatal("left arrow unexpectedly left an editable text field")
+	}
+	_, command := navigator.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if !navigator.back || command == nil {
+		t.Fatal("escape did not return from an editable text field")
+	}
+}
+
+func TestTextFormCanOpenDetailsImmediately(t *testing.T) {
+	selected := ""
+	field := huh.NewInput().Value(&selected)
+	navigator := &backNavigableForm{form: huh.NewForm(huh.NewGroup(field)), detailsEnabled: true}
+	_, command := navigator.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	if !navigator.details || command == nil {
+		t.Fatal("question mark did not open text-question details")
+	}
+}
+
+func TestTextFormFooterIncludesDetailsAndEscapeBack(t *testing.T) {
+	selected := ""
+	field := huh.NewInput().Value(&selected)
+	keymap := huh.NewDefaultKeyMap()
+	keymap.Input.Submit.SetHelp("enter", "accept")
+	navigator := &backNavigableForm{
+		form: huh.NewForm(huh.NewGroup(field)).WithKeyMap(keymap), detailsEnabled: true, backEnabled: true, backKey: tea.KeyEsc,
+	}
+	view := navigator.View()
+	for _, expected := range []string{"enter", "accept", "?", "details", "esc", "back"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("text footer missing %q: %q", expected, view)
+		}
 	}
 }
 
@@ -66,6 +106,44 @@ func TestRunTerminalFormReturnsAfterEnter(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("navigable form did not exit after Enter")
+	}
+}
+
+func TestRunTerminalInputAcceptsProposedAnswer(t *testing.T) {
+	done := make(chan struct {
+		value string
+		err   error
+	}, 1)
+	go func() {
+		value, err := runTerminalInput(strings.NewReader("\r"), io.Discard, "Intended purpose", "Draft support replies.", true, true)
+		done <- struct {
+			value string
+			err   error
+		}{value: value, err: err}
+	}()
+	select {
+	case result := <-done:
+		if result.err != nil || result.value != "Draft support replies." {
+			t.Fatalf("value=%q err=%v", result.value, result.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("terminal text input did not accept the proposed answer")
+	}
+}
+
+func TestRunTerminalInputReturnsOnEscape(t *testing.T) {
+	done := make(chan error, 1)
+	go func() {
+		_, err := runTerminalInput(strings.NewReader("\x1b"), io.Discard, "Intended purpose", "Draft support replies.", true, true)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != errPromptBack {
+			t.Fatalf("escape error = %v, want errPromptBack", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("terminal text input did not return after Escape")
 	}
 }
 

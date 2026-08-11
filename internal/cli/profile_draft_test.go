@@ -87,7 +87,7 @@ func TestTechnicalContextRequiresExplicitChoices(t *testing.T) {
 	if len(system.DeploymentModels) != 1 || system.DeploymentModels[0] != profile.DeploymentUnknown {
 		t.Fatalf("deployment answer = %#v", system.DeploymentModels)
 	}
-	if !strings.Contains(output.String(), "(answer required)") {
+	if !strings.Contains(output.String(), "answer required") {
 		t.Fatalf("required-answer guidance missing:\n%s", output.String())
 	}
 }
