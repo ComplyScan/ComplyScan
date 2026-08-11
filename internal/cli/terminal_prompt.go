@@ -310,9 +310,18 @@ func (form *backNavigableForm) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (form *backNavigableForm) View() string {
-	view := form.form.View()
+	return appendBackShortcut(form.form.View())
+}
+
+func appendBackShortcut(view string) string {
 	trailingNewlines := len(view) - len(strings.TrimRight(view, "\n"))
-	view = strings.TrimRight(view, "\n") + " • ← back"
+	view = strings.TrimRight(view, "\n")
+	const ansiReset = "\x1b[0m"
+	if reset := strings.LastIndex(view, ansiReset); reset >= 0 {
+		view = view[:reset] + " • ← back" + view[reset:]
+	} else {
+		view += " • ← back"
+	}
 	return view + strings.Repeat("\n", trailingNewlines)
 }
 

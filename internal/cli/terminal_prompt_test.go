@@ -43,3 +43,14 @@ func TestBackNavigableFormAdvertisesLeftArrowInFooter(t *testing.T) {
 		t.Fatalf("left-arrow back binding is absent from selector help: %q", view)
 	}
 }
+
+func TestAppendBackShortcutInheritsExistingFooterStyle(t *testing.T) {
+	styled := "\x1b[2m↑ up • enter submit\x1b[0m\n"
+	want := "\x1b[2m↑ up • enter submit • ← back\x1b[0m\n"
+	if got := appendBackShortcut(styled); got != want {
+		t.Fatalf("styled footer = %q, want %q", got, want)
+	}
+	if got := appendBackShortcut("↑ up\n"); got != "↑ up • ← back\n" {
+		t.Fatalf("plain footer = %q", got)
+	}
+}
