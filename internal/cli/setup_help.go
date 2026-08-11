@@ -208,7 +208,11 @@ func explainSetupQuestion(prompt promptSession, key string) error {
 	if _, err := fmt.Fprintln(prompt.output); err != nil {
 		return err
 	}
-	for _, line := range lines {
+	visible := lines
+	if prompt.conciseHelp {
+		visible = lines[:1]
+	}
+	for _, line := range visible {
 		if _, err := fmt.Fprintf(prompt.output, "  %s\n", line); err != nil {
 			return err
 		}

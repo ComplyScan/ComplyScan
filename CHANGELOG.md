@@ -8,6 +8,7 @@
 - Guided setup now shows five numbered stages from privacy selection through review and first scan, so users can see where they are and how much remains.
 - Local model selection now shows transparent download/runtime-memory ranges, model pulls retain Ollama's live progress and report elapsed time, and qualification, profile drafting, finding review, and framework evidence investigation report elapsed and target progress with the actual provider name.
 - Guided setup now presents a final summary of analysis privacy, model readiness, frameworks, systems, evidence ownership, and first-run behavior before writing configuration; users can revisit any major section or cancel without saving.
+- Interactive terminals now default to concise, progressive question guidance and offer a detailed mode with all category definitions and examples; `--detailed-guidance` makes the complete explanations directly selectable for later runs and accessible text-mode sessions retain them by default.
 
 ## 0.1.6 - 2026-08-11
 

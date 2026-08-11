@@ -418,6 +418,7 @@ type promptSession struct {
 	reader      *bufio.Reader
 	output      io.Writer
 	styleTitles bool
+	conciseHelp bool
 	selectOne   func(label, defaultValue string, options []terminalChoice) (string, error)
 	selectMany  func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error)
 	confirmBool func(label string, defaultValue bool) (bool, error)

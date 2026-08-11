@@ -614,6 +614,47 @@ func TestEverySetupQuestionHasDeveloperGuidance(t *testing.T) {
 	}
 }
 
+func TestSetupGuidanceCanProgressFromConciseToDetailed(t *testing.T) {
+	var conciseOutput bytes.Buffer
+	concisePrompt := promptSession{output: &conciseOutput, conciseHelp: true}
+	if err := explainSetupQuestion(concisePrompt, "intended-purpose"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(conciseOutput.String(), setupQuestionHelp["intended-purpose"][0]) || strings.Contains(conciseOutput.String(), "Example:") {
+		t.Fatalf("concise guidance did not preserve only the essential explanation:\n%s", conciseOutput.String())
+	}
+
+	var detailedOutput bytes.Buffer
+	detailedPrompt := promptSession{output: &detailedOutput}
+	if err := explainSetupQuestion(detailedPrompt, "intended-purpose"); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range setupQuestionHelp["intended-purpose"] {
+		if !strings.Contains(detailedOutput.String(), line) {
+			t.Errorf("detailed guidance missing %q", line)
+		}
+	}
+}
+
+func TestConfigureSetupGuidanceUsesTerminalSelection(t *testing.T) {
+	var output bytes.Buffer
+	prompt := promptSession{
+		output: &output,
+		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
+			if label != "guidance detail" || len(options) != 2 {
+				t.Fatalf("guidance selector label=%q options=%#v", label, options)
+			}
+			return options[0].Value, nil
+		},
+	}
+	if err := configureSetupGuidance(&prompt, false); err != nil {
+		t.Fatal(err)
+	}
+	if !prompt.conciseHelp || !strings.Contains(output.String(), "--detailed-guidance") {
+		t.Fatalf("concise guidance was not configured:\n%s", output.String())
+	}
+}
+
 func TestNonInteractiveSetupUpdatesReviewWithoutInventingProfile(t *testing.T) {
 	target := t.TempDir()
 	var stdout, stderr bytes.Buffer

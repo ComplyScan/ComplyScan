@@ -39,6 +39,7 @@ type setupOptions struct {
 	installOllama     bool
 	skipOllamaInstall bool
 	skipScan          bool
+	detailedGuidance  bool
 }
 
 func newSetupCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
@@ -91,6 +92,7 @@ func newSetupCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().BoolVar(&options.installOllama, "install-ollama", false, "install Ollama when it is missing (requires explicit use in non-interactive mode)")
 	command.Flags().BoolVar(&options.skipOllamaInstall, "skip-ollama-install", false, "do not offer to install Ollama when it is missing")
 	command.Flags().BoolVar(&options.skipScan, "skip-scan", false, "do not offer to run the first scan")
+	command.Flags().BoolVar(&options.detailedGuidance, "detailed-guidance", false, "show complete explanations and examples for every setup question")
 	return command
 }
 
@@ -114,6 +116,11 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	}
 	if _, err := fmt.Fprintf(stdout, "Repository: %s\n\n", target); err != nil {
 		return err
+	}
+	if interactive {
+		if err := configureSetupGuidance(&prompt, options.detailedGuidance); err != nil {
+			return err
+		}
 	}
 
 	var repositorySummary setupRepositorySummary
@@ -231,6 +238,29 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		return err
 	}
 	return runFirstScan(cmd, stdout, build, target, scanMode, repositorySummary.Discovery)
+}
+
+func configureSetupGuidance(prompt *promptSession, forceDetailed bool) error {
+	if forceDetailed || prompt.selectOne == nil {
+		prompt.conciseHelp = false
+		return nil
+	}
+	if err := prompt.sectionTitle("Setup guidance", false); err != nil {
+		return err
+	}
+	const (
+		concise  = "Concise — show the essential explanation for each question"
+		detailed = "Detailed — include category definitions and examples"
+	)
+	selected, err := promptChoice(*prompt, "guidance detail", concise, concise, detailed)
+	if err != nil {
+		return err
+	}
+	prompt.conciseHelp = selected == concise
+	if prompt.conciseHelp {
+		_, err = fmt.Fprintln(prompt.output, "  Complete explanations remain available with `complyscan setup --detailed-guidance`.")
+	}
+	return err
 }
 
 func collectInteractiveSetupContext(prompt promptSession, target string, cfg *config.Config, options setupOptions, summary setupRepositorySummary, draft setupProfileDraft, confirmReplace bool) error {
