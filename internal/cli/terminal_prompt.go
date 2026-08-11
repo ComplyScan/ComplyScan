@@ -310,7 +310,10 @@ func (form *backNavigableForm) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (form *backNavigableForm) View() string {
-	return form.form.View()
+	view := form.form.View()
+	trailingNewlines := len(view) - len(strings.TrimRight(view, "\n"))
+	view = strings.TrimRight(view, "\n") + " • ← back"
+	return view + strings.Repeat("\n", trailingNewlines)
 }
 
 func runTerminalForm(form *huh.Form, input io.Reader, output io.Writer, allowBack bool) error {
