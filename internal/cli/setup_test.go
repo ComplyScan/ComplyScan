@@ -48,7 +48,7 @@ func TestSetupStepTitleShowsPositionAndPreservesPlainFallback(t *testing.T) {
 
 func TestPromptOllamaModelListsInstalledModelsAndAcceptsCustomTag(t *testing.T) {
 	var output bytes.Buffer
-	prompt := promptSession{reader: bufio.NewReader(strings.NewReader("4\n")), output: &output}
+	prompt := promptSession{reader: bufio.NewReader(strings.NewReader("2\n")), output: &output}
 	model, err := promptOllamaModel(prompt, defaultSetupModel, []string{"codestral:22b"})
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +56,10 @@ func TestPromptOllamaModelListsInstalledModelsAndAcceptsCustomTag(t *testing.T) 
 	if model != "codestral:22b" {
 		t.Fatalf("model = %q", model)
 	}
-	for _, expected := range []string{"qwen3.5:9b", "onboarding benchmark recorded", "qwen3:8b", "technical-review baseline", "qwen3-coder:30b", "codestral:22b", "compatibility checked automatically"} {
+	for _, expected := range []string{
+		"qwen3.5:9b", "onboarding benchmark recorded", "qwen3:8b", "technical-review baseline",
+		"qwen3-coder:30b", "qwen2.5-coder:7b", "deepseek-coder-v2:16b", "codestral:22b", "compatibility checked automatically",
+	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("picker output missing %q:\n%s", expected, output.String())
 		}
@@ -93,8 +96,20 @@ func TestPromptOllamaModelUsesTerminalSelectorAndCustomEntry(t *testing.T) {
 	if model != "account-model:latest" {
 		t.Fatalf("model = %q", model)
 	}
-	if len(choices) < 2 || choices[len(choices)-1].Value != customModelChoice || !strings.Contains(choices[len(choices)-1].Label, "custom") {
+	if len(choices) < 7 || choices[0].Value != defaultSetupModel || choices[1].Value != customModelChoice || !strings.Contains(choices[1].Label, "any exact") {
 		t.Fatalf("terminal choices = %#v", choices)
+	}
+	for _, expected := range []string{"codestral:22b", "qwen2.5-coder:7b", "deepseek-coder-v2:16b"} {
+		found := false
+		for _, choice := range choices {
+			if choice.Value == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("terminal choices missing %q: %#v", expected, choices)
+		}
 	}
 	if !strings.Contains(output.String(), "Custom Ollama model tag") || strings.Contains(output.String(), "1)") {
 		t.Fatalf("custom-model output = %q", output.String())
@@ -114,9 +129,12 @@ func TestOllamaInstalledModelsParsesListOutput(t *testing.T) {
 
 func TestOllamaResourceEstimateUsesTransparentRanges(t *testing.T) {
 	tests := map[string]string{
-		"qwen3.5:9b":      "5–8 GB",
-		"qwen3-coder:30b": "18–24 GB",
-		"custom:latest":   "model- and quantization-dependent",
+		"qwen3.5:9b":            "5–8 GB",
+		"qwen2.5-coder:7b":      "4–6 GB",
+		"deepseek-coder-v2:16b": "9–13 GB",
+		"codestral:22b":         "12–16 GB",
+		"qwen3-coder:30b":       "18–24 GB",
+		"custom:latest":         "model- and quantization-dependent",
 	}
 	for model, expected := range tests {
 		if estimate := ollamaResourceEstimate(model); !strings.Contains(estimate, expected) || !strings.Contains(estimate, "memory") {

@@ -5,6 +5,7 @@
 ### Changed
 
 - Guided setup now shows concise help automatically and offers a question-specific `More guidance` action inside each terminal choice; text and accessible prompts accept `?` to expand only the current explanation. The optional `--detailed-guidance` flag remains available for showing every explanation in full.
+- Local model setup now keeps `Use another Ollama model` directly below the configured default, accepts any exact Ollama library or installed tag, lists every model reported by `ollama list`, and includes additional clearly unvalidated coding-model starting points with size-aware resource estimates. Every unseen model still has to pass the source-free compatibility check before repository context is sent.
 
 ## 0.1.7 - 2026-08-11
 

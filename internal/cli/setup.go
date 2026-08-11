@@ -933,29 +933,40 @@ type setupModelOption struct {
 
 const customModelChoice = "__complyscan_custom_model__"
 
-func promptOllamaModel(prompt promptSession, current string, installed []string) (string, error) {
-	options := []setupModelOption{
+func recommendedOllamaModels() []setupModelOption {
+	return []setupModelOption{
 		{tag: defaultSetupModel, detail: "recommended default; onboarding benchmark recorded; automatic compatibility check after selection"},
-		{tag: "qwen3:8b", detail: "smaller model with a technical-review baseline; automatic compatibility check after selection"},
-		{tag: "qwen3-coder:30b", detail: "larger coding model; substantially more memory; automatic compatibility check after selection"},
+		{tag: "qwen3:8b", detail: "smaller general model; technical-review baseline recorded; automatic compatibility check after selection"},
+		{tag: "qwen3-coder:30b", detail: "larger coding model; substantially more memory; no maintained quality baseline"},
+		{tag: "qwen2.5-coder:7b", detail: "smaller coding model; lower resource use; no maintained quality baseline"},
+		{tag: "deepseek-coder-v2:16b", detail: "mid-sized coding model; no maintained quality baseline"},
+		{tag: "codestral:22b", detail: "larger coding model; no maintained quality baseline"},
 	}
-	if current = strings.TrimSpace(current); current != "" {
-		options = prependUniqueModel(options, setupModelOption{tag: current, detail: modelStatus(current, installed)})
+}
+
+func promptOllamaModel(prompt promptSession, current string, installed []string) (string, error) {
+	current = strings.TrimSpace(current)
+	if current == "" {
+		current = defaultSetupModel
 	}
+	options := []setupModelOption{{tag: current, detail: modelStatus(current, installed)}}
 	for _, model := range installed {
 		options = appendUniqueModel(options, setupModelOption{tag: model, detail: modelStatus(model, installed)})
 	}
+	for _, recommendation := range recommendedOllamaModels() {
+		options = appendUniqueModel(options, recommendation)
+	}
 	if prompt.selectOne != nil {
 		choices := make([]terminalChoice, 0, len(options)+1)
-		for _, option := range options {
+		choices = append(choices, terminalChoice{Label: options[0].tag + " — " + options[0].detail, Value: options[0].tag})
+		choices = append(choices, terminalChoice{
+			Label: "Use another Ollama model — enter any exact installed or Ollama library tag",
+			Value: customModelChoice,
+		})
+		for _, option := range options[1:] {
 			choices = append(choices, terminalChoice{Label: option.tag + " — " + option.detail, Value: option.tag})
 		}
-		choices = append(choices, terminalChoice{Label: "Enter a custom Ollama model tag", Value: customModelChoice})
-		defaultModel := current
-		if defaultModel == "" {
-			defaultModel = options[0].tag
-		}
-		selected, err := prompt.chooseOne("Ollama model", defaultModel, choices)
+		selected, err := prompt.chooseOne("Ollama model", current, choices)
 		if err != nil {
 			return "", err
 		}
@@ -1017,16 +1028,6 @@ func promptCustomModel(prompt promptSession, label string) (string, error) {
 	}
 }
 
-func prependUniqueModel(options []setupModelOption, option setupModelOption) []setupModelOption {
-	result := []setupModelOption{option}
-	for _, existing := range options {
-		if !strings.EqualFold(existing.tag, option.tag) {
-			result = append(result, existing)
-		}
-	}
-	return result
-}
-
 func appendUniqueModel(options []setupModelOption, option setupModelOption) []setupModelOption {
 	for _, existing := range options {
 		if strings.EqualFold(existing.tag, option.tag) {
@@ -1071,6 +1072,12 @@ func ollamaResourceEstimate(model string) string {
 		return "roughly 40–50 GB to download and 48–64 GB of runtime memory; actual use varies by quantization and context"
 	case strings.Contains(value, "30b") || strings.Contains(value, "32b"):
 		return "roughly 18–24 GB to download and 20–32 GB of runtime memory; actual use varies by quantization and context"
+	case strings.Contains(value, "20b") || strings.Contains(value, "22b"):
+		return "roughly 12–16 GB to download and 16–24 GB of runtime memory; actual use varies by quantization and context"
+	case strings.Contains(value, "14b") || strings.Contains(value, "16b"):
+		return "roughly 9–13 GB to download and 12–20 GB of runtime memory; actual use varies by quantization and context"
+	case strings.Contains(value, "7b"):
+		return "roughly 4–6 GB to download and 6–9 GB of runtime memory; actual use varies by quantization and context"
 	case strings.EqualFold(value, defaultSetupModel), strings.Contains(value, "8b"), strings.Contains(value, "9b"):
 		return "roughly 5–8 GB to download and 6–10 GB of runtime memory; actual use varies by quantization and context"
 	default:
