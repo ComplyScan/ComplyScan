@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -160,82 +161,149 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 			"Use the advanced setup later for detailed data, deployment, supply-chain, and reviewed applicability records."); err != nil {
 		return profile.System{}, err
 	}
-
-	if err := explainSetupQuestion(prompt, "system-name"); err != nil {
-		return profile.System{}, err
-	}
-	if value.Name, err = prompt.text("System name", value.Name); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "intended-purpose"); err != nil {
-		return profile.System{}, err
-	}
-	if err := draft.explain(prompt.output, "intended-purpose"); err != nil {
-		return profile.System{}, err
-	}
-	if value.IntendedPurpose, err = prompt.text("Intended purpose", draft.first("intended-purpose", "unknown")); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "operating-regions"); err != nil {
-		return profile.System{}, err
-	}
-	if value.OperatingRegions, err = promptRequiredChoices(prompt, "Operating regions",
-		profile.RegionEU, profile.RegionEEA, profile.RegionUK, profile.RegionUS, profile.RegionGlobal, profile.RegionOther, profile.RegionUnknown); err != nil {
-		return profile.System{}, err
-	}
-
-	if err := explainSetupQuestion(prompt, "organization-role-basic"); err != nil {
-		return profile.System{}, err
-	}
 	const (
 		providerOption = "We develop, brand, or provide this AI system"
 		deployerOption = "We use an AI system provided by another organisation"
 		bothOption     = "We both provide and professionally use the system"
 		unknownOption  = "The organisational role has not been established"
 	)
-	role, err := promptRequiredChoice(prompt, "organisation role", providerOption, deployerOption, bothOption, unknownOption)
+	value.IntendedPurpose = draft.first("intended-purpose", "unknown")
+	completed := make([]bool, 7)
+	role := ""
+	err = runSetupPromptSteps(prompt, false,
+		func(step promptSession) error {
+			if err := explainSetupQuestion(step, "system-name"); err != nil {
+				return err
+			}
+			answer, err := step.text("System name", value.Name)
+			if err == nil {
+				value.Name, completed[0] = answer, true
+			}
+			return err
+		},
+		func(step promptSession) error {
+			if err := explainSetupQuestion(step, "intended-purpose"); err != nil {
+				return err
+			}
+			if err := draft.explain(step.output, "intended-purpose"); err != nil {
+				return err
+			}
+			answer, err := step.text("Intended purpose", value.IntendedPurpose)
+			if err == nil {
+				value.IntendedPurpose, completed[1] = answer, true
+			}
+			return err
+		},
+		func(step promptSession) error {
+			if err := explainSetupQuestion(step, "operating-regions"); err != nil {
+				return err
+			}
+			var answer []profile.OperatingRegion
+			var err error
+			if completed[2] {
+				answer, err = promptChoices(step, "Operating regions", value.OperatingRegions,
+					profile.RegionEU, profile.RegionEEA, profile.RegionUK, profile.RegionUS, profile.RegionGlobal, profile.RegionOther, profile.RegionUnknown)
+			} else {
+				answer, err = promptRequiredChoices(step, "Operating regions",
+					profile.RegionEU, profile.RegionEEA, profile.RegionUK, profile.RegionUS, profile.RegionGlobal, profile.RegionOther, profile.RegionUnknown)
+			}
+			if err == nil {
+				value.OperatingRegions, completed[2] = answer, true
+			}
+			return err
+		},
+		func(step promptSession) error {
+			if err := explainSetupQuestion(step, "organization-role-basic"); err != nil {
+				return err
+			}
+			var answer string
+			var err error
+			if completed[3] {
+				answer, err = promptChoice(step, "organisation role", role, providerOption, deployerOption, bothOption, unknownOption)
+			} else {
+				answer, err = promptRequiredChoice(step, "organisation role", providerOption, deployerOption, bothOption, unknownOption)
+			}
+			if err != nil {
+				return err
+			}
+			role, completed[3] = answer, true
+			switch role {
+			case providerOption:
+				value.OrganizationRoles = []profile.OrganizationRole{profile.RoleProvider}
+			case deployerOption:
+				value.OrganizationRoles = []profile.OrganizationRole{profile.RoleDeployer}
+			case bothOption:
+				value.OrganizationRoles = []profile.OrganizationRole{profile.RoleProvider, profile.RoleDeployer}
+			default:
+				value.OrganizationRoles = []profile.OrganizationRole{profile.RoleUnknown}
+			}
+			return nil
+		},
+		func(step promptSession) error {
+			if err := explainSetupQuestion(step, "decision-impact"); err != nil {
+				return err
+			}
+			if err := draft.explain(step.output, "decision-impact"); err != nil {
+				return err
+			}
+			var answer profile.DecisionImpact
+			var err error
+			if completed[4] {
+				answer, err = promptChoice(step, "Decision impact", value.DecisionImpact,
+					profile.ImpactAdvisory, profile.ImpactLow, profile.ImpactSignificant, profile.ImpactAutonomous, profile.ImpactUnknown)
+			} else {
+				answer, err = promptRequiredChoice(step, "Decision impact",
+					profile.ImpactAdvisory, profile.ImpactLow, profile.ImpactSignificant, profile.ImpactAutonomous, profile.ImpactUnknown)
+			}
+			if err == nil {
+				value.DecisionImpact, completed[4] = answer, true
+			}
+			return err
+		},
+		func(step promptSession) error {
+			if err := explainSetupQuestion(step, "lifecycle-stage"); err != nil {
+				return err
+			}
+			if err := draft.explain(step.output, "lifecycle-stage"); err != nil {
+				return err
+			}
+			var answer profile.LifecycleStage
+			var err error
+			if completed[5] {
+				answer, err = promptChoice(step, "Lifecycle stage", value.LifecycleStage,
+					profile.LifecycleDevelopment, profile.LifecycleTesting, profile.LifecycleProduction, profile.LifecycleRetired, profile.LifecycleUnknown)
+			} else {
+				answer, err = promptRequiredChoice(step, "Lifecycle stage",
+					profile.LifecycleDevelopment, profile.LifecycleTesting, profile.LifecycleProduction, profile.LifecycleRetired, profile.LifecycleUnknown)
+			}
+			if err == nil {
+				value.LifecycleStage, completed[5] = answer, true
+			}
+			return err
+		},
+		func(step promptSession) error {
+			if err := explainSetupQuestion(step, "human-oversight"); err != nil {
+				return err
+			}
+			if err := draft.explain(step.output, "human-oversight"); err != nil {
+				return err
+			}
+			var answer profile.HumanOversight
+			var err error
+			if completed[6] {
+				answer, err = promptChoice(step, "Human oversight", value.HumanOversight,
+					profile.OversightRequired, profile.OversightAvailable, profile.OversightLimited, profile.OversightNone, profile.OversightUnknown)
+			} else {
+				answer, err = promptRequiredChoice(step, "Human oversight",
+					profile.OversightRequired, profile.OversightAvailable, profile.OversightLimited, profile.OversightNone, profile.OversightUnknown)
+			}
+			if err == nil {
+				value.HumanOversight, completed[6] = answer, true
+			}
+			return err
+		},
+	)
 	if err != nil {
-		return profile.System{}, err
-	}
-	switch role {
-	case providerOption:
-		value.OrganizationRoles = []profile.OrganizationRole{profile.RoleProvider}
-	case deployerOption:
-		value.OrganizationRoles = []profile.OrganizationRole{profile.RoleDeployer}
-	case bothOption:
-		value.OrganizationRoles = []profile.OrganizationRole{profile.RoleProvider, profile.RoleDeployer}
-	default:
-		value.OrganizationRoles = []profile.OrganizationRole{profile.RoleUnknown}
-	}
-
-	if err := explainSetupQuestion(prompt, "decision-impact"); err != nil {
-		return profile.System{}, err
-	}
-	if err := draft.explain(prompt.output, "decision-impact"); err != nil {
-		return profile.System{}, err
-	}
-	if value.DecisionImpact, err = promptRequiredChoice(prompt, "Decision impact",
-		profile.ImpactAdvisory, profile.ImpactLow, profile.ImpactSignificant, profile.ImpactAutonomous, profile.ImpactUnknown); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "lifecycle-stage"); err != nil {
-		return profile.System{}, err
-	}
-	if err := draft.explain(prompt.output, "lifecycle-stage"); err != nil {
-		return profile.System{}, err
-	}
-	if value.LifecycleStage, err = promptRequiredChoice(prompt, "Lifecycle stage",
-		profile.LifecycleDevelopment, profile.LifecycleTesting, profile.LifecycleProduction, profile.LifecycleRetired, profile.LifecycleUnknown); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "human-oversight"); err != nil {
-		return profile.System{}, err
-	}
-	if err := draft.explain(prompt.output, "human-oversight"); err != nil {
-		return profile.System{}, err
-	}
-	if value.HumanOversight, err = promptRequiredChoice(prompt, "Human oversight",
-		profile.OversightRequired, profile.OversightAvailable, profile.OversightLimited, profile.OversightNone, profile.OversightUnknown); err != nil {
 		return profile.System{}, err
 	}
 
@@ -281,61 +349,107 @@ func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile
 	if err != nil {
 		return err
 	}
+	steps := make([]setupPromptStep, 0, followUpQuestions)
+	completed := make([]bool, followUpQuestions)
+	stepIndex := 0
 	if peopleContext {
-		if err = explainSetupQuestion(prompt, "users"); err != nil {
-			return err
+		if len(system.Users) == 0 {
+			system.Users = draft.values("users", system.Users)
 		}
-		if err = draft.explain(prompt.output, "users"); err != nil {
+		steps = append(steps, func(step promptSession) error {
+			if err := explainSetupQuestion(step, "users"); err != nil {
+				return err
+			}
+			if err := draft.explain(step.output, "users"); err != nil {
+				return err
+			}
+			answer, err := step.textList("Users", system.Users)
+			if err == nil {
+				system.Users = answer
+			}
 			return err
+		})
+		stepIndex++
+		if len(system.AffectedGroups) == 0 {
+			system.AffectedGroups = draft.values("affected-groups", system.AffectedGroups)
 		}
-		if system.Users, err = prompt.textList("Users", draft.values("users", system.Users)); err != nil {
+		steps = append(steps, func(step promptSession) error {
+			if err := explainSetupQuestion(step, "affected-groups"); err != nil {
+				return err
+			}
+			if err := draft.explain(step.output, "affected-groups"); err != nil {
+				return err
+			}
+			answer, err := step.textList("Potentially affected groups", system.AffectedGroups)
+			if err == nil {
+				system.AffectedGroups = answer
+			}
 			return err
-		}
-		if err = explainSetupQuestion(prompt, "affected-groups"); err != nil {
-			return err
-		}
-		if err = draft.explain(prompt.output, "affected-groups"); err != nil {
-			return err
-		}
-		if system.AffectedGroups, err = prompt.textList("Potentially affected groups", draft.values("affected-groups", system.AffectedGroups)); err != nil {
-			return err
-		}
+		})
+		stepIndex++
 	}
 	if dataContext {
-		if err = explainSetupQuestion(prompt, "personal-data"); err != nil {
+		personalIndex := stepIndex
+		steps = append(steps, func(step promptSession) error {
+			if err := explainSetupQuestion(step, "personal-data"); err != nil {
+				return err
+			}
+			if err := draft.explain(step.output, "personal-data"); err != nil {
+				return err
+			}
+			answer, err := promptRevisitableRequiredChoice(step, completed[personalIndex], system.Data.PersonalData,
+				"Processes personal data", profile.TriYes, profile.TriNo, profile.TriUnknown)
+			if err == nil {
+				system.Data.PersonalData, completed[personalIndex] = answer, true
+			}
 			return err
-		}
-		if err = draft.explain(prompt.output, "personal-data"); err != nil {
+		})
+		stepIndex++
+		specialIndex := stepIndex
+		steps = append(steps, func(step promptSession) error {
+			if err := explainSetupQuestion(step, "special-category-data"); err != nil {
+				return err
+			}
+			if err := draft.explain(step.output, "special-category-data"); err != nil {
+				return err
+			}
+			answer, err := promptRevisitableRequiredChoice(step, completed[specialIndex], system.Data.SpecialCategoryData,
+				"Processes special-category or similarly sensitive data", profile.TriYes, profile.TriNo, profile.TriUnknown)
+			if err == nil {
+				system.Data.SpecialCategoryData, completed[specialIndex] = answer, true
+			}
 			return err
-		}
-		if system.Data.PersonalData, err = promptRequiredChoice(prompt, "Processes personal data", profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
+		})
+		stepIndex++
+		childrenIndex := stepIndex
+		steps = append(steps, func(step promptSession) error {
+			if err := explainSetupQuestion(step, "children-data"); err != nil {
+				return err
+			}
+			if err := draft.explain(step.output, "children-data"); err != nil {
+				return err
+			}
+			answer, err := promptRevisitableRequiredChoice(step, completed[childrenIndex], system.Data.ChildrenData,
+				"Processes children's data", profile.TriYes, profile.TriNo, profile.TriUnknown)
+			if err == nil {
+				system.Data.ChildrenData, completed[childrenIndex] = answer, true
+			}
 			return err
-		}
-		if err = explainSetupQuestion(prompt, "special-category-data"); err != nil {
-			return err
-		}
-		if err = draft.explain(prompt.output, "special-category-data"); err != nil {
-			return err
-		}
-		if system.Data.SpecialCategoryData, err = promptRequiredChoice(prompt, "Processes special-category or similarly sensitive data", profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
-			return err
-		}
-		if err = explainSetupQuestion(prompt, "children-data"); err != nil {
-			return err
-		}
-		if err = draft.explain(prompt.output, "children-data"); err != nil {
-			return err
-		}
-		if system.Data.ChildrenData, err = promptRequiredChoice(prompt, "Processes children's data", profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
-			return err
-		}
+		})
+		stepIndex++
 	}
-
-	if err = explainSetupQuestion(prompt, "profile-reviewer"); err != nil {
+	reviewer := "unknown"
+	steps = append(steps, func(step promptSession) error {
+		if err := explainSetupQuestion(step, "profile-reviewer"); err != nil {
+			return err
+		}
+		answer, err := step.text("Factual profile reviewer (leave `unknown` to keep this unreviewed)", reviewer)
+		if err == nil {
+			reviewer = answer
+		}
 		return err
-	}
-	reviewer, err := prompt.text("Factual profile reviewer (leave `unknown` to keep this unreviewed)", "unknown")
-	if err != nil {
+	})
+	if err := runSetupPromptSteps(prompt, false, steps...); err != nil {
 		return err
 	}
 	if !strings.EqualFold(strings.TrimSpace(reviewer), "unknown") {
@@ -369,45 +483,88 @@ func collectNonEUTechnicalContext(prompt promptSession, system *profile.System, 
 }
 
 func collectTechnicalSystemContext(prompt promptSession, system *profile.System, draft setupProfileDraft, includeUseCase bool) error {
-	var err error
+	steps := make([]setupPromptStep, 0, 3)
+	completed := make([]bool, 3)
+	stepIndex := 0
 	if includeUseCase {
-		if err = explainSetupQuestion(prompt, "use-case-domains"); err != nil {
+		index := stepIndex
+		stepIndex++
+		steps = append(steps, func(step promptSession) error {
+			if err := explainSetupQuestion(step, "use-case-domains"); err != nil {
+				return err
+			}
+			if err := draft.explain(step.output, "use-case-domains"); err != nil {
+				return err
+			}
+			allowed := []profile.UseCaseDomain{
+				profile.DomainBiometrics, profile.DomainCriticalInfrastructure, profile.DomainEducation, profile.DomainEmployment,
+				profile.DomainEssentialServices, profile.DomainLawEnforcement, profile.DomainMigrationBorderControl,
+				profile.DomainJusticeDemocraticProcess, profile.DomainHealthcare, profile.DomainSoftwareDevelopment,
+				profile.DomainGeneralPurpose, profile.DomainOther, profile.DomainUnknown,
+			}
+			var answer []profile.UseCaseDomain
+			var err error
+			if completed[index] {
+				answer, err = promptChoices(step, "Use-case domains", system.UseCaseDomains, allowed...)
+			} else {
+				answer, err = promptRequiredChoices(step, "Use-case domains", allowed...)
+			}
+			if err == nil {
+				system.UseCaseDomains, completed[index] = answer, true
+			}
+			return err
+		})
+	}
+	activityIndex := stepIndex
+	stepIndex++
+	steps = append(steps, func(step promptSession) error {
+		if err := explainSetupQuestion(step, "ai-activities"); err != nil {
 			return err
 		}
-		if err = draft.explain(prompt.output, "use-case-domains"); err != nil {
+		if err := draft.explain(step.output, "ai-activities"); err != nil {
 			return err
 		}
-		if system.UseCaseDomains, err = promptRequiredChoices(prompt, "Use-case domains",
-			profile.DomainBiometrics, profile.DomainCriticalInfrastructure, profile.DomainEducation, profile.DomainEmployment,
-			profile.DomainEssentialServices, profile.DomainLawEnforcement, profile.DomainMigrationBorderControl,
-			profile.DomainJusticeDemocraticProcess, profile.DomainHealthcare, profile.DomainSoftwareDevelopment,
-			profile.DomainGeneralPurpose, profile.DomainOther, profile.DomainUnknown); err != nil {
+		allowed := []profile.AIActivity{
+			profile.ActivityInference, profile.ActivityTraining, profile.ActivityFineTuning, profile.ActivityEvaluation,
+			profile.ActivityAutomatedDecision, profile.ActivityAgentToolUse, profile.ActivitySyntheticContent, profile.ActivityUnknown,
+		}
+		var answer []profile.AIActivity
+		var err error
+		if completed[activityIndex] {
+			answer, err = promptChoices(step, "AI activities", system.AIActivities, allowed...)
+		} else {
+			answer, err = promptRequiredChoices(step, "AI activities", allowed...)
+		}
+		if err == nil {
+			system.AIActivities, completed[activityIndex] = answer, true
+		}
+		return err
+	})
+	deploymentIndex := stepIndex
+	steps = append(steps, func(step promptSession) error {
+		if err := explainSetupQuestion(step, "deployment-models"); err != nil {
 			return err
 		}
-	}
-	if err = explainSetupQuestion(prompt, "ai-activities"); err != nil {
+		if err := draft.explain(step.output, "deployment-models"); err != nil {
+			return err
+		}
+		allowed := []profile.DeploymentModel{
+			profile.DeploymentInternal, profile.DeploymentPrivateCustomer, profile.DeploymentPublic, profile.DeploymentOpenSource,
+			profile.DeploymentEmbedded, profile.DeploymentAPI, profile.DeploymentLocalCLI, profile.DeploymentUnknown,
+		}
+		var answer []profile.DeploymentModel
+		var err error
+		if completed[deploymentIndex] {
+			answer, err = promptChoices(step, "Deployment models", system.DeploymentModels, allowed...)
+		} else {
+			answer, err = promptRequiredChoices(step, "Deployment models", allowed...)
+		}
+		if err == nil {
+			system.DeploymentModels, completed[deploymentIndex] = answer, true
+		}
 		return err
-	}
-	if err = draft.explain(prompt.output, "ai-activities"); err != nil {
-		return err
-	}
-	if system.AIActivities, err = promptRequiredChoices(prompt, "AI activities",
-		profile.ActivityInference, profile.ActivityTraining, profile.ActivityFineTuning, profile.ActivityEvaluation,
-		profile.ActivityAutomatedDecision, profile.ActivityAgentToolUse, profile.ActivitySyntheticContent, profile.ActivityUnknown); err != nil {
-		return err
-	}
-	if err = explainSetupQuestion(prompt, "deployment-models"); err != nil {
-		return err
-	}
-	if err = draft.explain(prompt.output, "deployment-models"); err != nil {
-		return err
-	}
-	if system.DeploymentModels, err = promptRequiredChoices(prompt, "Deployment models",
-		profile.DeploymentInternal, profile.DeploymentPrivateCustomer, profile.DeploymentPublic, profile.DeploymentOpenSource,
-		profile.DeploymentEmbedded, profile.DeploymentAPI, profile.DeploymentLocalCLI, profile.DeploymentUnknown); err != nil {
-		return err
-	}
-	return nil
+	})
+	return runSetupPromptSteps(prompt, false, steps...)
 }
 
 func writeApplicabilityReadinessGate(prompt promptSession, system profile.System) error {
@@ -479,20 +636,27 @@ func configureRecommendedFrameworks(prompt promptSession, cfg *config.Config, sy
 	if _, err := fmt.Fprintf(prompt.output, "  %s\n", reason); err != nil {
 		return err
 	}
-	useRecommended, err := prompt.confirm("Use the recommended mapping", true)
-	if err != nil {
-		return err
-	}
-	if useRecommended {
-		cfg.Frameworks = recommended
+	for {
+		useRecommended, err := prompt.confirm("Use the recommended mapping", true)
+		if err != nil {
+			return err
+		}
+		if useRecommended {
+			cfg.Frameworks = recommended
+			return nil
+		}
+		selectionPrompt := prompt
+		selectionPrompt.backAvailable = true
+		selected, err := promptFrameworkSelection(selectionPrompt, recommended)
+		if errors.Is(err, errPromptBack) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		cfg.Frameworks = selected
 		return nil
 	}
-	selected, err := promptFrameworkSelection(prompt, recommended)
-	if err != nil {
-		return err
-	}
-	cfg.Frameworks = selected
-	return nil
 }
 
 func applyFrameworksToSystem(system *profile.System, frameworks []string) {

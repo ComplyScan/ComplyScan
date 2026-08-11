@@ -29,3 +29,68 @@ func runSetupPromptSteps(prompt promptSession, allowReturn bool, steps ...setupP
 	}
 	return nil
 }
+
+func promptRevisitableRequiredChoice[T ~string](prompt promptSession, completed bool, current T, label string, allowed ...T) (T, error) {
+	if completed {
+		return promptChoice(prompt, label, current, allowed...)
+	}
+	return promptRequiredChoice(prompt, label, allowed...)
+}
+
+func setupTextPromptStep(guidanceKey, label string, target *string) setupPromptStep {
+	return func(prompt promptSession) error {
+		if err := explainSetupQuestion(prompt, guidanceKey); err != nil {
+			return err
+		}
+		answer, err := prompt.text(label, *target)
+		if err == nil {
+			*target = answer
+		}
+		return err
+	}
+}
+
+func setupTextListPromptStep(guidanceKey, label string, target *[]string) setupPromptStep {
+	return func(prompt promptSession) error {
+		if err := explainSetupQuestion(prompt, guidanceKey); err != nil {
+			return err
+		}
+		answer, err := prompt.textList(label, *target)
+		if err == nil {
+			*target = answer
+		}
+		return err
+	}
+}
+
+func setupRequiredChoicePromptStep[T ~string](guidanceKey, label string, target *T, completed *bool, allowed ...T) setupPromptStep {
+	return func(prompt promptSession) error {
+		if err := explainSetupQuestion(prompt, guidanceKey); err != nil {
+			return err
+		}
+		answer, err := promptRevisitableRequiredChoice(prompt, *completed, *target, label, allowed...)
+		if err == nil {
+			*target, *completed = answer, true
+		}
+		return err
+	}
+}
+
+func setupRequiredChoicesPromptStep[T ~string](guidanceKey, label string, target *[]T, completed *bool, allowed ...T) setupPromptStep {
+	return func(prompt promptSession) error {
+		if err := explainSetupQuestion(prompt, guidanceKey); err != nil {
+			return err
+		}
+		var answer []T
+		var err error
+		if *completed {
+			answer, err = promptChoices(prompt, label, *target, allowed...)
+		} else {
+			answer, err = promptRequiredChoices(prompt, label, allowed...)
+		}
+		if err == nil {
+			*target, *completed = answer, true
+		}
+		return err
+	}
+}

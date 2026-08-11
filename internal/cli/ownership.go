@@ -149,27 +149,37 @@ func collectOwnershipRules(prompt promptSession, cfg *config.Config, alreadyConf
 		return false, err
 	}
 	rules := make([]ownership.Rule, 0, len(systemIDs))
-	for {
-		if err := explainSetupQuestion(prompt, "ownership-paths"); err != nil {
-			return false, err
-		}
-		paths, err := prompt.textList("Repository path patterns", nil)
-		if err != nil {
-			return false, err
-		}
-		if err := explainSetupQuestion(prompt, "ownership-systems"); err != nil {
-			return false, err
-		}
-		owners, err := promptChoices(prompt, "Owning systems", []string{systemIDs[0]}, systemIDs...)
-		if err != nil {
-			return false, err
-		}
-		rules = append(rules, ownership.Rule{Paths: paths, Systems: owners})
-		more, err := prompt.confirm("Add another path ownership rule", false)
-		if err != nil {
-			return false, err
-		}
-		if !more {
+	addAnother := true
+	for addAnother {
+		paths := []string(nil)
+		owners := []string{systemIDs[0]}
+		for {
+			if err := runSetupPromptSteps(prompt, false,
+				setupTextListPromptStep("ownership-paths", "Repository path patterns", &paths),
+				func(step promptSession) error {
+					if err := explainSetupQuestion(step, "ownership-systems"); err != nil {
+						return err
+					}
+					answer, err := promptChoices(step, "Owning systems", owners, systemIDs...)
+					if err == nil {
+						owners = answer
+					}
+					return err
+				},
+			); err != nil {
+				return false, err
+			}
+			confirmPrompt := prompt
+			confirmPrompt.backAvailable = true
+			more, err := confirmPrompt.confirm("Add another path ownership rule", false)
+			if errors.Is(err, errPromptBack) {
+				continue
+			}
+			if err != nil {
+				return false, err
+			}
+			rules = append(rules, ownership.Rule{Paths: paths, Systems: owners})
+			addAnother = more
 			break
 		}
 	}

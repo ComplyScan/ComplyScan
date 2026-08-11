@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Guided setup questions now provide a `← Back` action wherever a previous answer can be revisited. The accessible and redirected text interface accepts `back`; completed answers remain selected or become the text default when revisited, while `Ctrl+C` continues to cancel setup.
 - Guided setup now shows concise help automatically and offers a question-specific `Further explanation` row that expands inside the active terminal selector; text and accessible prompts accept `?` to expand only the current explanation. The optional `--detailed-guidance` flag remains available for showing every explanation in full.
 - Guided setup now presents five clearly named overall steps and labels every short or advanced questionnaire prompt as `Question X of Y`; conditional EU follow-up totals are calculated only after the relevant technical answers are known.
 - Questionnaire choice prompts no longer preselect any answer. Repository-derived and AI-drafted suggestions remain visible as advisory guidance, but every categorical answer requires an explicit choice; users must select `unknown` themselves when the fact is not established.

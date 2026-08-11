@@ -237,121 +237,47 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 		return profile.System{}, err
 	}
 
-	if err := explainSetupQuestion(prompt, "system-id"); err != nil {
-		return profile.System{}, err
+	value.IntendedPurpose = "unknown"
+	value.Users = []string{"unknown"}
+	value.AffectedGroups = []string{"unknown"}
+	reviewer := "unknown"
+	completed := make([]bool, 12)
+	steps := []setupPromptStep{
+		setupTextPromptStep("system-id", "System ID", &value.ID),
+		setupTextPromptStep("system-name", "System name", &value.Name),
+		setupTextPromptStep("intended-purpose", "Intended purpose", &value.IntendedPurpose),
+		setupRequiredChoicePromptStep("lifecycle-stage", "Lifecycle stage", &value.LifecycleStage, &completed[0],
+			profile.LifecycleDevelopment, profile.LifecycleTesting, profile.LifecycleProduction, profile.LifecycleRetired, profile.LifecycleUnknown),
+		setupRequiredChoicesPromptStep("organization-roles", "Organization roles", &value.OrganizationRoles, &completed[1],
+			profile.RoleProvider, profile.RoleDeployer, profile.RoleImporter, profile.RoleDistributor, profile.RoleProductManufacturer, profile.RoleUnknown),
+		setupRequiredChoicesPromptStep("operating-regions", "Operating regions", &value.OperatingRegions, &completed[2],
+			profile.RegionEU, profile.RegionEEA, profile.RegionUK, profile.RegionUS, profile.RegionGlobal, profile.RegionOther, profile.RegionUnknown),
+		setupRequiredChoicesPromptStep("use-case-domains", "Use-case domains", &value.UseCaseDomains, &completed[3],
+			profile.DomainBiometrics, profile.DomainCriticalInfrastructure, profile.DomainEducation, profile.DomainEmployment,
+			profile.DomainEssentialServices, profile.DomainLawEnforcement, profile.DomainMigrationBorderControl,
+			profile.DomainJusticeDemocraticProcess, profile.DomainHealthcare, profile.DomainSoftwareDevelopment,
+			profile.DomainGeneralPurpose, profile.DomainOther, profile.DomainUnknown),
+		setupTextListPromptStep("users", "Users", &value.Users),
+		setupTextListPromptStep("affected-groups", "Potentially affected groups", &value.AffectedGroups),
+		setupRequiredChoicePromptStep("decision-impact", "Decision impact", &value.DecisionImpact, &completed[4],
+			profile.ImpactAdvisory, profile.ImpactLow, profile.ImpactSignificant, profile.ImpactAutonomous, profile.ImpactUnknown),
+		setupRequiredChoicePromptStep("human-oversight", "Human oversight", &value.HumanOversight, &completed[5],
+			profile.OversightRequired, profile.OversightAvailable, profile.OversightLimited, profile.OversightNone, profile.OversightUnknown),
+		setupRequiredChoicesPromptStep("ai-activities", "AI activities", &value.AIActivities, &completed[6],
+			profile.ActivityInference, profile.ActivityTraining, profile.ActivityFineTuning, profile.ActivityEvaluation,
+			profile.ActivityAutomatedDecision, profile.ActivityAgentToolUse, profile.ActivitySyntheticContent, profile.ActivityUnknown),
+		setupRequiredChoicePromptStep("personal-data", "Processes personal data", &value.Data.PersonalData, &completed[7],
+			profile.TriYes, profile.TriNo, profile.TriUnknown),
+		setupRequiredChoicePromptStep("special-category-data", "Processes special-category or similarly sensitive data", &value.Data.SpecialCategoryData, &completed[8],
+			profile.TriYes, profile.TriNo, profile.TriUnknown),
+		setupRequiredChoicePromptStep("children-data", "Processes children's data", &value.Data.ChildrenData, &completed[9],
+			profile.TriYes, profile.TriNo, profile.TriUnknown),
+		setupRequiredChoicesPromptStep("deployment-models", "Deployment models", &value.DeploymentModels, &completed[10],
+			profile.DeploymentInternal, profile.DeploymentPrivateCustomer, profile.DeploymentPublic, profile.DeploymentOpenSource,
+			profile.DeploymentEmbedded, profile.DeploymentAPI, profile.DeploymentLocalCLI, profile.DeploymentUnknown),
+		setupTextPromptStep("profile-reviewer", "Profile reviewer (leave `unknown` to keep this draft)", &reviewer),
 	}
-	if value.ID, err = prompt.text("System ID", value.ID); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "system-name"); err != nil {
-		return profile.System{}, err
-	}
-	if value.Name, err = prompt.text("System name", value.Name); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "intended-purpose"); err != nil {
-		return profile.System{}, err
-	}
-	if value.IntendedPurpose, err = prompt.text("Intended purpose", "unknown"); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "lifecycle-stage"); err != nil {
-		return profile.System{}, err
-	}
-	if value.LifecycleStage, err = promptRequiredChoice(prompt, "Lifecycle stage",
-		profile.LifecycleDevelopment, profile.LifecycleTesting, profile.LifecycleProduction, profile.LifecycleRetired, profile.LifecycleUnknown); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "organization-roles"); err != nil {
-		return profile.System{}, err
-	}
-	if value.OrganizationRoles, err = promptRequiredChoices(prompt, "Organization roles",
-		profile.RoleProvider, profile.RoleDeployer, profile.RoleImporter, profile.RoleDistributor, profile.RoleProductManufacturer, profile.RoleUnknown); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "operating-regions"); err != nil {
-		return profile.System{}, err
-	}
-	if value.OperatingRegions, err = promptRequiredChoices(prompt, "Operating regions",
-		profile.RegionEU, profile.RegionEEA, profile.RegionUK, profile.RegionUS, profile.RegionGlobal, profile.RegionOther, profile.RegionUnknown); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "use-case-domains"); err != nil {
-		return profile.System{}, err
-	}
-	if value.UseCaseDomains, err = promptRequiredChoices(prompt, "Use-case domains",
-		profile.DomainBiometrics, profile.DomainCriticalInfrastructure, profile.DomainEducation, profile.DomainEmployment,
-		profile.DomainEssentialServices, profile.DomainLawEnforcement, profile.DomainMigrationBorderControl,
-		profile.DomainJusticeDemocraticProcess, profile.DomainHealthcare, profile.DomainSoftwareDevelopment,
-		profile.DomainGeneralPurpose, profile.DomainOther, profile.DomainUnknown); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "users"); err != nil {
-		return profile.System{}, err
-	}
-	if value.Users, err = prompt.textList("Users", []string{"unknown"}); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "affected-groups"); err != nil {
-		return profile.System{}, err
-	}
-	if value.AffectedGroups, err = prompt.textList("Potentially affected groups", []string{"unknown"}); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "decision-impact"); err != nil {
-		return profile.System{}, err
-	}
-	if value.DecisionImpact, err = promptRequiredChoice(prompt, "Decision impact",
-		profile.ImpactAdvisory, profile.ImpactLow, profile.ImpactSignificant, profile.ImpactAutonomous, profile.ImpactUnknown); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "human-oversight"); err != nil {
-		return profile.System{}, err
-	}
-	if value.HumanOversight, err = promptRequiredChoice(prompt, "Human oversight",
-		profile.OversightRequired, profile.OversightAvailable, profile.OversightLimited, profile.OversightNone, profile.OversightUnknown); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "ai-activities"); err != nil {
-		return profile.System{}, err
-	}
-	if value.AIActivities, err = promptRequiredChoices(prompt, "AI activities",
-		profile.ActivityInference, profile.ActivityTraining, profile.ActivityFineTuning, profile.ActivityEvaluation,
-		profile.ActivityAutomatedDecision, profile.ActivityAgentToolUse, profile.ActivitySyntheticContent, profile.ActivityUnknown); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "personal-data"); err != nil {
-		return profile.System{}, err
-	}
-	if value.Data.PersonalData, err = promptRequiredChoice(prompt, "Processes personal data", profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "special-category-data"); err != nil {
-		return profile.System{}, err
-	}
-	if value.Data.SpecialCategoryData, err = promptRequiredChoice(prompt, "Processes special-category or similarly sensitive data", profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "children-data"); err != nil {
-		return profile.System{}, err
-	}
-	if value.Data.ChildrenData, err = promptRequiredChoice(prompt, "Processes children's data", profile.TriYes, profile.TriNo, profile.TriUnknown); err != nil {
-		return profile.System{}, err
-	}
-	if err := explainSetupQuestion(prompt, "deployment-models"); err != nil {
-		return profile.System{}, err
-	}
-	if value.DeploymentModels, err = promptRequiredChoices(prompt, "Deployment models",
-		profile.DeploymentInternal, profile.DeploymentPrivateCustomer, profile.DeploymentPublic, profile.DeploymentOpenSource,
-		profile.DeploymentEmbedded, profile.DeploymentAPI, profile.DeploymentLocalCLI, profile.DeploymentUnknown); err != nil {
-		return profile.System{}, err
-	}
-
-	if err := explainSetupQuestion(prompt, "profile-reviewer"); err != nil {
-		return profile.System{}, err
-	}
-	reviewer, err := prompt.text("Profile reviewer (leave `unknown` to keep this draft)", "unknown")
-	if err != nil {
+	if err := runSetupPromptSteps(prompt, false, steps...); err != nil {
 		return profile.System{}, err
 	}
 	if !strings.EqualFold(reviewer, "unknown") {
@@ -382,20 +308,15 @@ func collectSystemProfileWithPrompt(prompt promptSession, target string, now tim
 			if err != nil {
 				return profile.System{}, err
 			}
-			if err := explainSetupQuestion(prompt, "decision-rationale"); err != nil {
-				return profile.System{}, err
-			}
-			if decision.Rationale, err = prompt.text("Decision rationale", ""); err != nil {
-				return profile.System{}, err
-			}
 			defaultReviewer := ""
 			if !strings.EqualFold(reviewer, "unknown") {
 				defaultReviewer = reviewer
 			}
-			if err := explainSetupQuestion(prompt, "applicability-reviewer"); err != nil {
-				return profile.System{}, err
-			}
-			if decision.ReviewedBy, err = prompt.text("Applicability reviewer", defaultReviewer); err != nil {
+			decision.ReviewedBy = defaultReviewer
+			if err := runSetupPromptSteps(prompt, false,
+				setupTextPromptStep("decision-rationale", "Decision rationale", &decision.Rationale),
+				setupTextPromptStep("applicability-reviewer", "Applicability reviewer", &decision.ReviewedBy),
+			); err != nil {
 				return profile.System{}, err
 			}
 			decision.ReviewedAt = now.Format(time.DateOnly)

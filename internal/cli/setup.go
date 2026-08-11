@@ -512,6 +512,16 @@ func setupReviewExplicit(options setupOptions) bool {
 }
 
 func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.Writer, cfg *config.Config, interactive bool, options setupOptions) (bool, error) {
+	for {
+		ready, err := configureSetupReviewOnce(ctx, prompt, stdout, cfg, interactive, options)
+		if errors.Is(err, errPromptBack) && interactive && strings.TrimSpace(options.reviewProvider) == "" {
+			continue
+		}
+		return ready, err
+	}
+}
+
+func configureSetupReviewOnce(ctx context.Context, prompt promptSession, stdout io.Writer, cfg *config.Config, interactive bool, options setupOptions) (bool, error) {
 	provider := strings.ToLower(strings.TrimSpace(options.reviewProvider))
 	if provider == "" && interactive {
 		if err := explainSetupQuestion(prompt, "review-provider"); err != nil {
@@ -578,7 +588,9 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 			return false, err
 		}
 		var err error
-		model, err = promptOllamaModel(prompt, setupModelDefault(cfg.AI.Ollama.Model), installed)
+		modelPrompt := prompt
+		modelPrompt.backAvailable = true
+		model, err = promptOllamaModel(modelPrompt, setupModelDefault(cfg.AI.Ollama.Model), installed)
 		if err != nil {
 			return false, err
 		}
@@ -603,7 +615,9 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 			if explainErr := explainSetupQuestion(prompt, "install-ollama"); explainErr != nil {
 				return false, explainErr
 			}
-			shouldInstall, err = prompt.confirm("Install and start Ollama now", true)
+			confirmPrompt := prompt
+			confirmPrompt.backAvailable = true
+			shouldInstall, err = confirmPrompt.confirm("Install and start Ollama now", true)
 			if err != nil {
 				return false, err
 			}
@@ -636,7 +650,9 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 			return false, explainErr
 		}
 		var confirmErr error
-		shouldPull, confirmErr = prompt.confirm(fmt.Sprintf("Download Ollama model %q now", model), true)
+		confirmPrompt := prompt
+		confirmPrompt.backAvailable = true
+		shouldPull, confirmErr = confirmPrompt.confirm(fmt.Sprintf("Download Ollama model %q now", model), true)
 		if confirmErr != nil {
 			return false, confirmErr
 		}
@@ -676,17 +692,25 @@ func promptAnalysisProvider(prompt promptSession, current string) (string, error
 	if isRemoteReviewProvider(current) {
 		defaultMode = hostedOption
 	}
-	selected, err := promptChoice(prompt, "Analysis mode", defaultMode, localOption, hostedOption, fastOption)
-	if err != nil {
-		return "", err
+	for {
+		selected, err := promptChoice(prompt, "Analysis mode", defaultMode, localOption, hostedOption, fastOption)
+		if err != nil {
+			return "", err
+		}
+		switch selected {
+		case localOption:
+			return "ollama", nil
+		case fastOption:
+			return "none", nil
+		}
+		hostedPrompt := prompt
+		hostedPrompt.backAvailable = true
+		provider, err := promptHostedProvider(hostedPrompt, current)
+		if errors.Is(err, errPromptBack) {
+			continue
+		}
+		return provider, err
 	}
-	switch selected {
-	case localOption:
-		return "ollama", nil
-	case fastOption:
-		return "none", nil
-	}
-	return promptHostedProvider(prompt, current)
 }
 
 func promptHostedProvider(prompt promptSession, current string) (string, error) {
@@ -704,7 +728,7 @@ func promptHostedProvider(prompt promptSession, current string) (string, error) 
 
 func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.Writer, cfg *config.Config, interactive bool, options setupOptions) (bool, error) {
 	provider := cfg.AI.Provider
-	profile, exists := hostedProviderProfileFor(provider)
+	providerProfile, exists := hostedProviderProfileFor(provider)
 	if !exists {
 		return false, fmt.Errorf("unsupported hosted review provider %q", provider)
 	}
@@ -716,42 +740,98 @@ func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.
 	providerName := strings.TrimSpace(options.remoteProviderName)
 	baseURL := strings.TrimSpace(options.remoteBaseURL)
 	if provider != customCompatibleProvider {
-		providerName = profile.Label
-		baseURL = profile.BaseURL
-	} else if interactive {
-		var err error
-		if providerName == "" {
-			if err := explainSetupQuestion(prompt, "remote-provider-name"); err != nil {
-				return false, err
-			}
-			providerName, err = prompt.text("Provider name", "")
-			if err != nil {
-				return false, err
-			}
-		}
-		if baseURL == "" {
-			if err := explainSetupQuestion(prompt, "remote-base-url"); err != nil {
-				return false, err
-			}
-			baseURL, err = prompt.text("API base URL", "https://")
-			if err != nil {
-				return false, err
-			}
-		}
+		providerName = providerProfile.Label
+		baseURL = providerProfile.BaseURL
 	}
-	cfg.AI.Remote.ProviderName = providerName
-	cfg.AI.Remote.BaseURL = baseURL
 	allowed := options.allowRemoteReview
+	keyEnvironment := strings.TrimSpace(options.remoteAPIKeyEnv)
+	if keyEnvironment == "" {
+		keyEnvironment = defaultRemoteAPIKeyEnvironment(provider)
+	}
+	model := strings.TrimSpace(options.remoteModel)
+	if model == "" {
+		model = defaultRemoteModel(provider)
+	}
+
 	if interactive {
-		if err := explainSetupQuestion(prompt, "remote-disclosure"); err != nil {
-			return false, err
+		steps := make([]setupPromptStep, 0, 5)
+		if provider == customCompatibleProvider && options.remoteProviderName == "" {
+			steps = append(steps, func(step promptSession) error {
+				if err := explainSetupQuestion(step, "remote-provider-name"); err != nil {
+					return err
+				}
+				value, err := step.text("Provider name", providerName)
+				if err == nil {
+					providerName = value
+				}
+				return err
+			})
 		}
-		if !allowed {
-			confirmed, err := prompt.confirm(fmt.Sprintf("Allow bounded repository context to be sent to %s", remoteProviderName(cfg.AI)), false)
-			if err != nil {
-				return false, err
-			}
-			allowed = confirmed
+		if provider == customCompatibleProvider && options.remoteBaseURL == "" {
+			steps = append(steps, func(step promptSession) error {
+				if err := explainSetupQuestion(step, "remote-base-url"); err != nil {
+					return err
+				}
+				defaultURL := baseURL
+				if defaultURL == "" {
+					defaultURL = "https://"
+				}
+				value, err := step.text("API base URL", defaultURL)
+				if err == nil {
+					baseURL = value
+				}
+				return err
+			})
+		}
+		if !options.allowRemoteReview {
+			steps = append(steps, func(step promptSession) error {
+				if err := explainSetupQuestion(step, "remote-disclosure"); err != nil {
+					return err
+				}
+				candidate := config.AIConfig{Provider: provider, Remote: config.RemoteConfig{ProviderName: providerName, BaseURL: baseURL}}
+				value, err := step.confirm(fmt.Sprintf("Allow bounded repository context to be sent to %s", remoteProviderName(candidate)), allowed)
+				if err == nil {
+					allowed = value
+				}
+				return err
+			})
+		}
+		if options.remoteAPIKeyEnv == "" {
+			steps = append(steps, func(step promptSession) error {
+				if err := explainSetupQuestion(step, "api-key-env"); err != nil {
+					return err
+				}
+				value, err := step.text("API key environment-variable name", keyEnvironment)
+				if err == nil {
+					keyEnvironment = value
+				}
+				return err
+			})
+		}
+		if options.remoteModel == "" {
+			steps = append(steps, func(step promptSession) error {
+				if err := explainSetupQuestion(step, "remote-model"); err != nil {
+					return err
+				}
+				key, keyAvailable := os.LookupEnv(keyEnvironment)
+				key = strings.TrimSpace(key)
+				var value string
+				var err error
+				if keyAvailable && key != "" {
+					value, err = promptRemoteModelCatalogue(ctx, step, provider, config.RemoteConfig{
+						ProviderName: providerName, BaseURL: baseURL, TimeoutSeconds: 360,
+					}, key)
+				} else {
+					value, err = promptRemoteModel(step, provider)
+				}
+				if err == nil {
+					model = value
+				}
+				return err
+			})
+		}
+		if err := runSetupPromptSteps(prompt, true, steps...); err != nil {
+			return false, err
 		}
 	}
 	if !allowed {
@@ -764,50 +844,14 @@ func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.
 		}
 		return true, nil
 	}
-
-	keyEnvironment := strings.TrimSpace(options.remoteAPIKeyEnv)
-	if keyEnvironment == "" && interactive {
-		if err := explainSetupQuestion(prompt, "api-key-env"); err != nil {
-			return false, err
-		}
-		var err error
-		keyEnvironment, err = prompt.text("API key environment-variable name", defaultRemoteAPIKeyEnvironment(provider))
-		if err != nil {
-			return false, err
-		}
-	}
-	if keyEnvironment == "" {
-		keyEnvironment = defaultRemoteAPIKeyEnvironment(provider)
-	}
-	key, keyAvailable := os.LookupEnv(keyEnvironment)
-	key = strings.TrimSpace(key)
-	keyAvailable = keyAvailable && key != ""
-	model := strings.TrimSpace(options.remoteModel)
-	if model == "" && interactive {
-		if err := explainSetupQuestion(prompt, "remote-model"); err != nil {
-			return false, err
-		}
-		var err error
-		if keyAvailable {
-			model, err = promptRemoteModelCatalogue(ctx, prompt, provider, config.RemoteConfig{
-				ProviderName: providerName, BaseURL: baseURL, TimeoutSeconds: 360,
-			}, key)
-		} else {
-			model, err = promptRemoteModel(prompt, provider)
-		}
-		if err != nil {
-			return false, err
-		}
-	}
-	if model == "" {
-		model = defaultRemoteModel(provider)
-	}
 	cfg.AI.Remote = config.RemoteConfig{
 		ProviderName: providerName, BaseURL: baseURL, Model: model, APIKeyEnv: keyEnvironment, TimeoutSeconds: 360, MaxFindings: 20,
 	}
 	if err := cfg.AI.Remote.ValidateForProvider(provider); err != nil {
 		return false, fmt.Errorf("remote review configuration: %w", err)
 	}
+	key, keyAvailable := os.LookupEnv(keyEnvironment)
+	keyAvailable = keyAvailable && strings.TrimSpace(key) != ""
 	if !keyAvailable {
 		if _, err := fmt.Fprintf(stdout, "%s is not currently set. Add it to your shell or CI secret store before scanning; the key itself is never written to .complyscan.yml.\n", keyEnvironment); err != nil {
 			return false, err

@@ -159,7 +159,7 @@ func TestPromptAnalysisProviderGroupsHostedProviders(t *testing.T) {
 				}
 				return options[1].Value, nil
 			case 2:
-				if label != "Hosted provider" || defaultValue != "anthropic" || len(options) != 8 || options[3].Value != "xai" || options[4].Value != "mistral" || options[5].Value != "groq" || options[5].Label != "GroqCloud — fast hosted models from several model makers" || options[6].Value != "openrouter" || options[7].Value != customCompatibleProvider {
+				if label != "Hosted provider" || defaultValue != "anthropic" || len(options) != 9 || options[3].Value != "xai" || options[4].Value != "mistral" || options[5].Value != "groq" || options[5].Label != "GroqCloud — fast hosted models from several model makers" || options[6].Value != "openrouter" || options[7].Value != customCompatibleProvider || options[8].Value != backChoiceValue {
 					t.Fatalf("provider selector: label=%q default=%q options=%#v", label, defaultValue, options)
 				}
 				return "gemini", nil
@@ -175,6 +175,66 @@ func TestPromptAnalysisProviderGroupsHostedProviders(t *testing.T) {
 	}
 	if provider != "gemini" || calls != 2 {
 		t.Fatalf("provider=%q calls=%d", provider, calls)
+	}
+}
+
+func TestPromptAnalysisProviderCanReturnFromHostedProvider(t *testing.T) {
+	var calls int
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("")), output: &bytes.Buffer{}, guidance: &questionGuidance{},
+		selectOne: func(label, _ string, options []terminalChoice) (string, error) {
+			calls++
+			switch calls {
+			case 1:
+				return options[1].Value, nil // Hosted AI provider.
+			case 2:
+				if label != "Hosted provider" || !containsTerminalChoice(options, backChoiceValue) {
+					t.Fatalf("hosted selector has no back control: %#v", options)
+				}
+				return backChoiceValue, nil
+			case 3:
+				return options[2].Value, nil // Fast technical analysis.
+			default:
+				t.Fatalf("unexpected selector call %d", calls)
+				return "", nil
+			}
+		},
+	}
+	provider, err := promptAnalysisProvider(prompt, "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider != "none" || calls != 3 {
+		t.Fatalf("provider = %q, calls = %d", provider, calls)
+	}
+}
+
+func TestBasicSystemQuestionnaireMovesBackAndKeepsAnswer(t *testing.T) {
+	input := strings.Join([]string{
+		"",     // Keep system name.
+		"",     // Keep intended purpose.
+		"1",    // EU operating region.
+		"back", // Return from organisation role.
+		"",     // Keep the previously selected EU region.
+		"1",    // Provider role.
+		"1",    // Advisory impact.
+		"1",    // Development lifecycle.
+		"1",    // Required oversight.
+	}, "\n") + "\n"
+	var output bytes.Buffer
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader(input)), output: &output,
+		guidance: &questionGuidance{}, step: &setupStepProgress{current: 4, total: 5},
+	}
+	system, err := collectBasicSystemProfile(prompt, ".", time.Now(), setupRepositorySummary{}, setupProfileDraft{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(system.OperatingRegions) != 1 || system.OperatingRegions[0] != profile.RegionEU {
+		t.Fatalf("operating regions = %#v", system.OperatingRegions)
+	}
+	if strings.Count(output.String(), "Operating regions") < 2 {
+		t.Fatalf("operating-region question was not revisited:\n%s", output.String())
 	}
 }
 
