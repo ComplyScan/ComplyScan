@@ -65,10 +65,10 @@ func TestPromptOllamaModelListsInstalledModelsAndAcceptsCustomTag(t *testing.T) 
 		t.Fatalf("model = %q", model)
 	}
 	for _, expected := range []string{
-		"Installed models — ready to use", "Suggested models to download", "Custom Ollama model",
+		"Installed · codestral:22b", "Suggested download · qwen3.5:9b",
 		"qwen3.5:9b", "onboarding benchmark recorded", "qwen3:8b", "technical-review baseline",
-		"qwen3-coder:30b", "qwen2.5-coder:7b", "deepseek-coder-v2:16b", "codestral:22b", "compatibility checked automatically",
-		"~6.6 GB", "~5.2 GB", "~18.6 GB", "~4.7 GB", "~8.9 GB", "12.4 GB",
+		"Ollama catalogue · Choose from common local models", "Exact tag · Enter any other Ollama model tag",
+		"6.6 GB", "5.2 GB", "12.4 GB",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("picker output missing %q:\n%s", expected, output.String())
@@ -76,7 +76,7 @@ func TestPromptOllamaModelListsInstalledModelsAndAcceptsCustomTag(t *testing.T) 
 	}
 
 	output.Reset()
-	prompt = promptSession{reader: bufio.NewReader(strings.NewReader("my-model:latest\n")), output: &output}
+	prompt = promptSession{reader: bufio.NewReader(strings.NewReader("4\nmy-model:latest\n")), output: &output}
 	model, err = promptOllamaModel(prompt, defaultSetupModel, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +106,7 @@ func TestPromptOllamaModelUsesTerminalSelectorAndCustomEntry(t *testing.T) {
 	if model != "account-model:latest" {
 		t.Fatalf("model = %q", model)
 	}
-	if len(choices) < 7 || choices[0].Value != "codestral:22b" || !strings.HasPrefix(choices[0].Label, "Installed · ") ||
+	if len(choices) != 5 || choices[0].Value != "codestral:22b" || !strings.HasPrefix(choices[0].Label, "Installed · ") ||
 		choices[1].Value != defaultSetupModel || !strings.HasPrefix(choices[1].Label, "Suggested download · ") ||
 		choices[len(choices)-2].Value != catalogueModelChoice || !strings.HasPrefix(choices[len(choices)-2].Label, "Ollama catalogue · ") ||
 		choices[len(choices)-1].Value != customModelChoice || !strings.HasPrefix(choices[len(choices)-1].Label, "Exact tag · ") {
@@ -117,7 +117,7 @@ func TestPromptOllamaModelUsesTerminalSelectorAndCustomEntry(t *testing.T) {
 			t.Errorf("model choice does not show a GB size: %#v", choice)
 		}
 	}
-	for _, expected := range []string{"codestral:22b", "qwen2.5-coder:7b", "deepseek-coder-v2:16b"} {
+	for _, expected := range []string{"codestral:22b", defaultSetupModel, "qwen3:8b"} {
 		found := false
 		for _, choice := range choices {
 			if choice.Value == expected {
@@ -143,7 +143,7 @@ func TestPromptOllamaModelGroupsInstalledModelsBeforeDownloads(t *testing.T) {
 			return defaultValue, nil
 		},
 	}
-	installed := []ollamaInstalledModel{{tag: defaultSetupModel, sizeGB: 6.6}, {tag: "qwen3:8b", sizeGB: 5.2}}
+	installed := []ollamaInstalledModel{{tag: defaultSetupModel, sizeGB: 6.6}}
 	model, err := promptOllamaModel(prompt, defaultSetupModel, installed)
 	if err != nil {
 		t.Fatal(err)
@@ -151,14 +151,84 @@ func TestPromptOllamaModelGroupsInstalledModelsBeforeDownloads(t *testing.T) {
 	if model != defaultSetupModel {
 		t.Fatalf("model = %q", model)
 	}
-	if len(choices) < 4 || choices[0].Value != defaultSetupModel || choices[1].Value != "qwen3:8b" {
+	if len(choices) != 4 || choices[0].Value != defaultSetupModel || choices[1].Value != "qwen3:8b" {
 		t.Fatalf("choices = %#v", choices)
 	}
-	if !strings.HasPrefix(choices[0].Label, "Installed · ") || !strings.HasPrefix(choices[1].Label, "Installed · ") || !strings.HasPrefix(choices[2].Label, "Suggested download · ") {
+	if !strings.HasPrefix(choices[0].Label, "Installed · ") || !strings.HasPrefix(choices[1].Label, "Suggested download · ") || choices[2].Value != catalogueModelChoice {
 		t.Fatalf("model categories = %#v", choices[:3])
 	}
 	if choices[len(choices)-1].Value != customModelChoice {
 		t.Fatalf("custom choice is not last: %#v", choices)
+	}
+}
+
+func TestCommonOllamaModelsAreCuratedExactLocalTags(t *testing.T) {
+	expected := []string{
+		"qwen3.5:9b", "qwen3.5:4b", "llama3.2:3b", "gemma3:4b",
+		"qwen2.5-coder:7b", "qwen3-coder:30b", "deepseek-coder-v2:16b", "codestral:22b",
+		"gemma3:12b", "mistral:7b", "deepseek-r1:8b", "phi4:14b", "gpt-oss:20b", "qwen3.5:27b",
+	}
+	models := commonOllamaModels()
+	if len(models) != len(expected) {
+		t.Fatalf("models = %#v", models)
+	}
+	seen := make(map[string]bool, len(models))
+	for index, model := range models {
+		if model.tag != expected[index] || !strings.Contains(model.tag, ":") || model.downloadSizeGB <= 0 || model.category == "" || isOllamaCloudTag(model.tag) || seen[model.tag] {
+			t.Fatalf("curated model %d = %#v", index, model)
+		}
+		seen[model.tag] = true
+	}
+}
+
+func TestPromptOllamaCatalogueShowsCommonModelsWithoutSearching(t *testing.T) {
+	var calls int
+	var catalogueChoices []terminalChoice
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("")), output: &bytes.Buffer{},
+		selectOne: func(label, _ string, options []terminalChoice) (string, error) {
+			calls++
+			if calls == 1 {
+				if label != "Ollama model" {
+					t.Fatalf("main label = %q", label)
+				}
+				return catalogueModelChoice, nil
+			}
+			if label != "Common Ollama models" {
+				t.Fatalf("catalogue label = %q", label)
+			}
+			catalogueChoices = append([]terminalChoice(nil), options...)
+			return "llama3.2:3b", nil
+		},
+	}
+	model, err := promptOllamaModel(prompt, defaultSetupModel, []ollamaInstalledModel{{tag: "gemma3:4b", sizeGB: 3.2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model != "llama3.2:3b" || calls != 2 {
+		t.Fatalf("model=%q calls=%d", model, calls)
+	}
+	for _, expected := range []string{
+		"Recommended · qwen3.5:9b · 6.6 GB",
+		"Small · llama3.2:3b · 2.0 GB",
+		"Installed · gemma3:4b · 3.2 GB · Small",
+		"Coding · qwen2.5-coder:7b · 4.7 GB",
+		"Reasoning · gpt-oss:20b · 14.0 GB",
+		"Large · qwen3.5:27b · 17.0 GB",
+	} {
+		found := false
+		for _, choice := range catalogueChoices {
+			if choice.Label == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("catalogue missing %q: %#v", expected, catalogueChoices)
+		}
+	}
+	if catalogueChoices[len(catalogueChoices)-1].Value != customModelChoice {
+		t.Fatalf("exact-tag option is not last: %#v", catalogueChoices)
 	}
 }
 
