@@ -108,11 +108,12 @@ func TestPromptOllamaModelUsesTerminalSelectorAndCustomEntry(t *testing.T) {
 	}
 	if len(choices) < 7 || choices[0].Value != "codestral:22b" || !strings.HasPrefix(choices[0].Label, "Installed · ") ||
 		choices[1].Value != defaultSetupModel || !strings.HasPrefix(choices[1].Label, "Suggested download · ") ||
-		choices[len(choices)-1].Value != customModelChoice || !strings.HasPrefix(choices[len(choices)-1].Label, "Custom model · ") {
+		choices[len(choices)-2].Value != catalogueModelChoice || !strings.HasPrefix(choices[len(choices)-2].Label, "Ollama catalogue · ") ||
+		choices[len(choices)-1].Value != customModelChoice || !strings.HasPrefix(choices[len(choices)-1].Label, "Exact tag · ") {
 		t.Fatalf("terminal choices = %#v", choices)
 	}
 	for _, choice := range choices {
-		if choice.Value != customModelChoice && (!strings.Contains(choice.Label, "GB") || (!strings.HasPrefix(choice.Label, "Installed · ") && !strings.HasPrefix(choice.Label, "Suggested download · "))) {
+		if choice.Value != customModelChoice && choice.Value != catalogueModelChoice && (!strings.Contains(choice.Label, "GB") || (!strings.HasPrefix(choice.Label, "Installed · ") && !strings.HasPrefix(choice.Label, "Suggested download · "))) {
 			t.Errorf("model choice does not show a GB size: %#v", choice)
 		}
 	}

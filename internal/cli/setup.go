@@ -980,6 +980,7 @@ type setupModelOption struct {
 }
 
 const customModelChoice = "__complyscan_custom_model__"
+const catalogueModelChoice = "__complyscan_catalogue_model__"
 
 func recommendedOllamaModels() []setupModelOption {
 	return []setupModelOption{
@@ -993,6 +994,10 @@ func recommendedOllamaModels() []setupModelOption {
 }
 
 func promptOllamaModel(prompt promptSession, current string, installed []ollamaInstalledModel) (string, error) {
+	return promptOllamaModelWithCatalogue(prompt, current, installed, newOllamaWebCatalogue())
+}
+
+func promptOllamaModelWithCatalogue(prompt promptSession, current string, installed []ollamaInstalledModel, catalogue ollamaCatalogue) (string, error) {
 	current = strings.TrimSpace(current)
 	if current == "" {
 		current = defaultSetupModel
@@ -1014,7 +1019,11 @@ func promptOllamaModel(prompt promptSession, current string, installed []ollamaI
 			choices = append(choices, terminalChoice{Label: categorizedModelOptionLabel(option), Value: option.tag})
 		}
 		choices = append(choices, terminalChoice{
-			Label: "Custom model · Enter any exact Ollama tag; its download size will be shown after selection",
+			Label: "Ollama catalogue · Search all local model families and downloadable variants",
+			Value: catalogueModelChoice,
+		})
+		choices = append(choices, terminalChoice{
+			Label: "Exact tag · Enter an Ollama model tag manually",
 			Value: customModelChoice,
 		})
 		selected, err := prompt.chooseOne("Ollama model", current, choices)
@@ -1022,7 +1031,10 @@ func promptOllamaModel(prompt promptSession, current string, installed []ollamaI
 			return "", err
 		}
 		if selected == customModelChoice {
-			return promptCustomModel(prompt, "Custom Ollama model tag")
+			return promptCustomOllamaModel(prompt)
+		}
+		if selected == catalogueModelChoice {
+			return promptOllamaCatalogue(prompt, catalogue)
 		}
 		return selected, nil
 	}
@@ -1075,6 +1087,124 @@ func promptOllamaModel(prompt promptSession, current string, installed []ollamaI
 		}
 		return strings.TrimSpace(value), nil
 	}
+}
+
+func promptOllamaCatalogue(prompt promptSession, catalogue ollamaCatalogue) (string, error) {
+	if _, err := fmt.Fprintln(prompt.output, "\n  Catalogue search sends only your search words to ollama.com. Repository content is never sent."); err != nil {
+		return "", err
+	}
+	query, err := prompt.text("Search Ollama catalogue", "code")
+	if err != nil {
+		return "", err
+	}
+	if _, err := fmt.Fprintf(prompt.output, "  Searching the Ollama catalogue for %q...\n", query); err != nil {
+		return "", err
+	}
+	models, err := catalogue.Search(context.Background(), query)
+	if err != nil || len(models) == 0 {
+		if err != nil {
+			_, _ = fmt.Fprintf(prompt.output, "  Catalogue search is unavailable: %v\n", err)
+		} else {
+			_, _ = fmt.Fprintf(prompt.output, "  No catalogue models matched %q.\n", query)
+		}
+		_, _ = fmt.Fprintln(prompt.output, "  Enter an exact Ollama tag instead.")
+		return promptCustomOllamaModel(prompt)
+	}
+	modelChoices := make([]terminalChoice, 0, len(models)+1)
+	modelByPath := make(map[string]ollamaCatalogueModel, len(models))
+	for _, model := range models {
+		label := model.Name
+		if model.Description != "" {
+			label += " — " + truncateSetupLabel(model.Description, 88)
+		}
+		modelChoices = append(modelChoices, terminalChoice{Label: label, Value: model.Path})
+		modelByPath[model.Path] = model
+	}
+	modelChoices = append(modelChoices, terminalChoice{Label: "Enter an exact tag manually", Value: customModelChoice})
+	selectedPath, err := chooseSetupOption(prompt, "Ollama catalogue results", modelChoices, modelChoices[0].Value)
+	if err != nil {
+		return "", err
+	}
+	if selectedPath == customModelChoice {
+		return promptCustomOllamaModel(prompt)
+	}
+	model := modelByPath[selectedPath]
+	variants, err := catalogue.Variants(context.Background(), model)
+	if err != nil || len(variants) == 0 {
+		if err != nil {
+			_, _ = fmt.Fprintf(prompt.output, "  Exact variants could not be loaded: %v\n", err)
+		} else {
+			_, _ = fmt.Fprintln(prompt.output, "  No local variants were listed; cloud-only variants are intentionally excluded from local mode.")
+		}
+		_, _ = fmt.Fprintln(prompt.output, "  Enter an exact local Ollama tag instead.")
+		return promptCustomOllamaModel(prompt)
+	}
+	variantChoices := make([]terminalChoice, 0, len(variants)+1)
+	for _, variant := range variants {
+		variantChoices = append(variantChoices, terminalChoice{Label: catalogueVariantLabel(variant), Value: variant.Tag})
+	}
+	variantChoices = append(variantChoices, terminalChoice{Label: "Enter an exact tag manually", Value: customModelChoice})
+	selectedTag, err := chooseSetupOption(prompt, model.Name+" variants", variantChoices, variantChoices[0].Value)
+	if err != nil {
+		return "", err
+	}
+	if selectedTag == customModelChoice {
+		return promptCustomOllamaModel(prompt)
+	}
+	return selectedTag, nil
+}
+
+func chooseSetupOption(prompt promptSession, label string, choices []terminalChoice, defaultValue string) (string, error) {
+	if prompt.selectOne != nil {
+		return prompt.chooseOne(label, defaultValue, choices)
+	}
+	defaultIndex := 1
+	for index, choice := range choices {
+		if choice.Value == defaultValue {
+			defaultIndex = index + 1
+		}
+		if _, err := fmt.Fprintf(prompt.output, "    %d) %s\n", index+1, choice.Label); err != nil {
+			return "", err
+		}
+	}
+	for {
+		value, err := prompt.text(label+" number", strconv.Itoa(defaultIndex))
+		if err != nil {
+			return "", err
+		}
+		selected, parseErr := strconv.Atoi(value)
+		if parseErr == nil && selected >= 1 && selected <= len(choices) && value == strconv.Itoa(selected) {
+			return choices[selected-1].Value, nil
+		}
+		if _, err := fmt.Fprintf(prompt.output, "  Enter a number from 1 to %d.\n", len(choices)); err != nil {
+			return "", err
+		}
+	}
+}
+
+func catalogueVariantLabel(variant ollamaCatalogueVariant) string {
+	detail := strings.TrimSpace(variant.Detail)
+	if variant.SizeGB > 0 {
+		size := fmt.Sprintf("%.1f GB", variant.SizeGB)
+		_, remainder, separated := strings.Cut(detail, "·")
+		if separated && strings.TrimSpace(remainder) != "" {
+			detail = size + " — " + strings.TrimSpace(remainder)
+		} else {
+			detail = size
+		}
+	}
+	if detail == "" {
+		detail = "size resolved by Ollama before download"
+	}
+	return variant.Tag + " — " + detail
+}
+
+func truncateSetupLabel(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if len([]rune(value)) <= limit {
+		return value
+	}
+	return string([]rune(value)[:limit-1]) + "…"
 }
 
 func modelOption(model, detail string, installed []ollamaInstalledModel) setupModelOption {
@@ -1142,6 +1272,21 @@ func promptCustomModel(prompt promptSession, label string) (string, error) {
 			return value, nil
 		}
 		if _, err := fmt.Fprintln(prompt.output, "  Enter a valid model name."); err != nil {
+			return "", err
+		}
+	}
+}
+
+func promptCustomOllamaModel(prompt promptSession) (string, error) {
+	for {
+		model, err := promptCustomModel(prompt, "Custom Ollama model tag")
+		if err != nil {
+			return "", err
+		}
+		if !isOllamaCloudTag(model) {
+			return model, nil
+		}
+		if _, err := fmt.Fprintln(prompt.output, "  Cloud-only Ollama tags are unavailable in local privacy mode. Choose a local model variant."); err != nil {
 			return "", err
 		}
 	}

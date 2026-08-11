@@ -6,6 +6,7 @@ require (
 	github.com/charmbracelet/huh v0.6.0
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/spf13/cobra v1.8.1
+	golang.org/x/net v0.28.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
