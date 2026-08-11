@@ -508,37 +508,10 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 		if err := explainSetupQuestion(prompt, "review-provider"); err != nil {
 			return false, err
 		}
-		const (
-			localOption     = "Local AI-assisted analysis — Ollama keeps context on this machine"
-			openAIOption    = "Cloud AI-assisted analysis — OpenAI"
-			anthropicOption = "Cloud AI-assisted analysis — Anthropic"
-			geminiOption    = "Cloud AI-assisted analysis — Gemini"
-			fastOption      = "Fast technical analysis — no model"
-		)
-		defaultProvider := localOption
-		switch cfg.AI.Provider {
-		case "openai":
-			defaultProvider = openAIOption
-		case "anthropic":
-			defaultProvider = anthropicOption
-		case "gemini":
-			defaultProvider = geminiOption
-		}
-		selected, err := promptChoice(prompt, "Analysis mode", defaultProvider, localOption, openAIOption, anthropicOption, geminiOption, fastOption)
+		var err error
+		provider, err = promptAnalysisProvider(prompt, cfg.AI.Provider)
 		if err != nil {
 			return false, err
-		}
-		switch selected {
-		case localOption:
-			provider = "ollama"
-		case openAIOption:
-			provider = "openai"
-		case anthropicOption:
-			provider = "anthropic"
-		case geminiOption:
-			provider = "gemini"
-		default:
-			provider = "none"
 		}
 	}
 	if provider == "" {
@@ -679,6 +652,42 @@ func configureSetupReview(ctx context.Context, prompt promptSession, stdout io.W
 		return false, err
 	}
 	return finishSetupModelQualification(ctx, stdout, cfg.AI, interactive || options.qualifyModel)
+}
+
+func promptAnalysisProvider(prompt promptSession, current string) (string, error) {
+	const (
+		localOption  = "Local AI — Ollama keeps repository context on this machine"
+		hostedOption = "Hosted AI provider — uses your API key and sends bounded context externally"
+		fastOption   = "Fast technical analysis — no model"
+	)
+	defaultMode := localOption
+	if isRemoteReviewProvider(current) {
+		defaultMode = hostedOption
+	}
+	selected, err := promptChoice(prompt, "Analysis mode", defaultMode, localOption, hostedOption, fastOption)
+	if err != nil {
+		return "", err
+	}
+	switch selected {
+	case localOption:
+		return "ollama", nil
+	case fastOption:
+		return "none", nil
+	}
+	return promptHostedProvider(prompt, current)
+}
+
+func promptHostedProvider(prompt promptSession, current string) (string, error) {
+	choices := []terminalChoice{
+		{Label: "OpenAI", Value: "openai"},
+		{Label: "Anthropic", Value: "anthropic"},
+		{Label: "Google Gemini", Value: "gemini"},
+	}
+	defaultProvider := current
+	if !isRemoteReviewProvider(defaultProvider) {
+		defaultProvider = "openai"
+	}
+	return chooseSetupOption(prompt, "Hosted provider", choices, defaultProvider)
 }
 
 func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.Writer, cfg *config.Config, interactive bool, options setupOptions) (bool, error) {

@@ -86,6 +86,38 @@ func TestPromptOllamaModelListsInstalledModelsAndAcceptsCustomTag(t *testing.T) 
 	}
 }
 
+func TestPromptAnalysisProviderGroupsHostedProviders(t *testing.T) {
+	var calls int
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("")), output: &bytes.Buffer{},
+		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
+			calls++
+			switch calls {
+			case 1:
+				if label != "Analysis mode" || defaultValue != "Hosted AI provider — uses your API key and sends bounded context externally" || len(options) != 3 {
+					t.Fatalf("analysis selector: label=%q default=%q options=%#v", label, defaultValue, options)
+				}
+				return options[1].Value, nil
+			case 2:
+				if label != "Hosted provider" || defaultValue != "anthropic" || len(options) != 3 {
+					t.Fatalf("provider selector: label=%q default=%q options=%#v", label, defaultValue, options)
+				}
+				return "gemini", nil
+			default:
+				t.Fatalf("unexpected selector call %d", calls)
+				return "", nil
+			}
+		},
+	}
+	provider, err := promptAnalysisProvider(prompt, "anthropic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider != "gemini" || calls != 2 {
+		t.Fatalf("provider=%q calls=%d", provider, calls)
+	}
+}
+
 func TestPromptOllamaModelUsesTerminalSelectorAndCustomEntry(t *testing.T) {
 	var output bytes.Buffer
 	var choices []terminalChoice
@@ -298,7 +330,7 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 		"Enter ? at the next prompt for more guidance",
 		"remaining conditionally relevant facts",
 		"EU AI Act technical mapping is recommended",
-		"Local AI-assisted analysis — Ollama keeps context on this machine",
+		"Local AI — Ollama keeps repository context on this machine",
 	} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("guided setup output missing explanation %q:\n%s", expected, stdout.String())
