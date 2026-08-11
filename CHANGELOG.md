@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.7 - 2026-08-11
+
 ### Changed
 
 - Interactive setup, profile, ownership, and verification wizards now render their main section titles as consistent bold terminal headings while preserving plain output for accessible, dumb, redirected, and `NO_COLOR` modes.
@@ -11,6 +13,10 @@
 - Interactive terminals now default to concise, progressive question guidance and offer a detailed mode with all category definitions and examples; `--detailed-guidance` makes the complete explanations directly selectable for later runs and accessible text-mode sessions retain them by default.
 - Setup review and completion now use a consistent status vocabulary—ready, needs review, and not configured—with compact visual markers in styled terminals and explicit text markers in accessible or redirected output.
 - Guided setup now saves private, source-free recovery checkpoints in the operating system's user-cache directory after each major stage, offers to resume or discard them on the next terminal run, and removes the draft after configuration is saved.
+
+### Fixed
+
+- Setup cancellation now advertises recovery only when a private checkpoint was actually written successfully.
 
 ## 0.1.6 - 2026-08-11
 
