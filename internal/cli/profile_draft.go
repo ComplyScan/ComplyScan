@@ -95,7 +95,9 @@ func draftProfileForSetup(
 	}
 	draftContext, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	activity := startConfiguredLLMActivity(output, cfg.AI, "draft setup answers", "Setup-answer draft received", "Setup-answer draft failed")
 	result, err := reviewer.DraftProfile(draftContext, request)
+	activity.Finish(err)
 	if err != nil {
 		_, _ = fmt.Fprintf(output, "Warning: AI-assisted profile drafting was incomplete after %s: %v. Continuing with repository signals and human questions.\n", formatElapsed(time.Since(draftStarted)), err)
 		return draft

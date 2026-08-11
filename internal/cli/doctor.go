@@ -191,7 +191,9 @@ func runDoctor(ctx context.Context, stdout io.Writer, build BuildInfo, target, c
 				return err
 			}
 		} else {
+			activity := startConfiguredLLMActivity(stdout, cfg.AI, "check compatibility", "Compatibility response received", "Compatibility request failed")
 			outcome, qualificationErr := qualifyConfiguredModel(ctx, cfg.AI, true)
+			activity.Finish(qualificationErr)
 			if qualificationErr != nil {
 				if writeErr := output.write("FAIL", "review compatibility", qualificationErr.Error()); writeErr != nil {
 					return writeErr

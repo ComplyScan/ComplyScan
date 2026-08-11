@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ComplyScan/ComplyScan/internal/config"
+	"github.com/ComplyScan/ComplyScan/internal/providers"
 )
 
 var (
@@ -110,4 +114,48 @@ func localModelSlowHint(provider string) string {
 		return "Local models may take several minutes"
 	}
 	return ""
+}
+
+func startConfiguredLLMActivity(output io.Writer, settings config.AIConfig, action, success, failure string) *llmActivity {
+	providerLabel := reviewProviderLabel(settings.Provider)
+	if providers.Kind(settings.Provider) == providers.Compatible {
+		providerLabel = remoteProviderName(settings)
+	}
+	return startLLMActivity(output, llmActivityOptions{
+		Waiting:  fmt.Sprintf("Waiting for %s %q to %s", providerLabel, configuredReviewModel(settings), action),
+		Success:  success,
+		Failure:  failure,
+		SlowHint: localModelSlowHint(settings.Provider),
+	})
+}
+
+type technicalActivityReviewer struct {
+	reviewer *providers.OllamaProvider
+	output   io.Writer
+	settings config.AIConfig
+}
+
+func (reviewer *technicalActivityReviewer) ReviewTechnical(ctx context.Context, request providers.TechnicalReviewRequest) (providers.TechnicalReviewResult, error) {
+	if len(request.Candidates) == 0 {
+		return reviewer.reviewer.ReviewTechnical(ctx, request)
+	}
+	action := "investigate technical evidence"
+	if objective := strings.TrimSpace(request.Candidates[0].ObjectiveID); objective != "" {
+		action += " for " + objective
+	}
+	activity := startConfiguredLLMActivity(reviewer.output, reviewer.settings, action, "Technical-evidence response received", "Technical-evidence request failed")
+	result, err := reviewer.reviewer.ReviewTechnical(ctx, request)
+	activity.Finish(err)
+	return result, err
+}
+
+func (reviewer *technicalActivityReviewer) PlanTechnicalSearch(ctx context.Context, candidate providers.TechnicalCandidate) (providers.TechnicalSearchPlan, providers.Usage, error) {
+	action := "plan a bounded evidence search"
+	if objective := strings.TrimSpace(candidate.ObjectiveID); objective != "" {
+		action += " for " + objective
+	}
+	activity := startConfiguredLLMActivity(reviewer.output, reviewer.settings, action, "Evidence-search plan received", "Evidence-search planning failed")
+	result, usage, err := reviewer.reviewer.PlanTechnicalSearch(ctx, candidate)
+	activity.Finish(err)
+	return result, usage, err
 }

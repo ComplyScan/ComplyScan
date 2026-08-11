@@ -593,7 +593,9 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 					if _, err := fmt.Fprintf(progressWriter, "Checking model compatibility before repository review...\n"); err != nil {
 						return fmt.Errorf("write model qualification progress: %w", err)
 					}
+					activity := startConfiguredLLMActivity(progressWriter, cfg.AI, "check compatibility", "Compatibility response received", "Compatibility request failed")
 					outcome, qualificationErr := qualifyConfiguredModel(cmd.Context(), cfg.AI, false)
+					activity.Finish(qualificationErr)
 					if qualificationErr != nil {
 						modelQualified = false
 						warning := fmt.Sprintf("%s review was incomplete because model qualification failed: %v. Deterministic findings and evidence remain available.", reviewProviderLabel(cfg.AI.Provider), qualificationErr)
@@ -636,7 +638,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 								return fmt.Errorf("write finding review progress: %w", err)
 							}
 						}
-						review, reviewErr := reviewFindingsWithProvider(cmd.Context(), cfg.AI, target, visible)
+						review, reviewErr := reviewFindingsWithProvider(cmd.Context(), progressWriter, cfg.AI, target, visible)
 						if reviewErr != nil {
 							warning := fmt.Sprintf("%s finding review was incomplete after %s: %v. Deterministic findings remain unchanged.", reviewProviderLabel(cfg.AI.Provider), formatElapsed(time.Since(findingReviewStarted)), reviewErr)
 							reportValue.Warnings = append(reportValue.Warnings, warning)
@@ -660,7 +662,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 					}
 					technicalReview, reviewErr := reviewTechnicalWithProvider(
 						cmd.Context(), cfg.AI, frameworkResults[index].TechnicalEvidence, investigationRequests[index], result.FullRepository,
-						refreshReview, technicalReviewProgress(progressWriter, cfg.AI.Provider, technicalReviewStarted, time.Now),
+						refreshReview, progressWriter, technicalReviewProgress(progressWriter, cfg.AI.Provider, technicalReviewStarted, time.Now),
 					)
 					if reviewErr != nil {
 						warning := fmt.Sprintf("%s technical evidence review for %s was incomplete after %s: %v. Deterministic evidence remains available.", reviewProviderLabel(cfg.AI.Provider), frameworkResults[index].Name, formatElapsed(time.Since(technicalReviewStarted)), reviewErr)
@@ -861,6 +863,7 @@ func validateVerificationPlans(plans []verification.Options, evidence framework.
 
 func reviewFindingsWithProvider(
 	ctx context.Context,
+	activityOutput io.Writer,
 	settings config.AIConfig,
 	target string,
 	findings []rules.Finding,
@@ -871,9 +874,11 @@ func reviewFindingsWithProvider(
 	}
 	findingContext, cancelFindings := context.WithTimeout(ctx, timeout)
 	defer cancelFindings()
+	activity := startConfiguredLLMActivity(activityOutput, settings, "review findings", "Finding-review response received", "Finding-review request failed")
 	findingResult, err := reviewer.Review(findingContext, providers.ReviewRequest{
 		RepositoryRoot: target, Findings: findings,
 	})
+	activity.Finish(err)
 	if err != nil {
 		return providers.ReviewResult{}, fmt.Errorf("%s advisory review: %w", reviewProviderLabel(settings.Provider), err)
 	}
@@ -887,13 +892,14 @@ func reviewTechnicalWithProvider(
 	investigationRequest providers.TechnicalReviewRequest,
 	repository discovery.Repository,
 	refresh bool,
+	activityOutput io.Writer,
 	onProgress func(technicalreview.Progress) error,
 ) (providers.TechnicalReviewResult, error) {
 	reviewer, _, maxFindings, model, kind, err := configuredReviewer(settings)
 	if err != nil {
 		return providers.TechnicalReviewResult{}, err
 	}
-	return runTechnicalReview(ctx, reviewer, settings, evidence, investigationRequest, repository, refresh, maxFindings, model, kind, onProgress)
+	return runTechnicalReview(ctx, reviewer, settings, evidence, investigationRequest, repository, refresh, maxFindings, model, kind, activityOutput, onProgress)
 }
 
 func runTechnicalReview(
@@ -907,6 +913,7 @@ func runTechnicalReview(
 	maxFindings int,
 	model string,
 	kind providers.Kind,
+	activityOutput io.Writer,
 	onProgress func(technicalreview.Progress) error,
 ) (providers.TechnicalReviewResult, error) {
 	var cache *technicalreview.Cache
@@ -922,7 +929,8 @@ func runTechnicalReview(
 	} else {
 		cacheUnavailable = true
 	}
-	technicalResult, err := technicalreview.Run(ctx, reviewer, investigationRequest, technicalreview.Options{
+	activeReviewer := &technicalActivityReviewer{reviewer: reviewer, output: activityOutput, settings: settings}
+	technicalResult, err := technicalreview.Run(ctx, activeReviewer, investigationRequest, technicalreview.Options{
 		Identity: technicalreview.Identity{
 			Provider: kind, Model: model, PromptVersion: providers.TechnicalReviewPromptVersion,
 			PackID: evidence.Pack.ID, PackVersion: evidence.Pack.Version, PackDigest: evidence.Pack.Digest,

@@ -118,7 +118,9 @@ func finishSetupModelQualification(ctx context.Context, output interface {
 		return false, err
 	}
 	qualificationStarted := time.Now()
+	activity := startConfiguredLLMActivity(output, settings, "check compatibility", "Compatibility response received", "Compatibility request failed")
 	outcome, err := qualifyConfiguredModel(ctx, settings, false)
+	activity.Finish(err)
 	if err != nil {
 		if _, writeErr := fmt.Fprintf(output, "Model qualification failed after %s: %v\nDeterministic setup will continue; choose another model or retry with `complyscan doctor --probe-review`.\n", formatElapsed(time.Since(qualificationStarted)), err); writeErr != nil {
 			return false, writeErr
