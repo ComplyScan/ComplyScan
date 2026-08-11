@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 )
 
@@ -201,8 +202,9 @@ func runTerminalSelect(input io.Reader, output io.Writer, label, defaultValue st
 	selected := defaultValue
 	guidance := terminalChoiceGuidance(choices)
 	instructions := "Use ↑/↓ to move and Enter to confirm."
-	if containsTerminalChoice(choices, backChoiceValue) {
-		instructions += " Select ← Back to return."
+	allowBack := containsTerminalChoice(choices, backChoiceValue)
+	if allowBack {
+		instructions += " Press ← or select ← Back to return."
 	}
 	field := huh.NewSelect[string]().
 		Title(label).
@@ -221,7 +223,7 @@ func runTerminalSelect(input io.Reader, output io.Writer, label, defaultValue st
 			return nil
 		})
 	form := huh.NewForm(huh.NewGroup(field)).WithInput(input).WithOutput(output)
-	if err := form.Run(); err != nil {
+	if err := runTerminalForm(form, input, output, allowBack); err != nil {
 		return "", fmt.Errorf("select %s: %w", strings.ToLower(label), err)
 	}
 	return selected, nil
@@ -259,8 +261,9 @@ func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, def
 	selected := append([]string(nil), defaults...)
 	guidance := terminalChoiceGuidance(choices)
 	instructions := "Use ↑/↓ to move, Space to tick or untick, and Enter to confirm."
-	if containsTerminalChoice(choices, backChoiceValue) {
-		instructions += " Select ← Back to return."
+	allowBack := containsTerminalChoice(choices, backChoiceValue)
+	if allowBack {
+		instructions += " Press ← or select ← Back to return."
 	}
 	field := huh.NewMultiSelect[string]().
 		Title(label).
@@ -284,10 +287,57 @@ func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, def
 			return nil
 		})
 	form := huh.NewForm(huh.NewGroup(field)).WithInput(input).WithOutput(output)
-	if err := form.Run(); err != nil {
+	if err := runTerminalForm(form, input, output, allowBack); err != nil {
 		return nil, fmt.Errorf("select %s: %w", strings.ToLower(label), err)
 	}
 	return withoutTerminalValue(selected, moreGuidanceChoiceValue), nil
+}
+
+type backNavigableForm struct {
+	form *huh.Form
+	back bool
+}
+
+func (form *backNavigableForm) Init() tea.Cmd {
+	return form.form.Init()
+}
+
+func (form *backNavigableForm) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := message.(tea.KeyMsg); ok && key.Type == tea.KeyLeft {
+		form.back = true
+		return form, tea.Quit
+	}
+	updated, command := form.form.Update(message)
+	if next, ok := updated.(*huh.Form); ok {
+		form.form = next
+	}
+	return form, command
+}
+
+func (form *backNavigableForm) View() string {
+	return form.form.View()
+}
+
+func runTerminalForm(form *huh.Form, input io.Reader, output io.Writer, allowBack bool) error {
+	if !allowBack {
+		return form.Run()
+	}
+	navigator := &backNavigableForm{form: form}
+	result, err := tea.NewProgram(navigator, tea.WithInput(input), tea.WithOutput(output), tea.WithReportFocus()).Run()
+	if err != nil {
+		return err
+	}
+	completed, ok := result.(*backNavigableForm)
+	if !ok {
+		return errors.New("terminal form returned an unexpected navigation state")
+	}
+	if completed.back {
+		return errPromptBack
+	}
+	if completed.form.State == huh.StateAborted {
+		return huh.ErrUserAborted
+	}
+	return nil
 }
 
 func terminalChoiceGuidance(choices []terminalChoice) string {
