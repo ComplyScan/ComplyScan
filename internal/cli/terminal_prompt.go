@@ -31,7 +31,7 @@ func (session promptSession) chooseOne(label, defaultValue string, choices []ter
 	for {
 		visible := append([]terminalChoice(nil), choices...)
 		if session.backAvailable {
-			visible = append(visible, terminalChoice{Label: "← Back — return to the previous question", Value: backChoiceValue})
+			visible = insertBackChoice(visible, defaultValue)
 		}
 		if session.hasQuestionGuidance() {
 			visible = append(visible, terminalChoice{
@@ -66,7 +66,14 @@ func (session promptSession) chooseMany(label string, defaults []string, choices
 	for {
 		visible := append([]terminalChoice(nil), choices...)
 		if session.backAvailable {
-			visible = append(visible, terminalChoice{Label: "← Back — return to the previous question", Value: backChoiceValue})
+			anchor := ""
+			for _, choice := range choices {
+				if containsTerminalValue(defaults, choice.Value) {
+					anchor = choice.Value
+					break
+				}
+			}
+			visible = insertBackChoice(visible, anchor)
 		}
 		if session.hasQuestionGuidance() {
 			visible = append(visible, terminalChoice{
@@ -299,6 +306,25 @@ func containsTerminalChoice(choices []terminalChoice, wanted string) bool {
 		}
 	}
 	return false
+}
+
+func insertBackChoice(choices []terminalChoice, anchor string) []terminalChoice {
+	back := terminalChoice{Label: "← Back — return to the previous question", Value: backChoiceValue}
+	if len(choices) == 0 {
+		return []terminalChoice{back}
+	}
+	insertAfter := 0
+	for index, choice := range choices {
+		if choice.Value == anchor {
+			insertAfter = index
+			break
+		}
+	}
+	result := make([]terminalChoice, 0, len(choices)+1)
+	result = append(result, choices[:insertAfter+1]...)
+	result = append(result, back)
+	result = append(result, choices[insertAfter+1:]...)
+	return result
 }
 
 func terminalGuidanceDescription(instructions string, expanded bool, guidance string) string {

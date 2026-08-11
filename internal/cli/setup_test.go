@@ -102,6 +102,9 @@ func TestBackControlsAreAddedOnlyWhenNavigationIsAvailable(t *testing.T) {
 	if !containsTerminalChoice(selectedOptions, backChoiceValue) {
 		t.Fatalf("back option missing from %#v", selectedOptions)
 	}
+	if len(selectedOptions) < 2 || selectedOptions[0].Value != "one" || selectedOptions[1].Value != backChoiceValue {
+		t.Fatalf("back option is not adjacent to the selected default: %#v", selectedOptions)
+	}
 
 	textPrompt := promptSession{
 		reader:        bufio.NewReader(strings.NewReader("back\n")),
@@ -159,7 +162,7 @@ func TestPromptAnalysisProviderGroupsHostedProviders(t *testing.T) {
 				}
 				return options[1].Value, nil
 			case 2:
-				if label != "Hosted provider" || defaultValue != "anthropic" || len(options) != 9 || options[3].Value != "xai" || options[4].Value != "mistral" || options[5].Value != "groq" || options[5].Label != "GroqCloud — fast hosted models from several model makers" || options[6].Value != "openrouter" || options[7].Value != customCompatibleProvider || options[8].Value != backChoiceValue {
+				if label != "Hosted provider" || defaultValue != "anthropic" || len(options) != 9 || options[2].Value != backChoiceValue || options[4].Value != "xai" || options[5].Value != "mistral" || options[6].Value != "groq" || options[6].Label != "GroqCloud — fast hosted models from several model makers" || options[7].Value != "openrouter" || options[8].Value != customCompatibleProvider {
 					t.Fatalf("provider selector: label=%q default=%q options=%#v", label, defaultValue, options)
 				}
 				return "gemini", nil
