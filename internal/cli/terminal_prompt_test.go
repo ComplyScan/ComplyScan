@@ -90,3 +90,17 @@ func TestBackHelpBindingAppearsAfterDownNavigation(t *testing.T) {
 		t.Fatalf("bindings = %#v", withBack)
 	}
 }
+
+func TestBackHelpFooterRemainsVisibleWhenValidationHidesOriginalHelp(t *testing.T) {
+	styledCurrent := "\x1b[2m↑ up • enter submit\x1b[0m"
+	styledBack := "\x1b[2m↑ up • ← back • enter submit\x1b[0m"
+	withHelp := "choices\n" + styledCurrent + "\n"
+	if got := replaceOrAppendHelpFooter(withHelp, styledCurrent, styledBack); got != "choices\n"+styledBack+"\n" {
+		t.Fatalf("replaced footer = %q", got)
+	}
+	validationView := "choices\n\x1b[31mselect at least one option\x1b[0m\n"
+	want := validationView[:len(validationView)-1] + "\n" + styledBack + "\n"
+	if got := replaceOrAppendHelpFooter(validationView, styledCurrent, styledBack); got != want {
+		t.Fatalf("validation footer = %q, want %q", got, want)
+	}
+}

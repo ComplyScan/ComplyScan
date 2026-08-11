@@ -319,10 +319,19 @@ func (form *backNavigableForm) View() string {
 		return view
 	}
 	footerWithBack := help.ShortHelpView(withBackHelpBinding(bindings))
+	return replaceOrAppendHelpFooter(view, currentFooter, footerWithBack)
+}
+
+func replaceOrAppendHelpFooter(view, currentFooter, footerWithBack string) string {
 	if footer := strings.LastIndex(view, currentFooter); footer >= 0 {
 		return view[:footer] + footerWithBack + view[footer+len(currentFooter):]
 	}
-	return view
+	trailingNewlines := len(view) - len(strings.TrimRight(view, "\n"))
+	view = strings.TrimRight(view, "\n")
+	if view != "" {
+		view += "\n"
+	}
+	return view + footerWithBack + strings.Repeat("\n", trailingNewlines)
 }
 
 func withBackHelpBinding(bindings []key.Binding) []key.Binding {
