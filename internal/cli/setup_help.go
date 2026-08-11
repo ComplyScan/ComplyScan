@@ -4,6 +4,10 @@ import (
 	"fmt"
 )
 
+type questionGuidance struct {
+	details []string
+}
+
 var setupQuestionHelp = map[string][]string{
 	"resume-setup": {
 		"A private setup draft from this repository is available in your operating system's user-cache directory. It contains configuration answers, but no API-key value or repository source code.",
@@ -204,6 +208,36 @@ var setupQuestionHelp = map[string][]string{
 	},
 }
 
+func (prompt promptSession) hasQuestionGuidance() bool {
+	return prompt.guidance != nil && len(prompt.guidance.details) > 0
+}
+
+func (prompt promptSession) showQuestionGuidance() error {
+	if !prompt.hasQuestionGuidance() {
+		return nil
+	}
+	if err := prompt.sectionTitle("More guidance", true); err != nil {
+		return err
+	}
+	for _, line := range prompt.guidance.details {
+		if _, err := fmt.Fprintf(prompt.output, "  %s\n", line); err != nil {
+			return err
+		}
+	}
+	if prompt.selectOne == nil {
+		_, err := fmt.Fprintln(prompt.output, "  Continue by answering the question below.")
+		return err
+	}
+	return nil
+}
+
+func (prompt promptSession) clearQuestionGuidance() {
+	if prompt.guidance == nil {
+		return
+	}
+	prompt.guidance.details = nil
+}
+
 func explainSetupQuestion(prompt promptSession, key string) error {
 	lines, exists := setupQuestionHelp[key]
 	if !exists {
@@ -212,14 +246,24 @@ func explainSetupQuestion(prompt promptSession, key string) error {
 	if _, err := fmt.Fprintln(prompt.output); err != nil {
 		return err
 	}
-	visible := lines
-	if prompt.conciseHelp {
-		visible = lines[:1]
+	if prompt.guidance != nil {
+		prompt.guidance.details = append(prompt.guidance.details[:0], lines[1:]...)
+	}
+	visible := lines[:1]
+	if prompt.alwaysDetailed {
+		visible = lines
+		if prompt.guidance != nil {
+			prompt.guidance.details = nil
+		}
 	}
 	for _, line := range visible {
 		if _, err := fmt.Fprintf(prompt.output, "  %s\n", line); err != nil {
 			return err
 		}
+	}
+	if !prompt.alwaysDetailed && len(lines) > 1 && prompt.selectOne == nil {
+		_, err := fmt.Fprintln(prompt.output, "  Enter ? at the next prompt for more guidance.")
+		return err
 	}
 	return nil
 }

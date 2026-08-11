@@ -415,17 +415,18 @@ func frameworkEnabled(enabled []string, wanted string) bool {
 }
 
 type promptSession struct {
-	reader      *bufio.Reader
-	output      io.Writer
-	styleTitles bool
-	conciseHelp bool
-	selectOne   func(label, defaultValue string, options []terminalChoice) (string, error)
-	selectMany  func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error)
-	confirmBool func(label string, defaultValue bool) (bool, error)
+	reader         *bufio.Reader
+	output         io.Writer
+	styleTitles    bool
+	alwaysDetailed bool
+	guidance       *questionGuidance
+	selectOne      func(label, defaultValue string, options []terminalChoice) (string, error)
+	selectMany     func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error)
+	confirmBool    func(label string, defaultValue bool) (bool, error)
 }
 
 func newPromptSession(input io.Reader, output io.Writer) promptSession {
-	session := promptSession{reader: bufio.NewReader(input), output: output}
+	session := promptSession{reader: bufio.NewReader(input), output: output, guidance: &questionGuidance{}}
 	if terminalPromptAvailable(input, output) {
 		session.styleTitles = os.Getenv("NO_COLOR") == ""
 		session.selectOne = func(label, defaultValue string, options []terminalChoice) (string, error) {
@@ -442,7 +443,22 @@ func newPromptSession(input io.Reader, output io.Writer) promptSession {
 }
 
 func (session promptSession) confirm(label string, defaultValue bool) (bool, error) {
+	if session.hasQuestionGuidance() && session.selectOne != nil {
+		defaultChoice := "No"
+		if defaultValue {
+			defaultChoice = "Yes"
+		}
+		selected, err := session.chooseOne(label, defaultChoice, []terminalChoice{
+			{Label: "Yes", Value: "Yes"},
+			{Label: "No", Value: "No"},
+		})
+		if err != nil {
+			return false, err
+		}
+		return selected == "Yes", nil
+	}
 	if session.confirmBool != nil {
+		session.clearQuestionGuidance()
 		return session.confirmBool(label, defaultValue)
 	}
 	defaultText := "y/N"
@@ -458,12 +474,21 @@ func (session promptSession) confirm(label string, defaultValue bool) (bool, err
 			return false, fmt.Errorf("read %s: %w", strings.ToLower(label), err)
 		}
 		value := strings.ToLower(strings.TrimSpace(line))
+		if value == "?" && session.hasQuestionGuidance() {
+			if err := session.showQuestionGuidance(); err != nil {
+				return false, err
+			}
+			continue
+		}
 		switch value {
 		case "":
+			session.clearQuestionGuidance()
 			return defaultValue, nil
 		case "y", "yes":
+			session.clearQuestionGuidance()
 			return true, nil
 		case "n", "no":
+			session.clearQuestionGuidance()
 			return false, nil
 		default:
 			if _, writeErr := fmt.Fprintln(session.output, "  Enter yes or no."); writeErr != nil {
@@ -477,6 +502,11 @@ func (session promptSession) confirm(label string, defaultValue bool) (bool, err
 }
 
 func (session promptSession) text(label, defaultValue string) (string, error) {
+	if session.hasQuestionGuidance() && session.selectOne != nil {
+		if _, err := fmt.Fprintln(session.output, "  Enter ? for more guidance about this question."); err != nil {
+			return "", err
+		}
+	}
 	for {
 		if _, err := fmt.Fprintf(session.output, "? %s [%s]: ", label, defaultValue); err != nil {
 			return "", err
@@ -486,10 +516,17 @@ func (session promptSession) text(label, defaultValue string) (string, error) {
 			return "", fmt.Errorf("read %s: %w", strings.ToLower(label), err)
 		}
 		value := strings.TrimSpace(line)
+		if value == "?" && session.hasQuestionGuidance() {
+			if err := session.showQuestionGuidance(); err != nil {
+				return "", err
+			}
+			continue
+		}
 		if value == "" {
 			value = defaultValue
 		}
 		if value != "" {
+			session.clearQuestionGuidance()
 			return value, nil
 		}
 		if errors.Is(err, io.EOF) {
@@ -515,7 +552,7 @@ func promptChoice[T ~string](session promptSession, label string, defaultValue T
 		for index, candidate := range allowed {
 			options[index] = terminalChoice{Label: string(candidate), Value: string(candidate)}
 		}
-		selected, err := session.selectOne(label, string(defaultValue), options)
+		selected, err := session.chooseOne(label, string(defaultValue), options)
 		if err != nil {
 			return defaultValue, err
 		}
@@ -564,7 +601,7 @@ func promptChoices[T ~string](session promptSession, label string, defaultValue 
 				exclusive = append(exclusive, string(value))
 			}
 		}
-		selected, err := session.selectMany(label, defaultStrings, options, exclusive)
+		selected, err := session.chooseMany(label, defaultStrings, options, exclusive)
 		if err != nil {
 			return nil, err
 		}

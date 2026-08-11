@@ -117,11 +117,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	if _, err := fmt.Fprintf(stdout, "Repository: %s\n\n", target); err != nil {
 		return err
 	}
-	if interactive {
-		if err := configureSetupGuidance(&prompt, options.detailedGuidance); err != nil {
-			return err
-		}
-	}
+	prompt.alwaysDetailed = options.detailedGuidance
 
 	var repositorySummary setupRepositorySummary
 	profileDraft := newSetupProfileDraft()
@@ -299,29 +295,6 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		return err
 	}
 	return runFirstScan(cmd, stdout, build, target, scanMode, repositorySummary.Discovery)
-}
-
-func configureSetupGuidance(prompt *promptSession, forceDetailed bool) error {
-	if forceDetailed || prompt.selectOne == nil {
-		prompt.conciseHelp = false
-		return nil
-	}
-	if err := prompt.sectionTitle("Setup guidance", false); err != nil {
-		return err
-	}
-	const (
-		concise  = "Concise — show the essential explanation for each question"
-		detailed = "Detailed — include category definitions and examples"
-	)
-	selected, err := promptChoice(*prompt, "guidance detail", concise, concise, detailed)
-	if err != nil {
-		return err
-	}
-	prompt.conciseHelp = selected == concise
-	if prompt.conciseHelp {
-		_, err = fmt.Fprintln(prompt.output, "  Complete explanations remain available with `complyscan setup --detailed-guidance`.")
-	}
-	return err
 }
 
 func collectInteractiveSetupContext(prompt promptSession, target string, cfg *config.Config, options setupOptions, summary setupRepositorySummary, draft setupProfileDraft, confirmReplace bool) error {
@@ -789,7 +762,7 @@ func promptRemoteModel(prompt promptSession, provider string) (string, error) {
 			options = append(options, terminalChoice{Label: model, Value: model})
 		}
 		options = append(options, terminalChoice{Label: "Enter a custom model ID", Value: customModelChoice})
-		selected, err := prompt.selectOne("Remote model", models[0], options)
+		selected, err := prompt.chooseOne("Remote model", models[0], options)
 		if err != nil {
 			return "", err
 		}
@@ -982,7 +955,7 @@ func promptOllamaModel(prompt promptSession, current string, installed []string)
 		if defaultModel == "" {
 			defaultModel = options[0].tag
 		}
-		selected, err := prompt.selectOne("Ollama model", defaultModel, choices)
+		selected, err := prompt.chooseOne("Ollama model", defaultModel, choices)
 		if err != nil {
 			return "", err
 		}

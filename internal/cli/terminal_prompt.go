@@ -12,9 +12,66 @@ import (
 
 const accessiblePromptEnvironment = "COMPLYSCAN_ACCESSIBLE"
 
+const moreGuidanceChoiceValue = "\x00complyscan-more-guidance"
+
 type terminalChoice struct {
 	Label string
 	Value string
+}
+
+func (session promptSession) chooseOne(label, defaultValue string, choices []terminalChoice) (string, error) {
+	if session.selectOne == nil {
+		return "", fmt.Errorf("select %s: interactive selector is unavailable", strings.ToLower(label))
+	}
+	for {
+		visible := append([]terminalChoice(nil), choices...)
+		if session.hasQuestionGuidance() {
+			visible = append(visible, terminalChoice{Label: "ⓘ More guidance about this question", Value: moreGuidanceChoiceValue})
+		}
+		selected, err := session.selectOne(label, defaultValue, visible)
+		if err != nil {
+			return "", err
+		}
+		if selected == moreGuidanceChoiceValue {
+			if err := session.showQuestionGuidance(); err != nil {
+				return "", err
+			}
+			continue
+		}
+		session.clearQuestionGuidance()
+		return selected, nil
+	}
+}
+
+func (session promptSession) chooseMany(label string, defaults []string, choices []terminalChoice, exclusive []string) ([]string, error) {
+	if session.selectMany == nil {
+		return nil, fmt.Errorf("select %s: interactive multi-selector is unavailable", strings.ToLower(label))
+	}
+	for {
+		visible := append([]terminalChoice(nil), choices...)
+		if session.hasQuestionGuidance() {
+			visible = append(visible, terminalChoice{Label: "ⓘ More guidance about this question", Value: moreGuidanceChoiceValue})
+		}
+		selected, err := session.selectMany(label, defaults, visible, exclusive)
+		if err != nil {
+			return nil, err
+		}
+		showGuidance := false
+		for _, value := range selected {
+			if value == moreGuidanceChoiceValue {
+				showGuidance = true
+				break
+			}
+		}
+		if showGuidance {
+			if err := session.showQuestionGuidance(); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		session.clearQuestionGuidance()
+		return selected, nil
+	}
 }
 
 type setupStatusKind string

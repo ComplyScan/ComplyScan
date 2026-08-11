@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Guided setup now shows concise help automatically and offers a question-specific `More guidance` action inside each terminal choice; text and accessible prompts accept `?` to expand only the current explanation. The optional `--detailed-guidance` flag remains available for showing every explanation in full.
+
 ## 0.1.7 - 2026-08-11
 
 ### Changed

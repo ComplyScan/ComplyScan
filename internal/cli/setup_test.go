@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -151,7 +152,7 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 		"Select Lifecycle stage (1-5)",
 		"Operating regions numbers (comma-separated)",
 		"Select organisation role (1-4)",
-		"advisory — AI suggests or drafts",
+		"Enter ? at the next prompt for more guidance",
 		"remaining conditionally relevant facts",
 		"EU AI Act technical mapping is recommended",
 		"Local AI-assisted analysis — Ollama keeps context on this machine",
@@ -162,6 +163,9 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "comma-separated: eu-ai-act-technical-evidence") {
 		t.Errorf("guided setup exposed internal framework IDs:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "Setup guidance") || strings.Contains(stdout.String(), "guidance detail") {
+		t.Errorf("guided setup unexpectedly asked for a global guidance mode:\n%s", stdout.String())
 	}
 	ignored, err := os.ReadFile(filepath.Join(target, ".gitignore"))
 	if err != nil {
@@ -638,16 +642,26 @@ func TestEverySetupQuestionHasDeveloperGuidance(t *testing.T) {
 
 func TestSetupGuidanceCanProgressFromConciseToDetailed(t *testing.T) {
 	var conciseOutput bytes.Buffer
-	concisePrompt := promptSession{output: &conciseOutput, conciseHelp: true}
+	concisePrompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("?\nConfirmed purpose\n")),
+		output: &conciseOutput, guidance: &questionGuidance{},
+	}
 	if err := explainSetupQuestion(concisePrompt, "intended-purpose"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(conciseOutput.String(), setupQuestionHelp["intended-purpose"][0]) || strings.Contains(conciseOutput.String(), "Example:") {
+	if !strings.Contains(conciseOutput.String(), setupQuestionHelp["intended-purpose"][0]) || strings.Contains(conciseOutput.String(), "Example:") || !strings.Contains(conciseOutput.String(), "Enter ?") {
 		t.Fatalf("concise guidance did not preserve only the essential explanation:\n%s", conciseOutput.String())
+	}
+	value, err := concisePrompt.text("Intended purpose", "unknown")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != "Confirmed purpose" || !strings.Contains(conciseOutput.String(), "Example:") || !strings.Contains(conciseOutput.String(), "More guidance") {
+		t.Fatalf("question-specific guidance was not expanded before accepting the answer; value=%q:\n%s", value, conciseOutput.String())
 	}
 
 	var detailedOutput bytes.Buffer
-	detailedPrompt := promptSession{output: &detailedOutput}
+	detailedPrompt := promptSession{output: &detailedOutput, alwaysDetailed: true, guidance: &questionGuidance{}}
 	if err := explainSetupQuestion(detailedPrompt, "intended-purpose"); err != nil {
 		t.Fatal(err)
 	}
@@ -658,22 +672,108 @@ func TestSetupGuidanceCanProgressFromConciseToDetailed(t *testing.T) {
 	}
 }
 
-func TestConfigureSetupGuidanceUsesTerminalSelection(t *testing.T) {
+func TestTerminalQuestionCanSelectMoreGuidance(t *testing.T) {
 	var output bytes.Buffer
+	selections := 0
 	prompt := promptSession{
-		output: &output,
+		output: &output, guidance: &questionGuidance{},
 		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
-			if label != "guidance detail" || len(options) != 2 {
-				t.Fatalf("guidance selector label=%q options=%#v", label, options)
+			selections++
+			if label != "Lifecycle stage" || len(options) != 3 || options[2].Value != moreGuidanceChoiceValue {
+				t.Fatalf("question selector label=%q options=%#v", label, options)
+			}
+			if selections == 1 {
+				return moreGuidanceChoiceValue, nil
 			}
 			return options[0].Value, nil
 		},
 	}
-	if err := configureSetupGuidance(&prompt, false); err != nil {
+	if err := explainSetupQuestion(prompt, "lifecycle-stage"); err != nil {
 		t.Fatal(err)
 	}
-	if !prompt.conciseHelp || !strings.Contains(output.String(), "--detailed-guidance") {
-		t.Fatalf("concise guidance was not configured:\n%s", output.String())
+	selected, err := promptChoice(prompt, "Lifecycle stage", profile.LifecycleDevelopment, profile.LifecycleDevelopment, profile.LifecycleUnknown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected != profile.LifecycleDevelopment || selections != 2 || !strings.Contains(output.String(), "development — being designed or implemented") {
+		t.Fatalf("selected=%q selections=%d output:\n%s", selected, selections, output.String())
+	}
+}
+
+func TestTerminalMultiSelectCanOpenQuestionGuidance(t *testing.T) {
+	var output bytes.Buffer
+	selections := 0
+	prompt := promptSession{
+		output: &output, guidance: &questionGuidance{},
+		selectMany: func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error) {
+			selections++
+			if label != "Operating regions" || options[len(options)-1].Value != moreGuidanceChoiceValue {
+				t.Fatalf("multi-selector label=%q options=%#v", label, options)
+			}
+			if selections == 1 {
+				return []string{moreGuidanceChoiceValue}, nil
+			}
+			return []string{string(profile.RegionUnknown)}, nil
+		},
+	}
+	if err := explainSetupQuestion(prompt, "operating-regions"); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := promptChoices(prompt, "Operating regions", []profile.OperatingRegion{profile.RegionUnknown}, profile.RegionEU, profile.RegionUnknown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selected) != 1 || selected[0] != profile.RegionUnknown || selections != 2 || !strings.Contains(output.String(), "eu — one or more European Union countries") {
+		t.Fatalf("selected=%#v selections=%d output:\n%s", selected, selections, output.String())
+	}
+}
+
+func TestTerminalConfirmationCanOpenQuestionGuidance(t *testing.T) {
+	var output bytes.Buffer
+	selections := 0
+	prompt := promptSession{
+		output: &output, guidance: &questionGuidance{},
+		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
+			selections++
+			if label != "Install Ollama" || defaultValue != "Yes" || len(options) != 3 || options[2].Value != moreGuidanceChoiceValue {
+				t.Fatalf("confirmation selector label=%q default=%q options=%#v", label, defaultValue, options)
+			}
+			if selections == 1 {
+				return moreGuidanceChoiceValue, nil
+			}
+			return "No", nil
+		},
+	}
+	if err := explainSetupQuestion(prompt, "install-ollama"); err != nil {
+		t.Fatal(err)
+	}
+	confirmed, err := prompt.confirm("Install Ollama", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if confirmed || selections != 2 || !strings.Contains(output.String(), "Choose no to keep deterministic scanning") {
+		t.Fatalf("confirmed=%t selections=%d output:\n%s", confirmed, selections, output.String())
+	}
+}
+
+func TestTerminalTextQuestionAdvertisesQuestionGuidance(t *testing.T) {
+	var output bytes.Buffer
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("Product name\n")),
+		output: &output, guidance: &questionGuidance{},
+		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
+			return "", errors.New("not used by text prompts")
+		},
+	}
+	if err := explainSetupQuestion(prompt, "system-name"); err != nil {
+		t.Fatal(err)
+	}
+	value, err := prompt.text("System name", "unknown")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != "Product name" || !strings.Contains(output.String(), "Enter ? for more guidance about this question") {
+		t.Fatalf("value=%q output:\n%s", value, output.String())
 	}
 }
 
