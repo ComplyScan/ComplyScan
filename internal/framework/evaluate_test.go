@@ -354,4 +354,21 @@ func TestEvaluateMarksUnsupportedSourceObjectivesNotEvaluated(t *testing.T) {
 	if report.Objectives[0].Status != ObjectiveNotEvaluated || report.Summary.NotEvaluated != 1 {
 		t.Fatalf("unsupported source was treated as evaluated: %#v", report)
 	}
+	if len(report.Objectives[0].UnresolvedQuestions) != 1 || !strings.Contains(report.Objectives[0].UnresolvedQuestions[0], "worker.rb") {
+		t.Fatalf("unsupported relevant path was not identified: %#v", report.Objectives[0].UnresolvedQuestions)
+	}
+}
+
+func TestEvaluateDoesNotBlockObjectiveForUnrelatedUnsupportedSource(t *testing.T) {
+	pack := Pack{Objectives: []TechnicalObjective{{
+		ID: "source-control", FileKinds: []string{"source"},
+		PathKeywords: []string{"worker"}, KeywordGroups: [][]string{{"decision"}},
+	}}}
+	report := Evaluate(pack, nil, discovery.Repository{Files: []discovery.File{
+		{Path: "main.go", Kind: discovery.KindSource, Content: []byte("package main\nfunc main() {}\n")},
+		{Path: "install.sh", Kind: discovery.KindSource, Content: []byte("#!/bin/sh\necho installing\n")},
+	}})
+	if report.Objectives[0].Status != ObjectiveNotDetected || report.Summary.NotDetected != 1 {
+		t.Fatalf("unrelated unsupported source blocked objective evaluation: %#v", report)
+	}
 }

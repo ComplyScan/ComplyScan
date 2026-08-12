@@ -197,14 +197,39 @@ func evaluateObjectives(pack Pack, repository discovery.Repository, graph codegr
 			for matchIndex := range assessments[index].Matches {
 				addObjectiveContextQuestions(&assessments[index].Matches[matchIndex].Context, assessments[index].ID)
 			}
-		} else if graph.SourceFilesSeen > graph.FilesIndexed && containsString(pack.Objectives[index].FileKinds, string(discovery.KindSource)) {
+		} else if paths := unsupportedSourcesRelevantToObjective(repository, graph, pack.Objectives[index]); len(paths) > 0 {
 			assessments[index].Status = ObjectiveNotEvaluated
 			assessments[index].UnresolvedQuestions = []string{
-				"This objective was not fully evaluated because one or more source files could not be indexed by a supported language analyzer.",
+				"This objective was not fully evaluated because a potentially relevant source file could not be indexed by a supported language analyzer: " + strings.Join(paths, ", ") + ".",
 			}
 		}
 	}
 	return assessments
+}
+
+func unsupportedSourcesRelevantToObjective(repository discovery.Repository, graph codegraph.Graph, objective TechnicalObjective) []string {
+	if !containsString(objective.FileKinds, string(discovery.KindSource)) {
+		return nil
+	}
+	paths := make([]string, 0)
+	ignoreMarker := ignoreMarkerPrefix + ignoreMarkerSuffix
+	for _, file := range repository.Files {
+		if file.Kind != discovery.KindSource || graph.SupportsSourcePath(file.Path) {
+			continue
+		}
+		rawContent := string(file.Content)
+		content := normalizeSearchContent(rawContent)
+		if strings.Contains(content, ignoreMarker) {
+			continue
+		}
+		matched, _, line := matchesObjective(file.Path, content, objective)
+		if !matched || !candidatePassesStaticScope(objective.ControlID, file.Path, rawContent, line) {
+			continue
+		}
+		paths = append(paths, file.Path)
+	}
+	sort.Strings(paths)
+	return paths
 }
 
 func objectiveInvestigationTerms(objective TechnicalObjective) []string {
