@@ -997,19 +997,24 @@ func TestSetupStatusUsesSemanticTextFallback(t *testing.T) {
 	}
 }
 
-func TestReviewSetupBeforeSaveCanCancelWithoutWriting(t *testing.T) {
+func TestReviewSetupOffersOnlyFirstRunOutcomes(t *testing.T) {
 	cfg := config.Default()
+	cfg.AI.Provider = "ollama"
 	var output bytes.Buffer
 	prompt := promptSession{
 		reader: bufio.NewReader(strings.NewReader("")), output: &output, backAvailable: true,
 		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
-			if label != "Finish setup" || defaultValue != string(setupReviewRunQuick) {
+			if label != "Finish setup" || defaultValue != string(setupReviewRunDeep) {
 				t.Fatalf("selector label=%q default=%q", label, defaultValue)
 			}
 			if !containsTerminalChoice(options, backChoiceValue) {
 				t.Fatalf("finish menu has no back control: %#v", options)
 			}
-			return string(setupReviewCancel), nil
+			visible := visibleTerminalChoices(options)
+			if len(visible) != 3 || visible[0].Value != string(setupReviewRunQuick) || visible[1].Value != string(setupReviewRunDeep) || visible[2].Value != string(setupReviewSaveOnly) {
+				t.Fatalf("finish menu options = %#v", visible)
+			}
+			return string(setupReviewSaveOnly), nil
 		},
 	}
 	mode := setupScanNone
@@ -1018,8 +1023,8 @@ func TestReviewSetupBeforeSaveCanCancelWithoutWriting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if save {
-		t.Fatal("cancel action unexpectedly allowed configuration save")
+	if !save || mode != setupScanNone {
+		t.Fatalf("save=%t mode=%q", save, mode)
 	}
 }
 

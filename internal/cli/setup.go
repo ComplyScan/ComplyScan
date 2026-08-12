@@ -370,10 +370,6 @@ const (
 	setupReviewRunQuick setupReviewAction = "Save and run quick deterministic scan"
 	setupReviewRunDeep  setupReviewAction = "Save and run deep AI-assisted scan"
 	setupReviewSaveOnly setupReviewAction = "Save without scanning"
-	setupReviewAnalysis setupReviewAction = "Change analysis and privacy mode"
-	setupReviewMappings setupReviewAction = "Change technical mappings"
-	setupReviewProfile  setupReviewAction = "Edit detailed system profile"
-	setupReviewCancel   setupReviewAction = "Cancel without saving"
 )
 
 func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.Writer, target string, cfg *config.Config, options setupOptions, summary setupRepositorySummary, scanMode *setupScanMode, modelReady *bool) (bool, error) {
@@ -381,7 +377,7 @@ func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.
 		if err := writeSetupReviewSummary(prompt, *cfg, *modelReady); err != nil {
 			return false, err
 		}
-		actions := make([]setupReviewAction, 0, 7)
+		actions := make([]setupReviewAction, 0, 3)
 		defaultAction := setupReviewRunQuick
 		if options.skipScan {
 			actions = append(actions, setupReviewSaveOnly)
@@ -394,17 +390,35 @@ func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.
 			}
 			actions = append(actions, setupReviewSaveOnly)
 		}
-		actions = append(actions, setupReviewAnalysis, setupReviewMappings)
-		if options.advanced {
-			actions = append(actions, setupReviewProfile)
-		}
-		actions = append(actions, setupReviewCancel)
 		if err := explainSetupQuestion(prompt, "scan-mode"); err != nil {
 			return false, err
 		}
 		action, err := promptChoice(prompt, "Finish setup", defaultAction, actions...)
 		if errors.Is(err, errPromptBack) {
-			action, err = setupReviewMappings, nil
+			if err := prompt.sectionTitle("Technical mappings", true); err != nil {
+				return false, err
+			}
+			for {
+				err = configureFrameworkSelection(prompt, cfg, true, nil)
+				if !errors.Is(err, errPromptBack) {
+					break
+				}
+				if err := prompt.sectionTitle("Analysis and privacy mode", true); err != nil {
+					return false, err
+				}
+				*modelReady, err = configureSetupReview(ctx, prompt, stdout, cfg, true, setupReviewRevisitOptions(options))
+				if err != nil {
+					return false, err
+				}
+				if err := prompt.sectionTitle("Technical mappings", true); err != nil {
+					return false, err
+				}
+			}
+			if err != nil {
+				return false, err
+			}
+			applyFrameworksToSystems(cfg.Systems, cfg.Frameworks)
+			continue
 		}
 		if err != nil {
 			return false, err
@@ -422,40 +436,6 @@ func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.
 		case setupReviewSaveOnly:
 			*scanMode = setupScanNone
 			return true, nil
-		case setupReviewAnalysis:
-			if err := prompt.sectionTitle("Analysis and privacy mode", true); err != nil {
-				return false, err
-			}
-			*modelReady, err = configureSetupReview(ctx, prompt, stdout, cfg, true, setupReviewRevisitOptions(options))
-			if err != nil {
-				return false, err
-			}
-		case setupReviewMappings:
-			if err := prompt.sectionTitle("Technical mappings", true); err != nil {
-				return false, err
-			}
-			if err := configureFrameworkSelection(prompt, cfg, true, nil); errors.Is(err, errPromptBack) {
-				if err := prompt.sectionTitle("Analysis and privacy mode", true); err != nil {
-					return false, err
-				}
-				*modelReady, err = configureSetupReview(ctx, prompt, stdout, cfg, true, setupReviewRevisitOptions(options))
-				if err != nil {
-					return false, err
-				}
-				continue
-			} else if err != nil {
-				return false, err
-			}
-			applyFrameworksToSystems(cfg.Systems, cfg.Frameworks)
-		case setupReviewProfile:
-			if err := prompt.sectionTitle("Detailed system profile and evidence ownership", true); err != nil {
-				return false, err
-			}
-			if err := collectAdvancedSetupContext(prompt, target, cfg, summary, false); err != nil {
-				return false, err
-			}
-		case setupReviewCancel:
-			return false, nil
 		}
 	}
 }
