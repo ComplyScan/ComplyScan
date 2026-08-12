@@ -669,6 +669,70 @@ func TestBaselineAcceptsCurrentFindingsButNotNewOnes(t *testing.T) {
 	}
 }
 
+func TestScanGatesReviewedLikelyRequiredTechnicalGap(t *testing.T) {
+	target := t.TempDir()
+	cfg := config.Default()
+	cfg.AI.Provider = "none"
+	system := basicApplicabilityTestSystem()
+	system.UseCaseDomains = []profile.UseCaseDomain{profile.DomainEmployment}
+	system.AIActivities = []profile.AIActivity{profile.ActivityInference}
+	system.DeploymentModels = []profile.DeploymentModel{profile.DeploymentAPI}
+	system.Users = []string{"recruiters"}
+	system.AffectedGroups = []string{"job applicants"}
+	system.Data = profile.DataProfile{PersonalData: profile.TriNo, SpecialCategoryData: profile.TriNo, ChildrenData: profile.TriNo}
+	system.ProfileReview = profile.ProfileReview{Status: profile.ReviewConfirmed, ReviewedBy: "Product owner", ReviewedAt: "2026-08-12"}
+	cfg.Systems = []profile.System{system}
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--no-report", "--no-color", target}, &stdout, &stderr, testBuild); code != 1 {
+		t.Fatalf("exit code = %d, want 1; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "AI-CTRL-001") || !strings.Contains(stdout.String(), "Likely required technical control") {
+		t.Fatalf("technical gap was not reported:\n%s", stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := Execute([]string{"baseline", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("baseline exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := Execute([]string{"scan", "--no-report", "--no-color", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("baselined scan exit code = %d, want 0; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Suppressed:") || strings.Contains(stdout.String(), "AI-CTRL-001") {
+		t.Fatalf("technical gap baseline was not applied:\n%s", stdout.String())
+	}
+}
+
+func TestScanDoesNotGateDraftApplicabilityContext(t *testing.T) {
+	target := t.TempDir()
+	cfg := config.Default()
+	cfg.AI.Provider = "none"
+	system := basicApplicabilityTestSystem()
+	system.UseCaseDomains = []profile.UseCaseDomain{profile.DomainEmployment}
+	system.AIActivities = []profile.AIActivity{profile.ActivityInference}
+	system.DeploymentModels = []profile.DeploymentModel{profile.DeploymentAPI}
+	system.Users = []string{"recruiters"}
+	system.AffectedGroups = []string{"job applicants"}
+	system.Data = profile.DataProfile{PersonalData: profile.TriNo, SpecialCategoryData: profile.TriNo, ChildrenData: profile.TriNo}
+	cfg.Systems = []profile.System{system}
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--no-report", "--no-color", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if strings.Contains(stdout.String(), "AI-CTRL-001") {
+		t.Fatalf("draft profile produced a blocking gap:\n%s", stdout.String())
+	}
+}
+
 func TestVersionCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := Execute([]string{"version"}, &stdout, &stderr, testBuild); code != 0 {

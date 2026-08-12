@@ -16,6 +16,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/governance"
 	"github.com/ComplyScan/ComplyScan/internal/inventory"
+	"github.com/ComplyScan/ComplyScan/internal/policy"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
@@ -513,6 +514,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 			)
 			aiInventory := inventory.NewReport(target, build.Version, inventory.Analyze(result.FullRepository), result.Warnings)
 			reportValue.AIInventory = &aiInventory
+			gateFindings := append([]rules.Finding(nil), result.Findings...)
 			frameworkResults := make([]report.FrameworkResult, 0, len(cfg.Frameworks))
 			for _, packID := range cfg.Frameworks {
 				pack, loadErr := framework.LoadBuiltin(packID)
@@ -540,6 +542,27 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 				})
 			}
 			reportValue.Frameworks = frameworkResults
+			if cfg.RuleEnabled(policy.TechnicalGapRuleID) {
+				for _, frameworkResult := range frameworkResults {
+					for _, finding := range policy.TechnicalGapFindings(frameworkResult.ID, config.FileName, cfg.Systems, frameworkResult.Reconciliation) {
+						if cfg.FindingSuppressed(finding) || baselineLoaded && accepted.Contains(finding.Fingerprint) {
+							reportValue.Suppressed++
+							continue
+						}
+						gateFindings = append(gateFindings, finding)
+						if rules.SeverityRank(finding.Severity) < rules.SeverityRank(minimumSeverity) {
+							continue
+						}
+						reportValue.Findings = append(reportValue.Findings, finding)
+						if outputFormat == "terminal" {
+							if err := report.WriteTerminalFinding(stdout, finding, terminalOptions); err != nil {
+								return fmt.Errorf("write technical gap finding: %w", err)
+							}
+						}
+					}
+				}
+				reportValue.Summary = report.Summarize(reportValue.Findings)
+			}
 			verificationResults := []verification.Report{}
 			if len(verificationPlans) > 0 {
 				verificationPlans, err = validateVerificationPlans(verificationPlans, combinedFrameworkEvidence(frameworkResults), cfg.Systems)
@@ -725,7 +748,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 					}
 				}
 			}
-			if report.MeetsThreshold(result.Findings, cfg.FailOn) {
+			if report.MeetsThreshold(gateFindings, cfg.FailOn) {
 				return &exitError{code: 1}
 			}
 			return nil
@@ -1092,10 +1115,34 @@ func newBaselineCommand(stdout io.Writer) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("scan %q: %w", target, err)
 			}
-			if err := baseline.Write(resolvedDestination, result.Findings); err != nil {
+			allFindings := append([]rules.Finding(nil), result.Findings...)
+			if cfg.RuleEnabled(policy.TechnicalGapRuleID) {
+				aiInventory := inventory.NewReport(target, "", inventory.Analyze(result.FullRepository), result.Warnings)
+				for _, packID := range cfg.Frameworks {
+					pack, loadErr := framework.LoadBuiltin(packID)
+					if loadErr != nil {
+						return loadErr
+					}
+					evidence := framework.Evaluate(pack, cfg.Systems, result.FullRepository)
+					if err := reconciliation.ValidateCoverage(evidence); err != nil {
+						return err
+					}
+					assessment := profile.AssessmentReport{}
+					if pack.Coverage.Framework == profile.FrameworkEUAIAct {
+						assessment = profile.AssessEUAIAct(cfg.Systems)
+					}
+					mapping := reconciliation.Build(cfg.Systems, assessment, evidence, aiInventory, cfg.Ownership)
+					for _, finding := range policy.TechnicalGapFindings(pack.Coverage.Framework, config.FileName, cfg.Systems, mapping) {
+						if !cfg.FindingSuppressed(finding) {
+							allFindings = append(allFindings, finding)
+						}
+					}
+				}
+			}
+			if err := baseline.Write(resolvedDestination, allFindings); err != nil {
 				return err
 			}
-			_, err = fmt.Fprintf(stdout, "Wrote %d current findings to %s\n", len(result.Findings), resolvedDestination)
+			_, err = fmt.Fprintf(stdout, "Wrote %d current findings and confirmed technical gaps to %s\n", len(allFindings), resolvedDestination)
 			return err
 		},
 	}
