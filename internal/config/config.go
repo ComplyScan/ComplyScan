@@ -27,6 +27,7 @@ var supportedRules = []string{
 	"AI-SEC-001",
 	"AI-DOC-001",
 	"AI-RISK-001",
+	"AI-CTRL-001",
 }
 
 type Config struct {
