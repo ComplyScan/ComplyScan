@@ -10,14 +10,17 @@ type setupPromptStep func(promptSession) error
 func runSetupPromptSteps(prompt promptSession, allowReturn bool, steps ...setupPromptStep) error {
 	for current := 0; current < len(steps); {
 		stepPrompt := prompt
-		stepPrompt.backAvailable = current > 0 || allowReturn
+		stepPrompt.backAvailable = true
 		if stepPrompt.questions != nil {
 			stepPrompt.questions.current = current
 		}
 		err := steps[current](stepPrompt)
 		if errors.Is(err, errPromptBack) {
 			if current == 0 {
-				return errPromptBack
+				if allowReturn {
+					return errPromptBack
+				}
+				continue
 			}
 			current--
 			continue

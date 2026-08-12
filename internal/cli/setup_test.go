@@ -85,6 +85,26 @@ func TestRunSetupPromptStepsReturnsAndPreservesEarlierAnswers(t *testing.T) {
 	}
 }
 
+func TestRunSetupPromptStepsAlwaysEnablesBackNavigation(t *testing.T) {
+	calls := 0
+	err := runSetupPromptSteps(promptSession{}, false, func(step promptSession) error {
+		calls++
+		if !step.backAvailable {
+			t.Fatal("back navigation was not enabled on the first question")
+		}
+		if calls == 1 {
+			return errPromptBack
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("first question calls = %d, want 2", calls)
+	}
+}
+
 func TestBackControlsAreAddedOnlyWhenNavigationIsAvailable(t *testing.T) {
 	var selectedOptions []terminalChoice
 	prompt := promptSession{
@@ -694,10 +714,13 @@ func TestConfigureFrameworkSelectionDoesNotPreselectSavedMappings(t *testing.T) 
 	cfg := config.Default()
 	cfg.Frameworks = []string{framework.EUAIActTechnicalEvidencePackID, framework.NISTAIRMFTechnicalEvidencePackID}
 	prompt := promptSession{
-		output: io.Discard,
+		output: io.Discard, backAvailable: true,
 		selectMany: func(_ string, defaults []string, options []terminalChoice, _ []string) ([]string, error) {
 			if len(defaults) != 0 {
 				t.Fatalf("saved mappings were preselected: %#v", defaults)
+			}
+			if !containsTerminalChoice(options, backChoiceValue) {
+				t.Fatalf("framework picker has no back control: %#v", options)
 			}
 			return []string{options[1].Value}, nil
 		},
@@ -978,10 +1001,13 @@ func TestReviewSetupBeforeSaveCanCancelWithoutWriting(t *testing.T) {
 	cfg := config.Default()
 	var output bytes.Buffer
 	prompt := promptSession{
-		reader: bufio.NewReader(strings.NewReader("")), output: &output,
+		reader: bufio.NewReader(strings.NewReader("")), output: &output, backAvailable: true,
 		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
 			if label != "Finish setup" || defaultValue != string(setupReviewRunQuick) {
 				t.Fatalf("selector label=%q default=%q", label, defaultValue)
+			}
+			if !containsTerminalChoice(options, backChoiceValue) {
+				t.Fatalf("finish menu has no back control: %#v", options)
 			}
 			return string(setupReviewCancel), nil
 		},

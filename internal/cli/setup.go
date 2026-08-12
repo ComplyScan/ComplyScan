@@ -119,6 +119,9 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	}
 
 	prompt := newPromptSession(cmd.InOrStdin(), stdout)
+	if interactive {
+		prompt.backAvailable = true
+	}
 	if err := prompt.sectionTitle("ComplyScan setup", false); err != nil {
 		return err
 	}
@@ -144,9 +147,15 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 			if loadErr != nil {
 				_ = prompt.status(setupStatusReview, "The previous setup draft could not be used; recovery will retry at the next checkpoint: "+loadErr.Error())
 			} else if found {
-				resume, resumeErr := promptSetupDraftResume(prompt, stored)
-				if resumeErr != nil {
-					return resumeErr
+				resume := false
+				for {
+					resume, err = promptSetupDraftResume(prompt, stored)
+					if !errors.Is(err, errPromptBack) {
+						break
+					}
+				}
+				if err != nil {
+					return err
 				}
 				if resume {
 					cfg = stored.Config
@@ -202,8 +211,26 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 			if err := prompt.status(setupStatusReady, "Resumed the saved technical mappings and repository profile."); err != nil {
 				return err
 			}
-		} else if err := configureFrameworkSelection(prompt, &cfg, true, options.frameworks); err != nil {
-			return err
+		} else {
+			for {
+				err = configureFrameworkSelection(prompt, &cfg, true, options.frameworks)
+				if !errors.Is(err, errPromptBack) {
+					if err != nil {
+						return err
+					}
+					break
+				}
+				if err := setupStepTitle(prompt, 2, totalSteps, "Analysis, privacy, and model", true); err != nil {
+					return err
+				}
+				modelReady, err = configureSetupReview(cmd.Context(), prompt, stdout, &cfg, true, setupReviewRevisitOptions(options))
+				if err != nil {
+					return err
+				}
+				if err := setupStepTitle(prompt, 3, totalSteps, "Technical mappings", true); err != nil {
+					return err
+				}
+			}
 		}
 		if setupDraftStageRank(resumeStage) < setupDraftStageRank(setupDraftContext) {
 			if options.advanced {
@@ -376,6 +403,9 @@ func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.
 			return false, err
 		}
 		action, err := promptChoice(prompt, "Finish setup", defaultAction, actions...)
+		if errors.Is(err, errPromptBack) {
+			action, err = setupReviewMappings, nil
+		}
 		if err != nil {
 			return false, err
 		}
@@ -393,20 +423,10 @@ func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.
 			*scanMode = setupScanNone
 			return true, nil
 		case setupReviewAnalysis:
-			revisit := options
-			revisit.reviewProvider = ""
-			revisit.ollamaModel = ""
-			revisit.remoteModel = ""
-			revisit.remoteAPIKeyEnv = ""
-			revisit.remoteProviderName = ""
-			revisit.remoteBaseURL = ""
-			revisit.allowRemoteReview = false
-			revisit.pullModel = false
-			revisit.qualifyModel = false
 			if err := prompt.sectionTitle("Analysis and privacy mode", true); err != nil {
 				return false, err
 			}
-			*modelReady, err = configureSetupReview(ctx, prompt, stdout, cfg, true, revisit)
+			*modelReady, err = configureSetupReview(ctx, prompt, stdout, cfg, true, setupReviewRevisitOptions(options))
 			if err != nil {
 				return false, err
 			}
@@ -414,7 +434,16 @@ func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.
 			if err := prompt.sectionTitle("Technical mappings", true); err != nil {
 				return false, err
 			}
-			if err := configureFrameworkSelection(prompt, cfg, true, nil); err != nil {
+			if err := configureFrameworkSelection(prompt, cfg, true, nil); errors.Is(err, errPromptBack) {
+				if err := prompt.sectionTitle("Analysis and privacy mode", true); err != nil {
+					return false, err
+				}
+				*modelReady, err = configureSetupReview(ctx, prompt, stdout, cfg, true, setupReviewRevisitOptions(options))
+				if err != nil {
+					return false, err
+				}
+				continue
+			} else if err != nil {
 				return false, err
 			}
 			applyFrameworksToSystems(cfg.Systems, cfg.Frameworks)
@@ -429,6 +458,19 @@ func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.
 			return false, nil
 		}
 	}
+}
+
+func setupReviewRevisitOptions(options setupOptions) setupOptions {
+	options.reviewProvider = ""
+	options.ollamaModel = ""
+	options.remoteModel = ""
+	options.remoteAPIKeyEnv = ""
+	options.remoteProviderName = ""
+	options.remoteBaseURL = ""
+	options.allowRemoteReview = false
+	options.pullModel = false
+	options.qualifyModel = false
+	return options
 }
 
 func writeSetupReviewSummary(prompt promptSession, cfg config.Config, modelReady bool) error {
