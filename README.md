@@ -137,6 +137,7 @@ Reports saved:
 | `AI-SEC-001` | High | Detect likely hardcoded AI API credentials and report only redacted evidence. |
 | `AI-DOC-001` | Medium | When AI usage is detected, check for a model card or AI-system documentation. |
 | `AI-RISK-001` | Medium | When AI usage is detected, check for repository-level AI risk-classification evidence. |
+| `AI-CTRL-001` | High | For a human-reviewed system profile, flag a likely-required technical objective when no configured implementation evidence is detected. |
 
 Provider detection requires typed evidence: a recognised dependency declaration, source import, service endpoint, or environment-variable access. Plain provider names and documentation prose are not treated as runtime usage. The maintained labelled corpus measures precision and recall across positive and hard-negative examples.
 
@@ -189,7 +190,7 @@ Investigation conclusions distinguish `technically-substantiated`, `partially-su
 
 The default failure threshold is `high`. `--severity` filters report output; it does not change `fail-on`.
 
-Technical-objective results do not change the process exit code. `framework assess` exits `0` after a valid technical scan even when evidence is not detected, and exits `2` for invalid configuration, pack, or discovery failures. A future dashboard policy gate must remain separate from evidence matching.
+Most technical-objective results remain advisory and do not change the process exit code. One conservative policy bridge is enforced: `AI-CTRL-001` is emitted only when a named human has reviewed the factual system profile, reconciliation maps an EU technical objective as likely required, and the bounded scan detects no configured implementation evidence. Draft profiles, unresolved applicability, voluntary NIST recommendations, candidate evidence, and every model observation remain non-blocking. This is a technical gap—not a legal breach determination. `framework assess` remains an evidence-only command and exits `0` after a valid assessment even when evidence is not detected.
 
 ## Configuration
 
@@ -226,6 +227,8 @@ rules:
   AI-DOC-001:
     enabled: true
   AI-RISK-001:
+    enabled: true
+  AI-CTRL-001:
     enabled: true
 
 ai:
@@ -288,7 +291,7 @@ Discovery is bounded to 25,000 text files and 100 MiB of text by default. Termin
 
 Every finding has a stable SHA-256 fingerprint in structured output. Reviewed findings can be suppressed by `rule`, a Git-style `path` pattern, an exact `fingerprint`, or a combination. Every suppression requires a `reason`; suppressed findings are excluded from output and exit-code evaluation, and their count remains visible in the report summary.
 
-For an existing repository, `complyscan baseline .` records the current findings in `.complyscan-baseline.json` without storing source evidence. Commit that deterministic file and future scans will report only findings whose fingerprints are new. Use `--baseline path/to/file` to select another baseline for a scan or `--no-baseline` to inspect every finding.
+For an existing repository, `complyscan baseline .` records the current deterministic findings and confirmed technical gaps in `.complyscan-baseline.json` without storing source evidence. Commit that deterministic file and future scans will report and gate only fingerprints that are new. A baseline accepts known work; it does not resolve it or establish compliance. Use `--baseline path/to/file` to select another baseline for a scan or `--no-baseline` to inspect every finding.
 
 ## Optional model review
 
