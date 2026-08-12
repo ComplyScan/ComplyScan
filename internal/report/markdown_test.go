@@ -16,7 +16,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
 
-func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
+func TestWriteDetailedMarkdownRendersScannerEvidenceTrace(t *testing.T) {
 	pack, err := framework.LoadBuiltin(framework.EUAIActTechnicalEvidencePackID)
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
 		}},
 	}
 	var output bytes.Buffer
-	if err := WriteMarkdown(&output, value); err != nil {
+	if err := WriteDetailedMarkdown(&output, value); err != nil {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
@@ -68,7 +68,7 @@ func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
 		"AI review: **Performed — advisory AI evidence review included**",
 		"Legal applicability: **Not assessed by this technical report**",
 		"## AI-related components",
-		"Integration code was detected; active production use is not confirmed.",
+		"Runtime-source integrations: **1** — OpenAI",
 		"## Technical checklist",
 		"| Article 14 | Human override or intervention mechanism | **Candidate evidence** |",
 		"## Recommended next actions",
@@ -120,12 +120,15 @@ func TestWriteMarkdownExplainsTestOnlyComponentsAndQuickScan(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"AI review: **Not performed — quick technical scan**",
-		"| OpenAI | tests | Only test-related references were detected.",
-		"Confirm whether equivalent production integration exists.",
+		"Test-only references: **1** — OpenAI",
+		"Runtime-source integration code is not proof",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
 		}
+	}
+	if strings.Contains(output.String(), "Detailed scanner evidence") || strings.Count(output.String(), "\n") > 80 {
+		t.Fatalf("concise Markdown included scanner trace or became too long:\n%s", output.String())
 	}
 }
 
@@ -146,7 +149,7 @@ func TestMarkdownShowsApplicabilityReadinessAndUnresolvedFacts(t *testing.T) {
 		Applicability: &assessment,
 	}}
 	var output bytes.Buffer
-	if err := WriteMarkdown(&output, value); err != nil {
+	if err := WriteDetailedMarkdown(&output, value); err != nil {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{"technical mapping readiness **incomplete**", "Unresolved fact: Operating regions have not been established"} {

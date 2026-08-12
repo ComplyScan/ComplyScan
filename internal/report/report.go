@@ -356,7 +356,7 @@ func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
 			return err
 		}
 	}
-	_, err := fmt.Fprintln(w, "Use --verbose for full terminal evidence; the saved Markdown report contains the reviewable detail.")
+	_, err := fmt.Fprintln(w, "Use --verbose for full terminal evidence; latest.md is concise and latest.json preserves the complete evidence bundle.")
 	return err
 }
 

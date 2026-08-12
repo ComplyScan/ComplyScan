@@ -11,8 +11,60 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
 )
 
-// WriteMarkdown renders the same scan result as a human-readable local report.
+// WriteMarkdown renders a concise, human-readable decision report. Exhaustive
+// scanner data remains available in the JSON evidence bundle.
 func WriteMarkdown(writer io.Writer, report Report) error {
+	if _, err := fmt.Fprintln(writer, "# ComplyScan report"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(writer, "\n> This report identifies technical signals in the repository. It does not determine legal compliance or prove that a control works in production."); err != nil {
+		return err
+	}
+	if err := writeReportOverviewMarkdown(writer, report); err != nil {
+		return err
+	}
+	if report.AIInventory != nil {
+		if err := writeAIComponentSummaryMarkdown(writer, *report.AIInventory); err != nil {
+			return err
+		}
+	}
+	if err := writeTechnicalChecklistMarkdown(writer, report); err != nil {
+		return err
+	}
+	if err := writeModelReviewSummaryMarkdown(writer, report); err != nil {
+		return err
+	}
+	if err := writeRecommendedActionsMarkdown(writer, report); err != nil {
+		return err
+	}
+	if err := writeCompactVerificationMarkdown(writer, report); err != nil {
+		return err
+	}
+	if len(report.Warnings) > 0 {
+		if _, err := fmt.Fprintln(writer, "\n## Scan warnings"); err != nil {
+			return err
+		}
+		for _, warning := range report.Warnings {
+			if _, err := fmt.Fprintf(writer, "\n- %s", markdownText(warning)); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintln(writer); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(writer, "\n## About this scan\n\n- Scan ID: %s\n- Created: %s\n- Tool: ComplyScan %s\n- Full machine-readable evidence: %s in this report directory\n",
+		inlineCode(report.Scan.ID), inlineCode(report.Scan.CreatedAt), markdownText(report.Tool.Version), inlineCode("latest.json")); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintln(writer, "\n---\n\nCandidate evidence requires technical and human verification. No evidence detected is a bounded search result, not proof that an implementation is absent.")
+	return err
+}
+
+// WriteDetailedMarkdown retains the exhaustive human-readable scanner trace
+// for diagnostics and backwards-compatible programmatic use. It is not the
+// default latest.md artifact.
+func WriteDetailedMarkdown(writer io.Writer, report Report) error {
 	if _, err := fmt.Fprintln(writer, "# ComplyScan report"); err != nil {
 		return err
 	}
@@ -276,16 +328,47 @@ func writeAIComponentSummaryMarkdown(writer io.Writer, value inventory.Report) e
 		_, err := fmt.Fprintln(writer, "\nNo configured AI provider or framework signal was detected in the bounded scan.")
 		return err
 	}
-	if _, err := fmt.Fprintln(writer, "\n| Component | Detected context | What this means | Next action |\n|---|---|---|---|"); err != nil {
-		return err
-	}
+	runtimeComponents := make([]string, 0)
+	configuredComponents := make([]string, 0)
+	testOnlyComponents := make([]string, 0)
+	otherComponents := make([]string, 0)
 	for _, component := range value.Components {
-		context, meaning, action := describeComponent(component)
-		if _, err := fmt.Fprintf(writer, "| %s | %s | %s | %s |\n", markdownTableText(component.Name), markdownTableText(context), markdownTableText(meaning), markdownTableText(action)); err != nil {
-			return err
+		hasRuntime := containsInventoryScope(component.Scopes, inventory.ScopeRuntime)
+		hasConfig := containsInventoryScope(component.Scopes, inventory.ScopeConfig)
+		hasTest := containsInventoryScope(component.Scopes, inventory.ScopeTest)
+		if hasRuntime {
+			runtimeComponents = append(runtimeComponents, component.Name)
+		}
+		if hasConfig {
+			configuredComponents = append(configuredComponents, component.Name)
+		}
+		if hasTest && !hasRuntime && !hasConfig {
+			testOnlyComponents = append(testOnlyComponents, component.Name)
+		}
+		if !hasRuntime && !hasConfig && !hasTest {
+			otherComponents = append(otherComponents, component.Name)
 		}
 	}
-	_, err := fmt.Fprintln(writer, "\nA runtime-source signal means integration code exists. Static analysis cannot establish whether that code is enabled or used in a deployed environment.")
+	writeGroup := func(label string, names []string) error {
+		if len(names) == 0 {
+			return nil
+		}
+		_, err := fmt.Fprintf(writer, "\n- %s: **%d** — %s", label, len(names), markdownText(strings.Join(names, ", ")))
+		return err
+	}
+	if err := writeGroup("Runtime-source integrations", runtimeComponents); err != nil {
+		return err
+	}
+	if err := writeGroup("Configuration references", configuredComponents); err != nil {
+		return err
+	}
+	if err := writeGroup("Test-only references", testOnlyComponents); err != nil {
+		return err
+	}
+	if err := writeGroup("Other repository references", otherComponents); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintln(writer, "\n\nRuntime-source integration code is not proof that a provider is enabled or processes production data. Confirm actual deployment and data flows.")
 	return err
 }
 
@@ -313,15 +396,124 @@ func writeTechnicalChecklistMarkdown(writer io.Writer, report Report) error {
 	return nil
 }
 
-func writeOneTechnicalChecklistMarkdown(writer io.Writer, name string, evidence framework.TechnicalEvidenceReport) error {
-	if _, err := fmt.Fprintf(writer, "\n### %s\n\n| Source | Technical objective | Result | What ComplyScan found | Next action |\n|---|---|---|---|---|\n", markdownText(name)); err != nil {
+func writeModelReviewSummaryMarkdown(writer io.Writer, report Report) error {
+	type row struct {
+		target, conclusion, confidence, summary string
+	}
+	rows := make([]row, 0)
+	models := make([]string, 0)
+	if report.Review != nil {
+		models = append(models, string(report.Review.Provider)+" / "+report.Review.Model)
+		for _, observation := range report.Review.Observations {
+			rows = append(rows, row{
+				target: observation.RuleID, conclusion: string(observation.Verdict), confidence: observation.Confidence,
+				summary: compactMarkdownText(observation.Rationale, 240),
+			})
+		}
+	}
+	appendTechnical := func(review providers.TechnicalReviewResult) {
+		models = append(models, string(review.Provider)+" / "+review.Model)
+		for _, observation := range review.Observations {
+			rows = append(rows, row{
+				target: observation.ObjectiveID, conclusion: string(observation.Conclusion), confidence: observation.Confidence,
+				summary: compactMarkdownText(observation.Rationale, 240),
+			})
+		}
+	}
+	if len(report.Frameworks) > 0 {
+		for _, result := range report.Frameworks {
+			if result.TechnicalReview != nil {
+				appendTechnical(*result.TechnicalReview)
+			}
+		}
+	} else if report.TechnicalReview != nil {
+		appendTechnical(*report.TechnicalReview)
+	}
+	if len(models) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintf(writer, "\n## AI advisory review\n\n- Reviewer: %s\n- Boundary: advisory repository analysis; runtime verification and legal review remain separate\n", markdownText(strings.Join(models, ", "))); err != nil {
 		return err
 	}
+	if len(rows) == 0 {
+		_, err := fmt.Fprintln(writer, "\nThe model returned no review observations.")
+		return err
+	}
+	if _, err := fmt.Fprintln(writer, "\n| Target | Conclusion | Confidence | Summary |\n|---|---|---|---|"); err != nil {
+		return err
+	}
+	for _, value := range rows {
+		if _, err := fmt.Fprintf(writer, "| %s | %s | %s | %s |\n", markdownTableText(value.target), markdownTableText(value.conclusion), markdownTableText(value.confidence), markdownTableText(value.summary)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeCompactVerificationMarkdown(writer io.Writer, report Report) error {
+	if len(report.ExecutionVerifications) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintln(writer, "\n## Isolated execution verification\n\n| Recipe | Result | Declared objectives | Boundary |\n|---|---|---|---|"); err != nil {
+		return err
+	}
+	for _, verification := range report.ExecutionVerifications {
+		if _, err := fmt.Fprintf(writer, "| %s | %s | %s | %s |\n",
+			markdownTableText(verification.RecipeID), markdownTableText(string(verification.Status)),
+			markdownTableText(strings.Join(verification.Objectives, ", ")), markdownTableText(compactMarkdownText(verification.Boundary, 200))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func compactMarkdownText(value string, limit int) string {
+	runes := []rune(strings.TrimSpace(value))
+	if len(runes) <= limit {
+		return string(runes)
+	}
+	return strings.TrimSpace(string(runes[:limit-1])) + "…"
+}
+
+func writeOneTechnicalChecklistMarkdown(writer io.Writer, name string, evidence framework.TechnicalEvidenceReport) error {
+	if _, err := fmt.Fprintf(writer, "\n### %s\n", markdownText(name)); err != nil {
+		return err
+	}
+	actionable := make([]framework.ObjectiveAssessment, 0)
+	notDetectedBySource := make(map[string][]string)
+	sourceOrder := make([]string, 0)
 	for _, objective := range evidence.Objectives {
-		result, found, action := describeObjective(objective)
-		if _, err := fmt.Fprintf(writer, "| %s | %s | **%s** | %s | %s |\n",
-			markdownTableText(objective.SourceReference), markdownTableText(objective.Title), markdownTableText(result),
-			markdownTableText(found), markdownTableText(action)); err != nil {
+		if objective.Status != framework.ObjectiveNotDetected {
+			actionable = append(actionable, objective)
+			continue
+		}
+		if _, exists := notDetectedBySource[objective.SourceReference]; !exists {
+			sourceOrder = append(sourceOrder, objective.SourceReference)
+		}
+		notDetectedBySource[objective.SourceReference] = append(notDetectedBySource[objective.SourceReference], objective.Title)
+	}
+	if len(actionable) > 0 {
+		if _, err := fmt.Fprintln(writer, "\n| Source | Objective requiring review | Result | Evidence |\n|---|---|---|---|"); err != nil {
+			return err
+		}
+		for _, objective := range actionable {
+			result, found, _ := describeObjective(objective)
+			if _, err := fmt.Fprintf(writer, "| %s | %s | **%s** | %s |\n",
+				markdownTableText(objective.SourceReference), markdownTableText(objective.Title), markdownTableText(result), markdownTableText(found)); err != nil {
+				return err
+			}
+		}
+	}
+	if len(sourceOrder) > 0 {
+		if _, err := fmt.Fprintf(writer, "\n**No evidence detected for %d objective(s):**\n", evidence.Summary.NotDetected); err != nil {
+			return err
+		}
+		for _, source := range sourceOrder {
+			if _, err := fmt.Fprintf(writer, "\n- **%s:** %s", markdownText(source), markdownText(strings.Join(notDetectedBySource[source], "; "))); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintln(writer, "\n\nFirst decide which objectives are relevant. A missing signal does not prove that a control is absent."); err != nil {
 			return err
 		}
 	}
@@ -397,36 +589,6 @@ func hasModelReview(report Report) bool {
 		}
 	}
 	return false
-}
-
-func describeComponent(component inventory.Component) (string, string, string) {
-	hasRuntime := containsInventoryScope(component.Scopes, inventory.ScopeRuntime)
-	hasTest := containsInventoryScope(component.Scopes, inventory.ScopeTest)
-	hasConfig := containsInventoryScope(component.Scopes, inventory.ScopeConfig)
-	contexts := make([]string, 0, 3)
-	if hasRuntime {
-		contexts = append(contexts, "runtime source")
-	}
-	if hasConfig {
-		contexts = append(contexts, "configuration")
-	}
-	if hasTest {
-		contexts = append(contexts, "tests")
-	}
-	context := strings.Join(contexts, ", ")
-	if context == "" {
-		context = "repository reference"
-	}
-	switch {
-	case hasRuntime:
-		return context, "Integration code was detected; active production use is not confirmed.", "Confirm whether it is enabled and processes production data."
-	case hasConfig:
-		return context, "Configuration was detected; active runtime use is not confirmed.", "Confirm whether this configuration is deployed."
-	case hasTest:
-		return context, "Only test-related references were detected.", "Confirm whether equivalent production integration exists."
-	default:
-		return context, "A technical reference was detected; its operational role is unknown.", "Review the detailed locations and classify its use."
-	}
 }
 
 func containsInventoryScope(scopes []inventory.Scope, wanted inventory.Scope) bool {
