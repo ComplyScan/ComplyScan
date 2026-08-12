@@ -195,6 +195,8 @@ func runTerminalSelect(input io.Reader, output io.Writer, label, defaultValue st
 		options = append(options, huh.NewOption(choice.Label, choice.Value))
 	}
 	selected := defaultValue
+	required := defaultValue == requiredAnswerChoiceValue
+	interaction := newRequiredSelectInteraction(required)
 	guidance := terminalChoiceGuidance(choices)
 	instructions := "Use ↑/↓ to move and Enter to confirm."
 	allowBack := containsTerminalChoice(choices, backChoiceValue)
@@ -212,13 +214,13 @@ func runTerminalSelect(input io.Reader, output io.Writer, label, defaultValue st
 			if value == moreGuidanceChoiceValue {
 				return errors.New("read the explanation, then choose an answer in this menu")
 			}
-			if value == requiredAnswerChoiceValue {
+			if value == requiredAnswerChoiceValue || required && !interaction.interacted {
 				return errors.New("choose an answer; no option is selected automatically")
 			}
 			return nil
 		})
 	form := huh.NewForm(huh.NewGroup(field)).WithInput(input).WithOutput(output)
-	if err := runTerminalForm(form, input, output, allowBack); err != nil {
+	if err := runTerminalForm(form, input, output, allowBack, interaction.Handle); err != nil {
 		return "", fmt.Errorf("select %s: %w", strings.ToLower(label), err)
 	}
 	return selected, nil
@@ -365,6 +367,43 @@ type multiSelectGuidanceTracker struct {
 	guidanceIndex int
 	highlighted   *bool
 	filtering     bool
+	disabled      bool
+}
+
+type requiredSelectInteraction struct {
+	required   bool
+	interacted bool
+	filtering  bool
+}
+
+func newRequiredSelectInteraction(required bool) *requiredSelectInteraction {
+	return &requiredSelectInteraction{required: required}
+}
+
+func (tracker *requiredSelectInteraction) Handle(message tea.KeyMsg) bool {
+	if !tracker.required {
+		return false
+	}
+	value := message.String()
+	if tracker.filtering {
+		if value == "esc" || value == "enter" {
+			tracker.filtering = false
+			return false
+		}
+		if message.Type == tea.KeyRunes || value == "backspace" || value == "delete" {
+			tracker.interacted = true
+		}
+		return false
+	}
+	if value == "/" {
+		tracker.filtering = true
+		return false
+	}
+	switch value {
+	case "up", "k", "ctrl+p", "down", "j", "ctrl+n", "right", "l", "home", "g", "end", "G", "ctrl+u", "ctrl+d":
+		tracker.interacted = true
+	}
+	return false
 }
 
 func newMultiSelectGuidanceTracker(total, guidanceIndex int, highlighted *bool) *multiSelectGuidanceTracker {
@@ -376,13 +415,20 @@ func (tracker *multiSelectGuidanceTracker) Handle(message tea.KeyMsg) bool {
 	if tracker.filtering {
 		if value == "esc" || value == "enter" {
 			tracker.filtering = false
-			tracker.cursor = 0
+			// Huh filters its private option list and cursor. Once filtering has
+			// occurred, avoid guessing that cursor position and showing guidance
+			// for a row that is not actually highlighted.
+			tracker.disabled = true
 		}
 		tracker.setHighlighted(false)
 		return false
 	}
 	if value == "/" {
 		tracker.filtering = true
+		tracker.setHighlighted(false)
+		return false
+	}
+	if tracker.disabled {
 		tracker.setHighlighted(false)
 		return false
 	}
@@ -410,7 +456,7 @@ func (tracker *multiSelectGuidanceTracker) move(offset int) {
 	if tracker.total <= 0 {
 		return
 	}
-	tracker.cursor = (tracker.cursor + offset + tracker.total) % tracker.total
+	tracker.cursor = min(max(tracker.cursor+offset, 0), tracker.total-1)
 }
 
 func (tracker *multiSelectGuidanceTracker) setHighlighted(value bool) {

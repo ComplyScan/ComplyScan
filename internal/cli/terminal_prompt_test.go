@@ -116,16 +116,36 @@ func TestMultiSelectGuidanceExpandsOnHighlight(t *testing.T) {
 	}
 }
 
-func TestMultiSelectGuidanceTrackerWrapsWithArrowNavigation(t *testing.T) {
+func TestMultiSelectGuidanceTrackerMatchesClampedArrowNavigation(t *testing.T) {
 	highlighted := false
 	tracker := newMultiSelectGuidanceTracker(4, 3, &highlighted)
 	tracker.Handle(tea.KeyMsg{Type: tea.KeyUp})
+	if highlighted || tracker.cursor != 0 {
+		t.Fatalf("top-boundary cursor=%d highlighted=%t", tracker.cursor, highlighted)
+	}
+	for range 3 {
+		tracker.Handle(tea.KeyMsg{Type: tea.KeyDown})
+	}
 	if !highlighted || tracker.cursor != 3 {
-		t.Fatalf("wrapped cursor=%d highlighted=%t", tracker.cursor, highlighted)
+		t.Fatalf("guidance cursor=%d highlighted=%t", tracker.cursor, highlighted)
 	}
 	tracker.Handle(tea.KeyMsg{Type: tea.KeyDown})
-	if highlighted || tracker.cursor != 0 {
-		t.Fatalf("returned cursor=%d highlighted=%t", tracker.cursor, highlighted)
+	if !highlighted || tracker.cursor != 3 {
+		t.Fatalf("bottom-boundary cursor=%d highlighted=%t", tracker.cursor, highlighted)
+	}
+}
+
+func TestMultiSelectGuidanceDoesNotGuessCursorAfterFiltering(t *testing.T) {
+	highlighted := false
+	tracker := newMultiSelectGuidanceTracker(4, 3, &highlighted)
+	tracker.Handle(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	tracker.Handle(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	tracker.Handle(tea.KeyMsg{Type: tea.KeyEnter})
+	for range 3 {
+		tracker.Handle(tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if highlighted {
+		t.Fatal("guidance expanded from a guessed cursor after filtering")
 	}
 }
 
@@ -205,6 +225,31 @@ func TestRunTerminalFormReturnsAfterEnter(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("navigable form did not exit after Enter")
+	}
+}
+
+func TestRequiredTerminalSelectRejectsUntouchedFirstChoice(t *testing.T) {
+	done := make(chan struct {
+		value string
+		err   error
+	}, 1)
+	go func() {
+		value, err := runTerminalSelect(strings.NewReader("\r\x1b[B\r"), io.Discard, "Lifecycle stage", requiredAnswerChoiceValue, []terminalChoice{
+			{Label: "Development", Value: "development"},
+			{Label: "Testing", Value: "testing"},
+		})
+		done <- struct {
+			value string
+			err   error
+		}{value: value, err: err}
+	}()
+	select {
+	case result := <-done:
+		if result.err != nil || result.value != "testing" {
+			t.Fatalf("value=%q err=%v", result.value, result.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("required selector did not recover after rejecting untouched submission")
 	}
 }
 
