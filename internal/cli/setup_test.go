@@ -690,6 +690,26 @@ func TestPromptFrameworkSelectionUsesTerminalCheckboxes(t *testing.T) {
 	}
 }
 
+func TestConfigureFrameworkSelectionDoesNotPreselectSavedMappings(t *testing.T) {
+	cfg := config.Default()
+	cfg.Frameworks = []string{framework.EUAIActTechnicalEvidencePackID, framework.NISTAIRMFTechnicalEvidencePackID}
+	prompt := promptSession{
+		output: io.Discard,
+		selectMany: func(_ string, defaults []string, options []terminalChoice, _ []string) ([]string, error) {
+			if len(defaults) != 0 {
+				t.Fatalf("saved mappings were preselected: %#v", defaults)
+			}
+			return []string{options[1].Value}, nil
+		},
+	}
+	if err := configureFrameworkSelection(prompt, &cfg, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Frameworks) != 1 || cfg.Frameworks[0] != framework.NISTAIRMFTechnicalEvidencePackID {
+		t.Fatalf("frameworks = %#v", cfg.Frameworks)
+	}
+}
+
 func TestPromptChoiceUsesNumberedMenu(t *testing.T) {
 	tests := []struct {
 		name    string

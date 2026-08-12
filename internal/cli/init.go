@@ -55,7 +55,7 @@ func newInitCommand(stdout io.Writer) *cobra.Command {
 			cfg := config.Default()
 			interactive := forceInteractive || (!nonInteractive && isInteractiveReader(cmd.InOrStdin()))
 			prompt := newPromptSession(cmd.InOrStdin(), stdout)
-			if err := configureFrameworkSelection(prompt, &cfg, interactive, selectedFrameworks, false); err != nil {
+			if err := configureFrameworkSelection(prompt, &cfg, interactive, selectedFrameworks); err != nil {
 				return err
 			}
 			if interactive {
@@ -86,7 +86,7 @@ func newInitCommand(stdout io.Writer) *cobra.Command {
 	return command
 }
 
-func configureFrameworkSelection(prompt promptSession, cfg *config.Config, interactive bool, explicit []string, preselectConfigured bool) error {
+func configureFrameworkSelection(prompt promptSession, cfg *config.Config, interactive bool, explicit []string) error {
 	if interactive {
 		if err := prompt.sectionTitle("Choose technical mappings", true); err != nil {
 			return err
@@ -102,11 +102,7 @@ func configureFrameworkSelection(prompt promptSession, cfg *config.Config, inter
 	if !interactive {
 		return nil
 	}
-	defaults := []string(nil)
-	if preselectConfigured {
-		defaults = cfg.Frameworks
-	}
-	selected, err := promptFrameworkSelection(prompt, defaults)
+	selected, err := promptFrameworkSelection(prompt, nil)
 	if err != nil {
 		return err
 	}
