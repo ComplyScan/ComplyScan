@@ -66,7 +66,7 @@ func TestScanCommandReusesGuidedSetupDiscovery(t *testing.T) {
 	}
 }
 
-func TestScanModesControlConfiguredAIReview(t *testing.T) {
+func TestScanAutomaticallyUsesConfiguredAIReview(t *testing.T) {
 	target := t.TempDir()
 	if err := os.WriteFile(filepath.Join(target, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -84,7 +84,10 @@ func TestScanModesControlConfiguredAIReview(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
-		t.Fatalf("default scan unexpectedly invoked configured AI: code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+		t.Fatalf("default scan did not preserve deterministic result after AI failure: code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Ollama advisory review requested") {
+		t.Fatalf("default scan did not invoke configured AI:\n%s", stdout.String())
 	}
 
 	cfg.AI.Provider = "none"
@@ -101,6 +104,16 @@ func TestScanModesControlConfiguredAIReview(t *testing.T) {
 	stderr.Reset()
 	if code := Execute([]string{"scan", "--quick", "--deep", "--no-report", target}, &stdout, &stderr, testBuild); code != 2 || !strings.Contains(stderr.String(), "cannot be used together") {
 		t.Fatalf("conflicting scan modes code=%d stderr=%q", code, stderr.String())
+	}
+}
+
+func TestScanHelpPresentsOneScanWorkflow(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--help"}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("scan help code=%d stderr=%q", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "--quick") || strings.Contains(stdout.String(), "--deep") {
+		t.Fatalf("scan help exposes legacy scan modes:\n%s", stdout.String())
 	}
 }
 

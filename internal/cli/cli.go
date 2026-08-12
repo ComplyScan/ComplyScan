@@ -314,7 +314,10 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 			if quickScan && deepScan {
 				return errors.New("--quick and --deep cannot be used together")
 			}
-			if quickScan || (!deepScan && !cmd.Flags().Changed("review")) {
+			// A normal scan uses the analysis provider saved by `complyscan setup`.
+			// The legacy --quick flag remains as a hidden compatibility escape hatch
+			// for existing automation that explicitly requested model-free analysis.
+			if quickScan {
 				cfg.AI.Provider = "none"
 			}
 			if deepScan && cfg.AI.Provider == "none" && !cmd.Flags().Changed("review") {
@@ -752,6 +755,8 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 	command.Flags().BoolVar(&refreshReview, "refresh-review", false, "ignore cached technical observations and run the configured provider again")
 	command.Flags().BoolVar(&quickScan, "quick", false, "run deterministic discovery and checks without AI review")
 	command.Flags().BoolVar(&deepScan, "deep", false, "require the configured AI review provider for a deep scan")
+	_ = command.Flags().MarkHidden("quick")
+	_ = command.Flags().MarkHidden("deep")
 	command.Flags().BoolVarP(&verbose, "verbose", "v", false, "print full framework, evidence, and advisory-review details in the terminal")
 	command.Flags().BoolVar(&verifyConfigured, "verify", false, "run verification recipes from .complyscan.yml in isolated containers")
 	command.Flags().StringVar(&verifyRuntime, "verify-runtime", "docker", "local container runtime for opt-in execution: docker or podman")
