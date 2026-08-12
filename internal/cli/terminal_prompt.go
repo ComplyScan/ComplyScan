@@ -495,7 +495,7 @@ func containsTerminalChoice(choices []terminalChoice, wanted string) bool {
 func visibleTerminalChoices(choices []terminalChoice) []terminalChoice {
 	visible := make([]terminalChoice, 0, len(choices))
 	for _, choice := range choices {
-		if choice.Value != backChoiceValue {
+		if choice.Value != backChoiceValue && choice.Value != requiredAnswerChoiceValue {
 			visible = append(visible, choice)
 		}
 	}

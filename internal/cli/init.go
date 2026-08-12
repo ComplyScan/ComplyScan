@@ -592,10 +592,7 @@ func promptRequiredChoice[T ~string](session promptSession, label string, allowe
 	label = session.nextQuestionLabel(label)
 	if session.selectOne != nil {
 		options := make([]terminalChoice, 0, len(allowed)+1)
-		options = append(options, terminalChoice{
-			Label: "Choose an answer — no option is preselected",
-			Value: requiredAnswerChoiceValue,
-		})
+		options = append(options, terminalChoice{Value: requiredAnswerChoiceValue})
 		for _, candidate := range allowed {
 			options = append(options, terminalChoice{Label: string(candidate), Value: string(candidate)})
 		}

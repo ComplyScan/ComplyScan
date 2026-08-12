@@ -109,6 +109,18 @@ func TestRunTerminalFormReturnsAfterEnter(t *testing.T) {
 	}
 }
 
+func TestRequiredChoicePlaceholderIsNotRendered(t *testing.T) {
+	choices := []terminalChoice{
+		{Value: requiredAnswerChoiceValue},
+		{Label: "Development", Value: "development"},
+		{Label: "Unknown", Value: "unknown"},
+	}
+	visible := visibleTerminalChoices(choices)
+	if len(visible) != 2 || visible[0].Value != "development" || visible[1].Value != "unknown" {
+		t.Fatalf("visible required choices = %#v", visible)
+	}
+}
+
 func TestRunTerminalInputAcceptsProposedAnswer(t *testing.T) {
 	done := make(chan struct {
 		value string
