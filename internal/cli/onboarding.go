@@ -184,9 +184,6 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 	completed := make([]bool, 7)
 	role := ""
 	if existing != nil {
-		for index := range completed {
-			completed[index] = true
-		}
 		switch {
 		case containsOrganizationRole(value.OrganizationRoles, profile.RoleProvider) && containsOrganizationRole(value.OrganizationRoles, profile.RoleDeployer):
 			role = bothOption

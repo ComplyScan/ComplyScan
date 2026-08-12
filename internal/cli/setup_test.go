@@ -263,7 +263,7 @@ func TestBasicSystemQuestionnaireMovesBackAndKeepsAnswer(t *testing.T) {
 	}
 }
 
-func TestBasicSystemQuestionnaireRetainsExistingAnswersWhenRerun(t *testing.T) {
+func TestBasicSystemQuestionnaireRequiresExplicitSelectorAnswersWhenRerun(t *testing.T) {
 	existing := profile.NewDraftSystem("assistant", "Support Assistant")
 	existing.IntendedPurpose = "Draft support replies for human review."
 	existing.OperatingRegions = []profile.OperatingRegion{profile.RegionEU}
@@ -271,15 +271,33 @@ func TestBasicSystemQuestionnaireRetainsExistingAnswersWhenRerun(t *testing.T) {
 	existing.DecisionImpact = profile.ImpactAdvisory
 	existing.LifecycleStage = profile.LifecycleProduction
 	existing.HumanOversight = profile.OversightRequired
+	var singleCalls, multipleCalls int
 	prompt := promptSession{
-		reader: bufio.NewReader(strings.NewReader("\n\n\n\n\n\n\n")), output: io.Discard,
+		reader: bufio.NewReader(strings.NewReader("\n\n")), output: io.Discard,
 		guidance: &questionGuidance{}, step: &setupStepProgress{current: 3, total: 5},
+		selectOne: func(_ string, defaultValue string, _ []terminalChoice) (string, error) {
+			singleCalls++
+			if defaultValue != requiredAnswerChoiceValue {
+				t.Fatalf("selector %d reused saved default %q", singleCalls, defaultValue)
+			}
+			return []string{
+				"We develop, brand, or provide this AI system",
+				string(profile.ImpactAdvisory), string(profile.LifecycleProduction), string(profile.OversightRequired),
+			}[singleCalls-1], nil
+		},
+		selectMany: func(_ string, defaults []string, _ []terminalChoice, _ []string) ([]string, error) {
+			multipleCalls++
+			if len(defaults) != 0 {
+				t.Fatalf("multi-selector reused saved defaults: %#v", defaults)
+			}
+			return []string{string(profile.RegionEU)}, nil
+		},
 	}
 	updated, err := collectBasicSystemProfile(prompt, ".", time.Now(), setupRepositorySummary{}, newSetupProfileDraft(), &existing)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Name != existing.Name || updated.IntendedPurpose != existing.IntendedPurpose ||
+	if singleCalls != 4 || multipleCalls != 1 || updated.Name != existing.Name || updated.IntendedPurpose != existing.IntendedPurpose ||
 		len(updated.OperatingRegions) != 1 || updated.OperatingRegions[0] != profile.RegionEU ||
 		len(updated.OrganizationRoles) != 1 || updated.OrganizationRoles[0] != profile.RoleProvider ||
 		updated.DecisionImpact != profile.ImpactAdvisory || updated.LifecycleStage != profile.LifecycleProduction ||
