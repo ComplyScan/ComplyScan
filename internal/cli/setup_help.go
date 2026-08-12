@@ -53,7 +53,7 @@ var setupQuestionHelp = map[string][]string{
 	},
 	"organization-role-basic": {
 		"Choose the closest description of your organisation's relationship to this system, not your personal job title.",
-		"The quick setup records provider and deployer roles only. Importer, distributor, and product-manufacturer details remain available in advanced setup.",
+		"This question covers provider and deployer roles. Importer, distributor, and product-manufacturer roles can be added later in the detailed system profile.",
 	},
 	"operating-regions": {
 		"Select where the system is offered, professionally used, or intended to have effects—not merely where the repository or developer is located.",

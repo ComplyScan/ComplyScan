@@ -275,13 +275,29 @@ func TestBasicSystemQuestionnaireRequiresExplicitSelectorAnswersWhenRerun(t *tes
 	prompt := promptSession{
 		reader: bufio.NewReader(strings.NewReader("\n\n")), output: io.Discard,
 		guidance: &questionGuidance{}, step: &setupStepProgress{current: 3, total: 5},
-		selectOne: func(_ string, defaultValue string, _ []terminalChoice) (string, error) {
+		selectOne: func(_ string, defaultValue string, options []terminalChoice) (string, error) {
 			singleCalls++
 			if defaultValue != requiredAnswerChoiceValue {
 				t.Fatalf("selector %d reused saved default %q", singleCalls, defaultValue)
 			}
+			if singleCalls == 1 {
+				want := []string{
+					"Provider — we build, brand, or supply the AI system",
+					"Deployer — we professionally use an AI system supplied by someone else",
+					"Provider and deployer — we supply the system and also use it ourselves",
+					"Unknown — our organisation’s role has not been confirmed",
+				}
+				if len(options) < len(want)+1 {
+					t.Fatalf("organisation-role options = %#v", options)
+				}
+				for index, label := range want {
+					if options[index+1].Label != label {
+						t.Errorf("organisation-role option %d = %q, want %q", index, options[index+1].Label, label)
+					}
+				}
+			}
 			return []string{
-				"We develop, brand, or provide this AI system",
+				"Provider — we build, brand, or supply the AI system",
 				string(profile.ImpactAdvisory), string(profile.LifecycleProduction), string(profile.OversightRequired),
 			}[singleCalls-1], nil
 		},

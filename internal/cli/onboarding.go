@@ -175,10 +175,10 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 		return profile.System{}, err
 	}
 	const (
-		providerOption = "We develop, brand, or provide this AI system"
-		deployerOption = "We use an AI system provided by another organisation"
-		bothOption     = "We both provide and professionally use the system"
-		unknownOption  = "The organisational role has not been established"
+		providerOption = "Provider — we build, brand, or supply the AI system"
+		deployerOption = "Deployer — we professionally use an AI system supplied by someone else"
+		bothOption     = "Provider and deployer — we supply the system and also use it ourselves"
+		unknownOption  = "Unknown — our organisation’s role has not been confirmed"
 	)
 	value.IntendedPurpose = draft.first("intended-purpose", value.IntendedPurpose)
 	completed := make([]bool, 7)
