@@ -211,8 +211,8 @@ var setupQuestionHelp = map[string][]string{
 		"Choose no if you want to review .complyscan.yml or commit the setup configuration before scanning.",
 	},
 	"scan-mode": {
-		"A quick scan creates the local inventory, deterministic findings, and preliminary technical mapping without waiting for a model.",
-		"Deep review adds advisory model reasoning and can take many minutes on local hardware. Saving setup lets you inspect the configuration before either scan.",
+		"ComplyScan always creates the local AI inventory, deterministic findings, and technical mapping. When an AI provider is configured, the same scan also investigates ambiguous evidence.",
+		"Choose whether to run the first scan now or save the configuration first. Later scans use the same `complyscan scan` command locally and in CI.",
 	},
 }
 

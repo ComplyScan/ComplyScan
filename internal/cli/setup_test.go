@@ -1004,14 +1004,14 @@ func TestReviewSetupOffersOnlyFirstRunOutcomes(t *testing.T) {
 	prompt := promptSession{
 		reader: bufio.NewReader(strings.NewReader("")), output: &output, backAvailable: true,
 		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
-			if label != "Finish setup" || defaultValue != string(setupReviewRunDeep) {
+			if label != "Finish setup" || defaultValue != string(setupReviewRunScan) {
 				t.Fatalf("selector label=%q default=%q", label, defaultValue)
 			}
 			if !containsTerminalChoice(options, backChoiceValue) {
 				t.Fatalf("finish menu has no back control: %#v", options)
 			}
 			visible := visibleTerminalChoices(options)
-			if len(visible) != 3 || visible[0].Value != string(setupReviewRunQuick) || visible[1].Value != string(setupReviewRunDeep) || visible[2].Value != string(setupReviewSaveOnly) {
+			if len(visible) != 2 || visible[0].Value != string(setupReviewRunScan) || visible[1].Value != string(setupReviewSaveOnly) {
 				t.Fatalf("finish menu options = %#v", visible)
 			}
 			return string(setupReviewSaveOnly), nil
@@ -1035,17 +1035,17 @@ func TestReviewSetupChoosesFirstRunActionWhileConfirming(t *testing.T) {
 	prompt := promptSession{
 		output: &output,
 		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
-			if label != "Finish setup" || defaultValue != string(setupReviewRunDeep) {
+			if label != "Finish setup" || defaultValue != string(setupReviewRunScan) {
 				t.Fatalf("selector label=%q default=%q", label, defaultValue)
 			}
 			values := make([]string, len(options))
 			for index, option := range options {
 				values[index] = option.Value
 			}
-			if !strings.Contains(strings.Join(values, "\n"), string(setupReviewRunQuick)) || !strings.Contains(strings.Join(values, "\n"), string(setupReviewSaveOnly)) {
+			if !strings.Contains(strings.Join(values, "\n"), string(setupReviewRunScan)) || !strings.Contains(strings.Join(values, "\n"), string(setupReviewSaveOnly)) {
 				t.Fatalf("finish actions = %#v", values)
 			}
-			return string(setupReviewRunDeep), nil
+			return string(setupReviewRunScan), nil
 		},
 	}
 	mode := setupScanNone
@@ -1057,8 +1057,8 @@ func TestReviewSetupChoosesFirstRunActionWhileConfirming(t *testing.T) {
 	if !save || mode != setupScanDeep {
 		t.Fatalf("save=%t mode=%q", save, mode)
 	}
-	if !strings.Contains(output.String(), "may take many minutes") {
-		t.Fatalf("deep-scan duration disclosure missing:\n%s", output.String())
+	if !strings.Contains(output.String(), "configured AI analysis when relevant") {
+		t.Fatalf("automatic analysis disclosure missing:\n%s", output.String())
 	}
 }
 

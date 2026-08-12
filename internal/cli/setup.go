@@ -318,21 +318,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	}
 
 	if !interactive || options.skipScan || scanMode == setupScanNone {
-		_, err := fmt.Fprintf(stdout, "Next: complyscan scan --quick %s\nDeep review when ready: complyscan scan --deep %s\n", shellQuote(target), shellQuote(target))
-		return err
-	}
-	if scanMode == setupScanDeep && cfg.AI.Provider == "none" {
-		if _, err := fmt.Fprintln(stdout, "Deep review was not started because no AI review provider was configured. The saved configuration can still run a quick scan."); err != nil {
-			return err
-		}
-		_, err := fmt.Fprintf(stdout, "Next: complyscan scan --quick %s\n", shellQuote(target))
-		return err
-	}
-	if scanMode == setupScanDeep && !modelReady {
-		if _, err := fmt.Fprintln(stdout, "Deep review was not started because the selected model or provider is not ready. The setup and preliminary scan remain available."); err != nil {
-			return err
-		}
-		_, err := fmt.Fprintf(stdout, "Next: complyscan scan --quick %s\nDeep review when ready: complyscan scan --deep %s\n", shellQuote(target), shellQuote(target))
+		_, err := fmt.Fprintf(stdout, "Next: complyscan scan %s\n", shellQuote(target))
 		return err
 	}
 	return runFirstScan(cmd, stdout, build, target, scanMode, repositorySummary.Discovery)
@@ -367,8 +353,7 @@ func collectAdvancedSetupContext(prompt promptSession, target string, cfg *confi
 type setupReviewAction string
 
 const (
-	setupReviewRunQuick setupReviewAction = "Save and run quick deterministic scan"
-	setupReviewRunDeep  setupReviewAction = "Save and run deep AI-assisted scan"
+	setupReviewRunScan  setupReviewAction = "Save and run ComplyScan"
 	setupReviewSaveOnly setupReviewAction = "Save without scanning"
 )
 
@@ -377,17 +362,13 @@ func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.
 		if err := writeSetupReviewSummary(prompt, *cfg, *modelReady); err != nil {
 			return false, err
 		}
-		actions := make([]setupReviewAction, 0, 3)
-		defaultAction := setupReviewRunQuick
+		actions := make([]setupReviewAction, 0, 2)
+		defaultAction := setupReviewRunScan
 		if options.skipScan {
 			actions = append(actions, setupReviewSaveOnly)
 			defaultAction = setupReviewSaveOnly
 		} else {
-			actions = append(actions, setupReviewRunQuick)
-			if cfg.AI.Provider != "none" && *modelReady {
-				actions = append(actions, setupReviewRunDeep)
-				defaultAction = setupReviewRunDeep
-			}
+			actions = append(actions, setupReviewRunScan)
 			actions = append(actions, setupReviewSaveOnly)
 		}
 		if err := explainSetupQuestion(prompt, "scan-mode"); err != nil {
@@ -424,13 +405,12 @@ func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.
 			return false, err
 		}
 		switch action {
-		case setupReviewRunQuick:
-			*scanMode = setupScanQuick
-			return true, nil
-		case setupReviewRunDeep:
+		case setupReviewRunScan:
 			*scanMode = setupScanDeep
-			if _, err := fmt.Fprintln(stdout, "\nDeep review may take many minutes depending on the model, hardware, and number of evidence targets."); err != nil {
-				return false, err
+			if cfg.AI.Provider != "none" {
+				if _, err := fmt.Fprintln(stdout, "\nThe scan will use the configured AI analysis when relevant. If the model is unavailable, deterministic analysis still completes and reports the interruption."); err != nil {
+					return false, err
+				}
 			}
 			return true, nil
 		case setupReviewSaveOnly:
@@ -1508,13 +1488,7 @@ func systemIndex(systems []profile.System, id string) int {
 }
 
 func runFirstScan(parent *cobra.Command, stdout io.Writer, build BuildInfo, target string, mode setupScanMode, discovered discovery.Result) error {
-	label := "quick preliminary scan"
-	args := []string{"--quick", target}
-	if mode == setupScanDeep {
-		label = "deep AI-assisted scan"
-		args = []string{"--deep", target}
-	}
-	if _, err := fmt.Fprintf(stdout, "\nStarting first %s...\n", label); err != nil {
+	if _, err := fmt.Fprintln(stdout, "\nStarting first ComplyScan scan..."); err != nil {
 		return err
 	}
 	command := newScanCommandWithDiscovery(stdout, build, &scanDiscoverySeed{Target: target, Discovery: discovered})
@@ -1523,7 +1497,7 @@ func runFirstScan(parent *cobra.Command, stdout io.Writer, build BuildInfo, targ
 	command.SetIn(parent.InOrStdin())
 	command.SetOut(stdout)
 	command.SetErr(parent.ErrOrStderr())
-	command.SetArgs(args)
+	command.SetArgs([]string{target})
 	err := command.ExecuteContext(parent.Context())
 	var status *exitError
 	if errors.As(err, &status) && status.code == 1 {
