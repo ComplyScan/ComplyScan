@@ -22,7 +22,7 @@ func TestQuickProfileShowsDraftSuggestionsWithoutPreselecting(t *testing.T) {
 	draft.Suggestions["human-oversight"] = providers.ProfileSuggestion{Field: "human-oversight", Values: []string{"required"}, Confidence: "medium", Rationale: "Approval gate", Evidence: []providers.ProfileEvidence{{Path: "review.go", Summary: "Approval is required."}}}
 	var output bytes.Buffer
 	prompt := promptSession{reader: bufio.NewReader(strings.NewReader("\n\n7\n4\n1\n2\n1\n")), output: &output}
-	system, err := collectBasicSystemProfile(prompt, t.TempDir(), time.Now(), setupRepositorySummary{}, draft)
+	system, err := collectBasicSystemProfile(prompt, t.TempDir(), time.Now(), setupRepositorySummary{}, draft, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

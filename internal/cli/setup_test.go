@@ -251,7 +251,7 @@ func TestBasicSystemQuestionnaireMovesBackAndKeepsAnswer(t *testing.T) {
 		reader: bufio.NewReader(strings.NewReader(input)), output: &output,
 		guidance: &questionGuidance{}, step: &setupStepProgress{current: 4, total: 5},
 	}
-	system, err := collectBasicSystemProfile(prompt, ".", time.Now(), setupRepositorySummary{}, setupProfileDraft{})
+	system, err := collectBasicSystemProfile(prompt, ".", time.Now(), setupRepositorySummary{}, setupProfileDraft{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,8 +440,12 @@ func TestInteractiveSetupCreatesRepositoryProfileAndSelectsLocalReview(t *testin
 	target := t.TempDir()
 	input := strings.NewReader(strings.Join([]string{
 		"", "", // analysis mode, Ollama model
-		"1", // technical mapping
-		"",  // save configuration
+		"", "", // system name, intended purpose
+		"7", "4", "5", "5", "5", // unknown profile facts
+		"1",            // EU technical mapping
+		"13", "8", "8", // unknown use case, activity, and deployment
+		"", // keep profile unreviewed
+		"", // save configuration
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	code := executeWithInput([]string{"setup", "--interactive", "--skip-ollama-install", "--skip-model-pull", "--skip-scan", target}, input, &stdout, &stderr, testBuild)
@@ -461,17 +465,17 @@ func TestInteractiveSetupCreatesRepositoryProfileAndSelectsLocalReview(t *testin
 	if cfg.Systems[0].LifecycleStage != profile.LifecycleUnknown {
 		t.Fatalf("lifecycle answer = %q", cfg.Systems[0].LifecycleStage)
 	}
-	for _, expected := range []string{"ComplyScan setup", "Step 1 of 4 — Repository inspection", "Step 2 of 4 — Analysis, privacy, and model", "Step 3 of 4 — Technical mappings", "Step 4 of 4 — Review, save, and first scan", "Repository inspected", "No model is used in this step", "Local model setup", "Report target:", "Save without scanning", "Saved", "Next: complyscan scan"} {
+	for _, expected := range []string{"ComplyScan setup", "Step 1 of 5 — Repository inspection", "Step 2 of 5 — Analysis, privacy, and model", "Step 3 of 5 — Repository-assisted system context", "Step 4 of 5 — Technical mappings and applicability", "Step 5 of 5 — Review, save, and first scan", "Repository inspected", "No model is used in this step", "Local model setup", "System questionnaire", "Save without scanning", "Saved", "Next: complyscan scan"} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("output missing %q:\n%s", expected, stdout.String())
 		}
 	}
-	for _, expected := range []string{"Business, jurisdictional, and legal-applicability facts remain unconfirmed", "Local AI — Ollama keeps repository context on this machine"} {
+	for _, expected := range []string{"source code cannot reliably establish", "Local AI — Ollama keeps repository context on this machine"} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("short setup output missing explanation %q:\n%s", expected, stdout.String())
 		}
 	}
-	for _, unexpected := range []string{"Questionnaire preparation", "System questionnaire", "Drafting setup answers"} {
+	for _, unexpected := range []string{"Questionnaire preparation", "Drafting setup answers"} {
 		if strings.Contains(stdout.String(), unexpected) {
 			t.Errorf("short setup unexpectedly included %q:\n%s", unexpected, stdout.String())
 		}
@@ -499,7 +503,12 @@ func TestFastSetupUsesDeterministicDraftWithoutModel(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\nclient = OpenAI()\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	input := strings.NewReader("\n")
+	input := strings.NewReader(strings.Join([]string{
+		"", "", // system name, intended purpose
+		"7", "4", "5", "5", "5", // unknown profile facts
+		"1", "8", // inference activity, unknown deployment
+		"", // save configuration
+	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	code := executeWithInput([]string{
 		"setup", "--interactive", "--review", "none", "--framework", framework.NISTAIRMFTechnicalEvidencePackID, "--skip-scan", target,
@@ -514,7 +523,7 @@ func TestFastSetupUsesDeterministicDraftWithoutModel(t *testing.T) {
 	if len(cfg.Systems) != 1 || len(cfg.Systems[0].AIActivities) != 1 || cfg.Systems[0].AIActivities[0] != profile.ActivityInference {
 		t.Fatalf("systems = %#v", cfg.Systems)
 	}
-	if cfg.AI.Provider != "none" || !strings.Contains(stdout.String(), "Report target:") || strings.Contains(stdout.String(), "AI suggestion") || strings.Contains(stdout.String(), "Drafting setup answers") {
+	if cfg.AI.Provider != "none" || !strings.Contains(stdout.String(), "Prepared 1 repository-evident setup suggestion") || strings.Contains(stdout.String(), "Drafting setup answers") {
 		t.Fatalf("fast setup output:\n%s", stdout.String())
 	}
 }
@@ -619,7 +628,12 @@ func basicApplicabilityTestSystem() profile.System {
 
 func TestNISTOnlySetupSkipsEUApplicabilityDecision(t *testing.T) {
 	target := t.TempDir()
-	input := strings.NewReader("\n")
+	input := strings.NewReader(strings.Join([]string{
+		"", "", // system name, intended purpose
+		"7", "4", "5", "5", "5", // unknown profile facts
+		"8", "8", // unknown activity and deployment
+		"", // save configuration
+	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	code := executeWithInput([]string{
 		"setup", "--interactive", "--framework", "nist-ai-rmf-technical-evidence", "--review", "none", "--skip-scan", target,

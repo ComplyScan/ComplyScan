@@ -145,7 +145,7 @@ func writeSetupRepositorySummary(prompt promptSession, summary setupRepositorySu
 	return err
 }
 
-func collectBasicSystemProfile(prompt promptSession, target string, now time.Time, summary setupRepositorySummary, draft setupProfileDraft) (profile.System, error) {
+func collectBasicSystemProfile(prompt promptSession, target string, now time.Time, summary setupRepositorySummary, draft setupProfileDraft, existing *profile.System) (profile.System, error) {
 	absolute, err := filepath.Abs(target)
 	if err != nil {
 		return profile.System{}, fmt.Errorf("resolve setup target: %w", err)
@@ -156,6 +156,15 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 		id = "system"
 	}
 	value := profile.NewDraftSystem(id, name)
+	if existing != nil {
+		value = *existing
+		if strings.TrimSpace(value.ID) == "" {
+			value.ID = id
+		}
+		if strings.TrimSpace(value.Name) == "" {
+			value.Name = name
+		}
+	}
 	prompt, err = prompt.startQuestionGroup("System questionnaire", 7, true)
 	if err != nil {
 		return profile.System{}, err
@@ -171,9 +180,24 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 		bothOption     = "We both provide and professionally use the system"
 		unknownOption  = "The organisational role has not been established"
 	)
-	value.IntendedPurpose = draft.first("intended-purpose", "unknown")
+	value.IntendedPurpose = draft.first("intended-purpose", value.IntendedPurpose)
 	completed := make([]bool, 7)
 	role := ""
+	if existing != nil {
+		for index := range completed {
+			completed[index] = true
+		}
+		switch {
+		case containsOrganizationRole(value.OrganizationRoles, profile.RoleProvider) && containsOrganizationRole(value.OrganizationRoles, profile.RoleDeployer):
+			role = bothOption
+		case containsOrganizationRole(value.OrganizationRoles, profile.RoleProvider):
+			role = providerOption
+		case containsOrganizationRole(value.OrganizationRoles, profile.RoleDeployer):
+			role = deployerOption
+		default:
+			role = unknownOption
+		}
+	}
 	err = runSetupPromptSteps(prompt, false,
 		func(step promptSession) error {
 			if err := explainSetupQuestion(step, "system-name"); err != nil {
@@ -321,6 +345,15 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 		return profile.System{}, err
 	}
 	return value, nil
+}
+
+func containsOrganizationRole(roles []profile.OrganizationRole, target profile.OrganizationRole) bool {
+	for _, role := range roles {
+		if role == target {
+			return true
+		}
+	}
+	return false
 }
 
 func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile.System, now time.Time, draft setupProfileDraft) error {
