@@ -416,14 +416,12 @@ func TestOllamaResourceEstimateUsesTransparentRanges(t *testing.T) {
 	}
 }
 
-func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
+func TestInteractiveSetupCreatesRepositoryProfileAndSelectsLocalReview(t *testing.T) {
 	target := t.TempDir()
 	input := strings.NewReader(strings.Join([]string{
-		"", "", "", "", // analysis mode, Ollama model, system name, intended purpose
-		"7", "4", "5", "1", "5", // regions, role, impact, lifecycle, oversight
-		"",             // recommended framework mapping
-		"13", "1", "8", // use case, AI activities, deployment
-		"", "", // reviewer, save configuration
+		"", "", // analysis mode, Ollama model
+		"", // technical mapping
+		"", // save configuration
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	code := executeWithInput([]string{"setup", "--interactive", "--skip-ollama-install", "--skip-model-pull", "--skip-scan", target}, input, &stdout, &stderr, testBuild)
@@ -440,25 +438,22 @@ func TestInteractiveSetupCreatesProfileAndSelectsLocalReview(t *testing.T) {
 	if cfg.AI.Provider != "ollama" || cfg.AI.Ollama.Model != defaultSetupModel {
 		t.Fatalf("AI configuration = %#v", cfg.AI)
 	}
-	if cfg.Systems[0].LifecycleStage != profile.LifecycleDevelopment {
+	if cfg.Systems[0].LifecycleStage != profile.LifecycleUnknown {
 		t.Fatalf("lifecycle answer = %q", cfg.Systems[0].LifecycleStage)
 	}
-	for _, expected := range []string{"ComplyScan setup", "Step 1 of 5 — Analysis, privacy, and model", "Step 2 of 5 — Repository inspection", "Step 3 of 5 — Questionnaire preparation", "Step 4 of 5 — Questionnaire, frameworks, and evidence ownership", "Step 5 of 5 — Review, save, and first scan", "Repository inspected", "System questionnaire — 7 questions", "Step 4 of 5 · Question 1 of 7 — System name", "Step 4 of 5 · Question 7 of 7 — Human oversight", "Local model setup", "Saved", "Next: complyscan scan"} {
+	for _, expected := range []string{"ComplyScan setup", "Step 1 of 4 — Analysis, privacy, and model", "Step 2 of 4 — Technical mappings", "Step 3 of 4 — Repository inspection", "Step 4 of 4 — Review, save, and first scan", "Repository inspected", "Local model setup", "Created repository profile", "Saved", "Next: complyscan scan"} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("output missing %q:\n%s", expected, stdout.String())
 		}
 	}
-	for _, expected := range []string{
-		"Step 4 of 5 · Question 6 of 7 — Lifecycle stage",
-		"Step 4 of 5 · Question 3 of 7 — Operating regions",
-		"Step 4 of 5 · Question 4 of 7 — organisation role",
-		"Describe what the system is designed to do",
-		"remaining conditionally relevant facts",
-		"EU AI Act technical mapping is recommended",
-		"Local AI — Ollama keeps repository context on this machine",
-	} {
+	for _, expected := range []string{"Business, jurisdictional, and legal-applicability facts remain unconfirmed", "Local AI — Ollama keeps repository context on this machine"} {
 		if !strings.Contains(stdout.String(), expected) {
-			t.Errorf("guided setup output missing explanation %q:\n%s", expected, stdout.String())
+			t.Errorf("short setup output missing explanation %q:\n%s", expected, stdout.String())
+		}
+	}
+	for _, unexpected := range []string{"Questionnaire preparation", "System questionnaire", "Drafting setup answers"} {
+		if strings.Contains(stdout.String(), unexpected) {
+			t.Errorf("short setup unexpectedly included %q:\n%s", unexpected, stdout.String())
 		}
 	}
 	if strings.Contains(stdout.String(), "comma-separated: eu-ai-act-technical-evidence") {
@@ -484,7 +479,7 @@ func TestFastSetupUsesDeterministicDraftWithoutModel(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\nclient = OpenAI()\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	input := strings.NewReader("\nDraft support replies for agents.\n4\n1\n1\n1\n1\n1\n8\n")
+	input := strings.NewReader("\n")
 	var stdout, stderr bytes.Buffer
 	code := executeWithInput([]string{
 		"setup", "--interactive", "--review", "none", "--framework", framework.NISTAIRMFTechnicalEvidencePackID, "--skip-scan", target,
@@ -499,8 +494,24 @@ func TestFastSetupUsesDeterministicDraftWithoutModel(t *testing.T) {
 	if len(cfg.Systems) != 1 || len(cfg.Systems[0].AIActivities) != 1 || cfg.Systems[0].AIActivities[0] != profile.ActivityInference {
 		t.Fatalf("systems = %#v", cfg.Systems)
 	}
-	if cfg.AI.Provider != "none" || !strings.Contains(stdout.String(), "Prepared 1 repository-evident setup suggestion(s) without a model") || !strings.Contains(stdout.String(), "AI suggestion") {
+	if cfg.AI.Provider != "none" || !strings.Contains(stdout.String(), "Created repository profile") || strings.Contains(stdout.String(), "AI suggestion") || strings.Contains(stdout.String(), "Drafting setup answers") {
 		t.Fatalf("fast setup output:\n%s", stdout.String())
+	}
+}
+
+func TestTechnicalMappingChangePreservesReviewedEUDecision(t *testing.T) {
+	system := profile.NewDraftSystem("example", "Example")
+	system.Applicability = []profile.ApplicabilityDecision{{
+		Framework: profile.FrameworkEUAIAct, Status: profile.ApplicabilityApplicable,
+		Rationale: "Reviewed deployment facts.", ReviewedBy: "Reviewer", ReviewedAt: "2026-08-12",
+	}}
+	applyFrameworksToSystem(&system, []string{framework.EUAIActTechnicalEvidencePackID, framework.NISTAIRMFTechnicalEvidencePackID})
+	if len(system.Applicability) != 1 || system.Applicability[0].Status != profile.ApplicabilityApplicable {
+		t.Fatalf("reviewed applicability decision was replaced: %#v", system.Applicability)
+	}
+	applyFrameworksToSystem(&system, []string{framework.NISTAIRMFTechnicalEvidencePackID})
+	if len(system.Applicability) != 0 {
+		t.Fatalf("EU applicability decision remained after EU mapping was disabled: %#v", system.Applicability)
 	}
 }
 
@@ -588,12 +599,7 @@ func basicApplicabilityTestSystem() profile.System {
 
 func TestNISTOnlySetupSkipsEUApplicabilityDecision(t *testing.T) {
 	target := t.TempDir()
-	input := strings.NewReader(strings.Join([]string{
-		"", "", // system name, intended purpose
-		"7", "4", "5", "1", "5", // regions, role, impact, lifecycle, oversight
-		"1", "8", // AI activities, deployment
-		"", // save configuration
-	}, "\n") + "\n")
+	input := strings.NewReader("\n")
 	var stdout, stderr bytes.Buffer
 	code := executeWithInput([]string{
 		"setup", "--interactive", "--framework", "nist-ai-rmf-technical-evidence", "--review", "none", "--skip-scan", target,
@@ -611,7 +617,7 @@ func TestNISTOnlySetupSkipsEUApplicabilityDecision(t *testing.T) {
 	if len(cfg.Systems[0].Applicability) != 0 || strings.Contains(stdout.String(), "Human EU AI Act applicability decision") {
 		t.Fatalf("NIST-only setup asked for an EU legal decision:\n%s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "NIST AI RMF is voluntary guidance") {
+	if !strings.Contains(stdout.String(), "NIST AI RMF is") || !strings.Contains(stdout.String(), "voluntary guidance") {
 		t.Fatalf("framework explanation missing:\n%s", stdout.String())
 	}
 }
@@ -968,7 +974,7 @@ func TestReviewSetupBeforeSaveCanCancelWithoutWriting(t *testing.T) {
 	}
 	mode := setupScanNone
 	ready := true
-	save, err := reviewSetupBeforeSave(context.Background(), prompt, &output, t.TempDir(), &cfg, setupOptions{}, setupRepositorySummary{}, newSetupProfileDraft(), &mode, &ready)
+	save, err := reviewSetupBeforeSave(context.Background(), prompt, &output, t.TempDir(), &cfg, setupOptions{}, setupRepositorySummary{}, &mode, &ready)
 	if err != nil {
 		t.Fatal(err)
 	}

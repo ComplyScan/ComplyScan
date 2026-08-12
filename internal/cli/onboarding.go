@@ -64,7 +64,7 @@ func promptSetupScanMode(prompt promptSession, summary setupRepositorySummary, p
 }
 
 func inspectRepositoryForSetup(ctx context.Context, prompt promptSession, target string, cfg config.Config, build BuildInfo) (setupRepositorySummary, error) {
-	if _, err := fmt.Fprintln(prompt.output, "Inspecting the repository before asking setup questions..."); err != nil {
+	if _, err := fmt.Fprintln(prompt.output, "Inspecting repository files and technical AI signals..."); err != nil {
 		return setupRepositorySummary{}, err
 	}
 	excludes := withGeneratedReportExclusion(append([]string(nil), cfg.Scan.Exclude...))
@@ -111,6 +111,38 @@ func inspectRepositoryForSetup(ctx context.Context, prompt promptSession, target
 		return setupRepositorySummary{}, err
 	}
 	return summary, nil
+}
+
+func ensureRepositoryDraftSystem(prompt promptSession, target string, cfg *config.Config, summary setupRepositorySummary) error {
+	if len(cfg.Systems) > 0 {
+		applyFrameworksToSystems(cfg.Systems, cfg.Frameworks)
+		return prompt.status(setupStatusReady, fmt.Sprintf("Kept %d existing system profile(s); detailed applicability facts were not changed.", len(cfg.Systems)))
+	}
+	absolute, err := filepath.Abs(target)
+	if err != nil {
+		return fmt.Errorf("resolve setup target: %w", err)
+	}
+	name := filepath.Base(absolute)
+	id := profile.SlugID(name)
+	if id == "" {
+		id = "system"
+	}
+	system := profile.NewDraftSystem(id, name)
+	if summary.Inventory.Summary.RuntimeSignals > 0 {
+		system.AIActivities = []profile.AIActivity{profile.ActivityInference}
+	}
+	applyFrameworksToSystem(&system, cfg.Frameworks)
+	if err := system.Validate(); err != nil {
+		return fmt.Errorf("validate repository draft system: %w", err)
+	}
+	cfg.Systems = append(cfg.Systems, system)
+	if err := prompt.status(setupStatusReview, fmt.Sprintf("Created repository profile %q for technical evidence ownership.", system.Name)); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(prompt.output,
+		"  Business, jurisdictional, and legal-applicability facts remain unconfirmed and are not required for this code scan.\n"+
+			"  Use `complyscan profile setup --replace` or rerun `complyscan setup --advanced` when a detailed profile is needed.")
+	return err
 }
 
 func writeSetupRepositorySummary(prompt promptSession, summary setupRepositorySummary) error {
@@ -661,10 +693,27 @@ func configureRecommendedFrameworks(prompt promptSession, cfg *config.Config, sy
 
 func applyFrameworksToSystem(system *profile.System, frameworks []string) {
 	if frameworkEnabled(frameworks, framework.EUAIActTechnicalEvidencePackID) {
-		system.Applicability = []profile.ApplicabilityDecision{{Framework: profile.FrameworkEUAIAct, Status: profile.ApplicabilityNeedsReview}}
+		for _, decision := range system.Applicability {
+			if decision.Framework == profile.FrameworkEUAIAct {
+				return
+			}
+		}
+		system.Applicability = append(system.Applicability, profile.ApplicabilityDecision{Framework: profile.FrameworkEUAIAct, Status: profile.ApplicabilityNeedsReview})
 		return
 	}
-	system.Applicability = nil
+	filtered := system.Applicability[:0]
+	for _, decision := range system.Applicability {
+		if decision.Framework != profile.FrameworkEUAIAct {
+			filtered = append(filtered, decision)
+		}
+	}
+	system.Applicability = filtered
+}
+
+func applyFrameworksToSystems(systems []profile.System, frameworks []string) {
+	for index := range systems {
+		applyFrameworksToSystem(&systems[index], frameworks)
+	}
 }
 
 func setupLanguage(path string) string {

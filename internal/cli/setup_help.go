@@ -18,8 +18,8 @@ var setupQuestionHelp = map[string][]string{
 		"You may answer unknown, but the report will then label requirement mapping as provisional. Completing these facts does not itself decide that the EU AI Act applies.",
 	},
 	"frameworks": {
-		"Choose which sources ComplyScan should map technical repository evidence against. The EU pack screens potential legal obligations; NIST AI RMF is voluntary guidance.",
-		"Select both to reuse the same detected controls across both mappings. This does not make a framework legally applicable or certify that its outcomes are satisfied.",
+		"Choose which sources ComplyScan should map the repository's technical evidence against. The EU pack covers code-visible objectives linked to potential legal obligations; NIST AI RMF is voluntary guidance.",
+		"This choice controls the technical scan only. It does not mean a law applies, decide legal risk, or certify that any outcome is satisfied. Select both to map shared evidence against each source separately.",
 	},
 	"system-id": {
 		"A short, stable machine-readable identifier used to connect scans and future dashboard records to this system.",

@@ -52,7 +52,7 @@ func newSetupCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	var options setupOptions
 	command := &cobra.Command{
 		Use:   "setup [path]",
-		Short: "Configure a repository, applicability context, and optional AI review",
+		Short: "Configure analysis, technical mappings, and an optional AI review",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if options.forceInteractive && options.nonInteractive {
@@ -128,7 +128,6 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	prompt.alwaysDetailed = options.detailedGuidance
 
 	var repositorySummary setupRepositorySummary
-	profileDraft := newSetupProfileDraft()
 	modelReady := true
 	reviewConfigured := false
 	scanMode := setupScanNone
@@ -165,7 +164,11 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		scanMode = setupScanNone
 	}
 	if interactive {
-		if err := setupStepTitle(prompt, 1, 5, "Analysis, privacy, and model", false); err != nil {
+		totalSteps := 4
+		if options.advanced {
+			totalSteps = 5
+		}
+		if err := setupStepTitle(prompt, 1, totalSteps, "Analysis, privacy, and model", false); err != nil {
 			return err
 		}
 		if setupDraftStageRank(resumeStage) >= setupDraftStageRank(setupDraftAnalysis) {
@@ -184,7 +187,17 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		if _, err := fmt.Fprintln(stdout); err != nil {
 			return err
 		}
-		if err := setupStepTitle(prompt, 2, 5, "Repository inspection", false); err != nil {
+		if err := setupStepTitle(prompt, 2, totalSteps, "Technical mappings", false); err != nil {
+			return err
+		}
+		if setupDraftStageRank(resumeStage) >= setupDraftStageRank(setupDraftContext) {
+			if err := prompt.status(setupStatusReady, "Resumed the saved technical mappings and repository profile."); err != nil {
+				return err
+			}
+		} else if err := configureFrameworkSelection(prompt, &cfg, true, options.frameworks); err != nil {
+			return err
+		}
+		if err := setupStepTitle(prompt, 3, totalSteps, "Repository inspection", true); err != nil {
 			return err
 		}
 		summary, inspectErr := inspectRepositoryForSetup(cmd.Context(), prompt, target, cfg, build)
@@ -192,21 +205,15 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 			return inspectErr
 		}
 		repositorySummary = summary
-		if err := setupStepTitle(prompt, 3, 5, "Questionnaire preparation", true); err != nil {
-			return err
-		}
-		if setupDraftStageRank(resumeStage) >= setupDraftStageRank(setupDraftContext) {
-			if err := prompt.status(setupStatusReady, "Resumed the saved system, framework, applicability, and ownership answers."); err != nil {
-				return err
-			}
-		} else {
-			if !options.advanced {
-				profileDraft = draftProfileForSetup(cmd.Context(), stdout, target, cfg, summary, modelReady)
-			}
-			if err := setupStepTitle(prompt, 4, 5, "Questionnaire, frameworks, and evidence ownership", true); err != nil {
-				return err
-			}
-			if err := collectInteractiveSetupContext(prompt, target, &cfg, options, summary, profileDraft, true); err != nil {
+		if setupDraftStageRank(resumeStage) < setupDraftStageRank(setupDraftContext) {
+			if options.advanced {
+				if err := setupStepTitle(prompt, 4, totalSteps, "Detailed system profile and evidence ownership", true); err != nil {
+					return err
+				}
+				if err := collectAdvancedSetupContext(prompt, target, &cfg, summary, true); err != nil {
+					return err
+				}
+			} else if err := ensureRepositoryDraftSystem(prompt, target, &cfg, summary); err != nil {
 				return err
 			}
 			draftSaved = checkpointSetupDraft(prompt, draftPath, target, setupDraftContext, cfg, scanMode, modelReady) || draftSaved
@@ -224,7 +231,12 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		}
 	}
 	if interactive {
-		if err := setupStepTitle(prompt, 5, 5, "Review, save, and first scan", true); err != nil {
+		reviewStep := 4
+		totalSteps := 4
+		if options.advanced {
+			reviewStep, totalSteps = 5, 5
+		}
+		if err := setupStepTitle(prompt, reviewStep, totalSteps, "Review, save, and first scan", true); err != nil {
 			return err
 		}
 		if !options.skipScan && setupDraftStageRank(resumeStage) < setupDraftStageRank(setupDraftReview) {
@@ -243,7 +255,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	}
 	if interactive {
 		draftSaved = checkpointSetupDraft(prompt, draftPath, target, setupDraftReview, cfg, scanMode, modelReady) || draftSaved
-		save, reviewErr := reviewSetupBeforeSave(cmd.Context(), prompt, stdout, target, &cfg, options, repositorySummary, profileDraft, &scanMode, &modelReady)
+		save, reviewErr := reviewSetupBeforeSave(cmd.Context(), prompt, stdout, target, &cfg, options, repositorySummary, &scanMode, &modelReady)
 		if reviewErr != nil {
 			return reviewErr
 		}
@@ -305,29 +317,8 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	return runFirstScan(cmd, stdout, build, target, scanMode, repositorySummary.Discovery)
 }
 
-func collectInteractiveSetupContext(prompt promptSession, target string, cfg *config.Config, options setupOptions, summary setupRepositorySummary, draft setupProfileDraft, confirmReplace bool) error {
-	var system profile.System
-	var err error
-	if options.advanced {
-		if err = configureFrameworkSelection(prompt, cfg, true, options.frameworks); err != nil {
-			return err
-		}
-		system, err = collectSystemProfileWithPrompt(prompt, target, time.Now(), cfg.Frameworks...)
-	} else {
-		system, err = collectBasicSystemProfile(prompt, target, time.Now(), summary, draft)
-		if err == nil {
-			err = configureRecommendedFrameworks(prompt, cfg, system, options.frameworks)
-			applyFrameworksToSystem(&system, cfg.Frameworks)
-		}
-	}
-	if err != nil {
-		return err
-	}
-	if !options.advanced && frameworkEnabled(cfg.Frameworks, framework.EUAIActTechnicalEvidencePackID) {
-		err = collectRelevantEUApplicabilityContext(prompt, &system, time.Now(), draft)
-	} else if !options.advanced {
-		err = collectNonEUTechnicalContext(prompt, &system, draft)
-	}
+func collectAdvancedSetupContext(prompt promptSession, target string, cfg *config.Config, summary setupRepositorySummary, confirmReplace bool) error {
+	system, err := collectSystemProfileWithPrompt(prompt, target, time.Now(), cfg.Frameworks...)
 	if err != nil {
 		return err
 	}
@@ -357,17 +348,21 @@ type setupReviewAction string
 const (
 	setupReviewSave     setupReviewAction = "Save configuration"
 	setupReviewAnalysis setupReviewAction = "Change analysis and privacy mode"
-	setupReviewContext  setupReviewAction = "Repeat system and framework questions"
+	setupReviewMappings setupReviewAction = "Change technical mappings"
+	setupReviewProfile  setupReviewAction = "Edit detailed system profile"
 	setupReviewScan     setupReviewAction = "Change first-run action"
 	setupReviewCancel   setupReviewAction = "Cancel without saving"
 )
 
-func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.Writer, target string, cfg *config.Config, options setupOptions, summary setupRepositorySummary, draft setupProfileDraft, scanMode *setupScanMode, modelReady *bool) (bool, error) {
+func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.Writer, target string, cfg *config.Config, options setupOptions, summary setupRepositorySummary, scanMode *setupScanMode, modelReady *bool) (bool, error) {
 	for {
 		if err := writeSetupReviewSummary(prompt, *cfg, *scanMode, *modelReady); err != nil {
 			return false, err
 		}
-		actions := []setupReviewAction{setupReviewSave, setupReviewAnalysis, setupReviewContext}
+		actions := []setupReviewAction{setupReviewSave, setupReviewAnalysis, setupReviewMappings}
+		if options.advanced {
+			actions = append(actions, setupReviewProfile)
+		}
 		if !options.skipScan {
 			actions = append(actions, setupReviewScan)
 		}
@@ -397,13 +392,19 @@ func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.
 			if err != nil {
 				return false, err
 			}
-		case setupReviewContext:
-			revisit := options
-			revisit.frameworks = nil
-			if err := prompt.sectionTitle("System, framework, and applicability context", true); err != nil {
+		case setupReviewMappings:
+			if err := prompt.sectionTitle("Technical mappings", true); err != nil {
 				return false, err
 			}
-			if err := collectInteractiveSetupContext(prompt, target, cfg, revisit, summary, draft, false); err != nil {
+			if err := configureFrameworkSelection(prompt, cfg, true, nil); err != nil {
+				return false, err
+			}
+			applyFrameworksToSystems(cfg.Systems, cfg.Frameworks)
+		case setupReviewProfile:
+			if err := prompt.sectionTitle("Detailed system profile and evidence ownership", true); err != nil {
+				return false, err
+			}
+			if err := collectAdvancedSetupContext(prompt, target, cfg, summary, false); err != nil {
 				return false, err
 			}
 		case setupReviewScan:
@@ -468,7 +469,7 @@ func writeSetupReviewSummary(prompt promptSession, cfg config.Config, scanMode s
 	if err := prompt.status(analysisStatus, "Analysis: "+analysis); err != nil {
 		return err
 	}
-	if err := prompt.status(setupStatusReady, "Frameworks: "+strings.Join(frameworks, ", ")); err != nil {
+	if err := prompt.status(setupStatusReady, "Technical mappings: "+strings.Join(frameworks, ", ")); err != nil {
 		return err
 	}
 	systemStatus := setupStatusMissing

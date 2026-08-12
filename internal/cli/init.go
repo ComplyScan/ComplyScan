@@ -88,7 +88,7 @@ func newInitCommand(stdout io.Writer) *cobra.Command {
 
 func configureFrameworkSelection(prompt promptSession, cfg *config.Config, interactive bool, explicit []string) error {
 	if interactive {
-		if err := prompt.sectionTitle("Framework selection", true); err != nil {
+		if err := prompt.sectionTitle("Choose technical mappings", true); err != nil {
 			return err
 		}
 		if err := explainSetupQuestion(prompt, "frameworks"); err != nil {
