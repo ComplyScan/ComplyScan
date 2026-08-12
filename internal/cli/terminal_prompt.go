@@ -72,7 +72,7 @@ func (session promptSession) chooseMany(label string, defaults []string, choices
 		}
 		if session.hasQuestionGuidance() {
 			visible = append(visible, terminalChoice{
-				Label:    "ⓘ Further explanation — press Space to expand",
+				Label:    "ⓘ Further explanation — highlight to expand",
 				Value:    moreGuidanceChoiceValue,
 				Guidance: strings.Join(session.guidance.details, "\n"),
 			})
@@ -307,6 +307,7 @@ func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, def
 	}
 	selected := append([]string(nil), defaults...)
 	guidance := terminalChoiceGuidance(choices)
+	guidanceHighlighted := false
 	instructions := "Use ↑/↓ to move, Space to tick or untick, and Enter to confirm."
 	allowBack := containsTerminalChoice(choices, backChoiceValue)
 	if allowBack {
@@ -315,8 +316,8 @@ func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, def
 	field := huh.NewMultiSelect[string]().
 		Title(label).
 		DescriptionFunc(func() string {
-			return terminalGuidanceDescription(instructions, containsTerminalValue(selected, moreGuidanceChoiceValue), guidance)
-		}, &selected).
+			return terminalGuidanceDescription(instructions, guidanceHighlighted, guidance)
+		}, &guidanceHighlighted).
 		Options(options...).
 		Value(&selected).
 		Validate(func(values []string) error {
@@ -334,7 +335,11 @@ func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, def
 			return nil
 		})
 	form := huh.NewForm(huh.NewGroup(field)).WithInput(input).WithOutput(output)
-	if err := runTerminalForm(form, input, output, allowBack); err != nil {
+	var keyHandler promptKeyHandler
+	if strings.TrimSpace(guidance) != "" {
+		keyHandler = newMultiSelectGuidanceTracker(len(visibleChoices), len(visibleChoices)-1, &guidanceHighlighted).Handle
+	}
+	if err := runTerminalForm(form, input, output, allowBack, keyHandler); err != nil {
 		return nil, fmt.Errorf("select %s: %w", strings.ToLower(label), err)
 	}
 	return withoutTerminalValue(selected, moreGuidanceChoiceValue), nil
@@ -347,9 +352,72 @@ type backNavigableForm struct {
 	backEnabled    bool
 	detailsEnabled bool
 	backKey        tea.KeyType
+	keyHandler     promptKeyHandler
 }
 
 type promptRelayoutMsg struct{}
+
+type promptKeyHandler func(tea.KeyMsg) bool
+
+type multiSelectGuidanceTracker struct {
+	cursor        int
+	total         int
+	guidanceIndex int
+	highlighted   *bool
+	filtering     bool
+}
+
+func newMultiSelectGuidanceTracker(total, guidanceIndex int, highlighted *bool) *multiSelectGuidanceTracker {
+	return &multiSelectGuidanceTracker{total: total, guidanceIndex: guidanceIndex, highlighted: highlighted}
+}
+
+func (tracker *multiSelectGuidanceTracker) Handle(message tea.KeyMsg) bool {
+	value := message.String()
+	if tracker.filtering {
+		if value == "esc" || value == "enter" {
+			tracker.filtering = false
+			tracker.cursor = 0
+		}
+		tracker.setHighlighted(false)
+		return false
+	}
+	if value == "/" {
+		tracker.filtering = true
+		tracker.setHighlighted(false)
+		return false
+	}
+	switch value {
+	case "up", "k", "ctrl+p":
+		tracker.move(-1)
+	case "down", "j", "ctrl+n":
+		tracker.move(1)
+	case "home", "g":
+		tracker.cursor = 0
+	case "end", "G":
+		tracker.cursor = tracker.total - 1
+	case "ctrl+u":
+		tracker.cursor = max(tracker.cursor-5, 0)
+	case "ctrl+d":
+		tracker.cursor = min(tracker.cursor+5, tracker.total-1)
+	case " ", "x":
+		return tracker.cursor == tracker.guidanceIndex
+	}
+	tracker.setHighlighted(tracker.cursor == tracker.guidanceIndex)
+	return false
+}
+
+func (tracker *multiSelectGuidanceTracker) move(offset int) {
+	if tracker.total <= 0 {
+		return
+	}
+	tracker.cursor = (tracker.cursor + offset + tracker.total) % tracker.total
+}
+
+func (tracker *multiSelectGuidanceTracker) setHighlighted(value bool) {
+	if tracker.highlighted != nil {
+		*tracker.highlighted = value
+	}
+}
 
 func (form *backNavigableForm) Init() tea.Cmd {
 	return form.form.Init()
@@ -364,6 +432,9 @@ func (form *backNavigableForm) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if form.detailsEnabled && keyMessage.Type == tea.KeyRunes && string(keyMessage.Runes) == "?" {
 			form.details = true
 			return form, tea.Quit
+		}
+		if form.keyHandler != nil && form.keyHandler(keyMessage) {
+			return form, nil
 		}
 	}
 	updated, command := form.form.Update(message)
@@ -447,11 +518,17 @@ func appendHelpBinding(bindings []key.Binding, addition key.Binding) []key.Bindi
 	return append(result, addition)
 }
 
-func runTerminalForm(form *huh.Form, input io.Reader, output io.Writer, allowBack bool) error {
+func runTerminalForm(form *huh.Form, input io.Reader, output io.Writer, allowBack bool, keyHandlers ...promptKeyHandler) error {
 	if !allowBack {
-		return form.Run()
+		if len(keyHandlers) == 0 || keyHandlers[0] == nil {
+			return form.Run()
+		}
 	}
-	navigator, err := runDecoratedTerminalForm(form, input, output, false, true, tea.KeyLeft)
+	var keyHandler promptKeyHandler
+	if len(keyHandlers) > 0 {
+		keyHandler = keyHandlers[0]
+	}
+	navigator, err := runDecoratedTerminalForm(form, input, output, false, allowBack, tea.KeyLeft, keyHandler)
 	if err != nil {
 		return err
 	}
@@ -461,13 +538,17 @@ func runTerminalForm(form *huh.Form, input io.Reader, output io.Writer, allowBac
 	return nil
 }
 
-func runDecoratedTerminalForm(form *huh.Form, input io.Reader, output io.Writer, detailsEnabled, backEnabled bool, backKey tea.KeyType) (*backNavigableForm, error) {
+func runDecoratedTerminalForm(form *huh.Form, input io.Reader, output io.Writer, detailsEnabled, backEnabled bool, backKey tea.KeyType, keyHandlers ...promptKeyHandler) (*backNavigableForm, error) {
 	// huh.Form.RunWithContext normally installs these commands before starting
 	// Bubble Tea. The navigation wrapper starts the program directly so it can
 	// distinguish setup navigation from Ctrl+C, and must preserve that lifecycle setup.
 	form.SubmitCmd = tea.Quit
 	form.CancelCmd = tea.Quit
-	navigator := &backNavigableForm{form: form, detailsEnabled: detailsEnabled, backEnabled: backEnabled, backKey: backKey}
+	var keyHandler promptKeyHandler
+	if len(keyHandlers) > 0 {
+		keyHandler = keyHandlers[0]
+	}
+	navigator := &backNavigableForm{form: form, detailsEnabled: detailsEnabled, backEnabled: backEnabled, backKey: backKey, keyHandler: keyHandler}
 	result, err := tea.NewProgram(navigator, tea.WithInput(input), tea.WithOutput(output), tea.WithReportFocus()).Run()
 	if err != nil {
 		return nil, err

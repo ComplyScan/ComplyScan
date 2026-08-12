@@ -93,6 +93,42 @@ func TestPromptRelayoutDoesNotScheduleItselfAgain(t *testing.T) {
 	}
 }
 
+func TestMultiSelectGuidanceExpandsOnHighlight(t *testing.T) {
+	highlighted := false
+	tracker := newMultiSelectGuidanceTracker(4, 3, &highlighted)
+	for range 3 {
+		if consumed := tracker.Handle(tea.KeyMsg{Type: tea.KeyDown}); consumed {
+			t.Fatal("moving to guidance was unexpectedly consumed")
+		}
+	}
+	if !highlighted {
+		t.Fatal("guidance did not expand when highlighted")
+	}
+	if consumed := tracker.Handle(tea.KeyMsg{Type: tea.KeySpace}); !consumed {
+		t.Fatal("Space selected the explanation as an answer")
+	}
+	if !highlighted {
+		t.Fatal("guidance collapsed while its row remained highlighted")
+	}
+	tracker.Handle(tea.KeyMsg{Type: tea.KeyUp})
+	if highlighted {
+		t.Fatal("guidance remained expanded after leaving its row")
+	}
+}
+
+func TestMultiSelectGuidanceTrackerWrapsWithArrowNavigation(t *testing.T) {
+	highlighted := false
+	tracker := newMultiSelectGuidanceTracker(4, 3, &highlighted)
+	tracker.Handle(tea.KeyMsg{Type: tea.KeyUp})
+	if !highlighted || tracker.cursor != 3 {
+		t.Fatalf("wrapped cursor=%d highlighted=%t", tracker.cursor, highlighted)
+	}
+	tracker.Handle(tea.KeyMsg{Type: tea.KeyDown})
+	if highlighted || tracker.cursor != 0 {
+		t.Fatalf("returned cursor=%d highlighted=%t", tracker.cursor, highlighted)
+	}
+}
+
 func TestLeavingExpandedGuidanceRestoresChoicesAfterOneKeypress(t *testing.T) {
 	selected := moreGuidanceChoiceValue
 	field := huh.NewSelect[string]().
