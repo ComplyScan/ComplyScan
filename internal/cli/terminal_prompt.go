@@ -490,6 +490,14 @@ func (form *backNavigableForm) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if _, relayout := message.(promptRelayoutMsg); relayout {
 		return form, command
 	}
+	if _, keyMessage := message.(tea.KeyMsg); keyMessage && form.keyHandler != nil {
+		// A key handler can change a dynamic description before Huh processes the
+		// same navigation key. Send one follow-up update so the viewport is laid
+		// out again using the new description height. Without it, leaving an
+		// expanded multi-select explanation can leave the options viewport at its
+		// one-row expanded height until another navigation key is pressed.
+		return form, tea.Batch(command, func() tea.Msg { return promptRelayoutMsg{} })
+	}
 	if _, keyMessage := message.(tea.KeyMsg); !keyMessage {
 		return form, tea.Batch(command, func() tea.Msg { return promptRelayoutMsg{} })
 	}

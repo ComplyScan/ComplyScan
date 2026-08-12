@@ -182,6 +182,54 @@ func TestLeavingExpandedGuidanceRestoresChoicesAfterOneKeypress(t *testing.T) {
 	}
 }
 
+func TestLeavingExpandedMultiSelectGuidanceRestoresChoicesAfterOneKeypress(t *testing.T) {
+	selected := []string{}
+	highlighted := false
+	field := huh.NewMultiSelect[string]().
+		Title("Operating regions").
+		DescriptionFunc(func() string {
+			if highlighted {
+				return "Further explanation:\nline one\nline two\nline three\nline four\nline five\nline six"
+			}
+			return "Choose every operating region."
+		}, &highlighted).
+		Options(
+			huh.NewOption("EU", "eu"),
+			huh.NewOption("EEA", "eea"),
+			huh.NewOption("UK", "uk"),
+			huh.NewOption("US", "us"),
+			huh.NewOption("Global", "global"),
+			huh.NewOption("Other", "other"),
+			huh.NewOption("Unknown", "unknown"),
+			huh.NewOption("Further explanation", moreGuidanceChoiceValue),
+		).
+		Value(&selected)
+	tracker := newMultiSelectGuidanceTracker(8, 7, &highlighted)
+	navigator := &backNavigableForm{
+		form:       huh.NewForm(huh.NewGroup(field)).WithWidth(100).WithHeight(14),
+		keyHandler: tracker.Handle,
+	}
+	drainTeaCommand(t, navigator, navigator.Init(), 100)
+	_, resize := navigator.Update(tea.WindowSizeMsg{Width: 100, Height: 14})
+	drainTeaCommand(t, navigator, resize, 100)
+	for range 7 {
+		_, command := navigator.Update(tea.KeyMsg{Type: tea.KeyDown})
+		drainTeaCommand(t, navigator, command, 100)
+	}
+	if !highlighted {
+		t.Fatal("guidance was not expanded")
+	}
+	_, command := navigator.Update(tea.KeyMsg{Type: tea.KeyUp})
+	drainTeaCommand(t, navigator, command, 100)
+
+	view := navigator.View()
+	for _, choice := range []string{"EU", "EEA", "UK", "US", "Global", "Other", "Unknown"} {
+		if !strings.Contains(view, choice) {
+			t.Fatalf("collapsed multi-select guidance still hides %q after one keypress: %q", choice, view)
+		}
+	}
+}
+
 func TestTextFormFooterIncludesDetailsAndEscapeBack(t *testing.T) {
 	selected := ""
 	field := huh.NewInput().Value(&selected)
