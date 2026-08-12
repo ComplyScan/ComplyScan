@@ -55,7 +55,7 @@ func newInitCommand(stdout io.Writer) *cobra.Command {
 			cfg := config.Default()
 			interactive := forceInteractive || (!nonInteractive && isInteractiveReader(cmd.InOrStdin()))
 			prompt := newPromptSession(cmd.InOrStdin(), stdout)
-			if err := configureFrameworkSelection(prompt, &cfg, interactive, selectedFrameworks); err != nil {
+			if err := configureFrameworkSelection(prompt, &cfg, interactive, selectedFrameworks, false); err != nil {
 				return err
 			}
 			if interactive {
@@ -86,7 +86,7 @@ func newInitCommand(stdout io.Writer) *cobra.Command {
 	return command
 }
 
-func configureFrameworkSelection(prompt promptSession, cfg *config.Config, interactive bool, explicit []string) error {
+func configureFrameworkSelection(prompt promptSession, cfg *config.Config, interactive bool, explicit []string, preselectConfigured bool) error {
 	if interactive {
 		if err := prompt.sectionTitle("Choose technical mappings", true); err != nil {
 			return err
@@ -102,7 +102,11 @@ func configureFrameworkSelection(prompt promptSession, cfg *config.Config, inter
 	if !interactive {
 		return nil
 	}
-	selected, err := promptFrameworkSelection(prompt, cfg.Frameworks)
+	defaults := []string(nil)
+	if preselectConfigured {
+		defaults = cfg.Frameworks
+	}
+	selected, err := promptFrameworkSelection(prompt, defaults)
 	if err != nil {
 		return err
 	}
@@ -116,10 +120,10 @@ func promptFrameworkSelection(prompt promptSession, defaults []string) ([]string
 		nistOption = "NIST AI RMF — voluntary technical practices"
 	)
 	defaultSelections := make([]string, 0, 2)
-	if frameworkEnabled(defaults, framework.EUAIActTechnicalEvidencePackID) {
+	if containsFramework(defaults, framework.EUAIActTechnicalEvidencePackID) {
 		defaultSelections = append(defaultSelections, euOption)
 	}
-	if frameworkEnabled(defaults, framework.NISTAIRMFTechnicalEvidencePackID) {
+	if containsFramework(defaults, framework.NISTAIRMFTechnicalEvidencePackID) {
 		defaultSelections = append(defaultSelections, nistOption)
 	}
 	selections, err := promptChoices(prompt, "Technical evidence packs", defaultSelections, euOption, nistOption)
@@ -136,6 +140,15 @@ func promptFrameworkSelection(prompt promptSession, defaults []string) ([]string
 		}
 	}
 	return selected, nil
+}
+
+func containsFramework(frameworks []string, wanted string) bool {
+	for _, id := range frameworks {
+		if id == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 const reportGitIgnoreEntry = "/.complyscan/reports/"

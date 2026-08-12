@@ -194,7 +194,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 			if err := prompt.status(setupStatusReady, "Resumed the saved technical mappings and repository profile."); err != nil {
 				return err
 			}
-		} else if err := configureFrameworkSelection(prompt, &cfg, true, options.frameworks); err != nil {
+		} else if err := configureFrameworkSelection(prompt, &cfg, true, options.frameworks, existed); err != nil {
 			return err
 		}
 		if err := setupStepTitle(prompt, 3, totalSteps, "Repository inspection", true); err != nil {
@@ -219,14 +219,14 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 			draftSaved = checkpointSetupDraft(prompt, draftPath, target, setupDraftContext, cfg, scanMode, modelReady) || draftSaved
 		}
 	} else if !existed {
-		if err := configureFrameworkSelection(prompt, &cfg, false, options.frameworks); err != nil {
+		if err := configureFrameworkSelection(prompt, &cfg, false, options.frameworks, false); err != nil {
 			return err
 		}
 		if _, err := fmt.Fprintln(stdout, "Non-interactive setup: no system profile was collected."); err != nil {
 			return err
 		}
 	} else if len(options.frameworks) > 0 {
-		if err := configureFrameworkSelection(prompt, &cfg, false, options.frameworks); err != nil {
+		if err := configureFrameworkSelection(prompt, &cfg, false, options.frameworks, true); err != nil {
 			return err
 		}
 	}
@@ -396,7 +396,7 @@ func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.
 			if err := prompt.sectionTitle("Technical mappings", true); err != nil {
 				return false, err
 			}
-			if err := configureFrameworkSelection(prompt, cfg, true, nil); err != nil {
+			if err := configureFrameworkSelection(prompt, cfg, true, nil, true); err != nil {
 				return false, err
 			}
 			applyFrameworksToSystems(cfg.Systems, cfg.Frameworks)

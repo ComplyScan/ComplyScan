@@ -651,7 +651,7 @@ func recommendFrameworks(system profile.System) ([]string, string) {
 
 func configureRecommendedFrameworks(prompt promptSession, cfg *config.Config, system profile.System, explicit []string) error {
 	if len(explicit) > 0 {
-		if err := configureFrameworkSelection(prompt, cfg, false, explicit); err != nil {
+		if err := configureFrameworkSelection(prompt, cfg, false, explicit, true); err != nil {
 			return err
 		}
 		if frameworkEnabled(cfg.Frameworks, framework.NISTAIRMFTechnicalEvidencePackID) {

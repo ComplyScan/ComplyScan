@@ -420,8 +420,8 @@ func TestInteractiveSetupCreatesRepositoryProfileAndSelectsLocalReview(t *testin
 	target := t.TempDir()
 	input := strings.NewReader(strings.Join([]string{
 		"", "", // analysis mode, Ollama model
-		"", // technical mapping
-		"", // save configuration
+		"1", // technical mapping
+		"",  // save configuration
 	}, "\n") + "\n")
 	var stdout, stderr bytes.Buffer
 	code := executeWithInput([]string{"setup", "--interactive", "--skip-ollama-install", "--skip-model-pull", "--skip-scan", target}, input, &stdout, &stderr, testBuild)
@@ -629,7 +629,7 @@ func TestPromptFrameworkSelectionUsesHumanReadableMultiSelect(t *testing.T) {
 		defaults []string
 		want     string
 	}{
-		{name: "default EU", input: "\n", want: "eu-ai-act-technical-evidence"},
+		{name: "fresh selection required", input: "\n1\n", want: "eu-ai-act-technical-evidence"},
 		{name: "EU", input: "1\n", want: "eu-ai-act-technical-evidence"},
 		{name: "NIST", input: "2\n", want: "nist-ai-rmf-technical-evidence"},
 		{name: "both", input: "1,2\n", want: "eu-ai-act-technical-evidence,nist-ai-rmf-technical-evidence"},
@@ -656,6 +656,9 @@ func TestPromptFrameworkSelectionUsesHumanReadableMultiSelect(t *testing.T) {
 			if strings.Contains(output.String(), "Both —") {
 				t.Errorf("picker still contains a synthetic Both option:\n%s", output.String())
 			}
+			if test.name == "fresh selection required" && !strings.Contains(output.String(), "answer required") {
+				t.Errorf("fresh selection did not require an explicit answer:\n%s", output.String())
+			}
 			if test.name == "invalid then both" && !strings.Contains(output.String(), "Enter one or more numbers from 1 to 2, separated by commas.") {
 				t.Errorf("invalid selection did not explain valid choices:\n%s", output.String())
 			}
@@ -669,7 +672,7 @@ func TestPromptFrameworkSelectionUsesTerminalCheckboxes(t *testing.T) {
 		output: io.Discard,
 		selectMany: func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error) {
 			called = true
-			if label != "Technical evidence packs" || len(defaults) != 1 || !strings.HasPrefix(defaults[0], "EU AI Act") {
+			if label != "Technical evidence packs" || len(defaults) != 0 {
 				t.Fatalf("selector label=%q defaults=%#v", label, defaults)
 			}
 			if len(options) != 2 || strings.Contains(options[0].Label, "Both") || strings.Contains(options[1].Label, "Both") || len(exclusive) != 0 {
