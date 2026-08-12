@@ -61,10 +61,20 @@ func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"# ComplyScan technical evidence report",
-		"Technical evidence only",
+		"# ComplyScan report",
+		"## Result at a glance",
+		"AI-related components detected: **1**",
+		"Technical objectives with candidate evidence: **1**",
+		"AI review: **Performed — advisory AI evidence review included**",
+		"Legal applicability: **Not assessed by this technical report**",
+		"## AI-related components",
+		"Integration code was detected; active production use is not confirmed.",
+		"## Technical checklist",
+		"| Article 14 | Human override or intervention mechanism | **Candidate evidence** |",
+		"## Recommended next actions",
+		"<summary><strong>Show detailed scanner evidence</strong></summary>",
 		"scan-",
-		"## Rule findings",
+		"### Deterministic rule findings",
 		"**1 finding:**",
 		"Review \\*logging\\*",
 		"### Technical evidence: EU AI Act technical code evidence",
@@ -87,6 +97,31 @@ func TestWriteMarkdownRendersHumanTechnicalEvidenceReport(t *testing.T) {
 		"Assurance level: signal-detected",
 		"Only an exported candidate was found.",
 		"Original model strength: partial.",
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
+		}
+	}
+	if summaryIndex, detailIndex := strings.Index(output.String(), "## Result at a glance"), strings.Index(output.String(), "## Detailed scanner evidence"); summaryIndex < 0 || detailIndex < 0 || summaryIndex > detailIndex {
+		t.Fatalf("human summary does not precede scanner detail:\n%s", output.String())
+	}
+}
+
+func TestWriteMarkdownExplainsTestOnlyComponentsAndQuickScan(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	aiInventory := inventory.NewReport(".", "dev", []inventory.Signal{{
+		Name: "OpenAI", Kind: inventory.KindProvider, EvidenceType: inventory.EvidenceImport,
+		Scope: inventory.ScopeTest, Confidence: "high", Path: "client_test.go", Line: 2,
+	}}, nil)
+	value.AIInventory = &aiInventory
+	var output bytes.Buffer
+	if err := WriteMarkdown(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"AI review: **Not performed — quick technical scan**",
+		"| OpenAI | tests | Only test-related references were detected.",
+		"Confirm whether equivalent production integration exists.",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("Markdown missing %q:\n%s", expected, output.String())

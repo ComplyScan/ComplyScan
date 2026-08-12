@@ -13,13 +13,31 @@ import (
 
 // WriteMarkdown renders the same scan result as a human-readable local report.
 func WriteMarkdown(writer io.Writer, report Report) error {
-	if _, err := fmt.Fprintln(writer, "# ComplyScan technical evidence report"); err != nil {
+	if _, err := fmt.Fprintln(writer, "# ComplyScan report"); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(writer, "\n> Technical evidence only. This is not a legal compliance assessment.\n\n"); err != nil {
+	if _, err := fmt.Fprintln(writer, "\n> This report identifies technical signals in the repository. It does not determine legal compliance or prove that a control works in production."); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(writer, "- Scan ID: %s\n- Created: %s\n- Target: %s\n- Tool: ComplyScan %s\n", inlineCode(report.Scan.ID), inlineCode(report.Scan.CreatedAt), inlineCode(report.Target), markdownText(report.Tool.Version)); err != nil {
+	if err := writeReportOverviewMarkdown(writer, report); err != nil {
+		return err
+	}
+	if report.AIInventory != nil {
+		if err := writeAIComponentSummaryMarkdown(writer, *report.AIInventory); err != nil {
+			return err
+		}
+	}
+	if err := writeTechnicalChecklistMarkdown(writer, report); err != nil {
+		return err
+	}
+	if err := writeRecommendedActionsMarkdown(writer, report); err != nil {
+		return err
+	}
+
+	if _, err := fmt.Fprintln(writer, "\n<details>\n<summary><strong>Show detailed scanner evidence</strong></summary>\n\n## Detailed scanner evidence\n\nThe sections below preserve locations, scanner reasoning, ownership records, and coverage details for technical review. The JSON report contains the same evidence in machine-readable form."); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(writer, "\n### Scan metadata\n\n- Scan ID: %s\n- Created: %s\n- Target: %s\n- Tool: ComplyScan %s\n", inlineCode(report.Scan.ID), inlineCode(report.Scan.CreatedAt), inlineCode(report.Target), markdownText(report.Tool.Version)); err != nil {
 		return err
 	}
 	if report.Tool.Commit != "" {
@@ -37,7 +55,7 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 		}
 	}
 
-	if _, err := fmt.Fprintln(writer, "\n## Rule findings"); err != nil {
+	if _, err := fmt.Fprintln(writer, "\n### Deterministic rule findings"); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(writer, "\n%s\n", markdownFindingSummary(report.Summary)); err != nil {
@@ -213,8 +231,241 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 		}
 	}
 
-	_, err := fmt.Fprintln(writer, "\n---\n\nGenerated from the versioned JSON evidence bundle. Candidate evidence requires technical and human verification.")
+	_, err := fmt.Fprintln(writer, "\n</details>\n\n---\n\nGenerated from the versioned JSON evidence bundle. Candidate evidence requires technical and human verification.")
 	return err
+}
+
+type markdownReportCounts struct {
+	CandidateEvidence int
+	NotDetected       int
+	NotEvaluated      int
+	SourceFilesSeen   int
+	FilesIndexed      int
+	UnsupportedFiles  int
+}
+
+func writeReportOverviewMarkdown(writer io.Writer, report Report) error {
+	counts := markdownCounts(report)
+	status := "Completed"
+	if len(report.Warnings) > 0 {
+		status = "Completed with warnings"
+	}
+	review := "Not performed — quick technical scan"
+	if hasModelReview(report) {
+		review = "Performed — advisory AI evidence review included"
+	}
+	components := 0
+	if report.AIInventory != nil {
+		components = report.AIInventory.Summary.Components
+	}
+	if _, err := fmt.Fprintf(writer, "\n## Result at a glance\n\n- Scan status: **%s**\n- AI-related components detected: **%d**\n- Technical objectives with candidate evidence: **%d**\n- Technical objectives with no evidence detected: **%d**\n- Technical objectives not fully assessed: **%d**\n- Source files analysed: **%d of %d**\n- Deterministic findings: **%d** (%d critical, %d high, %d medium, %d low, %d informational)\n- AI review: **%s**\n- Legal applicability: **Not assessed by this technical report**\n",
+		status, components, counts.CandidateEvidence, counts.NotDetected, counts.NotEvaluated,
+		counts.FilesIndexed, counts.SourceFilesSeen, report.Summary.Total, report.Summary.Critical, report.Summary.High,
+		report.Summary.Medium, report.Summary.Low, report.Summary.Info, review); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintln(writer, "\nA detected component or candidate control is a lead for review, not confirmation that it is active, complete, or effective.")
+	return err
+}
+
+func writeAIComponentSummaryMarkdown(writer io.Writer, value inventory.Report) error {
+	if _, err := fmt.Fprintln(writer, "\n## AI-related components"); err != nil {
+		return err
+	}
+	if len(value.Components) == 0 {
+		_, err := fmt.Fprintln(writer, "\nNo configured AI provider or framework signal was detected in the bounded scan.")
+		return err
+	}
+	if _, err := fmt.Fprintln(writer, "\n| Component | Detected context | What this means | Next action |\n|---|---|---|---|"); err != nil {
+		return err
+	}
+	for _, component := range value.Components {
+		context, meaning, action := describeComponent(component)
+		if _, err := fmt.Fprintf(writer, "| %s | %s | %s | %s |\n", markdownTableText(component.Name), markdownTableText(context), markdownTableText(meaning), markdownTableText(action)); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(writer, "\nA runtime-source signal means integration code exists. Static analysis cannot establish whether that code is enabled or used in a deployed environment.")
+	return err
+}
+
+func writeTechnicalChecklistMarkdown(writer io.Writer, report Report) error {
+	if _, err := fmt.Fprintln(writer, "\n## Technical checklist"); err != nil {
+		return err
+	}
+	if len(report.Frameworks) == 0 && report.TechnicalEvidence == nil {
+		_, err := fmt.Fprintln(writer, "\nNo technical evidence pack was evaluated.")
+		return err
+	}
+	if _, err := fmt.Fprintln(writer, "\nThese are code-focused checks from the selected evidence packs. Selecting a pack does not mean that its law or framework applies to the system."); err != nil {
+		return err
+	}
+	for _, result := range report.Frameworks {
+		if err := writeOneTechnicalChecklistMarkdown(writer, result.Name, result.TechnicalEvidence); err != nil {
+			return err
+		}
+	}
+	if len(report.Frameworks) == 0 && report.TechnicalEvidence != nil {
+		if err := writeOneTechnicalChecklistMarkdown(writer, report.TechnicalEvidence.Pack.Name, *report.TechnicalEvidence); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeOneTechnicalChecklistMarkdown(writer io.Writer, name string, evidence framework.TechnicalEvidenceReport) error {
+	if _, err := fmt.Fprintf(writer, "\n### %s\n\n| Source | Technical objective | Result | What ComplyScan found | Next action |\n|---|---|---|---|---|\n", markdownText(name)); err != nil {
+		return err
+	}
+	for _, objective := range evidence.Objectives {
+		result, found, action := describeObjective(objective)
+		if _, err := fmt.Fprintf(writer, "| %s | %s | **%s** | %s | %s |\n",
+			markdownTableText(objective.SourceReference), markdownTableText(objective.Title), markdownTableText(result),
+			markdownTableText(found), markdownTableText(action)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeRecommendedActionsMarkdown(writer io.Writer, report Report) error {
+	counts := markdownCounts(report)
+	if _, err := fmt.Fprintln(writer, "\n## Recommended next actions"); err != nil {
+		return err
+	}
+	actions := make([]string, 0, 5)
+	if report.AIInventory != nil && report.AIInventory.Summary.Components > 0 {
+		actions = append(actions, "Confirm which detected AI components are actually enabled in deployed environments and what data they process.")
+	}
+	if counts.CandidateEvidence > 0 {
+		actions = append(actions, fmt.Sprintf("Review the %d technical objective(s) with candidate evidence and confirm reachability, production use, completeness, and effectiveness.", counts.CandidateEvidence))
+	}
+	if counts.NotDetected > 0 {
+		actions = append(actions, fmt.Sprintf("Decide which of the %d no-evidence objective(s) are relevant before implementing anything; no detected signal does not prove a control is absent.", counts.NotDetected))
+	}
+	if counts.NotEvaluated > 0 {
+		actions = append(actions, fmt.Sprintf("Manually review the unsupported files identified for the %d objective(s) that could not be fully assessed.", counts.NotEvaluated))
+	}
+	if !hasModelReview(report) && counts.CandidateEvidence > 0 {
+		actions = append(actions, "Run a deep scan when ready to add advisory semantic review of the candidate evidence.")
+	}
+	if len(actions) == 0 {
+		actions = append(actions, "Review the detailed evidence and preserve the JSON bundle for future comparison.")
+	}
+	for index, action := range actions {
+		if _, err := fmt.Fprintf(writer, "\n%d. %s", index+1, markdownText(action)); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(writer)
+	return err
+}
+
+func markdownCounts(report Report) markdownReportCounts {
+	counts := markdownReportCounts{}
+	add := func(evidence framework.TechnicalEvidenceReport) {
+		counts.CandidateEvidence += evidence.Summary.CandidateEvidence
+		counts.NotDetected += evidence.Summary.NotDetected
+		counts.NotEvaluated += evidence.Summary.NotEvaluated
+		if evidence.Analysis.SourceFilesSeen > counts.SourceFilesSeen {
+			counts.SourceFilesSeen = evidence.Analysis.SourceFilesSeen
+		}
+		if evidence.Analysis.FilesIndexed > counts.FilesIndexed {
+			counts.FilesIndexed = evidence.Analysis.FilesIndexed
+		}
+		if len(evidence.Analysis.UnsupportedSourceFiles) > counts.UnsupportedFiles {
+			counts.UnsupportedFiles = len(evidence.Analysis.UnsupportedSourceFiles)
+		}
+	}
+	if len(report.Frameworks) > 0 {
+		for _, result := range report.Frameworks {
+			add(result.TechnicalEvidence)
+		}
+	} else if report.TechnicalEvidence != nil {
+		add(*report.TechnicalEvidence)
+	}
+	return counts
+}
+
+func hasModelReview(report Report) bool {
+	if report.Review != nil || report.TechnicalReview != nil {
+		return true
+	}
+	for _, result := range report.Frameworks {
+		if result.TechnicalReview != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func describeComponent(component inventory.Component) (string, string, string) {
+	hasRuntime := containsInventoryScope(component.Scopes, inventory.ScopeRuntime)
+	hasTest := containsInventoryScope(component.Scopes, inventory.ScopeTest)
+	hasConfig := containsInventoryScope(component.Scopes, inventory.ScopeConfig)
+	contexts := make([]string, 0, 3)
+	if hasRuntime {
+		contexts = append(contexts, "runtime source")
+	}
+	if hasConfig {
+		contexts = append(contexts, "configuration")
+	}
+	if hasTest {
+		contexts = append(contexts, "tests")
+	}
+	context := strings.Join(contexts, ", ")
+	if context == "" {
+		context = "repository reference"
+	}
+	switch {
+	case hasRuntime:
+		return context, "Integration code was detected; active production use is not confirmed.", "Confirm whether it is enabled and processes production data."
+	case hasConfig:
+		return context, "Configuration was detected; active runtime use is not confirmed.", "Confirm whether this configuration is deployed."
+	case hasTest:
+		return context, "Only test-related references were detected.", "Confirm whether equivalent production integration exists."
+	default:
+		return context, "A technical reference was detected; its operational role is unknown.", "Review the detailed locations and classify its use."
+	}
+}
+
+func containsInventoryScope(scopes []inventory.Scope, wanted inventory.Scope) bool {
+	for _, scope := range scopes {
+		if scope == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func describeObjective(objective framework.ObjectiveAssessment) (string, string, string) {
+	switch objective.Status {
+	case framework.ObjectiveCandidate:
+		locations := make([]string, 0, 2)
+		for index, match := range objective.Matches {
+			if index == 2 {
+				break
+			}
+			locations = append(locations, locationText(match.Path, match.StartLine))
+		}
+		found := strings.Join(locations, ", ")
+		if remaining := len(objective.Matches) - len(locations); remaining > 0 {
+			found += fmt.Sprintf(" and %d more location(s)", remaining)
+		}
+		return "Candidate evidence", found, "Confirm that this code is active, complete, and effective in production."
+	case framework.ObjectiveNotEvaluated:
+		found := "A potentially relevant file could not be analysed by a supported language analyser."
+		if len(objective.UnresolvedQuestions) > 0 {
+			found = objective.UnresolvedQuestions[0]
+		}
+		return "Not fully assessed", found, "Review the named unsupported file manually or add analyzer support."
+	default:
+		return "No evidence detected", "No configured technical signal was found in the supported files scanned.", "Decide whether this objective applies; implement or document it only if relevant."
+	}
+}
+
+func markdownTableText(value string) string {
+	return strings.ReplaceAll(markdownText(value), "|", "\\|")
 }
 
 func writeFrameworkResultMarkdown(writer io.Writer, result FrameworkResult) error {
