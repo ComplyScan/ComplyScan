@@ -275,47 +275,52 @@ func TestBasicSystemQuestionnaireRequiresExplicitSelectorAnswersWhenRerun(t *tes
 	prompt := promptSession{
 		reader: bufio.NewReader(strings.NewReader("\n\n")), output: io.Discard,
 		guidance: &questionGuidance{}, step: &setupStepProgress{current: 3, total: 5},
-		selectOne: func(_ string, defaultValue string, options []terminalChoice) (string, error) {
+		selectOne: func(_ string, defaultValue string, _ []terminalChoice) (string, error) {
 			singleCalls++
 			if defaultValue != requiredAnswerChoiceValue {
 				t.Fatalf("selector %d reused saved default %q", singleCalls, defaultValue)
 			}
-			if singleCalls == 1 {
-				want := []string{
-					"Provider — we build, brand, or supply the AI system",
-					"Deployer — we professionally use an AI system supplied by someone else",
-					"Provider and deployer — we supply the system and also use it ourselves",
-					"Unknown — our organisation’s role has not been confirmed",
-				}
-				if len(options) < len(want)+1 {
-					t.Fatalf("organisation-role options = %#v", options)
-				}
-				for index, label := range want {
-					if options[index+1].Label != label {
-						t.Errorf("organisation-role option %d = %q, want %q", index, options[index+1].Label, label)
-					}
-				}
-			}
 			return []string{
-				"Provider — we build, brand, or supply the AI system",
 				string(profile.ImpactAdvisory), string(profile.LifecycleProduction), string(profile.OversightRequired),
 			}[singleCalls-1], nil
 		},
-		selectMany: func(_ string, defaults []string, _ []terminalChoice, _ []string) ([]string, error) {
+		selectMany: func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error) {
 			multipleCalls++
 			if len(defaults) != 0 {
 				t.Fatalf("multi-selector reused saved defaults: %#v", defaults)
 			}
-			return []string{string(profile.RegionEU)}, nil
+			if multipleCalls == 1 {
+				return []string{string(profile.RegionEU)}, nil
+			}
+			if label != "Step 3 of 5 · Question 4 of 7 — Organisation roles" || strings.Join(exclusive, ",") != string(profile.RoleUnknown) {
+				t.Fatalf("organisation selector label=%q exclusive=%#v", label, exclusive)
+			}
+			wantLabels := []string{
+				"Provider — we build, brand, or supply the AI system",
+				"Deployer — we professionally use an AI system supplied by someone else",
+				"Importer — we bring a non-EU provider’s AI system into the EU market",
+				"Distributor — we make another provider’s AI system available in the EU",
+				"Product manufacturer — we supply the AI system with a product under our name or brand",
+				"Unknown — our organisation’s role has not been confirmed",
+			}
+			if len(options) < len(wantLabels) {
+				t.Fatalf("organisation-role options = %#v", options)
+			}
+			for index, want := range wantLabels {
+				if options[index].Label != want {
+					t.Errorf("organisation-role option %d = %q, want %q", index, options[index].Label, want)
+				}
+			}
+			return []string{string(profile.RoleImporter), string(profile.RoleDistributor)}, nil
 		},
 	}
 	updated, err := collectBasicSystemProfile(prompt, ".", time.Now(), setupRepositorySummary{}, newSetupProfileDraft(), &existing)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if singleCalls != 4 || multipleCalls != 1 || updated.Name != existing.Name || updated.IntendedPurpose != existing.IntendedPurpose ||
+	if singleCalls != 3 || multipleCalls != 2 || updated.Name != existing.Name || updated.IntendedPurpose != existing.IntendedPurpose ||
 		len(updated.OperatingRegions) != 1 || updated.OperatingRegions[0] != profile.RegionEU ||
-		len(updated.OrganizationRoles) != 1 || updated.OrganizationRoles[0] != profile.RoleProvider ||
+		len(updated.OrganizationRoles) != 2 || updated.OrganizationRoles[0] != profile.RoleImporter || updated.OrganizationRoles[1] != profile.RoleDistributor ||
 		updated.DecisionImpact != profile.ImpactAdvisory || updated.LifecycleStage != profile.LifecycleProduction ||
 		updated.HumanOversight != profile.OversightRequired {
 		t.Fatalf("rerun changed existing answers: %#v", updated)
@@ -1137,7 +1142,7 @@ func TestReviewSetupChoosesFirstRunActionWhileConfirming(t *testing.T) {
 
 func TestEverySetupQuestionHasDeveloperGuidance(t *testing.T) {
 	keys := []string{
-		"resume-setup", "applicability-context", "frameworks", "system-id", "system-name", "intended-purpose", "lifecycle-stage", "organization-roles", "organization-role-basic",
+		"resume-setup", "applicability-context", "frameworks", "system-id", "system-name", "intended-purpose", "lifecycle-stage", "organization-roles",
 		"operating-regions", "use-case-domains", "users", "affected-groups", "decision-impact",
 		"human-oversight", "ai-activities", "personal-data", "special-category-data", "children-data",
 		"deployment-models", "profile-reviewer", "applicability-decision", "decision-rationale",

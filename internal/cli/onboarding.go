@@ -171,30 +171,11 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 	}
 	if _, err := fmt.Fprintln(prompt.output,
 		"Repository-evident technical facts are shown separately. These short questions collect facts that source code cannot reliably establish.\n"+
-			"Use the advanced setup later for detailed data, deployment, supply-chain, and reviewed applicability records."); err != nil {
+			"Use the advanced setup later for detailed data, deployment, ownership, and reviewed applicability records."); err != nil {
 		return profile.System{}, err
 	}
-	const (
-		providerOption = "Provider — we build, brand, or supply the AI system"
-		deployerOption = "Deployer — we professionally use an AI system supplied by someone else"
-		bothOption     = "Provider and deployer — we supply the system and also use it ourselves"
-		unknownOption  = "Unknown — our organisation’s role has not been confirmed"
-	)
 	value.IntendedPurpose = draft.first("intended-purpose", value.IntendedPurpose)
 	completed := make([]bool, 7)
-	role := ""
-	if existing != nil {
-		switch {
-		case containsOrganizationRole(value.OrganizationRoles, profile.RoleProvider) && containsOrganizationRole(value.OrganizationRoles, profile.RoleDeployer):
-			role = bothOption
-		case containsOrganizationRole(value.OrganizationRoles, profile.RoleProvider):
-			role = providerOption
-		case containsOrganizationRole(value.OrganizationRoles, profile.RoleDeployer):
-			role = deployerOption
-		default:
-			role = unknownOption
-		}
-	}
 	err = runSetupPromptSteps(prompt, false,
 		func(step promptSession) error {
 			if err := explainSetupQuestion(step, "system-name"); err != nil {
@@ -238,31 +219,18 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 			return err
 		},
 		func(step promptSession) error {
-			if err := explainSetupQuestion(step, "organization-role-basic"); err != nil {
+			if err := explainSetupQuestion(step, "organization-roles"); err != nil {
 				return err
 			}
-			var answer string
-			var err error
+			defaults := []profile.OrganizationRole(nil)
 			if completed[3] {
-				answer, err = promptChoice(step, "organisation role", role, providerOption, deployerOption, bothOption, unknownOption)
-			} else {
-				answer, err = promptRequiredChoice(step, "organisation role", providerOption, deployerOption, bothOption, unknownOption)
+				defaults = value.OrganizationRoles
 			}
-			if err != nil {
-				return err
+			answer, err := promptOrganizationRoles(step, defaults)
+			if err == nil {
+				value.OrganizationRoles, completed[3] = answer, true
 			}
-			role, completed[3] = answer, true
-			switch role {
-			case providerOption:
-				value.OrganizationRoles = []profile.OrganizationRole{profile.RoleProvider}
-			case deployerOption:
-				value.OrganizationRoles = []profile.OrganizationRole{profile.RoleDeployer}
-			case bothOption:
-				value.OrganizationRoles = []profile.OrganizationRole{profile.RoleProvider, profile.RoleDeployer}
-			default:
-				value.OrganizationRoles = []profile.OrganizationRole{profile.RoleUnknown}
-			}
-			return nil
+			return err
 		},
 		func(step promptSession) error {
 			if err := explainSetupQuestion(step, "decision-impact"); err != nil {
@@ -344,13 +312,55 @@ func collectBasicSystemProfile(prompt promptSession, target string, now time.Tim
 	return value, nil
 }
 
-func containsOrganizationRole(roles []profile.OrganizationRole, target profile.OrganizationRole) bool {
-	for _, role := range roles {
-		if role == target {
-			return true
+func promptOrganizationRoles(session promptSession, defaults []profile.OrganizationRole) ([]profile.OrganizationRole, error) {
+	allowed := []profile.OrganizationRole{
+		profile.RoleProvider,
+		profile.RoleDeployer,
+		profile.RoleImporter,
+		profile.RoleDistributor,
+		profile.RoleProductManufacturer,
+		profile.RoleUnknown,
+	}
+	if session.selectMany == nil {
+		return promptChoices(session, "Organisation roles", defaults, allowed...)
+	}
+	labels := map[profile.OrganizationRole]string{
+		profile.RoleProvider:            "Provider — we build, brand, or supply the AI system",
+		profile.RoleDeployer:            "Deployer — we professionally use an AI system supplied by someone else",
+		profile.RoleImporter:            "Importer — we bring a non-EU provider’s AI system into the EU market",
+		profile.RoleDistributor:         "Distributor — we make another provider’s AI system available in the EU",
+		profile.RoleProductManufacturer: "Product manufacturer — we supply the AI system with a product under our name or brand",
+		profile.RoleUnknown:             "Unknown — our organisation’s role has not been confirmed",
+	}
+	defaultValues := make([]string, len(defaults))
+	for index, value := range defaults {
+		defaultValues[index] = string(value)
+	}
+	options := make([]terminalChoice, len(allowed))
+	for index, value := range allowed {
+		options[index] = terminalChoice{Label: labels[value], Value: string(value)}
+	}
+	selected, err := session.chooseMany(session.nextQuestionLabel("Organisation roles"), defaultValues, options, []string{string(profile.RoleUnknown)})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]profile.OrganizationRole, 0, len(selected))
+	seen := make(map[profile.OrganizationRole]struct{}, len(selected))
+	for _, selectedValue := range selected {
+		index, matched := choiceIndex(selectedValue, allowed)
+		if !matched {
+			return nil, fmt.Errorf("organisation roles selector returned unsupported value %q", selectedValue)
+		}
+		value := allowed[index]
+		if _, duplicate := seen[value]; !duplicate {
+			result = append(result, value)
+			seen[value] = struct{}{}
 		}
 	}
-	return false
+	if len(result) == 0 {
+		return nil, errors.New("organisation roles requires at least one selection")
+	}
+	return result, nil
 }
 
 func collectRelevantEUApplicabilityContext(prompt promptSession, system *profile.System, now time.Time, draft setupProfileDraft) error {
