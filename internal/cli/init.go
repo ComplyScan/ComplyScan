@@ -114,28 +114,28 @@ func promptFrameworkSelection(prompt promptSession, defaults []string) ([]string
 	const (
 		euOption   = "EU AI Act — code evidence linked to potential legal obligations"
 		nistOption = "NIST AI RMF — voluntary technical practices"
-		bothOption = "Both — map shared evidence against each source separately"
 	)
-	defaultSelection := euOption
-	euSelected := frameworkEnabled(defaults, framework.EUAIActTechnicalEvidencePackID)
-	nistSelected := frameworkEnabled(defaults, framework.NISTAIRMFTechnicalEvidencePackID)
-	if euSelected && nistSelected {
-		defaultSelection = bothOption
-	} else if nistSelected {
-		defaultSelection = nistOption
+	defaultSelections := make([]string, 0, 2)
+	if frameworkEnabled(defaults, framework.EUAIActTechnicalEvidencePackID) {
+		defaultSelections = append(defaultSelections, euOption)
 	}
-	selection, err := promptChoice(prompt, "technical evidence packs", defaultSelection, euOption, nistOption, bothOption)
+	if frameworkEnabled(defaults, framework.NISTAIRMFTechnicalEvidencePackID) {
+		defaultSelections = append(defaultSelections, nistOption)
+	}
+	selections, err := promptChoices(prompt, "Technical evidence packs", defaultSelections, euOption, nistOption)
 	if err != nil {
 		return nil, err
 	}
-	switch selection {
-	case nistOption:
-		return []string{framework.NISTAIRMFTechnicalEvidencePackID}, nil
-	case bothOption:
-		return []string{framework.EUAIActTechnicalEvidencePackID, framework.NISTAIRMFTechnicalEvidencePackID}, nil
-	default:
-		return []string{framework.EUAIActTechnicalEvidencePackID}, nil
+	selected := make([]string, 0, len(selections))
+	for _, selection := range selections {
+		switch selection {
+		case euOption:
+			selected = append(selected, framework.EUAIActTechnicalEvidencePackID)
+		case nistOption:
+			selected = append(selected, framework.NISTAIRMFTechnicalEvidencePackID)
+		}
 	}
+	return selected, nil
 }
 
 const reportGitIgnoreEntry = "/.complyscan/reports/"

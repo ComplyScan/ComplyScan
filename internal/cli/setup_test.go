@@ -622,7 +622,7 @@ func TestNISTOnlySetupSkipsEUApplicabilityDecision(t *testing.T) {
 	}
 }
 
-func TestPromptFrameworkSelectionUsesHumanReadableNumberedChoices(t *testing.T) {
+func TestPromptFrameworkSelectionUsesHumanReadableMultiSelect(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
@@ -632,10 +632,10 @@ func TestPromptFrameworkSelectionUsesHumanReadableNumberedChoices(t *testing.T) 
 		{name: "default EU", input: "\n", want: "eu-ai-act-technical-evidence"},
 		{name: "EU", input: "1\n", want: "eu-ai-act-technical-evidence"},
 		{name: "NIST", input: "2\n", want: "nist-ai-rmf-technical-evidence"},
-		{name: "both", input: "3\n", want: "eu-ai-act-technical-evidence,nist-ai-rmf-technical-evidence"},
+		{name: "both", input: "1,2\n", want: "eu-ai-act-technical-evidence,nist-ai-rmf-technical-evidence"},
 		{name: "configured NIST default", input: "\n", defaults: []string{"nist-ai-rmf-technical-evidence"}, want: "nist-ai-rmf-technical-evidence"},
 		{name: "configured both default", input: "\n", defaults: []string{"eu-ai-act-technical-evidence", "nist-ai-rmf-technical-evidence"}, want: "eu-ai-act-technical-evidence,nist-ai-rmf-technical-evidence"},
-		{name: "invalid then both", input: "4\n3\n", want: "eu-ai-act-technical-evidence,nist-ai-rmf-technical-evidence"},
+		{name: "invalid then both", input: "3\n1,2\n", want: "eu-ai-act-technical-evidence,nist-ai-rmf-technical-evidence"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -648,15 +648,42 @@ func TestPromptFrameworkSelectionUsesHumanReadableNumberedChoices(t *testing.T) 
 			if actual := strings.Join(selected, ","); actual != test.want {
 				t.Fatalf("selection = %q, want %q", actual, test.want)
 			}
-			for _, expected := range []string{"1) EU AI Act", "2) NIST AI RMF", "3) Both", "Select technical evidence packs (1-3)"} {
+			for _, expected := range []string{"1) EU AI Act", "2) NIST AI RMF", "Technical evidence packs numbers (comma-separated)"} {
 				if !strings.Contains(strings.ReplaceAll(output.String(), ", ", ","), expected) {
 					t.Errorf("picker output missing %q:\n%s", expected, output.String())
 				}
 			}
-			if test.name == "invalid then both" && !strings.Contains(output.String(), "Enter a number from 1 to 3.") {
+			if strings.Contains(output.String(), "Both —") {
+				t.Errorf("picker still contains a synthetic Both option:\n%s", output.String())
+			}
+			if test.name == "invalid then both" && !strings.Contains(output.String(), "Enter one or more numbers from 1 to 2, separated by commas.") {
 				t.Errorf("invalid selection did not explain valid choices:\n%s", output.String())
 			}
 		})
+	}
+}
+
+func TestPromptFrameworkSelectionUsesTerminalCheckboxes(t *testing.T) {
+	called := false
+	prompt := promptSession{
+		output: io.Discard,
+		selectMany: func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error) {
+			called = true
+			if label != "Technical evidence packs" || len(defaults) != 1 || !strings.HasPrefix(defaults[0], "EU AI Act") {
+				t.Fatalf("selector label=%q defaults=%#v", label, defaults)
+			}
+			if len(options) != 2 || strings.Contains(options[0].Label, "Both") || strings.Contains(options[1].Label, "Both") || len(exclusive) != 0 {
+				t.Fatalf("selector options=%#v exclusive=%#v", options, exclusive)
+			}
+			return []string{options[0].Value, options[1].Value}, nil
+		},
+	}
+	selected, err := promptFrameworkSelection(prompt, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called || strings.Join(selected, ",") != framework.EUAIActTechnicalEvidencePackID+","+framework.NISTAIRMFTechnicalEvidencePackID {
+		t.Fatalf("selected=%#v called=%t", selected, called)
 	}
 }
 

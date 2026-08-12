@@ -19,7 +19,7 @@ var setupQuestionHelp = map[string][]string{
 	},
 	"frameworks": {
 		"Choose which sources ComplyScan should map the repository's technical evidence against. The EU pack covers code-visible objectives linked to potential legal obligations; NIST AI RMF is voluntary guidance.",
-		"This choice controls the technical scan only. It does not mean a law applies, decide legal risk, or certify that any outcome is satisfied. Select both to map shared evidence against each source separately.",
+		"This choice controls the technical scan only. It does not mean a law applies, decide legal risk, or certify that any outcome is satisfied. Tick every source you want to scan against; shared evidence is mapped to each selected source separately.",
 	},
 	"system-id": {
 		"A short, stable machine-readable identifier used to connect scans and future dashboard records to this system.",
