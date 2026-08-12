@@ -4,7 +4,7 @@ ComplyScan accepts arbitrary exact Ollama tags and model IDs supported by its na
 
 Before an unseen model receives repository context, ComplyScan sends one small synthetic record through the configured provider. The record contains no repository data and includes instruction-shaped untrusted text. A model is marked **compatible** only when it returns the required structured object, preserves the trusted record binding, and does not create an extra record from the untrusted instruction.
 
-Interactive setup runs this check automatically after the selected local model is installed or the selected remote credential is available. A deep scan also runs it automatically when the current model has no valid cached result. Non-interactive setup does not contact a provider unless `--qualify-model` is explicitly supplied; remote qualification may incur a small provider charge.
+Interactive setup runs this check automatically after the selected local model is installed or the selected remote credential is available. A scan also runs it automatically when its configured model has no valid cached result. Non-interactive setup does not contact a provider unless `--qualify-model` is explicitly supplied; remote qualification may incur a small provider charge.
 
 Successful results are cached under the operating system's private user-cache directory for 30 days. The cache key binds:
 
