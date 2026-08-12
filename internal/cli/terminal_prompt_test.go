@@ -63,6 +63,69 @@ func TestTextFormCanOpenDetailsImmediately(t *testing.T) {
 	}
 }
 
+func TestDynamicPromptUpdateSchedulesViewportRelayout(t *testing.T) {
+	selected := "one"
+	navigator := newTestBackNavigableForm(&selected)
+	_, command := navigator.Update(struct{ changed string }{changed: "description"})
+	if command == nil {
+		t.Fatal("dynamic prompt update did not schedule a viewport relayout")
+	}
+	messages := collectTeaMessages(command)
+	found := false
+	for _, message := range messages {
+		if _, ok := message.(promptRelayoutMsg); ok {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("dynamic prompt messages = %#v, want promptRelayoutMsg", messages)
+	}
+}
+
+func TestPromptRelayoutDoesNotScheduleItselfAgain(t *testing.T) {
+	selected := "one"
+	navigator := newTestBackNavigableForm(&selected)
+	_, command := navigator.Update(promptRelayoutMsg{})
+	for _, message := range collectTeaMessages(command) {
+		if _, ok := message.(promptRelayoutMsg); ok {
+			t.Fatal("prompt relayout recursively scheduled another relayout")
+		}
+	}
+}
+
+func TestLeavingExpandedGuidanceRestoresChoicesAfterOneKeypress(t *testing.T) {
+	selected := moreGuidanceChoiceValue
+	field := huh.NewSelect[string]().
+		Title("Decision impact").
+		DescriptionFunc(func() string {
+			if selected == moreGuidanceChoiceValue {
+				return "Further explanation:\nline one\nline two\nline three\nline four"
+			}
+			return "Choose the strongest effect."
+		}, &selected).
+		Options(
+			huh.NewOption("Advisory", "advisory"),
+			huh.NewOption("Low", "low"),
+			huh.NewOption("Significant", "significant"),
+			huh.NewOption("Autonomous", "autonomous"),
+			huh.NewOption("Further explanation", moreGuidanceChoiceValue),
+		).
+		Value(&selected)
+	navigator := &backNavigableForm{form: huh.NewForm(huh.NewGroup(field)).WithWidth(80).WithHeight(10)}
+	drainTeaCommand(t, navigator, navigator.Init(), 50)
+	_, resize := navigator.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
+	drainTeaCommand(t, navigator, resize, 50)
+	_, command := navigator.Update(tea.KeyMsg{Type: tea.KeyUp})
+	drainTeaCommand(t, navigator, command, 50)
+
+	view := navigator.View()
+	for _, choice := range []string{"Advisory", "Low", "Significant", "Autonomous"} {
+		if !strings.Contains(view, choice) {
+			t.Fatalf("collapsed guidance still hides %q after one keypress: %q", choice, view)
+		}
+	}
+}
+
 func TestTextFormFooterIncludesDetailsAndEscapeBack(t *testing.T) {
 	selected := ""
 	field := huh.NewInput().Value(&selected)
@@ -203,5 +266,34 @@ func TestBackHelpFooterIsNotDuplicated(t *testing.T) {
 	view := "choices\n" + styledBack + "\n"
 	if got := replaceOrAppendHelpFooter(view, "", styledBack); got != view {
 		t.Fatalf("duplicated footer = %q, want %q", got, view)
+	}
+}
+
+func collectTeaMessages(command tea.Cmd) []tea.Msg {
+	if command == nil {
+		return nil
+	}
+	message := command()
+	if batch, ok := message.(tea.BatchMsg); ok {
+		messages := make([]tea.Msg, 0, len(batch))
+		for _, nested := range batch {
+			messages = append(messages, collectTeaMessages(nested)...)
+		}
+		return messages
+	}
+	return []tea.Msg{message}
+}
+
+func drainTeaCommand(t *testing.T, navigator *backNavigableForm, command tea.Cmd, remaining int) {
+	t.Helper()
+	if command == nil {
+		return
+	}
+	if remaining <= 0 {
+		t.Fatal("terminal prompt command queue did not settle")
+	}
+	for _, message := range collectTeaMessages(command) {
+		_, next := navigator.Update(message)
+		drainTeaCommand(t, navigator, next, remaining-1)
 	}
 }

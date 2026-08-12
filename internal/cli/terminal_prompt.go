@@ -349,6 +349,8 @@ type backNavigableForm struct {
 	backKey        tea.KeyType
 }
 
+type promptRelayoutMsg struct{}
+
 func (form *backNavigableForm) Init() tea.Cmd {
 	return form.form.Init()
 }
@@ -367,6 +369,12 @@ func (form *backNavigableForm) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	updated, command := form.form.Update(message)
 	if next, ok := updated.(*huh.Form); ok {
 		form.form = next
+	}
+	if _, relayout := message.(promptRelayoutMsg); relayout {
+		return form, command
+	}
+	if _, keyMessage := message.(tea.KeyMsg); !keyMessage {
+		return form, tea.Batch(command, func() tea.Msg { return promptRelayoutMsg{} })
 	}
 	return form, command
 }
