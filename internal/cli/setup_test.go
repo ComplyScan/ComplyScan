@@ -441,7 +441,7 @@ func TestInteractiveSetupCreatesRepositoryProfileAndSelectsLocalReview(t *testin
 	if cfg.Systems[0].LifecycleStage != profile.LifecycleUnknown {
 		t.Fatalf("lifecycle answer = %q", cfg.Systems[0].LifecycleStage)
 	}
-	for _, expected := range []string{"ComplyScan setup", "Step 1 of 4 — Analysis, privacy, and model", "Step 2 of 4 — Technical mappings", "Step 3 of 4 — Repository inspection", "Step 4 of 4 — Review, save, and first scan", "Repository inspected", "Local model setup", "Created repository profile", "Saved", "Next: complyscan scan"} {
+	for _, expected := range []string{"ComplyScan setup", "Step 1 of 4 — Repository inspection", "Step 2 of 4 — Analysis, privacy, and model", "Step 3 of 4 — Technical mappings", "Step 4 of 4 — Review, save, and first scan", "Repository inspected", "No model is used in this step", "Local model setup", "Report target:", "Save without scanning", "Saved", "Next: complyscan scan"} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("output missing %q:\n%s", expected, stdout.String())
 		}
@@ -494,7 +494,7 @@ func TestFastSetupUsesDeterministicDraftWithoutModel(t *testing.T) {
 	if len(cfg.Systems) != 1 || len(cfg.Systems[0].AIActivities) != 1 || cfg.Systems[0].AIActivities[0] != profile.ActivityInference {
 		t.Fatalf("systems = %#v", cfg.Systems)
 	}
-	if cfg.AI.Provider != "none" || !strings.Contains(stdout.String(), "Created repository profile") || strings.Contains(stdout.String(), "AI suggestion") || strings.Contains(stdout.String(), "Drafting setup answers") {
+	if cfg.AI.Provider != "none" || !strings.Contains(stdout.String(), "Report target:") || strings.Contains(stdout.String(), "AI suggestion") || strings.Contains(stdout.String(), "Drafting setup answers") {
 		t.Fatalf("fast setup output:\n%s", stdout.String())
 	}
 }
@@ -930,42 +930,6 @@ func TestTerminalPromptAvailabilityRespectsAccessibleModeAndStreams(t *testing.T
 	}
 }
 
-func TestPromptSetupScanModeMakesExpensiveReviewExplicit(t *testing.T) {
-	tests := []struct {
-		name       string
-		input      string
-		provider   string
-		modelReady bool
-		want       setupScanMode
-	}{
-		{name: "quick default", input: "\n", want: setupScanQuick},
-		{name: "deep default after ready AI setup", input: "\n", provider: "ollama", modelReady: true, want: setupScanDeep},
-		{name: "deep", input: "2\n", want: setupScanDeep},
-		{name: "configure only", input: "3\n", want: setupScanNone},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			var output bytes.Buffer
-			prompt := promptSession{reader: bufio.NewReader(strings.NewReader(test.input)), output: &output}
-			mode, err := promptSetupScanMode(prompt, setupRepositorySummary{}, test.provider, test.modelReady)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if mode != test.want {
-				t.Fatalf("mode = %q, want %q", mode, test.want)
-			}
-			for _, expected := range []string{"1) Quick scan", "2) Deep AI review", "3) Save setup without scanning"} {
-				if !strings.Contains(output.String(), expected) {
-					t.Errorf("scan-mode output missing %q:\n%s", expected, output.String())
-				}
-			}
-			if test.want == setupScanDeep && !strings.Contains(output.String(), "may take many minutes") {
-				t.Errorf("deep review did not disclose duration uncertainty:\n%s", output.String())
-			}
-		})
-	}
-}
-
 func TestWriteSetupReviewSummaryShowsDecisionsBeforeSave(t *testing.T) {
 	cfg := config.Default()
 	cfg.AI.Provider = "openai"
@@ -974,13 +938,13 @@ func TestWriteSetupReviewSummaryShowsDecisionsBeforeSave(t *testing.T) {
 	cfg.Systems = []profile.System{{ID: "checkout-ai", Name: "Checkout assistant"}}
 	var output bytes.Buffer
 	prompt := promptSession{output: &output}
-	if err := writeSetupReviewSummary(prompt, cfg, setupScanDeep, true); err != nil {
+	if err := writeSetupReviewSummary(prompt, cfg, true); err != nil {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
 		"Review setup", "[READY] Analysis: OpenAI cloud — gpt-test", "EU AI Act technical evidence",
 		"NIST AI RMF technical evidence", "Checkout assistant (checkout-ai)",
-		"single-system inference", "deep AI-assisted scan",
+		"all repository evidence maps to the single report target",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("review summary missing %q:\n%s", expected, output.String())
@@ -1016,7 +980,7 @@ func TestReviewSetupBeforeSaveCanCancelWithoutWriting(t *testing.T) {
 	prompt := promptSession{
 		reader: bufio.NewReader(strings.NewReader("")), output: &output,
 		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
-			if label != "review action" || defaultValue != string(setupReviewSave) {
+			if label != "Finish setup" || defaultValue != string(setupReviewRunQuick) {
 				t.Fatalf("selector label=%q default=%q", label, defaultValue)
 			}
 			return string(setupReviewCancel), nil
@@ -1030,6 +994,40 @@ func TestReviewSetupBeforeSaveCanCancelWithoutWriting(t *testing.T) {
 	}
 	if save {
 		t.Fatal("cancel action unexpectedly allowed configuration save")
+	}
+}
+
+func TestReviewSetupChoosesFirstRunActionWhileConfirming(t *testing.T) {
+	cfg := config.Default()
+	cfg.AI.Provider = "ollama"
+	var output bytes.Buffer
+	prompt := promptSession{
+		output: &output,
+		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
+			if label != "Finish setup" || defaultValue != string(setupReviewRunDeep) {
+				t.Fatalf("selector label=%q default=%q", label, defaultValue)
+			}
+			values := make([]string, len(options))
+			for index, option := range options {
+				values[index] = option.Value
+			}
+			if !strings.Contains(strings.Join(values, "\n"), string(setupReviewRunQuick)) || !strings.Contains(strings.Join(values, "\n"), string(setupReviewSaveOnly)) {
+				t.Fatalf("finish actions = %#v", values)
+			}
+			return string(setupReviewRunDeep), nil
+		},
+	}
+	mode := setupScanNone
+	ready := true
+	save, err := reviewSetupBeforeSave(context.Background(), prompt, &output, t.TempDir(), &cfg, setupOptions{}, setupRepositorySummary{}, &mode, &ready)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !save || mode != setupScanDeep {
+		t.Fatalf("save=%t mode=%q", save, mode)
+	}
+	if !strings.Contains(output.String(), "may take many minutes") {
+		t.Fatalf("deep-scan duration disclosure missing:\n%s", output.String())
 	}
 }
 

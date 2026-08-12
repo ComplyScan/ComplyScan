@@ -168,7 +168,15 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		if options.advanced {
 			totalSteps = 5
 		}
-		if err := setupStepTitle(prompt, 1, totalSteps, "Analysis, privacy, and model", false); err != nil {
+		if err := setupStepTitle(prompt, 1, totalSteps, "Repository inspection", false); err != nil {
+			return err
+		}
+		summary, inspectErr := inspectRepositoryForSetup(cmd.Context(), prompt, target, cfg, build)
+		if inspectErr != nil {
+			return inspectErr
+		}
+		repositorySummary = summary
+		if err := setupStepTitle(prompt, 2, totalSteps, "Analysis, privacy, and model", true); err != nil {
 			return err
 		}
 		if setupDraftStageRank(resumeStage) >= setupDraftStageRank(setupDraftAnalysis) {
@@ -187,7 +195,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		if _, err := fmt.Fprintln(stdout); err != nil {
 			return err
 		}
-		if err := setupStepTitle(prompt, 2, totalSteps, "Technical mappings", false); err != nil {
+		if err := setupStepTitle(prompt, 3, totalSteps, "Technical mappings", false); err != nil {
 			return err
 		}
 		if setupDraftStageRank(resumeStage) >= setupDraftStageRank(setupDraftContext) {
@@ -197,14 +205,6 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		} else if err := configureFrameworkSelection(prompt, &cfg, true, options.frameworks); err != nil {
 			return err
 		}
-		if err := setupStepTitle(prompt, 3, totalSteps, "Repository inspection", true); err != nil {
-			return err
-		}
-		summary, inspectErr := inspectRepositoryForSetup(cmd.Context(), prompt, target, cfg, build)
-		if inspectErr != nil {
-			return inspectErr
-		}
-		repositorySummary = summary
 		if setupDraftStageRank(resumeStage) < setupDraftStageRank(setupDraftContext) {
 			if options.advanced {
 				if err := setupStepTitle(prompt, 4, totalSteps, "Detailed system profile and evidence ownership", true); err != nil {
@@ -238,12 +238,6 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		}
 		if err := setupStepTitle(prompt, reviewStep, totalSteps, "Review, save, and first scan", true); err != nil {
 			return err
-		}
-		if !options.skipScan && setupDraftStageRank(resumeStage) < setupDraftStageRank(setupDraftReview) {
-			scanMode, err = promptSetupScanMode(prompt, repositorySummary, cfg.AI.Provider, modelReady)
-			if err != nil {
-				return err
-			}
 		}
 	}
 	configureReview := !reviewConfigured && (!interactive || options.skipScan || scanMode == setupScanDeep || setupReviewExplicit(options))
@@ -346,33 +340,57 @@ func collectAdvancedSetupContext(prompt promptSession, target string, cfg *confi
 type setupReviewAction string
 
 const (
-	setupReviewSave     setupReviewAction = "Save configuration"
+	setupReviewRunQuick setupReviewAction = "Save and run quick deterministic scan"
+	setupReviewRunDeep  setupReviewAction = "Save and run deep AI-assisted scan"
+	setupReviewSaveOnly setupReviewAction = "Save without scanning"
 	setupReviewAnalysis setupReviewAction = "Change analysis and privacy mode"
 	setupReviewMappings setupReviewAction = "Change technical mappings"
 	setupReviewProfile  setupReviewAction = "Edit detailed system profile"
-	setupReviewScan     setupReviewAction = "Change first-run action"
 	setupReviewCancel   setupReviewAction = "Cancel without saving"
 )
 
 func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.Writer, target string, cfg *config.Config, options setupOptions, summary setupRepositorySummary, scanMode *setupScanMode, modelReady *bool) (bool, error) {
 	for {
-		if err := writeSetupReviewSummary(prompt, *cfg, *scanMode, *modelReady); err != nil {
+		if err := writeSetupReviewSummary(prompt, *cfg, *modelReady); err != nil {
 			return false, err
 		}
-		actions := []setupReviewAction{setupReviewSave, setupReviewAnalysis, setupReviewMappings}
+		actions := make([]setupReviewAction, 0, 7)
+		defaultAction := setupReviewRunQuick
+		if options.skipScan {
+			actions = append(actions, setupReviewSaveOnly)
+			defaultAction = setupReviewSaveOnly
+		} else {
+			actions = append(actions, setupReviewRunQuick)
+			if cfg.AI.Provider != "none" && *modelReady {
+				actions = append(actions, setupReviewRunDeep)
+				defaultAction = setupReviewRunDeep
+			}
+			actions = append(actions, setupReviewSaveOnly)
+		}
+		actions = append(actions, setupReviewAnalysis, setupReviewMappings)
 		if options.advanced {
 			actions = append(actions, setupReviewProfile)
 		}
-		if !options.skipScan {
-			actions = append(actions, setupReviewScan)
-		}
 		actions = append(actions, setupReviewCancel)
-		action, err := promptChoice(prompt, "review action", setupReviewSave, actions...)
+		if err := explainSetupQuestion(prompt, "scan-mode"); err != nil {
+			return false, err
+		}
+		action, err := promptChoice(prompt, "Finish setup", defaultAction, actions...)
 		if err != nil {
 			return false, err
 		}
 		switch action {
-		case setupReviewSave:
+		case setupReviewRunQuick:
+			*scanMode = setupScanQuick
+			return true, nil
+		case setupReviewRunDeep:
+			*scanMode = setupScanDeep
+			if _, err := fmt.Fprintln(stdout, "\nDeep review may take many minutes depending on the model, hardware, and number of evidence targets."); err != nil {
+				return false, err
+			}
+			return true, nil
+		case setupReviewSaveOnly:
+			*scanMode = setupScanNone
 			return true, nil
 		case setupReviewAnalysis:
 			revisit := options
@@ -407,21 +425,13 @@ func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.
 			if err := collectAdvancedSetupContext(prompt, target, cfg, summary, false); err != nil {
 				return false, err
 			}
-		case setupReviewScan:
-			if err := prompt.sectionTitle("First-run action", true); err != nil {
-				return false, err
-			}
-			*scanMode, err = promptSetupScanMode(prompt, summary, cfg.AI.Provider, *modelReady)
-			if err != nil {
-				return false, err
-			}
 		case setupReviewCancel:
 			return false, nil
 		}
 	}
 }
 
-func writeSetupReviewSummary(prompt promptSession, cfg config.Config, scanMode setupScanMode, modelReady bool) error {
+func writeSetupReviewSummary(prompt promptSession, cfg config.Config, modelReady bool) error {
 	if err := prompt.sectionTitle("Review setup", true); err != nil {
 		return err
 	}
@@ -456,12 +466,6 @@ func writeSetupReviewSummary(prompt promptSession, cfg config.Config, scanMode s
 	} else if len(cfg.Systems) > 1 {
 		ownership = fmt.Sprintf("%d path rule(s)", len(cfg.Ownership))
 	}
-	firstRun := "save without scanning"
-	if scanMode == setupScanQuick {
-		firstRun = "quick deterministic scan"
-	} else if scanMode == setupScanDeep {
-		firstRun = "deep AI-assisted scan"
-	}
 	analysisStatus := setupStatusReady
 	if cfg.AI.Provider != "none" && !modelReady {
 		analysisStatus = setupStatusReview
@@ -482,17 +486,21 @@ func writeSetupReviewSummary(prompt promptSession, cfg config.Config, scanMode s
 			}
 		}
 	}
-	if err := prompt.status(systemStatus, "Systems: "+systems); err != nil {
+	reportTargetLabel := "Report target: "
+	if len(cfg.Systems) > 1 {
+		reportTargetLabel = "Report targets: "
+	}
+	if err := prompt.status(systemStatus, reportTargetLabel+systems); err != nil {
 		return err
 	}
 	ownershipStatus := setupStatusReady
 	if len(cfg.Systems) == 0 || (len(cfg.Systems) > 1 && len(cfg.Ownership) == 0) {
 		ownershipStatus = setupStatusMissing
 	}
-	if err := prompt.status(ownershipStatus, "Evidence ownership: "+ownership); err != nil {
-		return err
+	if ownership == "single-system inference" {
+		ownership = "all repository evidence maps to the single report target"
 	}
-	if err := prompt.status(setupStatusReady, "First run: "+firstRun); err != nil {
+	if err := prompt.status(ownershipStatus, "Evidence association: "+ownership); err != nil {
 		return err
 	}
 	_, err := fmt.Fprintln(prompt.output)

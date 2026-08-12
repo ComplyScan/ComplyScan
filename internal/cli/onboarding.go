@@ -34,37 +34,8 @@ const (
 	setupScanNone  setupScanMode = "none"
 )
 
-func promptSetupScanMode(prompt promptSession, summary setupRepositorySummary, provider string, modelReady bool) (setupScanMode, error) {
-	if err := explainSetupQuestion(prompt, "scan-mode"); err != nil {
-		return setupScanNone, err
-	}
-	quick := "Quick scan — deterministic discovery and checks; no model"
-	deep := "Deep AI review — bounded semantic review after the preliminary report"
-	none := "Save setup without scanning"
-	defaultMode := quick
-	if provider != "none" && modelReady {
-		defaultMode = deep
-	}
-	selected, err := promptChoice(prompt, "first-run action", defaultMode, quick, deep, none)
-	if err != nil {
-		return setupScanNone, err
-	}
-	switch selected {
-	case deep:
-		if _, err := fmt.Fprintf(prompt.output,
-			"\nDeep review will inspect model-generated context for this repository after saving the preliminary report. Local duration depends on hardware, model, and the number of evidence targets; it may take many minutes.\n"); err != nil {
-			return setupScanNone, err
-		}
-		return setupScanDeep, nil
-	case none:
-		return setupScanNone, nil
-	default:
-		return setupScanQuick, nil
-	}
-}
-
 func inspectRepositoryForSetup(ctx context.Context, prompt promptSession, target string, cfg config.Config, build BuildInfo) (setupRepositorySummary, error) {
-	if _, err := fmt.Fprintln(prompt.output, "Inspecting repository files and technical AI signals..."); err != nil {
+	if _, err := fmt.Fprintln(prompt.output, "Inspecting repository files and technical AI signals locally. No model is used in this step."); err != nil {
 		return setupRepositorySummary{}, err
 	}
 	excludes := withGeneratedReportExclusion(append([]string(nil), cfg.Scan.Exclude...))
@@ -116,7 +87,7 @@ func inspectRepositoryForSetup(ctx context.Context, prompt promptSession, target
 func ensureRepositoryDraftSystem(prompt promptSession, target string, cfg *config.Config, summary setupRepositorySummary) error {
 	if len(cfg.Systems) > 0 {
 		applyFrameworksToSystems(cfg.Systems, cfg.Frameworks)
-		return prompt.status(setupStatusReady, fmt.Sprintf("Kept %d existing system profile(s); detailed applicability facts were not changed.", len(cfg.Systems)))
+		return prompt.status(setupStatusReady, fmt.Sprintf("Kept %d existing report target(s); detailed profile facts were not changed.", len(cfg.Systems)))
 	}
 	absolute, err := filepath.Abs(target)
 	if err != nil {
@@ -136,11 +107,12 @@ func ensureRepositoryDraftSystem(prompt promptSession, target string, cfg *confi
 		return fmt.Errorf("validate repository draft system: %w", err)
 	}
 	cfg.Systems = append(cfg.Systems, system)
-	if err := prompt.status(setupStatusReview, fmt.Sprintf("Created repository profile %q for technical evidence ownership.", system.Name)); err != nil {
+	if err := prompt.status(setupStatusReview, fmt.Sprintf("Report target: %q (created from the repository name).", system.Name)); err != nil {
 		return err
 	}
 	_, err = fmt.Fprintln(prompt.output,
-		"  Business, jurisdictional, and legal-applicability facts remain unconfirmed and are not required for this code scan.\n"+
+		"  ComplyScan uses this internal draft to attach code evidence to a named system in reports. It does not infer legal applicability.\n"+
+			"  Business, jurisdictional, and legal-applicability facts remain unconfirmed and are not required for this code scan.\n"+
 			"  Use `complyscan profile setup --replace` or rerun `complyscan setup --advanced` when a detailed profile is needed.")
 	return err
 }
