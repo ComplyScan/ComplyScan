@@ -52,7 +52,7 @@ func newSetupCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	var options setupOptions
 	command := &cobra.Command{
 		Use:   "setup [path]",
-		Short: "Configure analysis, technical mappings, and an optional AI review",
+		Short: "Inspect the repository and configure its unified compliance scan",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if options.forceInteractive && options.nonInteractive {

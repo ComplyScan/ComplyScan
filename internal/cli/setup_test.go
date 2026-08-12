@@ -263,6 +263,31 @@ func TestBasicSystemQuestionnaireMovesBackAndKeepsAnswer(t *testing.T) {
 	}
 }
 
+func TestBasicSystemQuestionnaireRetainsExistingAnswersWhenRerun(t *testing.T) {
+	existing := profile.NewDraftSystem("assistant", "Support Assistant")
+	existing.IntendedPurpose = "Draft support replies for human review."
+	existing.OperatingRegions = []profile.OperatingRegion{profile.RegionEU}
+	existing.OrganizationRoles = []profile.OrganizationRole{profile.RoleProvider}
+	existing.DecisionImpact = profile.ImpactAdvisory
+	existing.LifecycleStage = profile.LifecycleProduction
+	existing.HumanOversight = profile.OversightRequired
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("\n\n\n\n\n\n\n")), output: io.Discard,
+		guidance: &questionGuidance{}, step: &setupStepProgress{current: 3, total: 5},
+	}
+	updated, err := collectBasicSystemProfile(prompt, ".", time.Now(), setupRepositorySummary{}, newSetupProfileDraft(), &existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Name != existing.Name || updated.IntendedPurpose != existing.IntendedPurpose ||
+		len(updated.OperatingRegions) != 1 || updated.OperatingRegions[0] != profile.RegionEU ||
+		len(updated.OrganizationRoles) != 1 || updated.OrganizationRoles[0] != profile.RoleProvider ||
+		updated.DecisionImpact != profile.ImpactAdvisory || updated.LifecycleStage != profile.LifecycleProduction ||
+		updated.HumanOversight != profile.OversightRequired {
+		t.Fatalf("rerun changed existing answers: %#v", updated)
+	}
+}
+
 func TestPromptOllamaModelUsesTerminalSelectorAndCustomEntry(t *testing.T) {
 	var output bytes.Buffer
 	var choices []terminalChoice
