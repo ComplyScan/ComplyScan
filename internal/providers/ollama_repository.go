@@ -146,6 +146,47 @@ func sanitizeRepositoryAnalysisRequest(request RepositoryAnalysisRequest) (Repos
 			system.MissingContext[missingIndex] = cleanReviewText(system.MissingContext[missingIndex], maxReviewMessageChars)
 		}
 	}
+	for index := range request.Graph.Languages {
+		request.Graph.Languages[index] = cleanReviewText(request.Graph.Languages[index], 100)
+	}
+	for index := range request.Graph.UnsupportedSourceFiles {
+		path := filepath.ToSlash(strings.TrimSpace(request.Graph.UnsupportedSourceFiles[index]))
+		if _, exists := allowedPaths[path]; !exists {
+			return request, nil, nil, nil, 0, fmt.Errorf("repository graph contains unknown unsupported source path %q", path)
+		}
+		request.Graph.UnsupportedSourceFiles[index] = path
+	}
+	for index := range request.Graph.Imports {
+		value := &request.Graph.Imports[index]
+		value.Path = filepath.ToSlash(strings.TrimSpace(value.Path))
+		if _, exists := allowedPaths[value.Path]; !exists {
+			return request, nil, nil, nil, 0, fmt.Errorf("repository graph import contains unknown path %q", value.Path)
+		}
+		value.ImportedPath = cleanReviewText(value.ImportedPath, maxReviewEvidenceChars)
+	}
+	for index := range request.Graph.Symbols {
+		value := &request.Graph.Symbols[index]
+		value.Path = filepath.ToSlash(strings.TrimSpace(value.Path))
+		lineCount, exists := allowedPaths[value.Path]
+		if !exists || value.StartLine < 1 || value.StartLine > lineCount || value.EndLine < value.StartLine || value.EndLine > lineCount {
+			return request, nil, nil, nil, 0, fmt.Errorf("repository graph symbol has invalid location %s:%d-%d", value.Path, value.StartLine, value.EndLine)
+		}
+		value.Name = cleanReviewText(value.Name, maxReviewEvidenceChars)
+		value.Kind = cleanReviewText(value.Kind, 100)
+		value.Reachability = cleanReviewText(value.Reachability, 100)
+	}
+	for index := range request.Graph.Relationships {
+		value := &request.Graph.Relationships[index]
+		value.Path = filepath.ToSlash(strings.TrimSpace(value.Path))
+		lineCount, exists := allowedPaths[value.Path]
+		if !exists || value.Line < 1 || value.Line > lineCount {
+			return request, nil, nil, nil, 0, fmt.Errorf("repository graph relationship has invalid location %s:%d", value.Path, value.Line)
+		}
+		value.Kind = cleanReviewText(value.Kind, 100)
+		value.From = cleanReviewText(value.From, maxReviewEvidenceChars)
+		value.To = cleanReviewText(value.To, maxReviewEvidenceChars)
+		value.Label = cleanReviewText(value.Label, maxReviewEvidenceChars)
+	}
 	return request, allowedPaths, objectiveIDs, systemIDs, submittedBytes, nil
 }
 

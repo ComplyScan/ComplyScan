@@ -257,6 +257,39 @@ type RepositorySystemContext struct {
 	MissingContext []string `json:"missing_context,omitempty"`
 }
 
+type RepositoryGraphContext struct {
+	Languages              []string                      `json:"languages,omitempty"`
+	IndexedSourceFiles     int                           `json:"indexed_source_files"`
+	UnsupportedSourceFiles []string                      `json:"unsupported_source_files,omitempty"`
+	Imports                []RepositoryGraphImport       `json:"imports,omitempty"`
+	Symbols                []RepositoryGraphSymbol       `json:"symbols,omitempty"`
+	Relationships          []RepositoryGraphRelationship `json:"relationships,omitempty"`
+}
+
+type RepositoryGraphImport struct {
+	Path         string `json:"path"`
+	ImportedPath string `json:"imported_path"`
+}
+
+type RepositoryGraphSymbol struct {
+	Name         string `json:"name"`
+	Kind         string `json:"kind"`
+	Path         string `json:"path"`
+	StartLine    int    `json:"start_line"`
+	EndLine      int    `json:"end_line"`
+	Reachability string `json:"reachability"`
+}
+
+type RepositoryGraphRelationship struct {
+	Kind     string `json:"kind"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Label    string `json:"label,omitempty"`
+	Path     string `json:"path"`
+	Line     int    `json:"line"`
+	Resolved bool   `json:"resolved"`
+}
+
 // RepositoryAnalysisRequest carries either repository source or trusted,
 // structured subsystem summaries. Synthesis requests also include the full
 // file index so every returned citation can still be checked against the
@@ -270,6 +303,7 @@ type RepositoryAnalysisRequest struct {
 	FileIndex          []RepositoryFileReference `json:"file_index,omitempty"`
 	Objectives         []RepositoryObjective     `json:"objectives"`
 	Systems            []RepositorySystemContext `json:"systems,omitempty"`
+	Graph              RepositoryGraphContext    `json:"repository_graph,omitempty"`
 	SubsystemSummaries []RepositorySectionResult `json:"subsystem_summaries,omitempty"`
 }
 

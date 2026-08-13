@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ComplyScan/ComplyScan/internal/codegraph"
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
@@ -88,14 +89,16 @@ func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository
 	objectives := repositoryObjectives(evidence)
 	systemContext := repositorySystems(systems)
 	budget := sourceBudget(options.MaxInputTokens, objectives, systemContext)
-	fullBytes := sourceFileBytes(files)
+	graph := codegraph.Build(repository)
+	fullGraph := repositoryGraphContext(graph, files)
+	fullBytes := requestContextBytes(files, fullGraph)
 	if options.Mode != ModeHierarchical && fullBytes <= budget {
 		if err := progress(options, Progress{Stage: "full-repository", Completed: 0, Total: 1, Scope: ".", InputBytes: fullBytes}); err != nil {
 			return providers.RepositoryAnalysisResult{}, err
 		}
 		result, err := reviewer.ReviewRepository(ctx, providers.RepositoryAnalysisRequest{
 			Mode: providers.RepositoryAnalysisFull, Scope: ".", RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository),
-			Files: files, Objectives: objectives, Systems: systemContext,
+			Files: files, Objectives: objectives, Systems: systemContext, Graph: fullGraph,
 		})
 		if err != nil {
 			return providers.RepositoryAnalysisResult{}, err
@@ -109,24 +112,29 @@ func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository
 	if options.Mode == ModeFull {
 		return providers.RepositoryAnalysisResult{}, fmt.Errorf("relevant repository context is %d bytes, exceeding the configured full-analysis budget of %d bytes", fullBytes, budget)
 	}
-	return runHierarchical(ctx, reviewer, repository, files, objectives, systemContext, budget, options)
+	return runHierarchical(ctx, reviewer, repository, graph, files, objectives, systemContext, budget, options)
 }
 
-func runHierarchical(ctx context.Context, reviewer Reviewer, repository discovery.Repository, files []providers.RepositorySourceFile, objectives []providers.RepositoryObjective, systems []providers.RepositorySystemContext, budget int64, options Options) (providers.RepositoryAnalysisResult, error) {
-	chunks, err := partitionRepository(files, budget)
+func runHierarchical(ctx context.Context, reviewer Reviewer, repository discovery.Repository, graph codegraph.Graph, files []providers.RepositorySourceFile, objectives []providers.RepositoryObjective, systems []providers.RepositorySystemContext, budget int64, options Options) (providers.RepositoryAnalysisResult, error) {
+	chunks, err := partitionRepository(files, budget*80/100)
 	if err != nil {
 		return providers.RepositoryAnalysisResult{}, err
 	}
 	summaries := make([]providers.RepositorySectionResult, 0, len(chunks))
 	aggregate := providers.RepositoryAnalysisResult{Provider: options.Provider, Model: options.Model}
 	for index, chunk := range chunks {
-		if err := progress(options, Progress{Stage: "subsystem", Completed: index, Total: len(chunks), Scope: chunk.scope, InputBytes: sourceFileBytes(chunk.files)}); err != nil {
+		chunkGraph := repositoryGraphContext(graph, chunk.files)
+		chunkBytes := requestContextBytes(chunk.files, chunkGraph)
+		if chunkBytes > budget {
+			return providers.RepositoryAnalysisResult{}, fmt.Errorf("subsystem %s requires %d context bytes, exceeding the configured budget of %d bytes after repository graph construction", chunk.scope, chunkBytes, budget)
+		}
+		if err := progress(options, Progress{Stage: "subsystem", Completed: index, Total: len(chunks), Scope: chunk.scope, InputBytes: chunkBytes}); err != nil {
 			return providers.RepositoryAnalysisResult{}, err
 		}
 		result, err := reviewer.ReviewRepository(ctx, providers.RepositoryAnalysisRequest{
 			Mode: providers.RepositoryAnalysisSubsystem, Scope: chunk.scope,
 			RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), Files: chunk.files,
-			Objectives: objectives, Systems: systems,
+			Objectives: objectives, Systems: systems, Graph: chunkGraph,
 		})
 		if err != nil {
 			return providers.RepositoryAnalysisResult{}, fmt.Errorf("analyze subsystem %s: %w", chunk.scope, err)
@@ -136,7 +144,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		aggregate.Coverage.FilesSubmitted += result.Coverage.FilesSubmitted
 		aggregate.Coverage.BytesSubmitted += result.Coverage.BytesSubmitted
 		aggregate.Coverage.CitationsChecked += result.Coverage.CitationsChecked
-		if err := progress(options, Progress{Stage: "subsystem", Completed: index + 1, Total: len(chunks), Scope: chunk.scope, InputBytes: sourceFileBytes(chunk.files)}); err != nil {
+		if err := progress(options, Progress{Stage: "subsystem", Completed: index + 1, Total: len(chunks), Scope: chunk.scope, InputBytes: chunkBytes}); err != nil {
 			return providers.RepositoryAnalysisResult{}, err
 		}
 	}
@@ -339,6 +347,68 @@ func sourceFileBytes(files []providers.RepositorySourceFile) int64 {
 		size += int64(len(file.Content) + len(file.Path) + 100)
 	}
 	return size
+}
+
+func requestContextBytes(files []providers.RepositorySourceFile, graph providers.RepositoryGraphContext) int64 {
+	encoded, _ := json.Marshal(graph)
+	return sourceFileBytes(files) + int64(len(encoded))
+}
+
+func repositoryGraphContext(graph codegraph.Graph, files []providers.RepositorySourceFile) providers.RepositoryGraphContext {
+	paths := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		paths[file.Path] = struct{}{}
+	}
+	result := providers.RepositoryGraphContext{}
+	for _, language := range graph.Languages {
+		result.Languages = append(result.Languages, string(language))
+	}
+	for _, path := range graph.UnsupportedSourceFiles {
+		if _, included := paths[path]; included {
+			result.UnsupportedSourceFiles = append(result.UnsupportedSourceFiles, path)
+		}
+	}
+	for _, path := range graph.IndexedSourceFiles {
+		if _, included := paths[path]; included {
+			result.IndexedSourceFiles++
+		}
+	}
+	names := make(map[string]string, len(graph.Symbols))
+	for _, symbol := range graph.Symbols {
+		name := symbol.QualifiedName
+		if name == "" {
+			name = symbol.Name
+		}
+		names[symbol.ID] = name
+		if _, included := paths[symbol.Path]; !included {
+			continue
+		}
+		result.Symbols = append(result.Symbols, providers.RepositoryGraphSymbol{
+			Name: name, Kind: string(symbol.Kind), Path: symbol.Path, StartLine: symbol.StartLine, EndLine: symbol.EndLine, Reachability: string(symbol.Reachability),
+		})
+	}
+	for _, imported := range graph.Imports {
+		if _, included := paths[imported.Path]; included {
+			result.Imports = append(result.Imports, providers.RepositoryGraphImport{Path: imported.Path, ImportedPath: imported.ImportedPath})
+		}
+	}
+	for _, edge := range graph.Edges {
+		if _, included := paths[edge.Path]; !included {
+			continue
+		}
+		from := names[edge.From]
+		if from == "" {
+			from = edge.From
+		}
+		to := names[edge.To]
+		if to == "" {
+			to = edge.To
+		}
+		result.Relationships = append(result.Relationships, providers.RepositoryGraphRelationship{
+			Kind: string(edge.Kind), From: from, To: to, Label: edge.Label, Path: edge.Path, Line: edge.Line, Resolved: edge.Resolved,
+		})
+	}
+	return result
 }
 
 func repositorySize(repository discovery.Repository) int64 {

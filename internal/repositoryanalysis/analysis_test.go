@@ -42,7 +42,7 @@ func (reviewer *recordingReviewer) ReviewRepository(_ context.Context, request p
 func TestRunUsesOneRequestWhenRepositoryFits(t *testing.T) {
 	reviewer := &recordingReviewer{}
 	repository := discovery.Repository{Files: []discovery.File{
-		{Path: "main.go", Kind: discovery.KindSource, Content: []byte("package main\n")},
+		{Path: "main.go", Kind: discovery.KindSource, Content: []byte("package main\nfunc main() {}\n")},
 		{Path: "notes.txt", Kind: discovery.KindOtherText, Content: []byte("not model context")},
 	}}
 	result, err := Run(context.Background(), reviewer, repository, []framework.TechnicalEvidenceReport{{
@@ -56,6 +56,9 @@ func TestRunUsesOneRequestWhenRepositoryFits(t *testing.T) {
 	}
 	if len(reviewer.requests[0].Files) != 1 || reviewer.requests[0].Objectives[0].ID != "pack/OBJ" {
 		t.Fatalf("unexpected prepared request: %#v", reviewer.requests[0])
+	}
+	if reviewer.requests[0].Graph.IndexedSourceFiles != 1 || len(reviewer.requests[0].Graph.Symbols) == 0 {
+		t.Fatalf("repository graph was not supplied with full source: %#v", reviewer.requests[0].Graph)
 	}
 	if result.Coverage.Mode != providers.RepositoryAnalysisFull {
 		t.Fatalf("unexpected coverage: %#v", result.Coverage)
