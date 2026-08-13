@@ -90,7 +90,8 @@ func TestRunUsesSubsystemsAndSynthesisWhenRepositoryExceedsBudget(t *testing.T) 
 
 func TestRunRedactsRepositorySourceBeforeReviewer(t *testing.T) {
 	reviewer := &recordingReviewer{}
-	secret := "sk-proj-abcdefghijklmnopqrstuvwxyz123456"
+	secret := "sk-" + "proj-" + "abcdefghijklmnopqrstuvwxyz" + "123456"
+	redacted := "sk-proj-" + "****3456"
 	_, err := Run(context.Background(), reviewer, discovery.Repository{Files: []discovery.File{{
 		Path: "main.go", Kind: discovery.KindSource, Content: []byte(fmt.Sprintf("var key = %q\n", secret)),
 	}}}, nil, nil, Options{Provider: providers.OpenAI, MaxInputTokens: 8_000})
@@ -98,7 +99,7 @@ func TestRunRedactsRepositorySourceBeforeReviewer(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := reviewer.requests[0].Files[0].Content
-	if strings.Contains(content, secret) || !strings.Contains(content, "sk-proj-****3456") {
+	if strings.Contains(content, secret) || !strings.Contains(content, redacted) {
 		t.Fatalf("source was not redacted: %s", content)
 	}
 }

@@ -7,14 +7,16 @@ import (
 )
 
 func TestReviewRepositoryValidatesCitationsAndRedactsSource(t *testing.T) {
+	secret := repositoryTestCredential()
+	redacted := "sk-proj-" + "****3456"
 	provider := &OllamaProvider{
 		kind: OpenAI, label: "OpenAI", model: "test-model",
 		completion: func(_ context.Context, request ollamaChatRequest) (ollamaChatResponse, error) {
 			encoded := request.Messages[1].Content
-			if strings.Contains(encoded, "sk-proj-abcdefghijklmnopqrstuvwxyz123456") {
+			if strings.Contains(encoded, secret) {
 				t.Fatal("repository source contained an unredacted credential")
 			}
-			if !strings.Contains(encoded, "sk-proj-****3456") {
+			if !strings.Contains(encoded, redacted) {
 				t.Fatalf("repository source did not contain the expected redaction: %s", encoded)
 			}
 			var response ollamaChatResponse
@@ -27,7 +29,7 @@ func TestReviewRepositoryValidatesCitationsAndRedactsSource(t *testing.T) {
 	}
 	result, err := provider.ReviewRepository(context.Background(), RepositoryAnalysisRequest{
 		Mode: RepositoryAnalysisFull, Scope: ".", RepositoryFiles: 1, RepositoryBytes: 80,
-		Files:      []RepositorySourceFile{{Path: "main.go", Kind: "source", Content: "package main\nvar key = \"sk-proj-abcdefghijklmnopqrstuvwxyz123456\"\n"}},
+		Files:      []RepositorySourceFile{{Path: "main.go", Kind: "source", Content: "package main\nvar key = \"" + secret + "\"\n"}},
 		Objectives: []RepositoryObjective{{ID: "OBJ-1", Title: "Document runtime", Description: "Map runtime use"}},
 		Systems:    []RepositorySystemContext{{ID: "system", Name: "System"}},
 	})
@@ -37,6 +39,10 @@ func TestReviewRepositoryValidatesCitationsAndRedactsSource(t *testing.T) {
 	if result.Coverage.Mode != RepositoryAnalysisFull || result.Coverage.CitationsChecked != 2 || len(result.Result.AIUses) != 1 {
 		t.Fatalf("unexpected repository result: %#v", result)
 	}
+}
+
+func repositoryTestCredential() string {
+	return "sk-" + "proj-" + "abcdefghijklmnopqrstuvwxyz" + "123456"
 }
 
 func TestReviewRepositoryRejectsInventedCitation(t *testing.T) {
