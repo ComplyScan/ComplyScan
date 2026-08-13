@@ -559,7 +559,7 @@ func promptChoice[T ~string](session promptSession, label string, defaultValue T
 	if session.selectOne != nil {
 		options := make([]terminalChoice, len(allowed))
 		for index, candidate := range allowed {
-			options[index] = terminalChoice{Label: string(candidate), Value: string(candidate)}
+			options[index] = terminalChoice{Label: setupChoiceLabel(label, string(candidate)), Value: string(candidate)}
 		}
 		selected, err := session.chooseOne(label, string(defaultValue), options)
 		if err != nil {
@@ -575,7 +575,7 @@ func promptChoice[T ~string](session promptSession, label string, defaultValue T
 		if strings.EqualFold(string(defaultValue), string(candidate)) {
 			defaultIndex = index
 		}
-		if _, err := fmt.Fprintf(session.output, "  %d) %s\n", index+1, candidate); err != nil {
+		if _, err := fmt.Fprintf(session.output, "  %d) %s\n", index+1, setupChoiceLabel(label, string(candidate))); err != nil {
 			return defaultValue, err
 		}
 	}
@@ -593,6 +593,23 @@ func promptChoice[T ~string](session promptSession, label string, defaultValue T
 	}
 }
 
+func setupChoiceLabel(questionLabel, value string) string {
+	if !strings.HasSuffix(strings.TrimSpace(questionLabel), "Decision impact") {
+		return value
+	}
+	description := map[string]string{
+		string(profile.ImpactAdvisory):    "AI suggests; a person independently reviews before action",
+		string(profile.ImpactLow):         "limited, reversible effect without material impact on people",
+		string(profile.ImpactSignificant): "materially influences an important outcome for a person",
+		string(profile.ImpactAutonomous):  "can trigger a consequential action without prior human approval",
+		string(profile.ImpactUnknown):     "downstream effect has not been established",
+	}[value]
+	if description == "" {
+		return value
+	}
+	return value + " — " + description
+}
+
 func promptRequiredChoice[T ~string](session promptSession, label string, allowed ...T) (T, error) {
 	var zero T
 	if len(allowed) == 0 {
@@ -603,7 +620,7 @@ func promptRequiredChoice[T ~string](session promptSession, label string, allowe
 		options := make([]terminalChoice, 0, len(allowed)+1)
 		options = append(options, terminalChoice{Value: requiredAnswerChoiceValue})
 		for _, candidate := range allowed {
-			options = append(options, terminalChoice{Label: string(candidate), Value: string(candidate)})
+			options = append(options, terminalChoice{Label: setupChoiceLabel(label, string(candidate)), Value: string(candidate)})
 		}
 		selected, err := session.chooseOne(label, requiredAnswerChoiceValue, options)
 		if err != nil {
@@ -615,7 +632,7 @@ func promptRequiredChoice[T ~string](session promptSession, label string, allowe
 		return zero, fmt.Errorf("%s selector returned unsupported value %q", strings.ToLower(label), selected)
 	}
 	for index, candidate := range allowed {
-		if _, err := fmt.Fprintf(session.output, "  %d) %s\n", index+1, candidate); err != nil {
+		if _, err := fmt.Fprintf(session.output, "  %d) %s\n", index+1, setupChoiceLabel(label, string(candidate))); err != nil {
 			return zero, err
 		}
 	}

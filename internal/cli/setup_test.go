@@ -928,6 +928,43 @@ func TestPromptRequiredChoiceHasNoPreselectedAnswer(t *testing.T) {
 	}
 }
 
+func TestDecisionImpactChoicesExplainTheirMeaningInline(t *testing.T) {
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("")), output: io.Discard,
+		selectOne: func(label, _ string, options []terminalChoice) (string, error) {
+			if label != "Step 3 of 5 · Question 5 of 7 — Decision impact" {
+				t.Fatalf("label = %q", label)
+			}
+			want := []string{
+				"advisory — AI suggests; a person independently reviews before action",
+				"low — limited, reversible effect without material impact on people",
+				"significant — materially influences an important outcome for a person",
+				"autonomous — can trigger a consequential action without prior human approval",
+				"unknown — downstream effect has not been established",
+			}
+			if len(options) != len(want)+1 {
+				t.Fatalf("options = %#v", options)
+			}
+			for index, expected := range want {
+				if options[index+1].Label != expected {
+					t.Errorf("option %d label = %q, want %q", index, options[index+1].Label, expected)
+				}
+			}
+			return string(profile.ImpactAdvisory), nil
+		},
+		step:      &setupStepProgress{current: 3, total: 5},
+		questions: &questionProgress{current: 4, total: 7},
+	}
+	selected, err := promptRequiredChoice(prompt, "Decision impact",
+		profile.ImpactAdvisory, profile.ImpactLow, profile.ImpactSignificant, profile.ImpactAutonomous, profile.ImpactUnknown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected != profile.ImpactAdvisory {
+		t.Fatalf("selected = %q", selected)
+	}
+}
+
 func TestConfirmUsesTerminalSelectorWhenAvailable(t *testing.T) {
 	var output bytes.Buffer
 	called := false
