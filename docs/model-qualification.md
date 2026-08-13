@@ -1,6 +1,6 @@
 # Automatic model qualification
 
-ComplyScan accepts arbitrary exact Ollama tags and model IDs supported by its native or OpenAI-compatible hosted adapters. A model does not need to be manually approved by the ComplyScan maintainers before a user tries it.
+ComplyScan's explicit configuration and automation interfaces accept arbitrary exact Ollama tags and model IDs supported by its native or OpenAI-compatible hosted adapters. Standard interactive setup intentionally exposes only a small cloud shortlist; everything outside that list is an experimental configuration and receives no maintained quality claim.
 
 Before an unseen model receives repository context, ComplyScan sends one small synthetic record through the configured provider. The record contains no repository data and includes instruction-shaped untrusted text. A model is marked **compatible** only when it returns the required structured object, preserves the trusted record binding, and does not create an extra record from the untrusted instruction.
 
@@ -35,7 +35,8 @@ The automatic check deliberately answers only: “Can this provider/model obey C
 ComplyScan uses separate labels:
 
 - **compatible** — passed the automatic synthetic contract;
-- **benchmark recorded** — passed a maintained, versioned task-specific corpus with published limitations; and
+- **validated for setup drafting** — passed the maintained labelled questionnaire-draft corpus;
+- **validated for technical review** — passed every maintained adversarial technical-review fixture; and
 - **experimental/unqualified** — selectable, but no current automatic result exists or the check failed.
 
-Official recommendations still require maintained benchmarks. All model output remains advisory and human-confirmed regardless of status.
+Promotion requires both task-specific validations for the exact model and prompt versions. All model output remains advisory and human-confirmed regardless of status. See the [model support policy](model-support-policy.md).
