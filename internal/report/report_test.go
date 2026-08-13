@@ -108,7 +108,7 @@ func TestRepositoryAnalysisIsRenderedAsAdvisoryEvidence(t *testing.T) {
 	if err := WriteMarkdown(&markdown, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(markdown.String(), "## AI uses found") || !strings.Contains(markdown.String(), "Summary generation") || !strings.Contains(markdown.String(), "This is not a legal compliance decision") {
+	if !strings.Contains(markdown.String(), "## 1. What ComplyScan found") || !strings.Contains(markdown.String(), "Summary generation") || !strings.Contains(markdown.String(), "cannot decide on its own whether your product complies with a law") {
 		t.Fatalf("repository analysis boundary missing from Markdown:\n%s", markdown.String())
 	}
 }

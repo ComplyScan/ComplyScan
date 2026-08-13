@@ -132,9 +132,9 @@ func TestWriteMarkdownExplainsTestOnlyComponentsAndQuickScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"Repository AI analysis: **not performed**",
-		"**Integration signals:** OpenAI",
-		"not necessarily an active AI use",
+		"Whole-repository AI review: **not run**",
+		"**AI libraries or configuration found:** OpenAI",
+		"not that they are active in the deployed product",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
@@ -162,7 +162,7 @@ func TestWriteMarkdownPrioritizesDeveloperDecisions(t *testing.T) {
 	evidence := framework.TechnicalEvidenceReport{
 		Analysis: framework.RepositoryAnalysis{SourceFilesSeen: 2, FilesIndexed: 2},
 		Objectives: []framework.ObjectiveAssessment{{
-			ID: "logging", Title: "Operational logging", Status: framework.ObjectiveCandidate,
+			ID: "logging", Title: "Operational logging", SourceReference: "Article 12", Status: framework.ObjectiveCandidate,
 			Matches: []framework.EvidenceMatch{{Path: "audit.go", StartLine: 11}},
 		}},
 	}
@@ -201,17 +201,18 @@ func TestWriteMarkdownPrioritizesDeveloperDecisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"## Overall result", "**Action required**", "## AI uses found", "Answer generation",
-		"## What needs attention", "Possible secret exposure", "Human oversight",
-		"## Supporting code evidence", "Strong code-evidence lead", "audit.go:11",
-		"## Questions to confirm", "Operating regions have not been established",
-		"## Scan coverage", "Complete evidence and diagnostics: `latest.json`",
+		"## Overall result", "**Action required**", "## 1. What ComplyScan found", "Answer generation",
+		"## 2. What to do next", "Possible secret exposure", "Human oversight",
+		"### Code that may already address requirements", "Code strongly suggests this is implemented", "audit.go:11",
+		"## 3. What ComplyScan could not determine", "Where will this AI feature be offered or used?",
+		"<summary>Legal and technical details</summary>", "Article 12",
+		"## How this scan was performed", "Full technical results: `latest.json`",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
 		}
 	}
-	for _, excluded := range []string{"## Technical checklist", "## AI advisory review", "No evidence detected for", "not-substantiated"} {
+	for _, excluded := range []string{"## Technical checklist", "## AI advisory review", "No evidence detected for", "not-substantiated", "Candidate evidence", "technical objective", "| high |"} {
 		if strings.Contains(output.String(), excluded) {
 			t.Errorf("developer summary contains diagnostic detail %q:\n%s", excluded, output.String())
 		}

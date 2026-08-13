@@ -51,11 +51,12 @@ type developerReportView struct {
 	repositoryAnalysis string
 	verificationPassed int
 	verificationFailed int
+	referenceDetails   []string
 }
 
 func writeDeveloperReportMarkdown(writer io.Writer, value Report) error {
 	view := buildDeveloperReportView(value)
-	if _, err := fmt.Fprintln(writer, "\n> Developer review of repository evidence. This is not a legal compliance decision."); err != nil {
+	if _, err := fmt.Fprintln(writer, "\n> A developer-focused review of code found in this repository. ComplyScan cannot decide on its own whether your product complies with a law."); err != nil {
 		return err
 	}
 	if err := writeDeveloperOutcomeMarkdown(writer, value, view); err != nil {
@@ -64,16 +65,19 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report) error {
 	if err := writeDeveloperAIUsesMarkdown(writer, value, view); err != nil {
 		return err
 	}
-	if err := writeDeveloperActionsMarkdown(writer, view); err != nil {
+	if err := writeDeveloperEvidenceMarkdown(writer, view); err != nil {
 		return err
 	}
-	if err := writeDeveloperEvidenceMarkdown(writer, view); err != nil {
+	if err := writeDeveloperActionsMarkdown(writer, view); err != nil {
 		return err
 	}
 	if err := writeDeveloperQuestionsMarkdown(writer, view); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(writer, "\n## Scan coverage\n\n- Source files indexed: **%d of %d**", view.filesIndexed, view.sourceFilesSeen); err != nil {
+	if err := writeDeveloperReferenceDetailsMarkdown(writer, view); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(writer, "\n## How this scan was performed\n\n- Source files checked: **%d of %d**", view.filesIndexed, view.sourceFilesSeen); err != nil {
 		return err
 	}
 	if view.unsupportedFiles > 0 {
@@ -81,7 +85,7 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report) error {
 			return err
 		}
 	}
-	if _, err := fmt.Fprintf(writer, "\n- Repository AI analysis: **%s**\n- Scan warnings: **%d**\n- Scan ID: %s\n- Complete evidence and diagnostics: %s\n",
+	if _, err := fmt.Fprintf(writer, "\n- Whole-repository AI review: **%s**\n- Parts of the scan that need attention: **%d**\n- Scan ID: %s\n- Full technical results: %s\n",
 		markdownText(view.repositoryAnalysis), len(value.Warnings), inlineCode(value.Scan.ID), inlineCode("latest.json")); err != nil {
 		return err
 	}
@@ -90,7 +94,7 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report) error {
 			return err
 		}
 	}
-	_, err := fmt.Fprintln(writer, "\n---\n\nA found signal is a review lead, not proof that a control is effective. A missing signal means only that this scan did not find configured repository evidence.")
+	_, err := fmt.Fprintln(writer, "\n---\n\nCode found by ComplyScan still needs human review. If ComplyScan found nothing, that only means this scan did not locate matching code; it does not prove that an implementation is missing.")
 	return err
 }
 
@@ -98,10 +102,10 @@ func buildDeveloperReportView(value Report) developerReportView {
 	counts := markdownCounts(value)
 	view := developerReportView{
 		sourceFilesSeen: counts.SourceFilesSeen, filesIndexed: counts.FilesIndexed,
-		unsupportedFiles: counts.UnsupportedFiles, repositoryAnalysis: "not performed",
+		unsupportedFiles: counts.UnsupportedFiles, repositoryAnalysis: "not run",
 	}
 	if value.RepositoryAnalysis != nil {
-		view.repositoryAnalysis = fmt.Sprintf("completed using %s context", repositoryAnalysisModeLabel(value.RepositoryAnalysis.Coverage.Mode))
+		view.repositoryAnalysis = fmt.Sprintf("completed using %s", repositoryAnalysisModeLabel(value.RepositoryAnalysis.Coverage.Mode))
 		if view.sourceFilesSeen == 0 {
 			view.sourceFilesSeen = value.RepositoryAnalysis.Coverage.RepositoryFiles
 		}
@@ -110,6 +114,7 @@ func buildDeveloperReportView(value Report) developerReportView {
 		}
 	}
 	view.integrationSignals = developerIntegrationSignals(value)
+	view.referenceDetails = developerReferenceDetails(value)
 	objectiveTitles := developerObjectiveTitles(value)
 	relevantObjectives := developerRelevantObjectives(value)
 	actionKeys := make(map[string]struct{})
@@ -167,24 +172,24 @@ func buildDeveloperReportView(value Report) developerReportView {
 			if _, relevant := relevantObjectives[rawID]; !relevant {
 				continue
 			}
-			next := "Confirm the implementation or add the missing technical control."
+			next := "Confirm whether the safeguard is complete or add the missing part."
 			if len(observation.MissingEvidence) > 0 {
-				next = observation.MissingEvidence[0]
+				next = "Check the full result in latest.json, then confirm whether the missing part exists elsewhere or needs to be added."
 			}
 			addAction("objective/"+observation.SystemID+"/"+rawID, developerAction{
 				priority: "Review", issue: developerObjectiveTitle(rawID, objectiveTitles),
-				why: compactMarkdownText(observation.Rationale, 180), next: compactMarkdownText(next, 180),
+				why: "Some related code was found, but ComplyScan could not confirm that it fully implements this safeguard.", next: compactMarkdownText(next, 180),
 				evidence: developerCitationText(observation.SupportingEvidence), control: true,
 			})
 		}
 		for index, observation := range value.RepositoryAnalysis.Result.UnmappedObservations {
 			next := observation.SuggestedReview
 			if next == "" {
-				next = "Confirm the purpose and map this activity to the appropriate technical control."
+				next = "Confirm what this code does and whether it belongs to one of the AI features listed above."
 			}
 			addAction(fmt.Sprintf("unmapped/%d/%s", index, observation.Summary), developerAction{
 				priority: "Review", issue: observation.Summary,
-				why: compactMarkdownText(observation.Reason, 180), next: compactMarkdownText(next, 180),
+				why: "AI-related code was found, but ComplyScan could not connect it to a known AI feature or safeguard.", next: compactMarkdownText(next, 180),
 				evidence: developerCitationText(observation.Evidence),
 			})
 		}
@@ -230,7 +235,7 @@ func buildDeveloperReportView(value Report) developerReportView {
 	case view.actionTotal > 0 || view.questionTotal > 0 || view.evidenceTotal > 0:
 		view.outcome = "Review needed"
 	default:
-		view.outcome = "No urgent code risks found"
+		view.outcome = "No urgent code problems found"
 	}
 	return view
 }
@@ -240,110 +245,130 @@ func writeDeveloperOutcomeMarkdown(writer io.Writer, value Report, view develope
 	if value.RepositoryAnalysis != nil {
 		aiUses = len(value.RepositoryAnalysis.Result.AIUses)
 	}
-	_, err := fmt.Fprintf(writer, "\n## Overall result\n\n**%s**\n\n- AI uses identified by repository analysis: **%d**\n- Important code risks: **%d**\n- Controls needing review: **%d**\n- Supporting code-evidence leads: **%d**\n- Questions requiring confirmation: **%d**\n",
+	_, err := fmt.Fprintf(writer, "\n## Overall result\n\n**%s**\n\n- AI features found: **%d**\n- Important code problems: **%d**\n- Safeguards to check: **%d**\n- Possible safeguards already found: **%d**\n- Questions only a person can answer: **%d**\n",
 		view.outcome, aiUses, view.importantRisks, view.controlsToReview, view.evidenceTotal, view.questionTotal)
 	return err
 }
 
 func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developerReportView) error {
-	if _, err := fmt.Fprintln(writer, "\n## AI uses found"); err != nil {
+	if _, err := fmt.Fprintln(writer, "\n## 1. What ComplyScan found\n\n### AI features"); err != nil {
 		return err
 	}
 	if value.RepositoryAnalysis == nil {
-		if _, err := fmt.Fprintln(writer, "\nNo repository-wide AI reasoning was performed, so this scan cannot conclude which AI uses are implemented."); err != nil {
+		if _, err := fmt.Fprintln(writer, "\nThe whole-repository AI review was not run, so ComplyScan could not identify specific AI features from the way the code works."); err != nil {
 			return err
 		}
 	} else if len(value.RepositoryAnalysis.Result.AIUses) == 0 {
-		if _, err := fmt.Fprintln(writer, "\nThe repository analysis did not identify a specific AI use. This is not proof that the repository contains no AI activity."); err != nil {
+		if _, err := fmt.Fprintln(writer, "\nThe whole-repository AI review did not identify a specific AI feature. This does not prove that the repository contains no AI activity."); err != nil {
 			return err
 		}
 	} else {
-		if _, err := fmt.Fprintln(writer, "\n| AI use | Purpose | Confidence | Code evidence |\n|---|---|---|---|"); err != nil {
+		if _, err := fmt.Fprintln(writer, "\n| AI feature | What it does | Where ComplyScan found it |\n|---|---|---|"); err != nil {
 			return err
 		}
 		for _, use := range value.RepositoryAnalysis.Result.AIUses {
-			if _, err := fmt.Fprintf(writer, "| %s | %s | %s | %s |\n",
-				markdownTableText(use.Name), markdownTableText(compactMarkdownText(use.Purpose, 160)),
-				markdownTableText(use.Confidence), markdownTableText(developerCitationText(use.Evidence))); err != nil {
+			if _, err := fmt.Fprintf(writer, "| %s | %s | %s |\n",
+				markdownTableText(developerPlainLanguage(use.Name)), markdownTableText(developerPlainLanguage(compactMarkdownText(use.Purpose, 160))),
+				markdownTableText(developerCitationText(use.Evidence))); err != nil {
 				return err
 			}
 		}
 	}
 	if len(view.integrationSignals) > 0 {
-		_, err := fmt.Fprintf(writer, "\n**Integration signals:** %s. These references show relevant dependencies or configuration, not necessarily an active AI use.\n", markdownText(strings.Join(view.integrationSignals, ", ")))
+		_, err := fmt.Fprintf(writer, "\n**AI libraries or configuration found:** %s. This shows that the repository refers to these tools, but not that they are active in the deployed product.\n", markdownText(strings.Join(view.integrationSignals, ", ")))
 		return err
 	}
 	return nil
 }
 
 func writeDeveloperActionsMarkdown(writer io.Writer, view developerReportView) error {
-	if _, err := fmt.Fprintln(writer, "\n## What needs attention"); err != nil {
+	if _, err := fmt.Fprintln(writer, "\n## 2. What to do next"); err != nil {
 		return err
 	}
 	if len(view.actions) == 0 {
-		_, err := fmt.Fprintln(writer, "\nNo urgent repository action was identified. Review the questions and evidence below before drawing a compliance conclusion.")
+		message := "ComplyScan did not identify an urgent code change."
+		if view.questionTotal > 0 {
+			message += " Answer the remaining questions before deciding whether more work is needed."
+		}
+		_, err := fmt.Fprintln(writer, "\n"+message)
 		return err
 	}
-	if _, err := fmt.Fprintln(writer, "\n| Priority | Issue | Why it matters | Next step | Evidence |\n|---|---|---|---|---|"); err != nil {
+	if _, err := fmt.Fprintln(writer, "\n| Priority | What ComplyScan found | Why it matters | What to do | Where |\n|---|---|---|---|---|"); err != nil {
 		return err
 	}
 	for _, action := range view.actions {
 		if _, err := fmt.Fprintf(writer, "| **%s** | %s | %s | %s | %s |\n",
-			markdownTableText(action.priority), markdownTableText(action.issue), markdownTableText(action.why),
-			markdownTableText(action.next), markdownTableText(action.evidence)); err != nil {
+			markdownTableText(action.priority), markdownTableText(developerPlainLanguage(action.issue)), markdownTableText(developerPlainLanguage(action.why)),
+			markdownTableText(developerPlainLanguage(action.next)), markdownTableText(action.evidence)); err != nil {
 			return err
 		}
 	}
 	if remaining := view.actionTotal - len(view.actions); remaining > 0 {
-		_, err := fmt.Fprintf(writer, "\n%d additional item(s) are recorded in %s.\n", remaining, inlineCode("latest.json"))
+		_, err := fmt.Fprintf(writer, "\n%d more item(s) are available in %s.\n", remaining, inlineCode("latest.json"))
 		return err
 	}
 	return nil
 }
 
 func writeDeveloperEvidenceMarkdown(writer io.Writer, view developerReportView) error {
-	if _, err := fmt.Fprintln(writer, "\n## Supporting code evidence"); err != nil {
+	if _, err := fmt.Fprintln(writer, "\n### Code that may already address requirements"); err != nil {
 		return err
 	}
 	if len(view.evidence) == 0 {
-		_, err := fmt.Fprintln(writer, "\nNo positive technical-control evidence lead was identified in this scan.")
+		_, err := fmt.Fprintln(writer, "\nComplyScan did not find code that clearly appears to implement one of the checked safeguards.")
 		return err
 	}
-	if _, err := fmt.Fprintln(writer, "\n| Technical objective | Assessment | Code evidence |\n|---|---|---|"); err != nil {
+	if _, err := fmt.Fprintln(writer, "\n| Safeguard | What ComplyScan thinks | Where |\n|---|---|---|"); err != nil {
 		return err
 	}
 	for _, evidence := range view.evidence {
 		if _, err := fmt.Fprintf(writer, "| %s | %s | %s |\n",
-			markdownTableText(evidence.title), markdownTableText(evidence.assessment), markdownTableText(evidence.evidence)); err != nil {
+			markdownTableText(developerPlainLanguage(evidence.title)), markdownTableText(developerPlainLanguage(evidence.assessment)), markdownTableText(evidence.evidence)); err != nil {
 			return err
 		}
 	}
 	if remaining := view.evidenceTotal - len(view.evidence); remaining > 0 {
-		_, err := fmt.Fprintf(writer, "\n%d additional evidence lead(s) are recorded in %s.\n", remaining, inlineCode("latest.json"))
+		_, err := fmt.Fprintf(writer, "\n%d more possible implementation(s) are available in %s.\n", remaining, inlineCode("latest.json"))
 		return err
 	}
 	return nil
 }
 
 func writeDeveloperQuestionsMarkdown(writer io.Writer, view developerReportView) error {
-	if _, err := fmt.Fprintln(writer, "\n## Questions to confirm"); err != nil {
+	if _, err := fmt.Fprintln(writer, "\n## 3. What ComplyScan could not determine"); err != nil {
 		return err
 	}
 	if len(view.questions) == 0 {
-		_, err := fmt.Fprintln(writer, "\nNo unresolved repository or applicability question was recorded.")
+		_, err := fmt.Fprintln(writer, "\nComplyScan did not record any unanswered question for this scan.")
 		return err
 	}
 	for _, question := range view.questions {
-		if _, err := fmt.Fprintf(writer, "\n- %s", markdownText(question)); err != nil {
+		if _, err := fmt.Fprintf(writer, "\n- %s", markdownText(developerPlainQuestion(question))); err != nil {
 			return err
 		}
 	}
 	if remaining := view.questionTotal - len(view.questions); remaining > 0 {
-		if _, err := fmt.Fprintf(writer, "\n- %d additional question(s) are recorded in %s.", remaining, inlineCode("latest.json")); err != nil {
+		if _, err := fmt.Fprintf(writer, "\n- %d more question(s) are available in %s.", remaining, inlineCode("latest.json")); err != nil {
 			return err
 		}
 	}
 	_, err := fmt.Fprintln(writer)
+	return err
+}
+
+func writeDeveloperReferenceDetailsMarkdown(writer io.Writer, view developerReportView) error {
+	if len(view.referenceDetails) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintln(writer, "\n<details>\n<summary>Legal and technical details</summary>\n\nThese are the sources used to define the available code checks. Their inclusion does not mean that every source or requirement applies to your product."); err != nil {
+		return err
+	}
+	for _, detail := range view.referenceDetails {
+		if _, err := fmt.Fprintf(writer, "\n- %s", markdownText(detail)); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(writer, "\n\nRequirement IDs, raw model output, and complete scanner results are available in `latest.json`.\n\n</details>")
 	return err
 }
 
@@ -352,13 +377,13 @@ func developerObjectiveAction(objective reconciliation.ObjectiveResult) (develop
 	switch objective.Mapping {
 	case reconciliation.MappingEvidenceMismatch:
 		action.priority = "High"
-		action.why = "Code evidence was found, but it conflicts with the configured system ownership or applicability context."
-		action.next = "Correct the system mapping or confirm which implementation owns this control."
+		action.why = "Related code was found, but ComplyScan could not tell which configured AI feature it belongs to."
+		action.next = "Correct the code-to-feature mapping or confirm which AI feature uses this implementation."
 		return action, true
 	case reconciliation.MappingUnableToEvaluate:
 		action.priority = "Review"
-		action.why = "Potentially relevant code could not be fully analysed."
-		action.next = "Review the unsupported code manually or add analyzer support, then rerun the scan."
+		action.why = "ComplyScan could not fully check code that may be relevant to this safeguard."
+		action.next = "Review that code manually or add support for its programming language, then run ComplyScan again."
 		return action, true
 	case reconciliation.MappingApplicabilityUnresolved:
 		// Missing applicability facts are presented once as questions instead of
@@ -366,8 +391,8 @@ func developerObjectiveAction(objective reconciliation.ObjectiveResult) (develop
 		return developerAction{}, false
 	case reconciliation.MappingRequirementWithoutEvidence:
 		action.priority = "High"
-		action.why = "The configured profile indicates this control may be required, but the scan found no supporting code evidence."
-		action.next = "Confirm applicability, then implement the control or document where its technical evidence lives."
+		action.why = "Your setup answers suggest this safeguard may be needed, but ComplyScan found no matching code."
+		action.next = "First confirm that this applies. If it does, implement the safeguard or point ComplyScan to where it exists."
 		return action, true
 	}
 	return developerAction{}, false
@@ -439,9 +464,9 @@ func developerSupportingEvidence(value Report, titles map[string]string) ([]deve
 				continue
 			}
 			rawID := developerRawObjectiveID(observation.ObjectiveID)
-			assessment := "Strong code-evidence lead"
+			assessment := "Code strongly suggests this is implemented"
 			if observation.Strength == providers.StrengthPartial {
-				assessment = "Partial code-evidence lead"
+				assessment = "Some relevant code was found, but important parts may be missing"
 			}
 			add(rawID, developerEvidence{
 				title: developerObjectiveTitle(rawID, titles), assessment: assessment,
@@ -462,7 +487,7 @@ func developerSupportingEvidence(value Report, titles map[string]string) ([]deve
 				locations = append(locations, locationText(match.Path, match.StartLine))
 			}
 			add(objective.ID, developerEvidence{
-				title: objective.Title, assessment: "Automated code signal; human confirmation needed",
+				title: objective.Title, assessment: "Possible implementation found; a person still needs to check it",
 				evidence: strings.Join(locations, ", "),
 			})
 		}
@@ -479,7 +504,7 @@ func developerSupportingEvidence(value Report, titles map[string]string) ([]deve
 		}
 		add("verification/"+result.RecipeID, developerEvidence{
 			title:      "Execution check: " + result.RecipeID,
-			assessment: "Passed in an isolated environment",
+			assessment: "The configured check passed; production behaviour still needs confirmation",
 			evidence:   compactMarkdownText(result.Boundary, 160),
 		})
 	}
@@ -539,7 +564,7 @@ func developerQuestions(value Report) ([]string, int) {
 		}
 	}
 	if len(developerIntegrationSignals(value)) > 0 && (value.RepositoryAnalysis == nil || len(value.RepositoryAnalysis.Result.AIUses) == 0) {
-		add("Are the detected AI integration references active in a deployed product, and what data do they process?")
+		add("Are the AI libraries or settings found here actually used in the deployed product, and what data do they process?")
 	}
 	total := len(questions)
 	if len(questions) > maxDeveloperQuestions {
@@ -557,6 +582,86 @@ func developerIntegrationSignals(value Report) []string {
 		names = append(names, component.Name)
 	}
 	return names
+}
+
+func developerReferenceDetails(value Report) []string {
+	details := make([]string, 0)
+	add := func(name string, evidence framework.TechnicalEvidenceReport) {
+		seen := make(map[string]struct{})
+		references := make([]string, 0)
+		for _, objective := range evidence.Objectives {
+			reference := strings.TrimSpace(objective.SourceReference)
+			if reference == "" {
+				continue
+			}
+			if _, exists := seen[reference]; exists {
+				continue
+			}
+			seen[reference] = struct{}{}
+			references = append(references, reference)
+		}
+		if len(references) == 0 {
+			return
+		}
+		details = append(details, fmt.Sprintf("%s — %s", name, strings.Join(references, ", ")))
+	}
+	for _, result := range value.Frameworks {
+		add(result.Name, result.TechnicalEvidence)
+	}
+	if len(value.Frameworks) == 0 && value.TechnicalEvidence != nil {
+		add(value.TechnicalEvidence.Pack.Name, *value.TechnicalEvidence)
+	}
+	return details
+}
+
+func developerPlainQuestion(question string) string {
+	normalized := strings.ToLower(strings.TrimSpace(question))
+	switch normalized {
+	case "operating regions have not been established.":
+		return "Where will this AI feature be offered or used?"
+	case "use-case domains have not been established.":
+		return "What will this AI feature be used for?"
+	case "the organization's ai value-chain role has not been established.":
+		return "Is your organisation building, selling, deploying, or operating this AI feature?"
+	case "the intended purpose has not been established.":
+		return "What is this AI feature intended to do?"
+	case "the lifecycle stage has not been established.":
+		return "Is this AI feature in development, testing, production, or retired?"
+	case "decision impact has not been established.":
+		return "How much can this AI feature affect a person's outcome?"
+	case "human oversight has not been established.":
+		return "Can a person review, stop, or override this AI feature?"
+	case "ai activities such as inference, training, evaluation, automated decisions, agent tool use, or synthetic-content generation have not been established.":
+		return "Does this code train, evaluate, run, or control AI models?"
+	case "one or more data categories have not been established.":
+		return "What types of data does this AI feature process?"
+	case "deployment models have not been established.":
+		return "Where and how is this AI feature deployed?"
+	case "the system's users have not been established.":
+		return "Who uses this AI feature?"
+	case "potentially affected groups have not been established.":
+		return "Who could be affected by this AI feature's outputs?"
+	default:
+		return developerPlainLanguage(question)
+	}
+}
+
+func developerPlainLanguage(value string) string {
+	replacer := strings.NewReplacer(
+		"candidate evidence", "possible matching code",
+		"Candidate evidence", "Possible matching code",
+		"technical objective", "code safeguard",
+		"Technical objective", "Code safeguard",
+		"technical control", "safeguard in the code",
+		"Technical control", "Safeguard in the code",
+		"applicability", "whether this applies",
+		"Applicability", "Whether this applies",
+		"not substantiated", "not confirmed",
+		"Not substantiated", "Not confirmed",
+		"unmapped", "not connected to an AI feature",
+		"Unmapped", "Not connected to an AI feature",
+	)
+	return replacer.Replace(value)
 }
 
 func developerCitationText(citations []providers.RepositoryCitation) string {
@@ -585,7 +690,7 @@ func developerEvidenceReferenceText(references []reconciliation.EvidenceReferenc
 		locations = append(locations, locationText(reference.Path, reference.Line))
 	}
 	if len(locations) == 0 {
-		return "No code evidence detected"
+		return "No matching code location found"
 	}
 	return strings.Join(locations, ", ")
 }
@@ -640,10 +745,14 @@ func developerHasUrgentAction(actions []developerAction) bool {
 func repositoryAnalysisModeLabel(mode providers.RepositoryAnalysisMode) string {
 	switch mode {
 	case providers.RepositoryAnalysisFull:
-		return "full-repository"
+		return "all repository files"
 	case providers.RepositoryAnalysisSubsystem:
-		return "subsystem"
+		return "grouped sections of the repository"
+	case providers.RepositoryAnalysisSynthesis:
+		return "grouped sections of the repository"
+	case providers.RepositoryAnalysisBoundedOnly:
+		return "focused checks only"
 	default:
-		return string(mode)
+		return "the available repository context"
 	}
 }
