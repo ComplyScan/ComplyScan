@@ -8,6 +8,8 @@ import (
 
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
+	"github.com/ComplyScan/ComplyScan/internal/ownership"
+	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 )
 
@@ -111,5 +113,35 @@ func TestRunFullModeReportsContextOverflow(t *testing.T) {
 	}}}, nil, nil, Options{Mode: ModeFull, Provider: providers.OpenAI, MaxInputTokens: 8_000})
 	if err == nil || !strings.Contains(err.Error(), "exceeding the configured full-analysis budget") {
 		t.Fatalf("expected context overflow, got %v", err)
+	}
+}
+
+func TestValidateSystemAttributionRequiresOwnedCitations(t *testing.T) {
+	systems := []profile.System{{ID: "assistant"}, {ID: "ranking"}}
+	rules := []ownership.Rule{
+		{Paths: []string{"apps/assistant/**"}, Systems: []string{"assistant"}},
+		{Paths: []string{"apps/ranking/**"}, Systems: []string{"ranking"}},
+	}
+	result := providers.RepositorySectionResult{ObjectiveObservations: []providers.RepositoryObjectiveObservation{{
+		ObjectiveID: "pack/objective", SystemID: "assistant",
+		SupportingEvidence: []providers.RepositoryCitation{{Path: "apps/ranking/model.go", Line: 1}},
+	}}}
+	if err := validateSystemAttribution(result, systems, rules); err == nil || !strings.Contains(err.Error(), "path ownership") {
+		t.Fatalf("expected cross-system attribution rejection, got %v", err)
+	}
+	result.ObjectiveObservations[0].SupportingEvidence[0].Path = "apps/assistant/model.go"
+	if err := validateSystemAttribution(result, systems, rules); err != nil {
+		t.Fatalf("owned citation should validate: %v", err)
+	}
+}
+
+func TestValidateSystemAttributionLeavesMultiSystemEvidenceUnresolvedWithoutOwnership(t *testing.T) {
+	result := providers.RepositorySectionResult{ObjectiveObservations: []providers.RepositoryObjectiveObservation{{
+		ObjectiveID: "pack/objective", SystemID: "assistant",
+		SupportingEvidence: []providers.RepositoryCitation{{Path: "main.go", Line: 1}},
+	}}}
+	err := validateSystemAttribution(result, []profile.System{{ID: "assistant"}, {ID: "ranking"}}, nil)
+	if err == nil || !strings.Contains(err.Error(), "without configured path ownership") {
+		t.Fatalf("expected unresolved multi-system attribution, got %v", err)
 	}
 }

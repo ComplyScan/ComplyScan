@@ -16,6 +16,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/governance"
 	"github.com/ComplyScan/ComplyScan/internal/inventory"
+	"github.com/ComplyScan/ComplyScan/internal/ownership"
 	"github.com/ComplyScan/ComplyScan/internal/policy"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
@@ -664,7 +665,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 						return fmt.Errorf("write repository analysis progress: %w", err)
 					}
 					repositoryReview, reviewErr := reviewRepositoryWithProvider(
-						cmd.Context(), cfg.AI, result.FullRepository, frameworkEvidenceReports(frameworkResults), cfg.Systems, progressWriter,
+						cmd.Context(), cfg.AI, result.FullRepository, frameworkEvidenceReports(frameworkResults), cfg.Systems, cfg.Ownership, progressWriter,
 					)
 					if reviewErr != nil {
 						warning := fmt.Sprintf("%s repository-wide analysis was incomplete after %s: %v. Deterministic findings and bounded evidence review remain available.", reviewProviderLabel(cfg.AI.Provider), formatElapsed(time.Since(repositoryReviewStarted)), reviewErr)
@@ -952,6 +953,7 @@ func reviewRepositoryWithProvider(
 	repository discovery.Repository,
 	evidence []framework.TechnicalEvidenceReport,
 	systems []profile.System,
+	ownershipRules []ownership.Rule,
 	progressWriter io.Writer,
 ) (providers.RepositoryAnalysisResult, error) {
 	reviewer, _, _, model, kind, err := configuredReviewer(settings)
@@ -963,7 +965,7 @@ func reviewRepositoryWithProvider(
 		return providers.RepositoryAnalysisResult{}, errors.New("repository-wide analysis is disabled by configuration")
 	}
 	return repositoryanalysis.Run(ctx, reviewer, repository, evidence, systems, repositoryanalysis.Options{
-		Mode: mode, MaxInputTokens: settings.RepositoryAnalysis.MaxInputTokens, Provider: kind, Model: model,
+		Mode: mode, MaxInputTokens: settings.RepositoryAnalysis.MaxInputTokens, Provider: kind, Model: model, Ownership: ownershipRules,
 		OnProgress: func(progress repositoryanalysis.Progress) error {
 			if progress.Completed == 0 {
 				return nil

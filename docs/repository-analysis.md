@@ -9,7 +9,7 @@ Repository-wide analysis is an advisory model layer added after deterministic di
 3. It loads the selected versioned code-only framework objectives and the configured system facts.
 4. If all relevant context fits the configured input budget, the provider receives it in one request. Otherwise files are grouped by top-level subsystem, every group is analyzed, and structured results are reduced through one or more synthesis levels.
 5. The model discovers technically evidenced AI uses, maps repository evidence to only the supplied objectives, and lists activity it could not map.
-6. Trusted code validates the response. Unknown objective IDs, unknown configured system IDs, duplicate AI-use IDs, unsupported classifications, invented paths, and out-of-range line citations reject the repository-wide pass.
+6. Trusted code validates the response. Unknown objective IDs, unknown configured system IDs, duplicate AI-use IDs, unsupported classifications, invented paths, out-of-range line citations, and system attributions that conflict with configured path ownership reject the repository-wide pass. In a multi-system repository without ownership rules, objective observations must remain system-unassigned.
 7. The result is saved separately from deterministic findings and reconciliation. The older bounded finding and technical-objective reviews still run as comparison and fallback layers.
 
 ## Context modes
@@ -50,4 +50,3 @@ No AI use identified is not proof that a repository has no AI. `not_supported` i
 - Repository-wide output is not yet merged into deterministic reconciliation or CI failure thresholds. It is deliberately non-blocking while comparative quality benchmarks are built.
 - Repository-wide analysis is not cached yet. The bounded technical investigation retains its existing source-free cache.
 - Context size and cost depend on the selected provider/model and repository. ComplyScan reports provider token usage where available but does not estimate price because provider prices change independently of the CLI.
-

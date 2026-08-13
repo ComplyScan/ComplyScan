@@ -14,6 +14,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/codegraph"
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
+	"github.com/ComplyScan/ComplyScan/internal/ownership"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
@@ -44,6 +45,7 @@ type Options struct {
 	MaxInputTokens int
 	Provider       providers.Kind
 	Model          string
+	Ownership      []ownership.Rule
 	OnProgress     func(Progress) error
 }
 
@@ -87,7 +89,7 @@ func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository
 		}, nil
 	}
 	objectives := repositoryObjectives(evidence)
-	systemContext := repositorySystems(systems)
+	systemContext := repositorySystems(systems, options.Ownership)
 	budget := sourceBudget(options.MaxInputTokens, objectives, systemContext)
 	graph := codegraph.Build(repository)
 	fullGraph := repositoryGraphContext(graph, files)
@@ -101,6 +103,9 @@ func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository
 			Files: files, Objectives: objectives, Systems: systemContext, Graph: fullGraph,
 		})
 		if err != nil {
+			return providers.RepositoryAnalysisResult{}, err
+		}
+		if err := validateSystemAttribution(result.Result, systems, options.Ownership); err != nil {
 			return providers.RepositoryAnalysisResult{}, err
 		}
 		if err := progress(options, Progress{Stage: "full-repository", Completed: 1, Total: 1, Scope: ".", InputBytes: fullBytes}); err != nil {
@@ -139,6 +144,9 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		if err != nil {
 			return providers.RepositoryAnalysisResult{}, fmt.Errorf("analyze subsystem %s: %w", chunk.scope, err)
 		}
+		if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership); err != nil {
+			return providers.RepositoryAnalysisResult{}, fmt.Errorf("analyze subsystem %s: %w", chunk.scope, err)
+		}
 		summaries = append(summaries, result.Result)
 		addUsage(&aggregate.Usage, result.Usage)
 		aggregate.Coverage.FilesSubmitted += result.Coverage.FilesSubmitted
@@ -166,6 +174,9 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			if err != nil {
 				return providers.RepositoryAnalysisResult{}, fmt.Errorf("synthesize repository analysis level %d part %d: %w", levels, index+1, err)
 			}
+			if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership); err != nil {
+				return providers.RepositoryAnalysisResult{}, fmt.Errorf("synthesize repository analysis level %d part %d: %w", levels, index+1, err)
+			}
 			next = append(next, result.Result)
 			addUsage(&aggregate.Usage, result.Usage)
 			aggregate.Coverage.CitationsChecked += result.Coverage.CitationsChecked
@@ -188,6 +199,9 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			Objectives: objectives, Systems: systems, SubsystemSummaries: group,
 		})
 		if err != nil {
+			return providers.RepositoryAnalysisResult{}, fmt.Errorf("synthesize repository analysis: %w", err)
+		}
+		if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership); err != nil {
 			return providers.RepositoryAnalysisResult{}, fmt.Errorf("synthesize repository analysis: %w", err)
 		}
 		summaries[0] = result.Result
@@ -313,7 +327,7 @@ func repositoryObjectives(reports []framework.TechnicalEvidenceReport) []provide
 	return result
 }
 
-func repositorySystems(systems []profile.System) []providers.RepositorySystemContext {
+func repositorySystems(systems []profile.System, rules []ownership.Rule) []providers.RepositorySystemContext {
 	result := make([]providers.RepositorySystemContext, 0, len(systems))
 	for _, system := range systems {
 		facts := []string{
@@ -322,9 +336,64 @@ func repositorySystems(systems []profile.System) []providers.RepositorySystemCon
 			"Decision impact: " + string(system.DecisionImpact),
 			"Human oversight: " + string(system.HumanOversight),
 		}
-		result = append(result, providers.RepositorySystemContext{ID: system.ID, Name: system.Name, DeclaredFacts: facts})
+		paths := []string{}
+		for _, rule := range rules {
+			for _, owner := range rule.Systems {
+				if owner == system.ID {
+					paths = append(paths, rule.Paths...)
+					break
+				}
+			}
+		}
+		if len(systems) > 1 && len(paths) == 0 {
+			facts = append(facts, "Repository path ownership is not established for this system; leave system_id empty unless cited evidence is explicitly owned by this system.")
+		}
+		result = append(result, providers.RepositorySystemContext{ID: system.ID, Name: system.Name, Paths: paths, DeclaredFacts: facts})
 	}
 	return result
+}
+
+func profileSystems(values []providers.RepositorySystemContext) []profile.System {
+	result := make([]profile.System, 0, len(values))
+	for _, value := range values {
+		result = append(result, profile.System{ID: value.ID, Name: value.Name})
+	}
+	return result
+}
+
+func validateSystemAttribution(result providers.RepositorySectionResult, systems []profile.System, rules []ownership.Rule) error {
+	if len(systems) <= 1 && len(rules) == 0 {
+		return nil
+	}
+	resolver := ownership.New(rules)
+	for _, observation := range result.ObjectiveObservations {
+		if observation.SystemID == "" {
+			continue
+		}
+		if !resolver.Configured() {
+			return fmt.Errorf("objective %q attributed evidence to system %q without configured path ownership", observation.ObjectiveID, observation.SystemID)
+		}
+		citations := append(append([]providers.RepositoryCitation(nil), observation.SupportingEvidence...), observation.ContradictoryEvidence...)
+		if len(citations) == 0 {
+			return fmt.Errorf("objective %q attributed system %q without cited evidence", observation.ObjectiveID, observation.SystemID)
+		}
+		for _, citation := range citations {
+			resolution := resolver.Resolve(citation.Path)
+			if resolution.Status == ownership.StatusConflicting || !containsSystem(resolution.Systems, observation.SystemID) {
+				return fmt.Errorf("objective %q attributed %s to system %q but path ownership is %s for %v", observation.ObjectiveID, citation.Path, observation.SystemID, resolution.Status, resolution.Systems)
+			}
+		}
+	}
+	return nil
+}
+
+func containsSystem(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func sourceBudget(tokens int, objectives []providers.RepositoryObjective, systems []providers.RepositorySystemContext) int64 {
