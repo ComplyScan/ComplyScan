@@ -51,22 +51,23 @@ type Summary struct {
 }
 
 type Report struct {
-	SchemaVersion          int                                `json:"schema_version"`
-	Tool                   Tool                               `json:"tool"`
-	Scan                   ScanMetadata                       `json:"scan"`
-	Target                 string                             `json:"target"`
-	Summary                Summary                            `json:"summary"`
-	Findings               []rules.Finding                    `json:"findings"`
-	Warnings               []string                           `json:"warnings,omitempty"`
-	Suppressed             int                                `json:"suppressed"`
-	Applicability          *profile.AssessmentReport          `json:"applicability,omitempty"`
-	TechnicalEvidence      *framework.TechnicalEvidenceReport `json:"technical_evidence,omitempty"`
-	AIInventory            *inventory.Report                  `json:"ai_inventory,omitempty"`
-	Reconciliation         *reconciliation.Report             `json:"reconciliation,omitempty"`
-	Review                 *providers.ReviewResult            `json:"review,omitempty"`
-	TechnicalReview        *providers.TechnicalReviewResult   `json:"evidence_investigation,omitempty"`
-	ExecutionVerifications []verification.Report              `json:"execution_verification,omitempty"`
-	Frameworks             []FrameworkResult                  `json:"frameworks,omitempty"`
+	SchemaVersion          int                                 `json:"schema_version"`
+	Tool                   Tool                                `json:"tool"`
+	Scan                   ScanMetadata                        `json:"scan"`
+	Target                 string                              `json:"target"`
+	Summary                Summary                             `json:"summary"`
+	Findings               []rules.Finding                     `json:"findings"`
+	Warnings               []string                            `json:"warnings,omitempty"`
+	Suppressed             int                                 `json:"suppressed"`
+	Applicability          *profile.AssessmentReport           `json:"applicability,omitempty"`
+	TechnicalEvidence      *framework.TechnicalEvidenceReport  `json:"technical_evidence,omitempty"`
+	AIInventory            *inventory.Report                   `json:"ai_inventory,omitempty"`
+	Reconciliation         *reconciliation.Report              `json:"reconciliation,omitempty"`
+	Review                 *providers.ReviewResult             `json:"review,omitempty"`
+	RepositoryAnalysis     *providers.RepositoryAnalysisResult `json:"repository_analysis,omitempty"`
+	TechnicalReview        *providers.TechnicalReviewResult    `json:"evidence_investigation,omitempty"`
+	ExecutionVerifications []verification.Report               `json:"execution_verification,omitempty"`
+	Frameworks             []FrameworkResult                   `json:"frameworks,omitempty"`
 }
 
 // FrameworkResult keeps each framework's applicability, technical evidence,
@@ -111,7 +112,7 @@ func NewWithMetadata(target string, tool Tool, scope ScanScope, createdAt time.T
 	created := createdAt.UTC().Format(time.RFC3339Nano)
 	identifier := sha256.Sum256([]byte(strings.Join([]string{target, tool.Version, tool.Commit, created}, "\x00")))
 	return Report{
-		SchemaVersion: 5,
+		SchemaVersion: 6,
 		Tool:          tool,
 		Scan: ScanMetadata{
 			ID: "scan-" + fmt.Sprintf("%x", identifier[:12]), CreatedAt: created, Scope: scope,
@@ -203,6 +204,11 @@ func WriteTerminal(w io.Writer, report Report, options TerminalOptions) error {
 			return err
 		}
 	}
+	if report.RepositoryAnalysis != nil {
+		if err := WriteTerminalRepositoryAnalysis(w, *report.RepositoryAnalysis); err != nil {
+			return err
+		}
+	}
 	if len(report.Frameworks) == 0 && report.TechnicalReview != nil {
 		if err := WriteTerminalTechnicalReview(w, *report.TechnicalReview); err != nil {
 			return err
@@ -281,6 +287,11 @@ func WriteTerminalCompletion(w io.Writer, report Report) error {
 			return err
 		}
 	}
+	if report.RepositoryAnalysis != nil {
+		if err := WriteTerminalRepositoryAnalysis(w, *report.RepositoryAnalysis); err != nil {
+			return err
+		}
+	}
 	if len(report.Frameworks) == 0 && report.TechnicalReview != nil {
 		if err := WriteTerminalTechnicalReview(w, *report.TechnicalReview); err != nil {
 			return err
@@ -356,7 +367,63 @@ func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
 			return err
 		}
 	}
+	if value.RepositoryAnalysis != nil {
+		analysis := value.RepositoryAnalysis
+		if _, err := fmt.Fprintf(w, "Repository AI analysis: %s; %d AI use(s), %d objective observation(s), %d unmapped observation(s); %d citation(s) checked\n",
+			analysis.Coverage.Mode, len(analysis.Result.AIUses), len(analysis.Result.ObjectiveObservations), len(analysis.Result.UnmappedObservations), analysis.Coverage.CitationsChecked); err != nil {
+			return err
+		}
+	}
 	_, err := fmt.Fprintln(w, "Use --verbose for full terminal evidence; latest.md is concise and latest.json preserves the complete evidence bundle.")
+	return err
+}
+
+// WriteTerminalRepositoryAnalysis renders whole-repository reasoning as a
+// separate advisory layer. It never changes deterministic findings or gates.
+func WriteTerminalRepositoryAnalysis(w io.Writer, analysis providers.RepositoryAnalysisResult) error {
+	if _, err := fmt.Fprintf(w, "Repository-wide AI analysis (%s / %s): %s\n", analysis.Provider, analysis.Model, analysis.Coverage.Mode); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "        Context: %d/%d relevant file submission(s), %d subsystem(s), %d verified citation(s)\n",
+		analysis.Coverage.FilesSubmitted, analysis.Coverage.RepositoryFiles, analysis.Coverage.Subsystems, analysis.Coverage.CitationsChecked); err != nil {
+		return err
+	}
+	for _, use := range analysis.Result.AIUses {
+		if _, err := fmt.Fprintf(w, "AI USE  %-6s %s — %s\n", strings.ToUpper(use.Confidence), use.Name, use.Purpose); err != nil {
+			return err
+		}
+		for _, citation := range use.Evidence {
+			if _, err := fmt.Fprintf(w, "        Evidence: %s — %s\n", locationText(citation.Path, citation.Line), citation.Summary); err != nil {
+				return err
+			}
+		}
+	}
+	for _, observation := range analysis.Result.ObjectiveObservations {
+		if _, err := fmt.Fprintf(w, "REPO MAP %-13s %-6s %s\n        %s\n", observation.Strength, strings.ToUpper(observation.Confidence), observation.ObjectiveID, observation.Rationale); err != nil {
+			return err
+		}
+		for _, missing := range observation.MissingEvidence {
+			if _, err := fmt.Fprintf(w, "        Missing: %s\n", missing); err != nil {
+				return err
+			}
+		}
+	}
+	for _, observation := range analysis.Result.UnmappedObservations {
+		if _, err := fmt.Fprintf(w, "UNMAPPED %-6s %s\n        %s\n", strings.ToUpper(observation.Confidence), observation.Summary, observation.Reason); err != nil {
+			return err
+		}
+	}
+	for _, question := range analysis.Result.UnresolvedQuestions {
+		if _, err := fmt.Fprintf(w, "        Unresolved: %s\n", question); err != nil {
+			return err
+		}
+	}
+	for _, note := range analysis.Notes {
+		if _, err := fmt.Fprintf(w, "Repository analysis note: %s\n", note); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(w)
 	return err
 }
 

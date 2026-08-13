@@ -86,7 +86,7 @@ func TestScanAutomaticallyUsesConfiguredAIReview(t *testing.T) {
 	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("default scan did not preserve deterministic result after AI failure: code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "Ollama advisory review requested") {
+	if !strings.Contains(stdout.String(), "Checking model compatibility before repository review") {
 		t.Fatalf("default scan did not invoke configured AI:\n%s", stdout.String())
 	}
 
@@ -224,7 +224,7 @@ func TestScanJSONOutputAndSeverityFilter(t *testing.T) {
 	if decoded.Summary.High == 0 || decoded.Summary.Medium != 0 || decoded.Summary.Info != 0 {
 		t.Fatalf("severity filter not reflected in summary: %#v", decoded.Summary)
 	}
-	if decoded.SchemaVersion != 5 || decoded.Tool.Commit != "test" || decoded.Scan.ID == "" || decoded.Scan.Scope.Findings != "full-repository" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
+	if decoded.SchemaVersion != 6 || decoded.Tool.Commit != "test" || decoded.Scan.ID == "" || decoded.Scan.Scope.Findings != "full-repository" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
 		t.Fatalf("missing evidence-bundle metadata: %#v", decoded)
 	}
 }
@@ -371,7 +371,7 @@ func TestScanChangedSinceRequiresGitRepository(t *testing.T) {
 	}
 }
 
-func TestScanCanEnableOllamaWithoutCallingItForClearRepository(t *testing.T) {
+func TestScanPreservesDeterministicResultWhenAIIsEnabledForClearRepository(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	target := filepath.Join("..", "..", "testdata", "non-ai-repository")
 	code := Execute([]string{"scan", "--no-report", "--format", "json", "--review", "ollama", "--ollama-model", "test-model", target}, &stdout, &stderr, testBuild)
@@ -382,14 +382,11 @@ func TestScanCanEnableOllamaWithoutCallingItForClearRepository(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatalf("invalid JSON: %v\n%s", err, stdout.String())
 	}
-	if decoded.Review == nil || decoded.Review.Provider != providers.Ollama || decoded.Review.Model != "test-model" || decoded.Review.InputFindings != 0 {
-		t.Fatalf("unexpected advisory review: %#v", decoded.Review)
-	}
-	if decoded.TechnicalReview == nil || decoded.TechnicalReview.Provider != providers.Ollama || decoded.TechnicalReview.InputCandidates != 0 {
-		t.Fatalf("unexpected technical review: %#v", decoded.TechnicalReview)
-	}
 	if decoded.Summary.Total != 0 {
 		t.Fatalf("model review changed deterministic summary: %#v", decoded.Summary)
+	}
+	if len(decoded.Warnings) == 0 {
+		t.Fatal("expected unavailable test model to be reported without failing the deterministic scan")
 	}
 }
 
@@ -1220,7 +1217,7 @@ func TestScanMapsSharedEvidenceAcrossEUAndNISTFrameworks(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 5 || len(decoded.Frameworks) != 2 {
+	if decoded.SchemaVersion != 6 || len(decoded.Frameworks) != 2 {
 		t.Fatalf("multi-framework contract missing: %#v", decoded.Frameworks)
 	}
 	var fingerprints []string

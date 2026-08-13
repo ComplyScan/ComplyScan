@@ -21,6 +21,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
 	"github.com/ComplyScan/ComplyScan/internal/report"
+	"github.com/ComplyScan/ComplyScan/internal/repositoryanalysis"
 	"github.com/ComplyScan/ComplyScan/internal/reviewcontext"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
 	"github.com/ComplyScan/ComplyScan/internal/scanner"
@@ -615,7 +616,8 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 					progressWriter = cmd.ErrOrStderr()
 				}
 				modelQualified := true
-				if len(visible) > 0 || candidateCount > 0 {
+				repositoryAnalysisRequested := cfg.AI.RepositoryAnalysis.Mode != "bounded-only" && len(result.FullRepository.Files) > 0
+				if len(visible) > 0 || candidateCount > 0 || repositoryAnalysisRequested {
 					if _, err := fmt.Fprintf(progressWriter, "Checking model compatibility before repository review...\n"); err != nil {
 						return fmt.Errorf("write model qualification progress: %w", err)
 					}
@@ -643,12 +645,43 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 					}
 				}
 				if modelQualified && outputFormat == "terminal" {
-					if _, err := fmt.Fprintf(stdout, "%s advisory review requested for %d finding(s) and %d technical evidence investigation target(s) with %s...\n\n", reviewProviderLabel(cfg.AI.Provider), len(visible), candidateCount, configuredReviewModel(cfg.AI)); err != nil {
+					if _, err := fmt.Fprintf(stdout, "%s advisory review requested for repository-wide reasoning, %d finding(s), and %d bounded technical evidence target(s) with %s...\n\n", reviewProviderLabel(cfg.AI.Provider), len(visible), candidateCount, configuredReviewModel(cfg.AI)); err != nil {
 						return fmt.Errorf("write terminal report: %w", err)
 					}
 					if isRemoteReviewProvider(cfg.AI.Provider) {
-						if _, err := fmt.Fprintln(stdout, "Remote review sends only bounded, redacted finding and source-context records to the selected provider; usage may incur cost."); err != nil {
+						disclosure := "Remote review sends redacted relevant repository text for whole-repository reasoning, plus bounded finding and evidence records, to the selected provider; usage may incur cost."
+						if !repositoryAnalysisRequested {
+							disclosure = "Remote review sends only bounded, redacted finding and source-context records to the selected provider; usage may incur cost."
+						}
+						if _, err := fmt.Fprintln(stdout, disclosure); err != nil {
 							return fmt.Errorf("write remote review disclosure: %w", err)
+						}
+					}
+				}
+				if modelQualified && repositoryAnalysisRequested {
+					repositoryReviewStarted := time.Now()
+					if _, err := fmt.Fprintf(progressWriter, "Starting repository-wide AI reasoning with %s %q...\n", reviewProviderLabel(cfg.AI.Provider), configuredReviewModel(cfg.AI)); err != nil {
+						return fmt.Errorf("write repository analysis progress: %w", err)
+					}
+					repositoryReview, reviewErr := reviewRepositoryWithProvider(
+						cmd.Context(), cfg.AI, result.FullRepository, frameworkEvidenceReports(frameworkResults), cfg.Systems, progressWriter,
+					)
+					if reviewErr != nil {
+						warning := fmt.Sprintf("%s repository-wide analysis was incomplete after %s: %v. Deterministic findings and bounded evidence review remain available.", reviewProviderLabel(cfg.AI.Provider), formatElapsed(time.Since(repositoryReviewStarted)), reviewErr)
+						reportValue.Warnings = append(reportValue.Warnings, warning)
+						if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
+							return fmt.Errorf("write repository analysis warning: %w", err)
+						}
+					} else {
+						reportValue.RepositoryAnalysis = &repositoryReview
+						if _, err := fmt.Fprintf(progressWriter, "Repository-wide AI reasoning completed in %s using %s context.\n", formatElapsed(time.Since(repositoryReviewStarted)), repositoryReview.Coverage.Mode); err != nil {
+							return fmt.Errorf("write repository analysis completion: %w", err)
+						}
+						if resolvedReportDirectory != "" {
+							artifacts, err = report.WriteArtifacts(resolvedReportDirectory, reportValue)
+							if err != nil {
+								return fmt.Errorf("checkpoint repository analysis reports: %w", err)
+							}
 						}
 					}
 				}
@@ -911,6 +944,53 @@ func reviewFindingsWithProvider(
 		return providers.ReviewResult{}, fmt.Errorf("%s advisory review: %w", reviewProviderLabel(settings.Provider), err)
 	}
 	return findingResult, nil
+}
+
+func reviewRepositoryWithProvider(
+	ctx context.Context,
+	settings config.AIConfig,
+	repository discovery.Repository,
+	evidence []framework.TechnicalEvidenceReport,
+	systems []profile.System,
+	progressWriter io.Writer,
+) (providers.RepositoryAnalysisResult, error) {
+	reviewer, _, _, model, kind, err := configuredReviewer(settings)
+	if err != nil {
+		return providers.RepositoryAnalysisResult{}, err
+	}
+	mode := repositoryanalysis.Mode(settings.RepositoryAnalysis.Mode)
+	if mode == "bounded-only" {
+		return providers.RepositoryAnalysisResult{}, errors.New("repository-wide analysis is disabled by configuration")
+	}
+	return repositoryanalysis.Run(ctx, reviewer, repository, evidence, systems, repositoryanalysis.Options{
+		Mode: mode, MaxInputTokens: settings.RepositoryAnalysis.MaxInputTokens, Provider: kind, Model: model,
+		OnProgress: func(progress repositoryanalysis.Progress) error {
+			if progress.Completed == 0 {
+				return nil
+			}
+			switch progress.Stage {
+			case "full-repository":
+				_, err := fmt.Fprintf(progressWriter, "Full repository context analyzed (%d byte(s)).\n", progress.InputBytes)
+				return err
+			case "subsystem":
+				_, err := fmt.Fprintf(progressWriter, "Subsystem %d/%d analyzed: %s\n", progress.Completed, progress.Total, progress.Scope)
+				return err
+			case "synthesis":
+				_, err := fmt.Fprintf(progressWriter, "Synthesis batch %d/%d completed: %s\n", progress.Completed, progress.Total, progress.Scope)
+				return err
+			default:
+				return nil
+			}
+		},
+	})
+}
+
+func frameworkEvidenceReports(results []report.FrameworkResult) []framework.TechnicalEvidenceReport {
+	evidence := make([]framework.TechnicalEvidenceReport, len(results))
+	for index := range results {
+		evidence[index] = results[index].TechnicalEvidence
+	}
+	return evidence
 }
 
 func reviewTechnicalWithProvider(

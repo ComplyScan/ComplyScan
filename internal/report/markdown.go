@@ -31,6 +31,11 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 	if err := writeTechnicalChecklistMarkdown(writer, report); err != nil {
 		return err
 	}
+	if report.RepositoryAnalysis != nil {
+		if err := writeRepositoryAnalysisMarkdown(writer, *report.RepositoryAnalysis); err != nil {
+			return err
+		}
+	}
 	if err := writeModelReviewSummaryMarkdown(writer, report); err != nil {
 		return err
 	}
@@ -76,6 +81,11 @@ func WriteDetailedMarkdown(writer io.Writer, report Report) error {
 	}
 	if report.AIInventory != nil {
 		if err := writeAIComponentSummaryMarkdown(writer, *report.AIInventory); err != nil {
+			return err
+		}
+	}
+	if report.RepositoryAnalysis != nil {
+		if err := writeRepositoryAnalysisMarkdown(writer, *report.RepositoryAnalysis); err != nil {
 			return err
 		}
 	}
@@ -285,6 +295,105 @@ func WriteDetailedMarkdown(writer io.Writer, report Report) error {
 
 	_, err := fmt.Fprintln(writer, "\n</details>\n\n---\n\nGenerated from the versioned JSON evidence bundle. Candidate evidence requires technical and human verification.")
 	return err
+}
+
+func writeRepositoryAnalysisMarkdown(writer io.Writer, analysis providers.RepositoryAnalysisResult) error {
+	if _, err := fmt.Fprintf(writer, "\n## Repository-wide AI analysis\n\n- Provider/model: %s / %s\n- Context mode: %s\n- Repository: %d discovered file(s), %d byte(s)\n- Submitted context: %d file submission(s), %d byte(s), %d subsystem(s)\n- Deterministically checked citations: %d\n\nThis is advisory technical reasoning over repository context. It does not determine legal applicability or certify compliance.\n",
+		inlineCode(string(analysis.Provider)), inlineCode(analysis.Model), markdownText(string(analysis.Coverage.Mode)), analysis.Coverage.RepositoryFiles,
+		analysis.Coverage.RepositoryBytes, analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.Subsystems,
+		analysis.Coverage.CitationsChecked); err != nil {
+		return err
+	}
+	if len(analysis.Result.AIUses) == 0 {
+		if _, err := fmt.Fprintln(writer, "\nNo AI implementation was identified by this model pass. This is not proof that the repository contains no AI activity."); err != nil {
+			return err
+		}
+	}
+	for _, use := range analysis.Result.AIUses {
+		if _, err := fmt.Fprintf(writer, "\n### AI use: %s\n\n- ID: %s\n- Purpose: %s\n- Lifecycle indication: %s\n- Confidence: %s\n",
+			markdownText(use.Name), inlineCode(use.ID), markdownText(use.Purpose), markdownText(use.Lifecycle), markdownText(use.Confidence)); err != nil {
+			return err
+		}
+		if err := writeRepositoryCitationsMarkdown(writer, "Evidence", use.Evidence); err != nil {
+			return err
+		}
+		for _, question := range use.UnresolvedQuestions {
+			if _, err := fmt.Fprintf(writer, "- Unresolved: %s\n", markdownText(question)); err != nil {
+				return err
+			}
+		}
+	}
+	if len(analysis.Result.ObjectiveObservations) > 0 {
+		if _, err := fmt.Fprintln(writer, "\n### Technical-objective mapping"); err != nil {
+			return err
+		}
+	}
+	for _, observation := range analysis.Result.ObjectiveObservations {
+		if _, err := fmt.Fprintf(writer, "\n#### %s\n\n- Strength: %s\n- Confidence: %s\n", inlineCode(observation.ObjectiveID), markdownText(string(observation.Strength)), markdownText(observation.Confidence)); err != nil {
+			return err
+		}
+		if observation.SystemID != "" {
+			if _, err := fmt.Fprintf(writer, "- Configured system: %s\n", inlineCode(observation.SystemID)); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintf(writer, "\n%s\n", markdownText(observation.Rationale)); err != nil {
+			return err
+		}
+		if err := writeRepositoryCitationsMarkdown(writer, "Supporting evidence", observation.SupportingEvidence); err != nil {
+			return err
+		}
+		if err := writeRepositoryCitationsMarkdown(writer, "Contradictory evidence", observation.ContradictoryEvidence); err != nil {
+			return err
+		}
+		for _, missing := range observation.MissingEvidence {
+			if _, err := fmt.Fprintf(writer, "- Missing: %s\n", markdownText(missing)); err != nil {
+				return err
+			}
+		}
+		for _, question := range observation.UnresolvedQuestions {
+			if _, err := fmt.Fprintf(writer, "- Unresolved: %s\n", markdownText(question)); err != nil {
+				return err
+			}
+		}
+	}
+	if len(analysis.Result.UnmappedObservations) > 0 {
+		if _, err := fmt.Fprintln(writer, "\n### AI activity not mapped to a supplied objective"); err != nil {
+			return err
+		}
+	}
+	for _, observation := range analysis.Result.UnmappedObservations {
+		if _, err := fmt.Fprintf(writer, "\n- **%s** (%s confidence): %s", markdownText(observation.Summary), markdownText(observation.Confidence), markdownText(observation.Reason)); err != nil {
+			return err
+		}
+		if observation.SuggestedReview != "" {
+			if _, err := fmt.Fprintf(writer, " Suggested review: %s", markdownText(observation.SuggestedReview)); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintln(writer); err != nil {
+			return err
+		}
+		if err := writeRepositoryCitationsMarkdown(writer, "Evidence", observation.Evidence); err != nil {
+			return err
+		}
+	}
+	for _, question := range analysis.Result.UnresolvedQuestions {
+		if _, err := fmt.Fprintf(writer, "\n- Repository-level unresolved question: %s", markdownText(question)); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(writer)
+	return err
+}
+
+func writeRepositoryCitationsMarkdown(writer io.Writer, label string, citations []providers.RepositoryCitation) error {
+	for _, citation := range citations {
+		if _, err := fmt.Fprintf(writer, "- %s: %s — %s\n", markdownText(label), inlineCode(locationText(citation.Path, citation.Line)), markdownText(citation.Summary)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type markdownReportCounts struct {

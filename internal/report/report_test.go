@@ -50,7 +50,7 @@ func TestWriteJSON(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 5 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
+	if decoded.SchemaVersion != 6 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
 		t.Fatalf("unexpected tool: %#v", decoded.Tool)
 	}
 	if !strings.HasPrefix(decoded.Scan.ID, "scan-") || decoded.Scan.CreatedAt != "2026-08-03T08:30:00Z" || decoded.Scan.Scope.Findings != "changed-files" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
@@ -67,7 +67,7 @@ func TestWriteJSON(t *testing.T) {
 	}
 }
 
-func TestWriteJSONUsesSchemaFiveEvidenceInvestigationContract(t *testing.T) {
+func TestWriteJSONUsesSchemaSixEvidenceInvestigationContract(t *testing.T) {
 	value := New(".", "dev", nil, nil, 0)
 	value.TechnicalReview = &providers.TechnicalReviewResult{
 		Provider: providers.Ollama, Model: "qwen3:8b", InputCandidates: 1, Reviewed: 1,
@@ -82,8 +82,34 @@ func TestWriteJSONUsesSchemaFiveEvidenceInvestigationContract(t *testing.T) {
 	if err := WriteJSON(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), `"schema_version": 5`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
-		t.Fatalf("unexpected schema-version-5 investigation JSON:\n%s", output.String())
+	if !strings.Contains(output.String(), `"schema_version": 6`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
+		t.Fatalf("unexpected schema-version-6 investigation JSON:\n%s", output.String())
+	}
+}
+
+func TestRepositoryAnalysisIsRenderedAsAdvisoryEvidence(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{
+		Provider: providers.OpenAI, Model: "test-model",
+		Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisFull, RepositoryFiles: 2, FilesSubmitted: 2, CitationsChecked: 1},
+		Result: providers.RepositorySectionResult{Scope: ".", AIUses: []providers.RepositoryAIUse{{
+			ID: "summaries", Name: "Summary generation", Purpose: "Generate summaries", Confidence: "high",
+			Evidence: []providers.RepositoryCitation{{Path: "main.go", Line: 12, Summary: "Runtime model call"}},
+		}}, ObjectiveObservations: []providers.RepositoryObjectiveObservation{}, UnmappedObservations: []providers.RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{}},
+	}
+	var terminal bytes.Buffer
+	if err := WriteTerminalCompletion(&terminal, value); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(terminal.String(), "Repository-wide AI analysis") || !strings.Contains(terminal.String(), "main.go:12") {
+		t.Fatalf("repository analysis missing from terminal:\n%s", terminal.String())
+	}
+	var markdown bytes.Buffer
+	if err := WriteMarkdown(&markdown, value); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(markdown.String(), "Repository-wide AI analysis") || !strings.Contains(markdown.String(), "does not determine legal applicability") {
+		t.Fatalf("repository analysis boundary missing from Markdown:\n%s", markdown.String())
 	}
 }
 
