@@ -2,10 +2,12 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 )
 
 type questionGuidance struct {
-	details []string
+	details            []string
+	choiceDescriptions map[string]string
 }
 
 var setupQuestionHelp = map[string][]string{
@@ -53,10 +55,13 @@ var setupQuestionHelp = map[string][]string{
 	},
 	"operating-regions": {
 		"Select where the system is offered, professionally used, or intended to have effects—not merely where the repository or developer is located.",
-		"eu — one or more European Union countries; eea — EU plus Iceland, Liechtenstein, or Norway",
-		"uk / us — the United Kingdom or United States respectively",
+		"eu — one or more European Union countries",
+		"eea — the EU plus Iceland, Liechtenstein, and Norway",
+		"uk — the United Kingdom",
+		"us — the United States",
 		"global — intentionally offered or operated across multiple world regions, including possible EU/EEA use",
-		"other — established regions not represented above; unknown — markets and use locations have not been established",
+		"other — established regions not represented above",
+		"unknown — markets and use locations have not been established; select unknown alone",
 	},
 	"use-case-domains": {
 		"Select what the AI actually does. These are screening categories; choosing one does not itself make the system high-risk.",
@@ -100,7 +105,8 @@ var setupQuestionHelp = map[string][]string{
 	"ai-activities": {
 		"Select every AI-related activity performed by this system. This helps ComplyScan avoid asking for controls unrelated to the codebase.",
 		"inference — sends inputs to a model and receives predictions, recommendations, classifications, embeddings, or generated outputs",
-		"training — creates model parameters from training data; fine-tuning — adapts an existing model using your data or examples",
+		"training — creates model parameters from training data",
+		"fine-tuning — adapts an existing model using your data or examples",
 		"evaluation — benchmarks, scores, red-teams, or validates model behavior or quality",
 		"automated-decision — uses AI output to make or materially trigger a decision about a person, object, or process",
 		"agent-tool-use — allows a model to choose or invoke tools, APIs, commands, files, or external actions",
@@ -111,21 +117,34 @@ var setupQuestionHelp = map[string][]string{
 		"Answer yes if the system reads, creates, predicts, stores, logs, or receives information relating to an identified or identifiable person.",
 		"Examples include names, email/IP/device identifiers, account IDs, voice or images, location, employee/customer records, and linked pseudonymous IDs.",
 		"Answer based on real inputs, outputs, logs, and training/evaluation data—not only the main database schema.",
+		"yes — personal data is processed or may enter the system",
+		"no — personal data is not processed anywhere in the relevant workflow",
+		"unknown — the system's data flows have not been fully established",
 	},
 	"special-category-data": {
 		"Answer yes if personal data reveals racial or ethnic origin, political opinions, religion or beliefs, trade-union membership, genetics, biometric identity, health, sex life, or sexual orientation.",
 		"Also choose yes for similarly sensitive categories protected by the laws relevant to your users. Choose unknown if datasets or prompts have not been reviewed.",
+		"yes — special-category or similarly sensitive personal data is processed or may enter the system",
+		"no — this type of sensitive personal data is not processed in the relevant workflow",
+		"unknown — datasets, prompts, outputs, or logs have not been sufficiently reviewed",
 	},
 	"children-data": {
 		"Answer yes if any input, output, account, log, training/evaluation record, or affected-person record can relate to children.",
 		"Use the relevant age threshold for the countries and service; choose unknown if age coverage or datasets have not been established.",
+		"yes — data about children is processed or may enter the system",
+		"no — data about children is not processed in the relevant workflow",
+		"unknown — age coverage or the relevant datasets have not been established",
 	},
 	"deployment-models": {
 		"Choose every way the system reaches users or other software:",
-		"internal — used only inside your organisation; private-customer — a dedicated customer deployment not open to the public",
-		"public — publicly accessible website, app, or service; open-source — source or model released under an open-source licence",
-		"embedded — included as a feature or safety component of another product; api — called programmatically over a service interface",
-		"local-cli — runs as a command-line program on the user's machine; unknown — deployment has not been established",
+		"internal — used only inside your organisation",
+		"private-customer — a dedicated customer deployment not open to the public",
+		"public — a publicly accessible website, app, or service",
+		"open-source — source code or model weights released under an open-source licence",
+		"embedded — included as a feature or safety component of another product",
+		"api — called programmatically over a service interface",
+		"local-cli — runs as a command-line program on the user's machine",
+		"unknown — deployment has not been established; select unknown alone",
 		"Example: customer-facing SaaS commonly uses public and api; a customer's private instance uses private-customer and possibly api.",
 	},
 	"profile-reviewer": {
@@ -134,8 +153,10 @@ var setupQuestionHelp = map[string][]string{
 	},
 	"applicability-decision": {
 		"This is a human legal/applicability record, not a quiz. Most developers should keep needs-review unless an accountable legal or compliance reviewer has documented a conclusion.",
-		"needs-review — no reviewed conclusion exists yet; applicable — a reviewer concluded the EU AI Act applies",
-		"not-applicable — a reviewer documented why it does not apply; uncertain — a reviewer assessed it but material uncertainty remains",
+		"needs-review — no reviewed conclusion exists yet",
+		"applicable — an accountable reviewer concluded that the EU AI Act applies",
+		"not-applicable — an accountable reviewer documented why it does not apply",
+		"uncertain — a reviewer assessed it but material uncertainty remains",
 		"ComplyScan's provisional screening above is evidence for review, not authority to choose applicable or not-applicable.",
 	},
 	"decision-rationale": {
@@ -240,6 +261,7 @@ func (prompt promptSession) clearQuestionGuidance() {
 		return
 	}
 	prompt.guidance.details = nil
+	prompt.guidance.choiceDescriptions = nil
 }
 
 func explainSetupQuestion(prompt promptSession, key string) error {
@@ -252,6 +274,7 @@ func explainSetupQuestion(prompt promptSession, key string) error {
 	}
 	if prompt.guidance != nil {
 		prompt.guidance.details = append(prompt.guidance.details[:0], lines[1:]...)
+		prompt.guidance.choiceDescriptions = setupChoiceDescriptions(lines[1:])
 	}
 	visible := lines[:1]
 	if prompt.alwaysDetailed {
@@ -266,4 +289,17 @@ func explainSetupQuestion(prompt promptSession, key string) error {
 		}
 	}
 	return nil
+}
+
+func setupChoiceDescriptions(lines []string) map[string]string {
+	descriptions := make(map[string]string)
+	for _, line := range lines {
+		value, description, found := strings.Cut(line, " — ")
+		value = strings.ToLower(strings.TrimSpace(value))
+		description = strings.TrimSpace(description)
+		if found && value != "" && description != "" {
+			descriptions[value] = description
+		}
+	}
+	return descriptions
 }

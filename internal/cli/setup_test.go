@@ -930,19 +930,19 @@ func TestPromptRequiredChoiceHasNoPreselectedAnswer(t *testing.T) {
 
 func TestDecisionImpactChoicesExplainTheirMeaningInline(t *testing.T) {
 	prompt := promptSession{
-		reader: bufio.NewReader(strings.NewReader("")), output: io.Discard,
+		reader: bufio.NewReader(strings.NewReader("")), output: io.Discard, guidance: &questionGuidance{},
 		selectOne: func(label, _ string, options []terminalChoice) (string, error) {
 			if label != "Step 3 of 5 · Question 5 of 7 — Decision impact" {
 				t.Fatalf("label = %q", label)
 			}
 			want := []string{
-				"advisory — AI suggests; a person independently reviews before action",
-				"low — limited, reversible effect without material impact on people",
-				"significant — materially influences an important outcome for a person",
-				"autonomous — can trigger a consequential action without prior human approval",
-				"unknown — downstream effect has not been established",
+				"advisory — AI suggests or drafts; a person independently reviews before any action",
+				"low — AI affects a limited, readily reversible workflow without materially affecting a person's access, safety, or opportunities",
+				"significant — AI materially influences eligibility, ranking, access, employment, education, credit, healthcare, safety, or a similarly important outcome",
+				"autonomous — AI can take or trigger a consequential action without prior meaningful human approval",
+				"unknown — the real downstream use of outputs has not been established",
 			}
-			if len(options) != len(want)+1 {
+			if len(options) != len(want)+2 {
 				t.Fatalf("options = %#v", options)
 			}
 			for index, expected := range want {
@@ -955,6 +955,9 @@ func TestDecisionImpactChoicesExplainTheirMeaningInline(t *testing.T) {
 		step:      &setupStepProgress{current: 3, total: 5},
 		questions: &questionProgress{current: 4, total: 7},
 	}
+	if err := explainSetupQuestion(prompt, "decision-impact"); err != nil {
+		t.Fatal(err)
+	}
 	selected, err := promptRequiredChoice(prompt, "Decision impact",
 		profile.ImpactAdvisory, profile.ImpactLow, profile.ImpactSignificant, profile.ImpactAutonomous, profile.ImpactUnknown)
 	if err != nil {
@@ -966,30 +969,32 @@ func TestDecisionImpactChoicesExplainTheirMeaningInline(t *testing.T) {
 }
 
 func TestLifecycleStageChoicesExplainTheirMeaningInline(t *testing.T) {
+	guidance := &questionGuidance{choiceDescriptions: setupChoiceDescriptions(setupQuestionHelp["lifecycle-stage"][1:])}
 	want := map[profile.LifecycleStage]string{
-		profile.LifecycleDevelopment: "development — being designed or implemented; not used in normal operation",
-		profile.LifecycleTesting:     "testing — controlled validation, pilot, or pre-production use",
+		profile.LifecycleDevelopment: "development — being designed or implemented; not used with real users in normal operation",
+		profile.LifecycleTesting:     "testing — being validated, piloted, or used in a controlled pre-production environment",
 		profile.LifecycleProduction:  "production — available or used in normal real-world operation",
-		profile.LifecycleRetired:     "retired — no longer used, though records or obligations may remain",
-		profile.LifecycleUnknown:     "unknown — current stage has not been established",
+		profile.LifecycleRetired:     "retired — no longer used, although records or obligations may remain",
+		profile.LifecycleUnknown:     "unknown — the current stage has not been established",
 	}
 	for value, expected := range want {
-		if actual := setupChoiceLabel("Step 3 of 5 · Question 6 of 7 — Lifecycle stage", string(value)); actual != expected {
+		if actual := setupChoiceLabel(guidance, string(value)); actual != expected {
 			t.Errorf("label for %q = %q, want %q", value, actual, expected)
 		}
 	}
 }
 
 func TestHumanOversightChoicesExplainTheirMeaningInline(t *testing.T) {
+	guidance := &questionGuidance{choiceDescriptions: setupChoiceDescriptions(setupQuestionHelp["human-oversight"][1:])}
 	want := map[profile.HumanOversight]string{
-		profile.OversightRequired:  "required — a person must review before the output or action can proceed",
-		profile.OversightAvailable: "available — a person can monitor, override, or stop it, but review is not always required",
-		profile.OversightLimited:   "limited — human intervention exists only for some cases, stages, or after action",
-		profile.OversightNone:      "none — no person can effectively review, override, or stop it",
-		profile.OversightUnknown:   "unknown — the operational oversight process has not been confirmed",
+		profile.OversightRequired:  "required — the relevant output or action is blocked until a person reviews it",
+		profile.OversightAvailable: "available — a person can monitor, override, or stop it, but review is not required for every output",
+		profile.OversightLimited:   "limited — intervention exists only for some cases, users, stages, or after the action",
+		profile.OversightNone:      "none — no person can effectively review, override, or stop the relevant AI behavior",
+		profile.OversightUnknown:   "unknown — the operational workflow has not been confirmed",
 	}
 	for value, expected := range want {
-		if actual := setupChoiceLabel("Step 3 of 5 · Question 7 of 7 — Human oversight", string(value)); actual != expected {
+		if actual := setupChoiceLabel(guidance, string(value)); actual != expected {
 			t.Errorf("label for %q = %q, want %q", value, actual, expected)
 		}
 	}

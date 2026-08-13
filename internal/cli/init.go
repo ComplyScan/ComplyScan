@@ -406,8 +406,8 @@ func (session promptSession) confirm(label string, defaultValue bool) (bool, err
 			defaultChoice = "Yes"
 		}
 		selected, err := session.chooseOne(label, defaultChoice, []terminalChoice{
-			{Label: "Yes", Value: "Yes"},
-			{Label: "No", Value: "No"},
+			{Label: setupChoiceLabel(session.guidance, "Yes"), Value: "Yes"},
+			{Label: setupChoiceLabel(session.guidance, "No"), Value: "No"},
 		})
 		if err != nil {
 			return false, err
@@ -559,7 +559,7 @@ func promptChoice[T ~string](session promptSession, label string, defaultValue T
 	if session.selectOne != nil {
 		options := make([]terminalChoice, len(allowed))
 		for index, candidate := range allowed {
-			options[index] = terminalChoice{Label: setupChoiceLabel(label, string(candidate)), Value: string(candidate)}
+			options[index] = terminalChoice{Label: setupChoiceLabel(session.guidance, string(candidate)), Value: string(candidate)}
 		}
 		selected, err := session.chooseOne(label, string(defaultValue), options)
 		if err != nil {
@@ -575,7 +575,7 @@ func promptChoice[T ~string](session promptSession, label string, defaultValue T
 		if strings.EqualFold(string(defaultValue), string(candidate)) {
 			defaultIndex = index
 		}
-		if _, err := fmt.Fprintf(session.output, "  %d) %s\n", index+1, setupChoiceLabel(label, string(candidate))); err != nil {
+		if _, err := fmt.Fprintf(session.output, "  %d) %s\n", index+1, setupChoiceLabel(session.guidance, string(candidate))); err != nil {
 			return defaultValue, err
 		}
 	}
@@ -593,36 +593,11 @@ func promptChoice[T ~string](session promptSession, label string, defaultValue T
 	}
 }
 
-func setupChoiceLabel(questionLabel, value string) string {
-	var description string
-	switch {
-	case strings.HasSuffix(strings.TrimSpace(questionLabel), "Decision impact"):
-		description = map[string]string{
-			string(profile.ImpactAdvisory):    "AI suggests; a person independently reviews before action",
-			string(profile.ImpactLow):         "limited, reversible effect without material impact on people",
-			string(profile.ImpactSignificant): "materially influences an important outcome for a person",
-			string(profile.ImpactAutonomous):  "can trigger a consequential action without prior human approval",
-			string(profile.ImpactUnknown):     "downstream effect has not been established",
-		}[value]
-	case strings.HasSuffix(strings.TrimSpace(questionLabel), "Lifecycle stage"):
-		description = map[string]string{
-			string(profile.LifecycleDevelopment): "being designed or implemented; not used in normal operation",
-			string(profile.LifecycleTesting):     "controlled validation, pilot, or pre-production use",
-			string(profile.LifecycleProduction):  "available or used in normal real-world operation",
-			string(profile.LifecycleRetired):     "no longer used, though records or obligations may remain",
-			string(profile.LifecycleUnknown):     "current stage has not been established",
-		}[value]
-	case strings.HasSuffix(strings.TrimSpace(questionLabel), "Human oversight"):
-		description = map[string]string{
-			string(profile.OversightRequired):  "a person must review before the output or action can proceed",
-			string(profile.OversightAvailable): "a person can monitor, override, or stop it, but review is not always required",
-			string(profile.OversightLimited):   "human intervention exists only for some cases, stages, or after action",
-			string(profile.OversightNone):      "no person can effectively review, override, or stop it",
-			string(profile.OversightUnknown):   "the operational oversight process has not been confirmed",
-		}[value]
-	default:
+func setupChoiceLabel(guidance *questionGuidance, value string) string {
+	if guidance == nil {
 		return value
 	}
+	description := guidance.choiceDescriptions[strings.ToLower(strings.TrimSpace(value))]
 	if description == "" {
 		return value
 	}
@@ -639,7 +614,7 @@ func promptRequiredChoice[T ~string](session promptSession, label string, allowe
 		options := make([]terminalChoice, 0, len(allowed)+1)
 		options = append(options, terminalChoice{Value: requiredAnswerChoiceValue})
 		for _, candidate := range allowed {
-			options = append(options, terminalChoice{Label: setupChoiceLabel(label, string(candidate)), Value: string(candidate)})
+			options = append(options, terminalChoice{Label: setupChoiceLabel(session.guidance, string(candidate)), Value: string(candidate)})
 		}
 		selected, err := session.chooseOne(label, requiredAnswerChoiceValue, options)
 		if err != nil {
@@ -651,7 +626,7 @@ func promptRequiredChoice[T ~string](session promptSession, label string, allowe
 		return zero, fmt.Errorf("%s selector returned unsupported value %q", strings.ToLower(label), selected)
 	}
 	for index, candidate := range allowed {
-		if _, err := fmt.Fprintf(session.output, "  %d) %s\n", index+1, setupChoiceLabel(label, string(candidate))); err != nil {
+		if _, err := fmt.Fprintf(session.output, "  %d) %s\n", index+1, setupChoiceLabel(session.guidance, string(candidate))); err != nil {
 			return zero, err
 		}
 	}
@@ -682,7 +657,7 @@ func promptChoices[T ~string](session promptSession, label string, defaultValue 
 		options := make([]terminalChoice, len(allowed))
 		exclusive := []string{}
 		for index, value := range allowed {
-			options[index] = terminalChoice{Label: string(value), Value: string(value)}
+			options[index] = terminalChoice{Label: setupChoiceLabel(session.guidance, string(value)), Value: string(value)}
 			if strings.EqualFold(string(value), "unknown") {
 				exclusive = append(exclusive, string(value))
 			}
@@ -709,7 +684,7 @@ func promptChoices[T ~string](session promptSession, label string, defaultValue 
 		return result, nil
 	}
 	for index, candidate := range allowed {
-		if _, err := fmt.Fprintf(session.output, "  %d) %s\n", index+1, candidate); err != nil {
+		if _, err := fmt.Fprintf(session.output, "  %d) %s\n", index+1, setupChoiceLabel(session.guidance, string(candidate))); err != nil {
 			return nil, err
 		}
 	}
