@@ -95,7 +95,7 @@ func TestPromptRelayoutDoesNotScheduleItselfAgain(t *testing.T) {
 
 func TestMultiSelectGuidanceExpandsOnHighlight(t *testing.T) {
 	highlighted := false
-	tracker := newMultiSelectGuidanceTracker(4, 3, &highlighted)
+	tracker := newMultiSelectGuidanceTracker(4, 3, 0, func(value bool) { highlighted = value })
 	for range 3 {
 		if consumed := tracker.Handle(tea.KeyMsg{Type: tea.KeyDown}); consumed {
 			t.Fatal("moving to guidance was unexpectedly consumed")
@@ -118,7 +118,7 @@ func TestMultiSelectGuidanceExpandsOnHighlight(t *testing.T) {
 
 func TestMultiSelectGuidanceTrackerMatchesClampedArrowNavigation(t *testing.T) {
 	highlighted := false
-	tracker := newMultiSelectGuidanceTracker(4, 3, &highlighted)
+	tracker := newMultiSelectGuidanceTracker(4, 3, 0, func(value bool) { highlighted = value })
 	tracker.Handle(tea.KeyMsg{Type: tea.KeyUp})
 	if highlighted || tracker.cursor != 0 {
 		t.Fatalf("top-boundary cursor=%d highlighted=%t", tracker.cursor, highlighted)
@@ -137,7 +137,7 @@ func TestMultiSelectGuidanceTrackerMatchesClampedArrowNavigation(t *testing.T) {
 
 func TestMultiSelectGuidanceDoesNotGuessCursorAfterFiltering(t *testing.T) {
 	highlighted := false
-	tracker := newMultiSelectGuidanceTracker(4, 3, &highlighted)
+	tracker := newMultiSelectGuidanceTracker(4, 3, 0, func(value bool) { highlighted = value })
 	tracker.Handle(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	tracker.Handle(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
 	tracker.Handle(tea.KeyMsg{Type: tea.KeyEnter})
@@ -153,12 +153,7 @@ func TestLeavingExpandedGuidanceRestoresChoicesAfterOneKeypress(t *testing.T) {
 	selected := moreGuidanceChoiceValue
 	field := huh.NewSelect[string]().
 		Title("Decision impact").
-		DescriptionFunc(func() string {
-			if selected == moreGuidanceChoiceValue {
-				return "Further explanation:\nline one\nline two\nline three\nline four"
-			}
-			return "Choose the strongest effect."
-		}, &selected).
+		Description("Further explanation:\nline one\nline two\nline three\nline four").
 		Options(
 			huh.NewOption("Advisory", "advisory"),
 			huh.NewOption("Low", "low"),
@@ -167,7 +162,14 @@ func TestLeavingExpandedGuidanceRestoresChoicesAfterOneKeypress(t *testing.T) {
 			huh.NewOption("Further explanation", moreGuidanceChoiceValue),
 		).
 		Value(&selected)
-	navigator := &backNavigableForm{form: huh.NewForm(huh.NewGroup(field)).WithWidth(80).WithHeight(10)}
+	tracker := newMultiSelectGuidanceTracker(5, 4, 4, func(highlighted bool) {
+		description := "Choose the strongest effect."
+		if highlighted {
+			description = "Further explanation:\nline one\nline two\nline three\nline four"
+		}
+		field.Description(description)
+	})
+	navigator := &backNavigableForm{form: huh.NewForm(huh.NewGroup(field)).WithWidth(80).WithHeight(10), keyHandler: tracker.Handle}
 	drainTeaCommand(t, navigator, navigator.Init(), 50)
 	_, resize := navigator.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
 	drainTeaCommand(t, navigator, resize, 50)
@@ -187,12 +189,7 @@ func TestLeavingExpandedMultiSelectGuidanceRestoresChoicesAfterOneKeypress(t *te
 	highlighted := false
 	field := huh.NewMultiSelect[string]().
 		Title("Operating regions").
-		DescriptionFunc(func() string {
-			if highlighted {
-				return "Further explanation:\nline one\nline two\nline three\nline four\nline five\nline six"
-			}
-			return "Choose every operating region."
-		}, &highlighted).
+		Description("Choose every operating region.").
 		Options(
 			huh.NewOption("EU", "eu"),
 			huh.NewOption("EEA", "eea"),
@@ -204,7 +201,14 @@ func TestLeavingExpandedMultiSelectGuidanceRestoresChoicesAfterOneKeypress(t *te
 			huh.NewOption("Further explanation", moreGuidanceChoiceValue),
 		).
 		Value(&selected)
-	tracker := newMultiSelectGuidanceTracker(8, 7, &highlighted)
+	tracker := newMultiSelectGuidanceTracker(8, 7, 0, func(value bool) {
+		highlighted = value
+		description := "Choose every operating region."
+		if highlighted {
+			description = "Further explanation:\nline one\nline two\nline three\nline four\nline five\nline six"
+		}
+		field.Description(description)
+	})
 	navigator := &backNavigableForm{
 		form:       huh.NewForm(huh.NewGroup(field)).WithWidth(100).WithHeight(14),
 		keyHandler: tracker.Handle,

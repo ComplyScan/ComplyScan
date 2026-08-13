@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync/atomic"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -205,22 +206,32 @@ func runTerminalSelect(input io.Reader, output io.Writer, label, defaultValue st
 	}
 	field := huh.NewSelect[string]().
 		Title(label).
-		DescriptionFunc(func() string {
-			return terminalGuidanceDescription(instructions, selected == moreGuidanceChoiceValue, guidance)
-		}, &selected).
+		Description(instructions).
 		Options(options...).
 		Value(&selected).
 		Validate(func(value string) error {
 			if value == moreGuidanceChoiceValue {
 				return errors.New("read the explanation, then choose an answer in this menu")
 			}
-			if value == requiredAnswerChoiceValue || required && !interaction.interacted {
+			if value == requiredAnswerChoiceValue || required && !interaction.interacted.Load() {
 				return errors.New("choose an answer; no option is selected automatically")
 			}
 			return nil
 		})
+	keyHandler := promptKeyHandler(interaction.Handle)
+	if strings.TrimSpace(guidance) != "" {
+		guidanceIndex := terminalChoiceIndex(visibleChoices, moreGuidanceChoiceValue)
+		initialCursor := terminalChoiceIndex(visibleChoices, defaultValue)
+		if initialCursor < 0 {
+			initialCursor = 0
+		}
+		tracker := newMultiSelectGuidanceTracker(len(visibleChoices), guidanceIndex, initialCursor, func(highlighted bool) {
+			field.Description(terminalGuidanceDescription(instructions, highlighted, guidance))
+		})
+		keyHandler = combinePromptKeyHandlers(interaction.Handle, tracker.Handle)
+	}
 	form := huh.NewForm(huh.NewGroup(field)).WithInput(input).WithOutput(output)
-	if err := runTerminalForm(form, input, output, allowBack, interaction.Handle); err != nil {
+	if err := runTerminalForm(form, input, output, allowBack, keyHandler); err != nil {
 		return "", fmt.Errorf("select %s: %w", strings.ToLower(label), err)
 	}
 	return selected, nil
@@ -309,7 +320,6 @@ func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, def
 	}
 	selected := append([]string(nil), defaults...)
 	guidance := terminalChoiceGuidance(choices)
-	guidanceHighlighted := false
 	instructions := "Use ↑/↓ to move, Space to tick or untick, and Enter to confirm."
 	allowBack := containsTerminalChoice(choices, backChoiceValue)
 	if allowBack {
@@ -317,9 +327,7 @@ func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, def
 	}
 	field := huh.NewMultiSelect[string]().
 		Title(label).
-		DescriptionFunc(func() string {
-			return terminalGuidanceDescription(instructions, guidanceHighlighted, guidance)
-		}, &guidanceHighlighted).
+		Description(instructions).
 		Options(options...).
 		Value(&selected).
 		Validate(func(values []string) error {
@@ -339,7 +347,11 @@ func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, def
 	form := huh.NewForm(huh.NewGroup(field)).WithInput(input).WithOutput(output)
 	var keyHandler promptKeyHandler
 	if strings.TrimSpace(guidance) != "" {
-		keyHandler = newMultiSelectGuidanceTracker(len(visibleChoices), len(visibleChoices)-1, &guidanceHighlighted).Handle
+		guidanceIndex := terminalChoiceIndex(visibleChoices, moreGuidanceChoiceValue)
+		tracker := newMultiSelectGuidanceTracker(len(visibleChoices), guidanceIndex, 0, func(highlighted bool) {
+			field.Description(terminalGuidanceDescription(instructions, highlighted, guidance))
+		})
+		keyHandler = tracker.Handle
 	}
 	if err := runTerminalForm(form, input, output, allowBack, keyHandler); err != nil {
 		return nil, fmt.Errorf("select %s: %w", strings.ToLower(label), err)
@@ -365,14 +377,14 @@ type multiSelectGuidanceTracker struct {
 	cursor        int
 	total         int
 	guidanceIndex int
-	highlighted   *bool
+	onHighlight   func(bool)
 	filtering     bool
 	disabled      bool
 }
 
 type requiredSelectInteraction struct {
 	required   bool
-	interacted bool
+	interacted atomic.Bool
 	filtering  bool
 }
 
@@ -391,7 +403,7 @@ func (tracker *requiredSelectInteraction) Handle(message tea.KeyMsg) bool {
 			return false
 		}
 		if message.Type == tea.KeyRunes || value == "backspace" || value == "delete" {
-			tracker.interacted = true
+			tracker.interacted.Store(true)
 		}
 		return false
 	}
@@ -401,13 +413,18 @@ func (tracker *requiredSelectInteraction) Handle(message tea.KeyMsg) bool {
 	}
 	switch value {
 	case "up", "k", "ctrl+p", "down", "j", "ctrl+n", "right", "l", "home", "g", "end", "G", "ctrl+u", "ctrl+d":
-		tracker.interacted = true
+		tracker.interacted.Store(true)
 	}
 	return false
 }
 
-func newMultiSelectGuidanceTracker(total, guidanceIndex int, highlighted *bool) *multiSelectGuidanceTracker {
-	return &multiSelectGuidanceTracker{total: total, guidanceIndex: guidanceIndex, highlighted: highlighted}
+func newMultiSelectGuidanceTracker(total, guidanceIndex, initialCursor int, onHighlight func(bool)) *multiSelectGuidanceTracker {
+	return &multiSelectGuidanceTracker{
+		cursor:        min(max(initialCursor, 0), max(total-1, 0)),
+		total:         total,
+		guidanceIndex: guidanceIndex,
+		onHighlight:   onHighlight,
+	}
 }
 
 func (tracker *multiSelectGuidanceTracker) Handle(message tea.KeyMsg) bool {
@@ -460,8 +477,19 @@ func (tracker *multiSelectGuidanceTracker) move(offset int) {
 }
 
 func (tracker *multiSelectGuidanceTracker) setHighlighted(value bool) {
-	if tracker.highlighted != nil {
-		*tracker.highlighted = value
+	if tracker.onHighlight != nil {
+		tracker.onHighlight(value)
+	}
+}
+
+func combinePromptKeyHandlers(handlers ...promptKeyHandler) promptKeyHandler {
+	return func(message tea.KeyMsg) bool {
+		for _, handler := range handlers {
+			if handler != nil && handler(message) {
+				return true
+			}
+		}
+		return false
 	}
 }
 
@@ -633,6 +661,15 @@ func containsTerminalChoice(choices []terminalChoice, wanted string) bool {
 		}
 	}
 	return false
+}
+
+func terminalChoiceIndex(choices []terminalChoice, wanted string) int {
+	for index, choice := range choices {
+		if choice.Value == wanted {
+			return index
+		}
+	}
+	return -1
 }
 
 func visibleTerminalChoices(choices []terminalChoice) []terminalChoice {
