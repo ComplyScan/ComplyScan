@@ -16,6 +16,19 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
 
+func TestWriteMarkdownDeduplicatesReviewerIdentity(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	value.Review = &providers.ReviewResult{Provider: providers.OpenAI, Model: "test-model"}
+	value.TechnicalReview = &providers.TechnicalReviewResult{Provider: providers.OpenAI, Model: "test-model"}
+	var output bytes.Buffer
+	if err := WriteMarkdown(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(output.String(), "openai / test-model") != 1 {
+		t.Fatalf("reviewer identity should appear once:\n%s", output.String())
+	}
+}
+
 func TestWriteDetailedMarkdownRendersScannerEvidenceTrace(t *testing.T) {
 	pack, err := framework.LoadBuiltin(framework.EUAIActTechnicalEvidencePackID)
 	if err != nil {

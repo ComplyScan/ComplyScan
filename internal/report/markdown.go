@@ -511,8 +511,17 @@ func writeModelReviewSummaryMarkdown(writer io.Writer, report Report) error {
 	}
 	rows := make([]row, 0)
 	models := make([]string, 0)
+	modelSeen := make(map[string]struct{})
+	addModel := func(provider providers.Kind, model string) {
+		value := string(provider) + " / " + model
+		if _, exists := modelSeen[value]; exists {
+			return
+		}
+		modelSeen[value] = struct{}{}
+		models = append(models, value)
+	}
 	if report.Review != nil {
-		models = append(models, string(report.Review.Provider)+" / "+report.Review.Model)
+		addModel(report.Review.Provider, report.Review.Model)
 		for _, observation := range report.Review.Observations {
 			rows = append(rows, row{
 				target: observation.RuleID, conclusion: string(observation.Verdict), confidence: observation.Confidence,
@@ -521,7 +530,7 @@ func writeModelReviewSummaryMarkdown(writer io.Writer, report Report) error {
 		}
 	}
 	appendTechnical := func(review providers.TechnicalReviewResult) {
-		models = append(models, string(review.Provider)+" / "+review.Model)
+		addModel(review.Provider, review.Model)
 		for _, observation := range review.Observations {
 			rows = append(rows, row{
 				target: observation.ObjectiveID, conclusion: string(observation.Conclusion), confidence: observation.Confidence,
