@@ -145,3 +145,13 @@ func TestValidateSystemAttributionLeavesMultiSystemEvidenceUnresolvedWithoutOwne
 		t.Fatalf("expected unresolved multi-system attribution, got %v", err)
 	}
 }
+
+func TestValidateSystemAttributionAllowsNoEvidenceForSoleSystem(t *testing.T) {
+	result := providers.RepositorySectionResult{ObjectiveObservations: []providers.RepositoryObjectiveObservation{{
+		ObjectiveID: "pack/objective", SystemID: "assistant", Strength: providers.StrengthNotSupported,
+	}}}
+	rules := []ownership.Rule{{Paths: []string{"apps/assistant/**"}, Systems: []string{"assistant"}}}
+	if err := validateSystemAttribution(result, []profile.System{{ID: "assistant"}}, rules); err != nil {
+		t.Fatalf("no-evidence observation should remain attached to the sole system: %v", err)
+	}
+}

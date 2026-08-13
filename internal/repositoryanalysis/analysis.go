@@ -370,12 +370,18 @@ func validateSystemAttribution(result providers.RepositorySectionResult, systems
 		if observation.SystemID == "" {
 			continue
 		}
-		if !resolver.Configured() {
-			return fmt.Errorf("objective %q attributed evidence to system %q without configured path ownership", observation.ObjectiveID, observation.SystemID)
-		}
 		citations := append(append([]providers.RepositoryCitation(nil), observation.SupportingEvidence...), observation.ContradictoryEvidence...)
 		if len(citations) == 0 {
+			if len(systems) == 1 && systems[0].ID == observation.SystemID {
+				// An objective with no claimed repository evidence can safely remain
+				// associated with the only configured system. There is no evidence
+				// path to own and no competing system to confuse it with.
+				continue
+			}
 			return fmt.Errorf("objective %q attributed system %q without cited evidence", observation.ObjectiveID, observation.SystemID)
+		}
+		if !resolver.Configured() {
+			return fmt.Errorf("objective %q attributed evidence to system %q without configured path ownership", observation.ObjectiveID, observation.SystemID)
 		}
 		for _, citation := range citations {
 			resolution := resolver.Resolve(citation.Path)
