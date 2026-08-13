@@ -354,18 +354,17 @@ func frameworkEnabled(enabled []string, wanted string) bool {
 }
 
 type promptSession struct {
-	reader         *bufio.Reader
-	output         io.Writer
-	styleTitles    bool
-	alwaysDetailed bool
-	guidance       *questionGuidance
-	questions      *questionProgress
-	step           *setupStepProgress
-	backAvailable  bool
-	inputText      func(label, defaultValue string, guidanceAvailable, allowBack bool) (string, error)
-	selectOne      func(label, defaultValue string, options []terminalChoice) (string, error)
-	selectMany     func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error)
-	confirmBool    func(label string, defaultValue bool) (bool, error)
+	reader        *bufio.Reader
+	output        io.Writer
+	styleTitles   bool
+	guidance      *questionGuidance
+	questions     *questionProgress
+	step          *setupStepProgress
+	backAvailable bool
+	inputText     func(label, defaultValue string, allowBack bool) (string, error)
+	selectOne     func(label, defaultValue string, options []terminalChoice) (string, error)
+	selectMany    func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error)
+	confirmBool   func(label string, defaultValue bool) (bool, error)
 }
 
 type questionProgress struct {
@@ -382,8 +381,8 @@ func newPromptSession(input io.Reader, output io.Writer) promptSession {
 	session := promptSession{reader: bufio.NewReader(input), output: output, guidance: &questionGuidance{}, step: &setupStepProgress{}}
 	if terminalPromptAvailable(input, output) {
 		session.styleTitles = os.Getenv("NO_COLOR") == ""
-		session.inputText = func(label, defaultValue string, guidanceAvailable, allowBack bool) (string, error) {
-			return runTerminalInput(input, output, label, defaultValue, guidanceAvailable, allowBack)
+		session.inputText = func(label, defaultValue string, allowBack bool) (string, error) {
+			return runTerminalInput(input, output, label, defaultValue, allowBack)
 		}
 		session.selectOne = func(label, defaultValue string, options []terminalChoice) (string, error) {
 			return runTerminalSelect(input, output, label, defaultValue, options)
@@ -400,7 +399,7 @@ func newPromptSession(input io.Reader, output io.Writer) promptSession {
 
 func (session promptSession) confirm(label string, defaultValue bool) (bool, error) {
 	label = session.nextQuestionLabel(label)
-	if (session.hasQuestionGuidance() || session.backAvailable) && session.selectOne != nil {
+	if session.backAvailable && session.selectOne != nil {
 		defaultChoice := "No"
 		if defaultValue {
 			defaultChoice = "Yes"
@@ -439,12 +438,6 @@ func (session promptSession) confirm(label string, defaultValue bool) (bool, err
 			session.clearQuestionGuidance()
 			return false, errPromptBack
 		}
-		if value == "?" && session.hasQuestionGuidance() {
-			if err := session.showQuestionGuidance(); err != nil {
-				return false, err
-			}
-			continue
-		}
 		switch value {
 		case "":
 			session.clearQuestionGuidance()
@@ -473,15 +466,9 @@ func (session promptSession) text(label, defaultValue string) (string, error) {
 func (session promptSession) readText(label, defaultValue string) (string, error) {
 	for {
 		if session.inputText != nil {
-			value, err := session.inputText(label, defaultValue, session.hasQuestionGuidance(), session.backAvailable)
+			value, err := session.inputText(label, defaultValue, session.backAvailable)
 			if err != nil {
 				return "", err
-			}
-			if value == moreGuidanceChoiceValue && session.hasQuestionGuidance() {
-				if err := session.showQuestionGuidance(); err != nil {
-					return "", err
-				}
-				continue
 			}
 			session.clearQuestionGuidance()
 			return value, nil
@@ -503,9 +490,6 @@ func (session promptSession) readText(label, defaultValue string) (string, error
 		} else {
 			actions = append([]string{"answer required"}, actions...)
 		}
-		if session.hasQuestionGuidance() {
-			actions = append(actions, "? details")
-		}
 		if session.backAvailable {
 			actions = append(actions, "type `back` to return")
 		}
@@ -523,12 +507,6 @@ func (session promptSession) readText(label, defaultValue string) (string, error
 		if session.backAvailable && strings.EqualFold(value, "back") {
 			session.clearQuestionGuidance()
 			return "", errPromptBack
-		}
-		if value == "?" && session.hasQuestionGuidance() {
-			if err := session.showQuestionGuidance(); err != nil {
-				return "", err
-			}
-			continue
 		}
 		if value == "" {
 			value = defaultValue

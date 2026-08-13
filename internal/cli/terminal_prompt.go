@@ -15,93 +15,56 @@ import (
 
 const accessiblePromptEnvironment = "COMPLYSCAN_ACCESSIBLE"
 
-const moreGuidanceChoiceValue = "\x00complyscan-more-guidance"
 const requiredAnswerChoiceValue = "\x00complyscan-required-answer"
 const backChoiceValue = "\x00complyscan-back"
 
 var errPromptBack = errors.New("return to previous setup question")
 
 type terminalChoice struct {
-	Label    string
-	Value    string
-	Guidance string
+	Label string
+	Value string
 }
 
 func (session promptSession) chooseOne(label, defaultValue string, choices []terminalChoice) (string, error) {
 	if session.selectOne == nil {
 		return "", fmt.Errorf("select %s: interactive selector is unavailable", strings.ToLower(label))
 	}
-	for {
-		visible := append([]terminalChoice(nil), choices...)
-		if session.backAvailable {
-			visible = append(visible, terminalChoice{Value: backChoiceValue})
-		}
-		if session.hasQuestionGuidance() {
-			visible = append(visible, terminalChoice{
-				Label:    "ⓘ Further explanation — highlight to expand",
-				Value:    moreGuidanceChoiceValue,
-				Guidance: strings.Join(session.guidance.details, "\n"),
-			})
-		}
-		selected, err := session.selectOne(label, defaultValue, visible)
-		if err != nil {
-			return "", err
-		}
-		if selected == moreGuidanceChoiceValue {
-			if err := session.showQuestionGuidance(); err != nil {
-				return "", err
-			}
-			continue
-		}
-		if selected == backChoiceValue {
-			session.clearQuestionGuidance()
-			return "", errPromptBack
-		}
-		session.clearQuestionGuidance()
-		return selected, nil
+	visible := append([]terminalChoice(nil), choices...)
+	if session.backAvailable {
+		visible = append(visible, terminalChoice{Value: backChoiceValue})
 	}
+	selected, err := session.selectOne(label, defaultValue, visible)
+	if err != nil {
+		return "", err
+	}
+	if selected == backChoiceValue {
+		session.clearQuestionGuidance()
+		return "", errPromptBack
+	}
+	session.clearQuestionGuidance()
+	return selected, nil
 }
 
 func (session promptSession) chooseMany(label string, defaults []string, choices []terminalChoice, exclusive []string) ([]string, error) {
 	if session.selectMany == nil {
 		return nil, fmt.Errorf("select %s: interactive multi-selector is unavailable", strings.ToLower(label))
 	}
-	for {
-		visible := append([]terminalChoice(nil), choices...)
-		if session.backAvailable {
-			visible = append(visible, terminalChoice{Value: backChoiceValue})
-		}
-		if session.hasQuestionGuidance() {
-			visible = append(visible, terminalChoice{
-				Label:    "ⓘ Further explanation — highlight to expand",
-				Value:    moreGuidanceChoiceValue,
-				Guidance: strings.Join(session.guidance.details, "\n"),
-			})
-		}
-		selected, err := session.selectMany(label, defaults, visible, exclusive)
-		if err != nil {
-			return nil, err
-		}
-		showGuidance := false
-		for _, value := range selected {
-			if value == backChoiceValue {
-				session.clearQuestionGuidance()
-				return nil, errPromptBack
-			}
-			if value == moreGuidanceChoiceValue {
-				showGuidance = true
-				break
-			}
-		}
-		if showGuidance {
-			if err := session.showQuestionGuidance(); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		session.clearQuestionGuidance()
-		return selected, nil
+	visible := append([]terminalChoice(nil), choices...)
+	if session.backAvailable {
+		visible = append(visible, terminalChoice{Value: backChoiceValue})
 	}
+	selected, err := session.selectMany(label, defaults, visible, exclusive)
+	if err != nil {
+		return nil, err
+	}
+	for _, value := range selected {
+		if value == backChoiceValue {
+			session.clearQuestionGuidance()
+			return nil, errPromptBack
+		}
+	}
+	session.clearQuestionGuidance()
+	return selected, nil
 }
 
 type setupStatusKind string
@@ -198,7 +161,6 @@ func runTerminalSelect(input io.Reader, output io.Writer, label, defaultValue st
 	selected := defaultValue
 	required := defaultValue == requiredAnswerChoiceValue
 	interaction := newRequiredSelectInteraction(required)
-	guidance := terminalChoiceGuidance(choices)
 	instructions := "Use ↑/↓ to move and Enter to confirm."
 	allowBack := containsTerminalChoice(choices, backChoiceValue)
 	if allowBack {
@@ -210,34 +172,19 @@ func runTerminalSelect(input io.Reader, output io.Writer, label, defaultValue st
 		Options(options...).
 		Value(&selected).
 		Validate(func(value string) error {
-			if value == moreGuidanceChoiceValue {
-				return errors.New("read the explanation, then choose an answer in this menu")
-			}
 			if value == requiredAnswerChoiceValue || required && !interaction.interacted.Load() {
 				return errors.New("choose an answer; no option is selected automatically")
 			}
 			return nil
 		})
-	keyHandler := promptKeyHandler(interaction.Handle)
-	if strings.TrimSpace(guidance) != "" {
-		guidanceIndex := terminalChoiceIndex(visibleChoices, moreGuidanceChoiceValue)
-		initialCursor := terminalChoiceIndex(visibleChoices, defaultValue)
-		if initialCursor < 0 {
-			initialCursor = 0
-		}
-		tracker := newMultiSelectGuidanceTracker(len(visibleChoices), guidanceIndex, initialCursor, func(highlighted bool) {
-			field.Description(terminalGuidanceDescription(instructions, highlighted, guidance))
-		})
-		keyHandler = combinePromptKeyHandlers(interaction.Handle, tracker.Handle)
-	}
 	form := huh.NewForm(huh.NewGroup(field)).WithInput(input).WithOutput(output)
-	if err := runTerminalForm(form, input, output, allowBack, keyHandler); err != nil {
+	if err := runTerminalForm(form, input, output, allowBack, interaction.Handle); err != nil {
 		return "", fmt.Errorf("select %s: %w", strings.ToLower(label), err)
 	}
 	return selected, nil
 }
 
-func runTerminalInput(input io.Reader, output io.Writer, label, defaultValue string, guidanceAvailable, allowBack bool) (string, error) {
+func runTerminalInput(input io.Reader, output io.Writer, label, defaultValue string, allowBack bool) (string, error) {
 	selected := ""
 	instructions := "Type a replacement."
 	if strings.TrimSpace(defaultValue) != "" {
@@ -267,13 +214,10 @@ func runTerminalInput(input io.Reader, output io.Writer, label, defaultValue str
 	keymap := huh.NewDefaultKeyMap()
 	keymap.Input.Submit.SetHelp("enter", "accept")
 	form := huh.NewForm(huh.NewGroup(field)).WithKeyMap(keymap).WithInput(input).WithOutput(output).WithWidth(promptContentWidth(output))
-	if guidanceAvailable || allowBack {
-		navigator, err := runDecoratedTerminalForm(form, input, output, guidanceAvailable, allowBack, tea.KeyEsc)
+	if allowBack {
+		navigator, err := runDecoratedTerminalForm(form, input, output, allowBack, tea.KeyEsc)
 		if err != nil {
 			return "", fmt.Errorf("enter %s: %w", strings.ToLower(label), err)
-		}
-		if navigator.details {
-			return moreGuidanceChoiceValue, nil
 		}
 		if navigator.back {
 			return "", errPromptBack
@@ -319,7 +263,6 @@ func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, def
 		exclusiveValues[strings.ToLower(strings.TrimSpace(value))] = struct{}{}
 	}
 	selected := append([]string(nil), defaults...)
-	guidance := terminalChoiceGuidance(choices)
 	instructions := "Use ↑/↓ to move, Space to tick or untick, and Enter to confirm."
 	allowBack := containsTerminalChoice(choices, backChoiceValue)
 	if allowBack {
@@ -331,12 +274,11 @@ func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, def
 		Options(options...).
 		Value(&selected).
 		Validate(func(values []string) error {
-			answers := withoutTerminalValue(values, moreGuidanceChoiceValue)
-			if len(answers) == 0 {
+			if len(values) == 0 {
 				return errors.New("select at least one option")
 			}
-			if len(answers) > 1 {
-				for _, value := range answers {
+			if len(values) > 1 {
+				for _, value := range values {
 					if _, isExclusive := exclusiveValues[strings.ToLower(strings.TrimSpace(value))]; isExclusive {
 						return fmt.Errorf("%s must be selected alone", value)
 					}
@@ -345,42 +287,21 @@ func runTerminalMultiSelect(input io.Reader, output io.Writer, label string, def
 			return nil
 		})
 	form := huh.NewForm(huh.NewGroup(field)).WithInput(input).WithOutput(output)
-	var keyHandler promptKeyHandler
-	if strings.TrimSpace(guidance) != "" {
-		guidanceIndex := terminalChoiceIndex(visibleChoices, moreGuidanceChoiceValue)
-		tracker := newMultiSelectGuidanceTracker(len(visibleChoices), guidanceIndex, 0, func(highlighted bool) {
-			field.Description(terminalGuidanceDescription(instructions, highlighted, guidance))
-		})
-		keyHandler = tracker.Handle
-	}
-	if err := runTerminalForm(form, input, output, allowBack, keyHandler); err != nil {
+	if err := runTerminalForm(form, input, output, allowBack); err != nil {
 		return nil, fmt.Errorf("select %s: %w", strings.ToLower(label), err)
 	}
-	return withoutTerminalValue(selected, moreGuidanceChoiceValue), nil
+	return selected, nil
 }
 
 type backNavigableForm struct {
-	form           *huh.Form
-	back           bool
-	details        bool
-	backEnabled    bool
-	detailsEnabled bool
-	backKey        tea.KeyType
-	keyHandler     promptKeyHandler
+	form        *huh.Form
+	back        bool
+	backEnabled bool
+	backKey     tea.KeyType
+	keyHandler  promptKeyHandler
 }
-
-type promptRelayoutMsg struct{}
 
 type promptKeyHandler func(tea.KeyMsg) bool
-
-type multiSelectGuidanceTracker struct {
-	cursor        int
-	total         int
-	guidanceIndex int
-	onHighlight   func(bool)
-	filtering     bool
-	disabled      bool
-}
 
 type requiredSelectInteraction struct {
 	required   bool
@@ -418,81 +339,6 @@ func (tracker *requiredSelectInteraction) Handle(message tea.KeyMsg) bool {
 	return false
 }
 
-func newMultiSelectGuidanceTracker(total, guidanceIndex, initialCursor int, onHighlight func(bool)) *multiSelectGuidanceTracker {
-	return &multiSelectGuidanceTracker{
-		cursor:        min(max(initialCursor, 0), max(total-1, 0)),
-		total:         total,
-		guidanceIndex: guidanceIndex,
-		onHighlight:   onHighlight,
-	}
-}
-
-func (tracker *multiSelectGuidanceTracker) Handle(message tea.KeyMsg) bool {
-	value := message.String()
-	if tracker.filtering {
-		if value == "esc" || value == "enter" {
-			tracker.filtering = false
-			// Huh filters its private option list and cursor. Once filtering has
-			// occurred, avoid guessing that cursor position and showing guidance
-			// for a row that is not actually highlighted.
-			tracker.disabled = true
-		}
-		tracker.setHighlighted(false)
-		return false
-	}
-	if value == "/" {
-		tracker.filtering = true
-		tracker.setHighlighted(false)
-		return false
-	}
-	if tracker.disabled {
-		tracker.setHighlighted(false)
-		return false
-	}
-	switch value {
-	case "up", "k", "ctrl+p":
-		tracker.move(-1)
-	case "down", "j", "ctrl+n":
-		tracker.move(1)
-	case "home", "g":
-		tracker.cursor = 0
-	case "end", "G":
-		tracker.cursor = tracker.total - 1
-	case "ctrl+u":
-		tracker.cursor = max(tracker.cursor-5, 0)
-	case "ctrl+d":
-		tracker.cursor = min(tracker.cursor+5, tracker.total-1)
-	case " ", "x":
-		return tracker.cursor == tracker.guidanceIndex
-	}
-	tracker.setHighlighted(tracker.cursor == tracker.guidanceIndex)
-	return false
-}
-
-func (tracker *multiSelectGuidanceTracker) move(offset int) {
-	if tracker.total <= 0 {
-		return
-	}
-	tracker.cursor = min(max(tracker.cursor+offset, 0), tracker.total-1)
-}
-
-func (tracker *multiSelectGuidanceTracker) setHighlighted(value bool) {
-	if tracker.onHighlight != nil {
-		tracker.onHighlight(value)
-	}
-}
-
-func combinePromptKeyHandlers(handlers ...promptKeyHandler) promptKeyHandler {
-	return func(message tea.KeyMsg) bool {
-		for _, handler := range handlers {
-			if handler != nil && handler(message) {
-				return true
-			}
-		}
-		return false
-	}
-}
-
 func (form *backNavigableForm) Init() tea.Cmd {
 	return form.form.Init()
 }
@@ -503,10 +349,6 @@ func (form *backNavigableForm) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			form.back = true
 			return form, tea.Quit
 		}
-		if form.detailsEnabled && keyMessage.Type == tea.KeyRunes && string(keyMessage.Runes) == "?" {
-			form.details = true
-			return form, tea.Quit
-		}
 		if form.keyHandler != nil && form.keyHandler(keyMessage) {
 			return form, nil
 		}
@@ -514,20 +356,6 @@ func (form *backNavigableForm) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	updated, command := form.form.Update(message)
 	if next, ok := updated.(*huh.Form); ok {
 		form.form = next
-	}
-	if _, relayout := message.(promptRelayoutMsg); relayout {
-		return form, command
-	}
-	if _, keyMessage := message.(tea.KeyMsg); keyMessage && form.keyHandler != nil {
-		// A key handler can change a dynamic description before Huh processes the
-		// same navigation key. Send one follow-up update so the viewport is laid
-		// out again using the new description height. Without it, leaving an
-		// expanded multi-select explanation can leave the options viewport at its
-		// one-row expanded height until another navigation key is pressed.
-		return form, tea.Batch(command, func() tea.Msg { return promptRelayoutMsg{} })
-	}
-	if _, keyMessage := message.(tea.KeyMsg); !keyMessage {
-		return form, tea.Batch(command, func() tea.Msg { return promptRelayoutMsg{} })
 	}
 	return form, command
 }
@@ -538,9 +366,6 @@ func (form *backNavigableForm) View() string {
 	bindings := form.form.KeyBinds()
 	currentFooter := help.ShortHelpView(bindings)
 	enhancedBindings := bindings
-	if form.detailsEnabled {
-		enhancedBindings = appendHelpBinding(enhancedBindings, key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "details")))
-	}
 	if form.backEnabled {
 		back := key.NewBinding(key.WithKeys(form.backKey.String()), key.WithHelp(form.backKey.String(), "back"))
 		if form.backKey == tea.KeyLeft {
@@ -610,7 +435,7 @@ func runTerminalForm(form *huh.Form, input io.Reader, output io.Writer, allowBac
 	if len(keyHandlers) > 0 {
 		keyHandler = keyHandlers[0]
 	}
-	navigator, err := runDecoratedTerminalForm(form, input, output, false, allowBack, tea.KeyLeft, keyHandler)
+	navigator, err := runDecoratedTerminalForm(form, input, output, allowBack, tea.KeyLeft, keyHandler)
 	if err != nil {
 		return err
 	}
@@ -620,7 +445,7 @@ func runTerminalForm(form *huh.Form, input io.Reader, output io.Writer, allowBac
 	return nil
 }
 
-func runDecoratedTerminalForm(form *huh.Form, input io.Reader, output io.Writer, detailsEnabled, backEnabled bool, backKey tea.KeyType, keyHandlers ...promptKeyHandler) (*backNavigableForm, error) {
+func runDecoratedTerminalForm(form *huh.Form, input io.Reader, output io.Writer, backEnabled bool, backKey tea.KeyType, keyHandlers ...promptKeyHandler) (*backNavigableForm, error) {
 	// huh.Form.RunWithContext normally installs these commands before starting
 	// Bubble Tea. The navigation wrapper starts the program directly so it can
 	// distinguish setup navigation from Ctrl+C, and must preserve that lifecycle setup.
@@ -630,7 +455,7 @@ func runDecoratedTerminalForm(form *huh.Form, input io.Reader, output io.Writer,
 	if len(keyHandlers) > 0 {
 		keyHandler = keyHandlers[0]
 	}
-	navigator := &backNavigableForm{form: form, detailsEnabled: detailsEnabled, backEnabled: backEnabled, backKey: backKey, keyHandler: keyHandler}
+	navigator := &backNavigableForm{form: form, backEnabled: backEnabled, backKey: backKey, keyHandler: keyHandler}
 	result, err := tea.NewProgram(navigator, tea.WithInput(input), tea.WithOutput(output), tea.WithReportFocus()).Run()
 	if err != nil {
 		return nil, err
@@ -645,15 +470,6 @@ func runDecoratedTerminalForm(form *huh.Form, input io.Reader, output io.Writer,
 	return completed, nil
 }
 
-func terminalChoiceGuidance(choices []terminalChoice) string {
-	for _, choice := range choices {
-		if choice.Value == moreGuidanceChoiceValue {
-			return choice.Guidance
-		}
-	}
-	return ""
-}
-
 func containsTerminalChoice(choices []terminalChoice, wanted string) bool {
 	for _, choice := range choices {
 		if choice.Value == wanted {
@@ -661,15 +477,6 @@ func containsTerminalChoice(choices []terminalChoice, wanted string) bool {
 		}
 	}
 	return false
-}
-
-func terminalChoiceIndex(choices []terminalChoice, wanted string) int {
-	for index, choice := range choices {
-		if choice.Value == wanted {
-			return index
-		}
-	}
-	return -1
 }
 
 func visibleTerminalChoices(choices []terminalChoice) []terminalChoice {
@@ -680,35 +487,4 @@ func visibleTerminalChoices(choices []terminalChoice) []terminalChoice {
 		}
 	}
 	return visible
-}
-
-func terminalGuidanceDescription(instructions string, expanded bool, guidance string) string {
-	if !expanded || strings.TrimSpace(guidance) == "" {
-		return instructions
-	}
-	lines := []string{instructions, "", "Further explanation:"}
-	for _, line := range strings.Split(guidance, "\n") {
-		lines = append(lines, "• "+line)
-	}
-	lines = append(lines, "", "Move to an answer in this menu when you are ready to continue.")
-	return strings.Join(lines, "\n")
-}
-
-func containsTerminalValue(values []string, wanted string) bool {
-	for _, value := range values {
-		if value == wanted {
-			return true
-		}
-	}
-	return false
-}
-
-func withoutTerminalValue(values []string, omitted string) []string {
-	filtered := make([]string, 0, len(values))
-	for _, value := range values {
-		if value != omitted {
-			filtered = append(filtered, value)
-		}
-	}
-	return filtered
 }

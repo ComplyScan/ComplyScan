@@ -100,7 +100,7 @@ func newSetupCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().BoolVar(&options.installOllama, "install-ollama", false, "install Ollama when it is missing (requires explicit use in non-interactive mode)")
 	command.Flags().BoolVar(&options.skipOllamaInstall, "skip-ollama-install", false, "do not offer to install Ollama when it is missing")
 	command.Flags().BoolVar(&options.skipScan, "skip-scan", false, "do not offer to run the first scan")
-	command.Flags().BoolVar(&options.detailedGuidance, "detailed-guidance", false, "show complete explanations and examples for every setup question")
+	command.Flags().BoolVar(&options.detailedGuidance, "detailed-guidance", false, "deprecated compatibility flag; setup explanations are always visible")
 	return command
 }
 
@@ -128,7 +128,6 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	if _, err := fmt.Fprintf(stdout, "Repository: %s\n\n", target); err != nil {
 		return err
 	}
-	prompt.alwaysDetailed = options.detailedGuidance
 
 	var repositorySummary setupRepositorySummary
 	modelReady := true

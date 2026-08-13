@@ -942,7 +942,7 @@ func TestDecisionImpactChoicesExplainTheirMeaningInline(t *testing.T) {
 				"autonomous — AI can take or trigger a consequential action without prior meaningful human approval",
 				"unknown — the real downstream use of outputs has not been established",
 			}
-			if len(options) != len(want)+2 {
+			if len(options) != len(want)+1 {
 				t.Fatalf("options = %#v", options)
 			}
 			for index, expected := range want {
@@ -1262,51 +1262,39 @@ func TestEverySetupQuestionHasDeveloperGuidance(t *testing.T) {
 	}
 }
 
-func TestSetupGuidanceCanProgressFromConciseToDetailed(t *testing.T) {
-	var conciseOutput bytes.Buffer
-	concisePrompt := promptSession{
-		reader: bufio.NewReader(strings.NewReader("?\nConfirmed purpose\n")),
-		output: &conciseOutput, guidance: &questionGuidance{},
+func TestSetupGuidanceShowsNonChoiceDetailsByDefault(t *testing.T) {
+	var output bytes.Buffer
+	prompt := promptSession{
+		reader: bufio.NewReader(strings.NewReader("Confirmed purpose\n")),
+		output: &output, guidance: &questionGuidance{},
 	}
-	if err := explainSetupQuestion(concisePrompt, "intended-purpose"); err != nil {
+	if err := explainSetupQuestion(prompt, "intended-purpose"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(conciseOutput.String(), setupQuestionHelp["intended-purpose"][0]) || strings.Contains(conciseOutput.String(), "Example:") || strings.Contains(conciseOutput.String(), "Enter ? at the next prompt") {
-		t.Fatalf("concise guidance did not preserve only the essential explanation:\n%s", conciseOutput.String())
+	normalizedOutput := strings.Join(strings.Fields(output.String()), " ")
+	for _, line := range setupQuestionHelp["intended-purpose"] {
+		if !strings.Contains(normalizedOutput, strings.Join(strings.Fields(line), " ")) {
+			t.Errorf("default guidance missing %q", line)
+		}
 	}
-	value, err := concisePrompt.text("Intended purpose", "unknown")
+	value, err := prompt.text("Intended purpose", "unknown")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value != "Confirmed purpose" || !strings.Contains(conciseOutput.String(), "Example:") || !strings.Contains(conciseOutput.String(), "More guidance") {
-		t.Fatalf("question-specific guidance was not expanded before accepting the answer; value=%q:\n%s", value, conciseOutput.String())
-	}
-
-	var detailedOutput bytes.Buffer
-	detailedPrompt := promptSession{output: &detailedOutput, alwaysDetailed: true, guidance: &questionGuidance{}}
-	if err := explainSetupQuestion(detailedPrompt, "intended-purpose"); err != nil {
-		t.Fatal(err)
-	}
-	normalizedOutput := strings.Join(strings.Fields(detailedOutput.String()), " ")
-	for _, line := range setupQuestionHelp["intended-purpose"] {
-		if !strings.Contains(normalizedOutput, strings.Join(strings.Fields(line), " ")) {
-			t.Errorf("detailed guidance missing %q", line)
-		}
+	if value != "Confirmed purpose" || strings.Contains(output.String(), "More guidance") || strings.Contains(output.String(), "? details") {
+		t.Fatalf("value=%q output:\n%s", value, output.String())
 	}
 }
 
-func TestTerminalQuestionCanSelectMoreGuidance(t *testing.T) {
+func TestTerminalQuestionShowsInlineGuidanceWithoutSeparateOption(t *testing.T) {
 	var output bytes.Buffer
 	selections := 0
 	prompt := promptSession{
 		output: &output, guidance: &questionGuidance{},
 		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
 			selections++
-			if label != "Lifecycle stage" || len(options) != 3 || options[2].Value != moreGuidanceChoiceValue || options[2].Guidance == "" {
+			if label != "Lifecycle stage" || len(options) != 2 || !strings.Contains(options[0].Label, "being designed or implemented") || !strings.Contains(options[1].Label, "has not been established") {
 				t.Fatalf("question selector label=%q options=%#v", label, options)
-			}
-			if selections == 1 {
-				return moreGuidanceChoiceValue, nil
 			}
 			return options[0].Value, nil
 		},
@@ -1318,23 +1306,20 @@ func TestTerminalQuestionCanSelectMoreGuidance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if selected != profile.LifecycleDevelopment || selections != 2 || !strings.Contains(output.String(), "development — being designed or implemented") {
+	if selected != profile.LifecycleDevelopment || selections != 1 || strings.Contains(output.String(), "Further explanation") {
 		t.Fatalf("selected=%q selections=%d output:\n%s", selected, selections, output.String())
 	}
 }
 
-func TestTerminalMultiSelectCanOpenQuestionGuidance(t *testing.T) {
+func TestTerminalMultiSelectShowsInlineGuidanceWithoutSeparateOption(t *testing.T) {
 	var output bytes.Buffer
 	selections := 0
 	prompt := promptSession{
 		output: &output, guidance: &questionGuidance{},
 		selectMany: func(label string, defaults []string, options []terminalChoice, exclusive []string) ([]string, error) {
 			selections++
-			if label != "Operating regions" || options[len(options)-1].Value != moreGuidanceChoiceValue || options[len(options)-1].Guidance == "" {
+			if label != "Operating regions" || len(options) != 2 || !strings.Contains(options[0].Label, "European Union countries") || !strings.Contains(options[1].Label, "have not been established") {
 				t.Fatalf("multi-selector label=%q options=%#v", label, options)
-			}
-			if selections == 1 {
-				return []string{moreGuidanceChoiceValue}, nil
 			}
 			return []string{string(profile.RegionUnknown)}, nil
 		},
@@ -1346,23 +1331,20 @@ func TestTerminalMultiSelectCanOpenQuestionGuidance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(selected) != 1 || selected[0] != profile.RegionUnknown || selections != 2 || !strings.Contains(output.String(), "eu — one or more European Union countries") {
+	if len(selected) != 1 || selected[0] != profile.RegionUnknown || selections != 1 || strings.Contains(output.String(), "Further explanation") {
 		t.Fatalf("selected=%#v selections=%d output:\n%s", selected, selections, output.String())
 	}
 }
 
-func TestTerminalConfirmationCanOpenQuestionGuidance(t *testing.T) {
+func TestTerminalConfirmationShowsGuidanceWithoutSeparateOption(t *testing.T) {
 	var output bytes.Buffer
 	selections := 0
 	prompt := promptSession{
-		output: &output, guidance: &questionGuidance{},
+		output: &output, guidance: &questionGuidance{}, backAvailable: true,
 		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
 			selections++
-			if label != "Install Ollama" || defaultValue != "Yes" || len(options) != 3 || options[2].Value != moreGuidanceChoiceValue {
+			if label != "Install Ollama" || defaultValue != "Yes" || len(options) != 3 || options[2].Value != backChoiceValue {
 				t.Fatalf("confirmation selector label=%q default=%q options=%#v", label, defaultValue, options)
-			}
-			if selections == 1 {
-				return moreGuidanceChoiceValue, nil
 			}
 			return "No", nil
 		},
@@ -1374,35 +1356,15 @@ func TestTerminalConfirmationCanOpenQuestionGuidance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if confirmed || selections != 2 || !strings.Contains(output.String(), "Choose no to keep deterministic scanning") {
+	if confirmed || selections != 1 || !strings.Contains(output.String(), "Choose no to keep deterministic scanning") || strings.Contains(output.String(), "Further explanation") {
 		t.Fatalf("confirmed=%t selections=%d output:\n%s", confirmed, selections, output.String())
 	}
 }
 
-func TestTerminalGuidanceExpandsInsideActiveSelector(t *testing.T) {
-	guidance := "advisory — supports a human decision\nautonomous — acts without prior human approval"
-	description := terminalGuidanceDescription("Use ↑/↓ to move and Enter to confirm.", true, guidance)
-	for _, expected := range []string{"Further explanation:", "advisory — supports a human decision", "autonomous — acts without prior human approval", "Move to an answer in this menu"} {
-		if !strings.Contains(description, expected) {
-			t.Errorf("expanded selector guidance missing %q:\n%s", expected, description)
-		}
-	}
-	if collapsed := terminalGuidanceDescription("instructions", false, guidance); collapsed != "instructions" {
-		t.Fatalf("collapsed guidance = %q", collapsed)
-	}
-}
-
-func TestTerminalGuidanceActionIsRemovedFromMultiSelection(t *testing.T) {
-	values := withoutTerminalValue([]string{"eu", moreGuidanceChoiceValue, "uk"}, moreGuidanceChoiceValue)
-	if strings.Join(values, ",") != "eu,uk" || !containsTerminalValue([]string{moreGuidanceChoiceValue}, moreGuidanceChoiceValue) {
-		t.Fatalf("filtered values = %#v", values)
-	}
-}
-
-func TestTerminalTextQuestionAdvertisesQuestionGuidance(t *testing.T) {
+func TestTerminalTextQuestionShowsGuidanceByDefault(t *testing.T) {
 	var output bytes.Buffer
 	prompt := promptSession{
-		reader: bufio.NewReader(strings.NewReader("?\nProduct name\n")),
+		reader: bufio.NewReader(strings.NewReader("Product name\n")),
 		output: &output, guidance: &questionGuidance{},
 		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
 			return "", errors.New("not used by text prompts")
@@ -1415,7 +1377,7 @@ func TestTerminalTextQuestionAdvertisesQuestionGuidance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value != "Product name" || !strings.Contains(output.String(), "More guidance") || strings.Contains(output.String(), "Enter ? for more guidance about this question") {
+	if value != "Product name" || !strings.Contains(output.String(), "Use the product name") || strings.Contains(output.String(), "More guidance") || strings.Contains(output.String(), "? details") {
 		t.Fatalf("value=%q output:\n%s", value, output.String())
 	}
 }

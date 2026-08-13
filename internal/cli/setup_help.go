@@ -6,7 +6,6 @@ import (
 )
 
 type questionGuidance struct {
-	details            []string
 	choiceDescriptions map[string]string
 }
 
@@ -233,34 +232,10 @@ var setupQuestionHelp = map[string][]string{
 	},
 }
 
-func (prompt promptSession) hasQuestionGuidance() bool {
-	return prompt.guidance != nil && len(prompt.guidance.details) > 0
-}
-
-func (prompt promptSession) showQuestionGuidance() error {
-	if !prompt.hasQuestionGuidance() {
-		return nil
-	}
-	if err := prompt.sectionTitle("More guidance", true); err != nil {
-		return err
-	}
-	for _, line := range prompt.guidance.details {
-		if err := writePromptParagraph(prompt.output, "  ", line); err != nil {
-			return err
-		}
-	}
-	if prompt.selectOne == nil {
-		_, err := fmt.Fprintln(prompt.output, "  Continue by answering the question below.")
-		return err
-	}
-	return nil
-}
-
 func (prompt promptSession) clearQuestionGuidance() {
 	if prompt.guidance == nil {
 		return
 	}
-	prompt.guidance.details = nil
 	prompt.guidance.choiceDescriptions = nil
 }
 
@@ -273,14 +248,12 @@ func explainSetupQuestion(prompt promptSession, key string) error {
 		return err
 	}
 	if prompt.guidance != nil {
-		prompt.guidance.details = append(prompt.guidance.details[:0], lines[1:]...)
 		prompt.guidance.choiceDescriptions = setupChoiceDescriptions(lines[1:])
 	}
-	visible := lines[:1]
-	if prompt.alwaysDetailed {
-		visible = lines
-		if prompt.guidance != nil {
-			prompt.guidance.details = nil
+	visible := append([]string(nil), lines[0])
+	for _, line := range lines[1:] {
+		if _, _, isChoiceDescription := strings.Cut(line, " — "); !isChoiceDescription {
+			visible = append(visible, line)
 		}
 	}
 	for _, line := range visible {

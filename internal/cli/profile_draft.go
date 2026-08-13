@@ -58,21 +58,12 @@ func (draft setupProfileDraft) explain(prompt promptSession, field string) error
 	if _, err := fmt.Fprintf(prompt.output, "\n  %s\n", title); err != nil {
 		return err
 	}
-	visibleValues := suggestion.Values
-	if len(visibleValues) > 3 {
-		visibleValues = visibleValues[:3]
-	}
-	for _, value := range visibleValues {
+	for _, value := range suggestion.Values {
 		prefix := "    "
 		if len(suggestion.Values) > 1 {
 			prefix = "    • "
 		}
 		if err := writePromptParagraph(prompt.output, prefix, value); err != nil {
-			return err
-		}
-	}
-	if omitted := len(suggestion.Values) - len(visibleValues); omitted > 0 {
-		if _, err := fmt.Fprintf(prompt.output, "    +%d more model candidate(s) in the details\n", omitted); err != nil {
 			return err
 		}
 	}
@@ -84,18 +75,14 @@ func (draft setupProfileDraft) explain(prompt promptSession, field string) error
 	if _, err := fmt.Fprintf(prompt.output, "\n    Based on %d %s\n", count, unit); err != nil {
 		return err
 	}
-	if prompt.hasQuestionGuidance() || strings.TrimSpace(suggestion.Rationale) != "" || count > 0 {
-		if _, err := fmt.Fprintln(prompt.output, "    Press ? to inspect the rationale and evidence."); err != nil {
+	if rationale := strings.TrimSpace(suggestion.Rationale); rationale != "" {
+		if err := writePromptParagraph(prompt.output, "    Rationale: ", rationale); err != nil {
 			return err
 		}
 	}
-	if prompt.guidance != nil {
-		prompt.guidance.details = append(prompt.guidance.details,
-			"AI suggestion rationale: "+suggestion.Rationale,
-			fmt.Sprintf("AI evidence · %d %s:", count, unit),
-		)
-		for _, value := range suggestion.Values {
-			prompt.guidance.details = append(prompt.guidance.details, "Suggested value: "+value)
+	if count > 0 {
+		if _, err := fmt.Fprintf(prompt.output, "    Evidence · %d %s\n", count, unit); err != nil {
+			return err
 		}
 	}
 	for _, evidence := range suggestion.Evidence {
@@ -103,12 +90,12 @@ func (draft setupProfileDraft) explain(prompt promptSession, field string) error
 		if evidence.Line > 0 {
 			location += ":" + strconv.Itoa(evidence.Line)
 		}
-		if prompt.guidance != nil {
-			prompt.guidance.details = append(prompt.guidance.details, location+" — "+evidence.Summary)
+		if err := writePromptParagraph(prompt.output, "      • ", location+" — "+evidence.Summary); err != nil {
+			return err
 		}
 	}
-	if prompt.guidance != nil {
-		prompt.guidance.details = append(prompt.guidance.details, "The suggestion is advisory, not a confirmed fact. Select the answer yourself.")
+	if _, err := fmt.Fprintln(prompt.output, "    Advisory draft only; confirm the answer yourself."); err != nil {
+		return err
 	}
 	return nil
 }

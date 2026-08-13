@@ -53,200 +53,22 @@ func TestTextFormUsesEscapeForBackWithoutStealingLeftArrow(t *testing.T) {
 	}
 }
 
-func TestTextFormCanOpenDetailsImmediately(t *testing.T) {
-	selected := ""
-	field := huh.NewInput().Value(&selected)
-	navigator := &backNavigableForm{form: huh.NewForm(huh.NewGroup(field)), detailsEnabled: true}
-	_, command := navigator.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
-	if !navigator.details || command == nil {
-		t.Fatal("question mark did not open text-question details")
-	}
-}
-
-func TestDynamicPromptUpdateSchedulesViewportRelayout(t *testing.T) {
-	selected := "one"
-	navigator := newTestBackNavigableForm(&selected)
-	_, command := navigator.Update(struct{ changed string }{changed: "description"})
-	if command == nil {
-		t.Fatal("dynamic prompt update did not schedule a viewport relayout")
-	}
-	messages := collectTeaMessages(command)
-	found := false
-	for _, message := range messages {
-		if _, ok := message.(promptRelayoutMsg); ok {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("dynamic prompt messages = %#v, want promptRelayoutMsg", messages)
-	}
-}
-
-func TestPromptRelayoutDoesNotScheduleItselfAgain(t *testing.T) {
-	selected := "one"
-	navigator := newTestBackNavigableForm(&selected)
-	_, command := navigator.Update(promptRelayoutMsg{})
-	for _, message := range collectTeaMessages(command) {
-		if _, ok := message.(promptRelayoutMsg); ok {
-			t.Fatal("prompt relayout recursively scheduled another relayout")
-		}
-	}
-}
-
-func TestMultiSelectGuidanceExpandsOnHighlight(t *testing.T) {
-	highlighted := false
-	tracker := newMultiSelectGuidanceTracker(4, 3, 0, func(value bool) { highlighted = value })
-	for range 3 {
-		if consumed := tracker.Handle(tea.KeyMsg{Type: tea.KeyDown}); consumed {
-			t.Fatal("moving to guidance was unexpectedly consumed")
-		}
-	}
-	if !highlighted {
-		t.Fatal("guidance did not expand when highlighted")
-	}
-	if consumed := tracker.Handle(tea.KeyMsg{Type: tea.KeySpace}); !consumed {
-		t.Fatal("Space selected the explanation as an answer")
-	}
-	if !highlighted {
-		t.Fatal("guidance collapsed while its row remained highlighted")
-	}
-	tracker.Handle(tea.KeyMsg{Type: tea.KeyUp})
-	if highlighted {
-		t.Fatal("guidance remained expanded after leaving its row")
-	}
-}
-
-func TestMultiSelectGuidanceTrackerMatchesClampedArrowNavigation(t *testing.T) {
-	highlighted := false
-	tracker := newMultiSelectGuidanceTracker(4, 3, 0, func(value bool) { highlighted = value })
-	tracker.Handle(tea.KeyMsg{Type: tea.KeyUp})
-	if highlighted || tracker.cursor != 0 {
-		t.Fatalf("top-boundary cursor=%d highlighted=%t", tracker.cursor, highlighted)
-	}
-	for range 3 {
-		tracker.Handle(tea.KeyMsg{Type: tea.KeyDown})
-	}
-	if !highlighted || tracker.cursor != 3 {
-		t.Fatalf("guidance cursor=%d highlighted=%t", tracker.cursor, highlighted)
-	}
-	tracker.Handle(tea.KeyMsg{Type: tea.KeyDown})
-	if !highlighted || tracker.cursor != 3 {
-		t.Fatalf("bottom-boundary cursor=%d highlighted=%t", tracker.cursor, highlighted)
-	}
-}
-
-func TestMultiSelectGuidanceDoesNotGuessCursorAfterFiltering(t *testing.T) {
-	highlighted := false
-	tracker := newMultiSelectGuidanceTracker(4, 3, 0, func(value bool) { highlighted = value })
-	tracker.Handle(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
-	tracker.Handle(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
-	tracker.Handle(tea.KeyMsg{Type: tea.KeyEnter})
-	for range 3 {
-		tracker.Handle(tea.KeyMsg{Type: tea.KeyDown})
-	}
-	if highlighted {
-		t.Fatal("guidance expanded from a guessed cursor after filtering")
-	}
-}
-
-func TestLeavingExpandedGuidanceRestoresChoicesAfterOneKeypress(t *testing.T) {
-	selected := moreGuidanceChoiceValue
-	field := huh.NewSelect[string]().
-		Title("Decision impact").
-		Description("Further explanation:\nline one\nline two\nline three\nline four").
-		Options(
-			huh.NewOption("Advisory", "advisory"),
-			huh.NewOption("Low", "low"),
-			huh.NewOption("Significant", "significant"),
-			huh.NewOption("Autonomous", "autonomous"),
-			huh.NewOption("Further explanation", moreGuidanceChoiceValue),
-		).
-		Value(&selected)
-	tracker := newMultiSelectGuidanceTracker(5, 4, 4, func(highlighted bool) {
-		description := "Choose the strongest effect."
-		if highlighted {
-			description = "Further explanation:\nline one\nline two\nline three\nline four"
-		}
-		field.Description(description)
-	})
-	navigator := &backNavigableForm{form: huh.NewForm(huh.NewGroup(field)).WithWidth(80).WithHeight(10), keyHandler: tracker.Handle}
-	drainTeaCommand(t, navigator, navigator.Init(), 50)
-	_, resize := navigator.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
-	drainTeaCommand(t, navigator, resize, 50)
-	_, command := navigator.Update(tea.KeyMsg{Type: tea.KeyUp})
-	drainTeaCommand(t, navigator, command, 50)
-
-	view := navigator.View()
-	for _, choice := range []string{"Advisory", "Low", "Significant", "Autonomous"} {
-		if !strings.Contains(view, choice) {
-			t.Fatalf("collapsed guidance still hides %q after one keypress: %q", choice, view)
-		}
-	}
-}
-
-func TestLeavingExpandedMultiSelectGuidanceRestoresChoicesAfterOneKeypress(t *testing.T) {
-	selected := []string{}
-	highlighted := false
-	field := huh.NewMultiSelect[string]().
-		Title("Operating regions").
-		Description("Choose every operating region.").
-		Options(
-			huh.NewOption("EU", "eu"),
-			huh.NewOption("EEA", "eea"),
-			huh.NewOption("UK", "uk"),
-			huh.NewOption("US", "us"),
-			huh.NewOption("Global", "global"),
-			huh.NewOption("Other", "other"),
-			huh.NewOption("Unknown", "unknown"),
-			huh.NewOption("Further explanation", moreGuidanceChoiceValue),
-		).
-		Value(&selected)
-	tracker := newMultiSelectGuidanceTracker(8, 7, 0, func(value bool) {
-		highlighted = value
-		description := "Choose every operating region."
-		if highlighted {
-			description = "Further explanation:\nline one\nline two\nline three\nline four\nline five\nline six"
-		}
-		field.Description(description)
-	})
-	navigator := &backNavigableForm{
-		form:       huh.NewForm(huh.NewGroup(field)).WithWidth(100).WithHeight(14),
-		keyHandler: tracker.Handle,
-	}
-	drainTeaCommand(t, navigator, navigator.Init(), 100)
-	_, resize := navigator.Update(tea.WindowSizeMsg{Width: 100, Height: 14})
-	drainTeaCommand(t, navigator, resize, 100)
-	for range 7 {
-		_, command := navigator.Update(tea.KeyMsg{Type: tea.KeyDown})
-		drainTeaCommand(t, navigator, command, 100)
-	}
-	if !highlighted {
-		t.Fatal("guidance was not expanded")
-	}
-	_, command := navigator.Update(tea.KeyMsg{Type: tea.KeyUp})
-	drainTeaCommand(t, navigator, command, 100)
-
-	view := navigator.View()
-	for _, choice := range []string{"EU", "EEA", "UK", "US", "Global", "Other", "Unknown"} {
-		if !strings.Contains(view, choice) {
-			t.Fatalf("collapsed multi-select guidance still hides %q after one keypress: %q", choice, view)
-		}
-	}
-}
-
-func TestTextFormFooterIncludesDetailsAndEscapeBack(t *testing.T) {
+func TestTextFormFooterIncludesEscapeBack(t *testing.T) {
 	selected := ""
 	field := huh.NewInput().Value(&selected)
 	keymap := huh.NewDefaultKeyMap()
 	keymap.Input.Submit.SetHelp("enter", "accept")
 	navigator := &backNavigableForm{
-		form: huh.NewForm(huh.NewGroup(field)).WithKeyMap(keymap), detailsEnabled: true, backEnabled: true, backKey: tea.KeyEsc,
+		form: huh.NewForm(huh.NewGroup(field)).WithKeyMap(keymap), backEnabled: true, backKey: tea.KeyEsc,
 	}
 	view := navigator.View()
-	for _, expected := range []string{"enter", "accept", "?", "details", "esc", "back"} {
+	for _, expected := range []string{"enter", "accept", "esc", "back"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("text footer missing %q: %q", expected, view)
 		}
+	}
+	if strings.Contains(view, "details") {
+		t.Fatalf("removed details action remains in footer: %q", view)
 	}
 }
 
@@ -323,7 +145,7 @@ func TestRunTerminalInputAcceptsProposedAnswer(t *testing.T) {
 		err   error
 	}, 1)
 	go func() {
-		value, err := runTerminalInput(strings.NewReader("\r"), io.Discard, "Intended purpose", "Draft support replies.", true, true)
+		value, err := runTerminalInput(strings.NewReader("\r"), io.Discard, "Intended purpose", "Draft support replies.", true)
 		done <- struct {
 			value string
 			err   error
@@ -342,7 +164,7 @@ func TestRunTerminalInputAcceptsProposedAnswer(t *testing.T) {
 func TestRunTerminalInputReturnsOnEscape(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
-		_, err := runTerminalInput(strings.NewReader("\x1b"), io.Discard, "Intended purpose", "Draft support replies.", true, true)
+		_, err := runTerminalInput(strings.NewReader("\x1b"), io.Discard, "Intended purpose", "Draft support replies.", true)
 		done <- err
 	}()
 	select {
