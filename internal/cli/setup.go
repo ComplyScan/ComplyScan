@@ -93,7 +93,7 @@ func newSetupCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	command.Flags().StringVar(&options.remoteProviderName, "provider-name", "", "display name for a custom OpenAI-compatible provider")
 	command.Flags().StringVar(&options.remoteBaseURL, "base-url", "", "HTTPS API base URL for an OpenAI-compatible provider")
 	command.Flags().StringSliceVar(&options.frameworks, "framework", nil, "built-in technical evidence pack to enable (repeatable)")
-	command.Flags().BoolVar(&options.allowRemoteReview, "allow-remote-review", false, "confirm that bounded repository context may be sent to the selected remote provider")
+	command.Flags().BoolVar(&options.allowRemoteReview, "allow-remote-review", false, "confirm that relevant redacted repository context may be sent to the selected remote provider")
 	command.Flags().BoolVar(&options.pullModel, "pull-model", false, "download the configured Ollama model (requires --review ollama in non-interactive mode)")
 	command.Flags().BoolVar(&options.skipModelPull, "skip-model-pull", false, "configure Ollama without offering to download the model")
 	command.Flags().BoolVar(&options.qualifyModel, "qualify-model", false, "run the bounded synthetic model compatibility check (automatic in interactive setup; remote providers may charge)")
@@ -849,7 +849,7 @@ func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.
 					return err
 				}
 				candidate := config.AIConfig{Provider: provider, Remote: config.RemoteConfig{ProviderName: providerName, BaseURL: baseURL}}
-				value, err := step.confirm(fmt.Sprintf("Allow bounded repository context to be sent to %s", remoteProviderName(candidate)), allowed)
+				value, err := step.confirm(fmt.Sprintf("Allow relevant redacted repository context to be sent to %s", remoteProviderName(candidate)), allowed)
 				if err == nil {
 					allowed = value
 				}
