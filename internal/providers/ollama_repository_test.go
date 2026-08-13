@@ -1,0 +1,79 @@
+package providers
+
+import (
+	"context"
+	"strings"
+	"testing"
+)
+
+func TestReviewRepositoryValidatesCitationsAndRedactsSource(t *testing.T) {
+	provider := &OllamaProvider{
+		kind: OpenAI, label: "OpenAI", model: "test-model",
+		completion: func(_ context.Context, request ollamaChatRequest) (ollamaChatResponse, error) {
+			encoded := request.Messages[1].Content
+			if strings.Contains(encoded, "sk-proj-abcdefghijklmnopqrstuvwxyz123456") {
+				t.Fatal("repository source contained an unredacted credential")
+			}
+			if !strings.Contains(encoded, "sk-proj-****3456") {
+				t.Fatalf("repository source did not contain the expected redaction: %s", encoded)
+			}
+			var response ollamaChatResponse
+			response.Done = true
+			response.Message.Content = `{"result":{"scope":".","ai_uses":[{"id":"generation","name":"Text generation","purpose":"Generate summaries","lifecycle":"runtime","confidence":"high","evidence":[{"path":"main.go","line":2,"summary":"Runtime code invokes the model client."}],"unresolved_questions":[]}],"objective_observations":[{"objective_id":"OBJ-1","system_id":"system","strength":"partial","confidence":"medium","rationale":"The call is connected but runtime safeguards are not established.","supporting_evidence":[{"path":"main.go","line":2,"summary":"The runtime path invokes the client."}],"contradictory_evidence":[],"missing_evidence":["Runtime configuration"],"unresolved_questions":[]}],"unmapped_observations":[],"unresolved_questions":[]}}`
+			response.PromptEvalCount = 20
+			response.EvalCount = 10
+			return response, nil
+		},
+	}
+	result, err := provider.ReviewRepository(context.Background(), RepositoryAnalysisRequest{
+		Mode: RepositoryAnalysisFull, Scope: ".", RepositoryFiles: 1, RepositoryBytes: 80,
+		Files:      []RepositorySourceFile{{Path: "main.go", Kind: "source", Content: "package main\nvar key = \"sk-proj-abcdefghijklmnopqrstuvwxyz123456\"\n"}},
+		Objectives: []RepositoryObjective{{ID: "OBJ-1", Title: "Document runtime", Description: "Map runtime use"}},
+		Systems:    []RepositorySystemContext{{ID: "system", Name: "System"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Coverage.Mode != RepositoryAnalysisFull || result.Coverage.CitationsChecked != 2 || len(result.Result.AIUses) != 1 {
+		t.Fatalf("unexpected repository result: %#v", result)
+	}
+}
+
+func TestReviewRepositoryRejectsInventedCitation(t *testing.T) {
+	provider := &OllamaProvider{
+		kind: Anthropic, label: "Anthropic", model: "test-model",
+		completion: func(context.Context, ollamaChatRequest) (ollamaChatResponse, error) {
+			var response ollamaChatResponse
+			response.Done = true
+			response.Message.Content = `{"result":{"scope":".","ai_uses":[{"id":"use","name":"Use","purpose":"Purpose","lifecycle":"unknown","confidence":"low","evidence":[{"path":"invented.go","line":1,"summary":"Invented path"}],"unresolved_questions":[]}],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`
+			return response, nil
+		},
+	}
+	_, err := provider.ReviewRepository(context.Background(), RepositoryAnalysisRequest{
+		Mode: RepositoryAnalysisFull, Scope: ".", RepositoryFiles: 1,
+		Files: []RepositorySourceFile{{Path: "main.go", Kind: "source", Content: "package main\n"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), `unknown path "invented.go"`) {
+		t.Fatalf("expected invented citation error, got %v", err)
+	}
+}
+
+func TestReviewRepositoryRejectsUnknownObjective(t *testing.T) {
+	provider := &OllamaProvider{
+		kind: Gemini, label: "Gemini", model: "test-model",
+		completion: func(context.Context, ollamaChatRequest) (ollamaChatResponse, error) {
+			var response ollamaChatResponse
+			response.Done = true
+			response.Message.Content = `{"result":{"scope":".","ai_uses":[],"objective_observations":[{"objective_id":"INVENTED","system_id":"","strength":"uncertain","confidence":"low","rationale":"Unknown","supporting_evidence":[],"contradictory_evidence":[],"missing_evidence":[],"unresolved_questions":[]}],"unmapped_observations":[],"unresolved_questions":[]}}`
+			return response, nil
+		},
+	}
+	_, err := provider.ReviewRepository(context.Background(), RepositoryAnalysisRequest{
+		Mode: RepositoryAnalysisFull, Scope: ".", RepositoryFiles: 1,
+		Files:      []RepositorySourceFile{{Path: "main.go", Kind: "source", Content: "package main\n"}},
+		Objectives: []RepositoryObjective{{ID: "OBJ-1"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), `unknown objective "INVENTED"`) {
+		t.Fatalf("expected unknown objective error, got %v", err)
+	}
+}

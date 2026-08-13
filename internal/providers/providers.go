@@ -212,3 +212,130 @@ type TechnicalReviewResult struct {
 	Notes           []string               `json:"notes,omitempty"`
 	Usage           Usage                  `json:"usage,omitempty"`
 }
+
+// RepositoryAnalysisMode records how much repository context was available to
+// the model. It is deliberately explicit so full-repository and hierarchical
+// results cannot be mistaken for the older bounded-candidate review.
+type RepositoryAnalysisMode string
+
+const (
+	RepositoryAnalysisFull        RepositoryAnalysisMode = "full-repository"
+	RepositoryAnalysisSubsystem   RepositoryAnalysisMode = "subsystem"
+	RepositoryAnalysisSynthesis   RepositoryAnalysisMode = "hierarchical-synthesis"
+	RepositoryAnalysisBoundedOnly RepositoryAnalysisMode = "bounded-fallback"
+)
+
+// RepositorySourceFile is a redacted text file supplied to repository-wide
+// analysis. Paths and line counts are retained so citations can be verified
+// deterministically after the model responds.
+type RepositorySourceFile struct {
+	Path      string `json:"path"`
+	Kind      string `json:"kind"`
+	LineCount int    `json:"line_count"`
+	Content   string `json:"content"`
+}
+
+type RepositoryFileReference struct {
+	Path      string `json:"path"`
+	Kind      string `json:"kind"`
+	LineCount int    `json:"line_count"`
+}
+
+type RepositoryObjective struct {
+	ID              string `json:"id"`
+	Title           string `json:"title"`
+	SourceReference string `json:"source_reference"`
+	Description     string `json:"description"`
+	Verification    string `json:"verification"`
+}
+
+type RepositorySystemContext struct {
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Paths          []string `json:"paths,omitempty"`
+	DeclaredFacts  []string `json:"declared_facts,omitempty"`
+	MissingContext []string `json:"missing_context,omitempty"`
+}
+
+// RepositoryAnalysisRequest carries either repository source or trusted,
+// structured subsystem summaries. Synthesis requests also include the full
+// file index so every returned citation can still be checked against the
+// discovered repository.
+type RepositoryAnalysisRequest struct {
+	Mode               RepositoryAnalysisMode    `json:"mode"`
+	Scope              string                    `json:"scope"`
+	RepositoryFiles    int                       `json:"repository_files"`
+	RepositoryBytes    int64                     `json:"repository_bytes"`
+	Files              []RepositorySourceFile    `json:"files,omitempty"`
+	FileIndex          []RepositoryFileReference `json:"file_index,omitempty"`
+	Objectives         []RepositoryObjective     `json:"objectives"`
+	Systems            []RepositorySystemContext `json:"systems,omitempty"`
+	SubsystemSummaries []RepositorySectionResult `json:"subsystem_summaries,omitempty"`
+}
+
+type RepositoryCitation struct {
+	Path    string `json:"path"`
+	Line    int    `json:"line"`
+	Summary string `json:"summary"`
+}
+
+// RepositoryAIUse is a model-discovered implementation or integration. It is
+// an advisory inventory candidate, not a legal classification.
+type RepositoryAIUse struct {
+	ID                  string               `json:"id"`
+	Name                string               `json:"name"`
+	Purpose             string               `json:"purpose"`
+	Lifecycle           string               `json:"lifecycle"`
+	Confidence          string               `json:"confidence"`
+	Evidence            []RepositoryCitation `json:"evidence"`
+	UnresolvedQuestions []string             `json:"unresolved_questions,omitempty"`
+}
+
+type RepositoryObjectiveObservation struct {
+	ObjectiveID           string               `json:"objective_id"`
+	SystemID              string               `json:"system_id,omitempty"`
+	Strength              EvidenceStrength     `json:"strength"`
+	Confidence            string               `json:"confidence"`
+	Rationale             string               `json:"rationale"`
+	SupportingEvidence    []RepositoryCitation `json:"supporting_evidence"`
+	ContradictoryEvidence []RepositoryCitation `json:"contradictory_evidence"`
+	MissingEvidence       []string             `json:"missing_evidence,omitempty"`
+	UnresolvedQuestions   []string             `json:"unresolved_questions,omitempty"`
+}
+
+type RepositoryUnmappedObservation struct {
+	Summary         string               `json:"summary"`
+	Reason          string               `json:"reason"`
+	Confidence      string               `json:"confidence"`
+	Evidence        []RepositoryCitation `json:"evidence"`
+	SuggestedReview string               `json:"suggested_review,omitempty"`
+}
+
+// RepositorySectionResult is returned for a complete repository, one
+// subsystem, or the synthesis of multiple subsystems.
+type RepositorySectionResult struct {
+	Scope                 string                           `json:"scope"`
+	AIUses                []RepositoryAIUse                `json:"ai_uses"`
+	ObjectiveObservations []RepositoryObjectiveObservation `json:"objective_observations"`
+	UnmappedObservations  []RepositoryUnmappedObservation  `json:"unmapped_observations"`
+	UnresolvedQuestions   []string                         `json:"unresolved_questions"`
+}
+
+type RepositoryCoverage struct {
+	Mode             RepositoryAnalysisMode `json:"mode"`
+	RepositoryFiles  int                    `json:"repository_files"`
+	RepositoryBytes  int64                  `json:"repository_bytes"`
+	FilesSubmitted   int                    `json:"files_submitted"`
+	BytesSubmitted   int64                  `json:"bytes_submitted"`
+	Subsystems       int                    `json:"subsystems,omitempty"`
+	CitationsChecked int                    `json:"citations_checked"`
+}
+
+type RepositoryAnalysisResult struct {
+	Provider Kind                    `json:"provider"`
+	Model    string                  `json:"model"`
+	Coverage RepositoryCoverage      `json:"coverage"`
+	Result   RepositorySectionResult `json:"result"`
+	Notes    []string                `json:"notes,omitempty"`
+	Usage    Usage                   `json:"usage,omitempty"`
+}
