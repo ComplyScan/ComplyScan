@@ -179,12 +179,12 @@ func TestPromptAnalysisProviderGroupsHostedProviders(t *testing.T) {
 			calls++
 			switch calls {
 			case 1:
-				if label != "Analysis mode" || defaultValue != "Hosted AI provider — uses your API key and sends bounded context externally" || len(options) != 3 {
+				if label != "Analysis mode" || defaultValue != "Cloud AI review — recommended; selected models using your API key" || len(options) != 3 || !strings.Contains(options[2].Label, "Experimental local AI") {
 					t.Fatalf("analysis selector: label=%q default=%q options=%#v", label, defaultValue, options)
 				}
-				return options[1].Value, nil
+				return options[0].Value, nil
 			case 2:
-				if label != "Hosted provider" || defaultValue != "anthropic" || len(options) != 9 || options[3].Value != "xai" || options[4].Value != "mistral" || options[5].Value != "groq" || options[5].Label != "GroqCloud — fast hosted models from several model makers" || options[6].Value != "openrouter" || options[7].Value != customCompatibleProvider || options[8].Value != backChoiceValue {
+				if label != "Hosted provider" || defaultValue != "anthropic" || len(options) != 4 || options[0].Value != "openai" || options[1].Value != "anthropic" || options[2].Value != "gemini" || options[3].Value != backChoiceValue {
 					t.Fatalf("provider selector: label=%q default=%q options=%#v", label, defaultValue, options)
 				}
 				return "gemini", nil
@@ -203,6 +203,35 @@ func TestPromptAnalysisProviderGroupsHostedProviders(t *testing.T) {
 	}
 }
 
+func TestStandardCloudShortlistExcludesExperimentalProvidersAndModels(t *testing.T) {
+	profiles := standardHostedProviderProfiles()
+	if len(profiles) != 3 {
+		t.Fatalf("standard provider count = %d, want 3: %#v", len(profiles), profiles)
+	}
+	wantModels := map[string][]string{
+		"openai":    {"gpt-5.6-sol", "gpt-5.6-terra"},
+		"anthropic": {"claude-opus-5", "claude-sonnet-5"},
+		"gemini":    {"gemini-3.5-flash", "gemini-3.6-flash"},
+	}
+	for _, profile := range profiles {
+		models := remoteModelOptions(profile.ID)
+		if strings.Join(models, ",") != strings.Join(wantModels[profile.ID], ",") {
+			t.Errorf("%s shortlist = %#v", profile.ID, models)
+		}
+		for _, model := range profile.Models {
+			if model.DraftValidated || model.CodeValidated || !strings.Contains(hostedModelStatus(model), "live quality gates pending") {
+				t.Errorf("unearned validation state for %s/%s: %#v", profile.ID, model.ID, model)
+			}
+		}
+	}
+	for _, experimental := range []string{"xai", "mistral", "groq", "openrouter", customCompatibleProvider} {
+		profile, exists := hostedProviderProfileFor(experimental)
+		if !exists || profile.StandardSetup {
+			t.Errorf("experimental provider %q entered standard setup: %#v", experimental, profile)
+		}
+	}
+}
+
 func TestPromptAnalysisProviderCanReturnFromHostedProvider(t *testing.T) {
 	var calls int
 	prompt := promptSession{
@@ -211,14 +240,14 @@ func TestPromptAnalysisProviderCanReturnFromHostedProvider(t *testing.T) {
 			calls++
 			switch calls {
 			case 1:
-				return options[1].Value, nil // Hosted AI provider.
+				return options[0].Value, nil // Cloud AI review.
 			case 2:
 				if label != "Hosted provider" || !containsTerminalChoice(options, backChoiceValue) {
 					t.Fatalf("hosted selector has no back control: %#v", options)
 				}
 				return backChoiceValue, nil
 			case 3:
-				return options[2].Value, nil // Fast technical analysis.
+				return options[1].Value, nil // Fast technical analysis.
 			default:
 				t.Fatalf("unexpected selector call %d", calls)
 				return "", nil
@@ -500,10 +529,10 @@ func TestOllamaResourceEstimateUsesTransparentRanges(t *testing.T) {
 	}
 }
 
-func TestInteractiveSetupCreatesRepositoryProfileAndSelectsLocalReview(t *testing.T) {
+func TestInteractiveSetupCreatesRepositoryProfileAndSelectsExperimentalLocalReview(t *testing.T) {
 	target := t.TempDir()
 	input := strings.NewReader(strings.Join([]string{
-		"", "", // analysis mode, Ollama model
+		"3", "", // experimental local analysis, Ollama model
 		"", "", // system name, intended purpose
 		"7", "4", "5", "5", "5", // unknown profile facts
 		"1",            // EU technical mapping
@@ -529,12 +558,12 @@ func TestInteractiveSetupCreatesRepositoryProfileAndSelectsLocalReview(t *testin
 	if cfg.Systems[0].LifecycleStage != profile.LifecycleUnknown {
 		t.Fatalf("lifecycle answer = %q", cfg.Systems[0].LifecycleStage)
 	}
-	for _, expected := range []string{"ComplyScan setup", "Step 1 of 5 — Repository inspection", "Step 2 of 5 — Analysis, privacy, and model", "Step 3 of 5 — Repository-assisted system context", "Step 4 of 5 — Technical mappings and applicability", "Step 5 of 5 — Review, save, and first scan", "Repository inspected", "No model is used in this step", "Local model setup", "System questionnaire", "Save without scanning", "Saved", "Next: complyscan scan"} {
+	for _, expected := range []string{"ComplyScan setup", "Step 1 of 5 — Repository inspection", "Step 2 of 5 — Analysis, privacy, and model", "Step 3 of 5 — Repository-assisted system context", "Step 4 of 5 — Technical mappings and applicability", "Step 5 of 5 — Review, save, and first scan", "Repository inspected", "No model is used in this step", "Experimental local model setup", "System questionnaire", "Save without scanning", "Saved", "Next: complyscan scan"} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("output missing %q:\n%s", expected, stdout.String())
 		}
 	}
-	for _, expected := range []string{"source code cannot reliably establish", "Local AI — Ollama keeps repository context on this machine"} {
+	for _, expected := range []string{"source code cannot reliably establish", "Experimental local AI — advanced Ollama setup", "no local model is currently approved"} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("short setup output missing explanation %q:\n%s", expected, stdout.String())
 		}
@@ -1397,9 +1426,9 @@ func TestNonInteractiveSetupConfiguresCustomCompatibleProvider(t *testing.T) {
 	}
 }
 
-func TestPromptRemoteModelOffersProviderChoicesAndCustomID(t *testing.T) {
+func TestPromptRemoteModelOffersOnlyProviderShortlist(t *testing.T) {
 	var output bytes.Buffer
-	prompt := promptSession{reader: bufio.NewReader(strings.NewReader("2\n")), output: &output}
+	prompt := promptSession{reader: bufio.NewReader(strings.NewReader("1\n")), output: &output}
 	model, err := promptRemoteModel(prompt, "anthropic")
 	if err != nil {
 		t.Fatal(err)
@@ -1407,38 +1436,40 @@ func TestPromptRemoteModelOffersProviderChoicesAndCustomID(t *testing.T) {
 	if model != "claude-opus-5" || !strings.Contains(output.String(), "claude-sonnet-5") {
 		t.Fatalf("model = %q; output:\n%s", model, output.String())
 	}
-	prompt = promptSession{reader: bufio.NewReader(strings.NewReader("account-specific-model\n")), output: &output}
+	prompt = promptSession{reader: bufio.NewReader(strings.NewReader("2\n")), output: &output}
 	model, err = promptRemoteModel(prompt, "gemini")
-	if err != nil || model != "account-specific-model" {
-		t.Fatalf("custom model = %q, error = %v", model, err)
+	if err != nil || model != "gemini-3.6-flash" {
+		t.Fatalf("shortlisted model = %q, error = %v", model, err)
 	}
 }
 
-func TestPromptRemoteModelUsesTerminalSelectorAndCustomEntry(t *testing.T) {
+func TestPromptRemoteModelUsesTerminalSelectorWithoutCustomEntry(t *testing.T) {
 	var output bytes.Buffer
 	var choices []terminalChoice
 	prompt := promptSession{
-		reader: bufio.NewReader(strings.NewReader("account-specific-model\n")), output: &output,
+		reader: bufio.NewReader(strings.NewReader("")), output: &output,
 		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
-			if label != "Remote model" || defaultValue != "claude-sonnet-5" {
+			if label != "Remote model" || defaultValue != "claude-opus-5" {
 				t.Fatalf("selector arguments: label=%q default=%q", label, defaultValue)
 			}
 			choices = append([]terminalChoice(nil), options...)
-			return customModelChoice, nil
+			return "claude-sonnet-5", nil
 		},
 	}
 	model, err := promptRemoteModel(prompt, "anthropic")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if model != "account-specific-model" {
+	if model != "claude-sonnet-5" {
 		t.Fatalf("model = %q", model)
 	}
-	if len(choices) != 4 || choices[0].Value != "claude-sonnet-5" || choices[len(choices)-1].Value != customModelChoice {
+	if len(choices) != 2 || choices[0].Value != "claude-opus-5" || choices[1].Value != "claude-sonnet-5" || containsTerminalChoice(choices, customModelChoice) {
 		t.Fatalf("terminal choices = %#v", choices)
 	}
-	if !strings.Contains(output.String(), "Custom remote model ID") || strings.Contains(output.String(), "1)") {
-		t.Fatalf("custom-model output = %q", output.String())
+	for _, choice := range choices {
+		if !strings.Contains(choice.Label, "live quality gates pending") {
+			t.Errorf("benchmark status missing from %#v", choice)
+		}
 	}
 }
 
@@ -1459,7 +1490,7 @@ func TestPromptRemoteModelCatalogueUsesAccountModelsAndSearchableSelector(t *tes
 	prompt := promptSession{
 		reader: bufio.NewReader(strings.NewReader("")), output: &output,
 		selectOne: func(label, defaultValue string, options []terminalChoice) (string, error) {
-			if label != "Hosted model" || defaultValue != "claude-sonnet-5" {
+			if label != "Hosted model" || defaultValue != "claude-opus-5" {
 				t.Fatalf("selector label=%q default=%q", label, defaultValue)
 			}
 			choices = append([]terminalChoice(nil), options...)
@@ -1470,10 +1501,10 @@ func TestPromptRemoteModelCatalogueUsesAccountModelsAndSearchableSelector(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if model != "claude-opus-5" || len(choices) != 3 || choices[0].Label != "Claude Opus 5 · claude-opus-5" || choices[2].Value != customModelChoice {
+	if model != "claude-opus-5" || len(choices) != 2 || !strings.Contains(choices[0].Label, "Claude Opus 5 · claude-opus-5") || containsTerminalChoice(choices, customModelChoice) {
 		t.Fatalf("model=%q choices=%#v", model, choices)
 	}
-	if !strings.Contains(output.String(), "Loaded 2 model(s) available to this API key") || !strings.Contains(output.String(), "Use / to filter") {
+	if !strings.Contains(output.String(), "Found 2 shortlisted model(s) available to this API key") || strings.Contains(output.String(), "Use / to filter") {
 		t.Fatalf("output:\n%s", output.String())
 	}
 }
@@ -1498,7 +1529,7 @@ func TestPromptRemoteModelCatalogueFallsBackWhenDiscoveryUnavailable(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if model != "gpt-5.6-terra" || !strings.Contains(output.String(), "Live model catalogue unavailable") || !strings.Contains(output.String(), "suggested models and exact-ID entry") {
+	if model != "gpt-5.6-sol" || !strings.Contains(output.String(), "Live model catalogue unavailable") || !strings.Contains(output.String(), "ComplyScan model shortlist") {
 		t.Fatalf("model=%q output:\n%s", model, output.String())
 	}
 }

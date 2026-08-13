@@ -477,7 +477,7 @@ func writeSetupReviewSummary(prompt promptSession, cfg config.Config, modelReady
 	}
 	analysis := "Fast technical analysis (no model)"
 	if cfg.AI.Provider == "ollama" {
-		analysis = fmt.Sprintf("Local Ollama — %s", cfg.AI.Ollama.Model)
+		analysis = fmt.Sprintf("Experimental local Ollama — %s", cfg.AI.Ollama.Model)
 	} else if cfg.AI.Provider != "none" {
 		analysis = fmt.Sprintf("%s cloud — %s", reviewProviderLabel(cfg.AI.Provider), cfg.AI.Remote.Model)
 	}
@@ -630,7 +630,10 @@ func configureSetupReviewOnce(ctx context.Context, prompt promptSession, stdout 
 		if ollamaPath != "" {
 			installed = ollamaInstalledModels(ctx, ollamaPath)
 		}
-		if err := prompt.sectionTitle("Local model setup", true); err != nil {
+		if err := prompt.sectionTitle("Experimental local model setup", true); err != nil {
+			return false, err
+		}
+		if _, err := fmt.Fprintln(stdout, "  Local model review is an advanced experimental path. Small general-purpose models may miss connected code or produce unreliable questionnaire drafts; no local model is currently approved as the standard ComplyScan reviewer."); err != nil {
 			return false, err
 		}
 		if err := explainSetupQuestion(prompt, "ollama-model"); err != nil {
@@ -733,16 +736,16 @@ func configureSetupReviewOnce(ctx context.Context, prompt promptSession, stdout 
 
 func promptAnalysisProvider(prompt promptSession, current string) (string, error) {
 	const (
-		localOption  = "Local AI — Ollama keeps repository context on this machine"
-		hostedOption = "Hosted AI provider — uses your API key and sends bounded context externally"
-		fastOption   = "Fast technical analysis — no model"
+		hostedOption = "Cloud AI review — recommended; selected models using your API key"
+		fastOption   = "Fast technical analysis — no model and no external processing"
+		localOption  = "Experimental local AI — advanced Ollama setup; quality is not assured"
 	)
-	defaultMode := localOption
-	if isRemoteReviewProvider(current) {
-		defaultMode = hostedOption
+	defaultMode := hostedOption
+	if current == "ollama" {
+		defaultMode = localOption
 	}
 	for {
-		selected, err := promptChoice(prompt, "Analysis mode", defaultMode, localOption, hostedOption, fastOption)
+		selected, err := promptChoice(prompt, "Analysis mode", defaultMode, hostedOption, fastOption, localOption)
 		if err != nil {
 			return "", err
 		}
@@ -763,10 +766,14 @@ func promptAnalysisProvider(prompt promptSession, current string) (string, error
 }
 
 func promptHostedProvider(prompt promptSession, current string) (string, error) {
-	profiles := hostedProviderProfiles()
+	profiles := standardHostedProviderProfiles()
 	choices := make([]terminalChoice, 0, len(profiles))
 	for _, profile := range profiles {
-		choices = append(choices, terminalChoice{Label: profile.Label, Value: profile.ID})
+		label := profile.SetupLabel
+		if label == "" {
+			label = profile.Label
+		}
+		choices = append(choices, terminalChoice{Label: label, Value: profile.ID})
 	}
 	defaultProvider := current
 	if !isRemoteReviewProvider(defaultProvider) {
@@ -784,6 +791,11 @@ func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.
 	if interactive {
 		if err := prompt.sectionTitle("Hosted model setup", true); err != nil {
 			return false, err
+		}
+		if !providerProfile.StandardSetup {
+			if _, err := fmt.Fprintln(stdout, "  This provider is outside ComplyScan's standard cloud shortlist and has no maintained live quality benchmark. Continue only as an explicit experimental configuration."); err != nil {
+				return false, err
+			}
 		}
 	}
 	providerName := strings.TrimSpace(options.remoteProviderName)
@@ -920,9 +932,54 @@ func promptRemoteModelCatalogue(ctx context.Context, prompt promptSession, provi
 		APIKey: apiKey, BaseURL: remote.BaseURL, Timeout: 15 * time.Second,
 	})
 	if err != nil {
-		if _, writeErr := fmt.Fprintf(prompt.output, "  Live model catalogue unavailable: %v\n  Showing suggested models and exact-ID entry instead.\n", err); writeErr != nil {
+		fallback := "Showing the ComplyScan model shortlist instead."
+		if profile, exists := hostedProviderProfileFor(provider); exists && !profile.StandardSetup {
+			fallback = "Showing suggested experimental models and exact-ID entry instead."
+		}
+		if _, writeErr := fmt.Fprintf(prompt.output, "  Live model catalogue unavailable: %v\n  %s\n", err, fallback); writeErr != nil {
 			return "", writeErr
 		}
+		return promptRemoteModel(prompt, provider)
+	}
+	profile, _ := hostedProviderProfileFor(provider)
+	if !profile.StandardSetup {
+		return promptExperimentalRemoteModelCatalogue(prompt, provider, models)
+	}
+	available := make(map[string]providers.RemoteModel, len(models))
+	for _, model := range models {
+		available[strings.ToLower(model.ID)] = model
+	}
+	choices := make([]terminalChoice, 0, len(profile.Models))
+	for _, candidate := range profile.Models {
+		model, found := available[strings.ToLower(candidate.ID)]
+		if !found {
+			continue
+		}
+		label := candidate.ID + " · " + hostedModelStatus(candidate)
+		if model.DisplayName != "" && !strings.EqualFold(model.DisplayName, model.ID) {
+			label = model.DisplayName + " · " + label
+		}
+		choices = append(choices, terminalChoice{Label: label, Value: candidate.ID})
+	}
+	if len(choices) == 0 {
+		if _, err := fmt.Fprintln(prompt.output, "  None of ComplyScan's shortlisted models were returned for this API key. Showing the exact supported IDs so you can confirm account access or choose another provider."); err != nil {
+			return "", err
+		}
+		return promptRemoteModel(prompt, provider)
+	}
+	defaultModel := choices[0].Value
+	if _, err := fmt.Fprintf(prompt.output, "  Found %d shortlisted model(s) available to this API key. Only the maintained shortlist is shown.\n", len(choices)); err != nil {
+		return "", err
+	}
+	selected, err := chooseSetupOption(prompt, "Hosted model", choices, defaultModel)
+	if err != nil {
+		return "", err
+	}
+	return selected, nil
+}
+
+func promptExperimentalRemoteModelCatalogue(prompt promptSession, provider string, models []providers.RemoteModel) (string, error) {
+	if len(models) == 0 {
 		return promptRemoteModel(prompt, provider)
 	}
 	choices := make([]terminalChoice, 0, len(models)+1)
@@ -933,44 +990,36 @@ func promptRemoteModelCatalogue(ctx context.Context, prompt promptSession, provi
 		}
 		choices = append(choices, terminalChoice{Label: label, Value: model.ID})
 	}
-	choices = append(choices, terminalChoice{Label: "Exact model ID · Enter a model not shown above", Value: customModelChoice})
-	defaultModel := models[0].ID
-	for _, recommended := range remoteModelOptions(provider) {
-		for _, available := range models {
-			if strings.EqualFold(recommended, available.ID) {
-				defaultModel = available.ID
-				break
-			}
-		}
-		if strings.EqualFold(defaultModel, recommended) {
-			break
-		}
-	}
-	if _, err := fmt.Fprintf(prompt.output, "  Loaded %d model(s) available to this API key. Use / to filter the list.\n", len(models)); err != nil {
-		return "", err
-	}
-	selected, err := chooseSetupOption(prompt, "Hosted model", choices, defaultModel)
+	choices = append(choices, terminalChoice{Label: "Exact model ID · Experimental custom model", Value: customModelChoice})
+	selected, err := chooseSetupOption(prompt, "Experimental hosted model", choices, choices[0].Value)
 	if err != nil {
 		return "", err
 	}
 	if selected == customModelChoice {
-		return promptCustomModel(prompt, "Exact remote model ID")
+		return promptCustomModel(prompt, "Exact experimental model ID")
 	}
 	return selected, nil
 }
 
 func promptRemoteModel(prompt promptSession, provider string) (string, error) {
-	models := remoteModelOptions(provider)
-	if len(models) == 0 {
+	profile, exists := hostedProviderProfileFor(provider)
+	if !exists || len(profile.Models) == 0 {
 		return promptCustomModel(prompt, "Remote model ID")
 	}
+	models := profile.Models
 	if prompt.selectOne != nil {
-		options := make([]terminalChoice, 0, len(models)+1)
-		for _, model := range models {
-			options = append(options, terminalChoice{Label: model, Value: model})
+		optionCount := len(models)
+		if !profile.StandardSetup {
+			optionCount++
 		}
-		options = append(options, terminalChoice{Label: "Enter a custom model ID", Value: customModelChoice})
-		selected, err := prompt.chooseOne("Remote model", models[0], options)
+		options := make([]terminalChoice, 0, optionCount)
+		for _, model := range models {
+			options = append(options, terminalChoice{Label: model.ID + " · " + hostedModelStatus(model), Value: model.ID})
+		}
+		if !profile.StandardSetup {
+			options = append(options, terminalChoice{Label: "Enter an experimental custom model ID", Value: customModelChoice})
+		}
+		selected, err := prompt.chooseOne("Remote model", models[0].ID, options)
 		if err != nil {
 			return "", err
 		}
@@ -979,30 +1028,34 @@ func promptRemoteModel(prompt promptSession, provider string) (string, error) {
 		}
 		return selected, nil
 	}
-	if _, err := fmt.Fprintf(prompt.output, "  Suggested %s models (you may also type another exact model ID):\n", reviewProviderLabel(provider)); err != nil {
+	if _, err := fmt.Fprintf(prompt.output, "  ComplyScan %s model shortlist:\n", reviewProviderLabel(provider)); err != nil {
 		return "", err
 	}
 	for index, model := range models {
-		if _, err := fmt.Fprintf(prompt.output, "    %d) %s\n", index+1, model); err != nil {
+		if _, err := fmt.Fprintf(prompt.output, "    %d) %s · %s\n", index+1, model.ID, hostedModelStatus(model)); err != nil {
 			return "", err
 		}
 	}
 	for {
-		value, err := prompt.text("Remote model number or exact ID", "1")
+		label := "Remote model number"
+		if !profile.StandardSetup {
+			label = "Remote model number or experimental exact ID"
+		}
+		value, err := prompt.text(label, "1")
 		if err != nil {
 			return "", err
 		}
 		var selected int
 		if _, scanErr := fmt.Sscanf(value, "%d", &selected); scanErr == nil {
 			if selected >= 1 && selected <= len(models) && value == fmt.Sprintf("%d", selected) {
-				return models[selected-1], nil
+				return models[selected-1].ID, nil
 			}
 			if _, writeErr := fmt.Fprintf(prompt.output, "  Enter a number from 1 to %d, or an exact model ID.\n", len(models)); writeErr != nil {
 				return "", writeErr
 			}
 			continue
 		}
-		if strings.TrimSpace(value) != "" && !strings.ContainsAny(value, "\r\n\x00") {
+		if !profile.StandardSetup && strings.TrimSpace(value) != "" && !strings.ContainsAny(value, "\r\n\x00") {
 			return strings.TrimSpace(value), nil
 		}
 	}
@@ -1013,7 +1066,11 @@ func remoteModelOptions(provider string) []string {
 	if !exists {
 		return nil
 	}
-	return append([]string(nil), profile.Models...)
+	models := make([]string, 0, len(profile.Models))
+	for _, model := range profile.Models {
+		models = append(models, model.ID)
+	}
+	return models
 }
 
 func defaultRemoteModel(provider string) string {

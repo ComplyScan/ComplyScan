@@ -167,12 +167,12 @@ var setupQuestionHelp = map[string][]string{
 		"Choose no if you only wanted to inspect the rules; use `complyscan ownership show` to review them without changing configuration.",
 	},
 	"review-provider": {
-		"Choose local AI to keep bounded model context on this machine, cloud AI to use your own provider account, or fast technical analysis to run without a model.",
-		"This choice is made before repository analysis so no model receives context before its privacy boundary is clear. Every model result remains an advisory draft that requires confirmation.",
+		"The recommended AI path uses your OpenAI, Anthropic, or Gemini account with a small ComplyScan model shortlist. Fast technical analysis uses no model, while local Ollama review remains an advanced experimental option.",
+		"This choice is made before model-assisted repository analysis so no model receives context before its privacy boundary is clear. Cloud review sends bounded redacted context externally; every result remains advisory and requires confirmation.",
 	},
 	"ollama-model": {
-		"Choose the local Ollama model used for advisory code-context review. Setup lists installed models and recommendations; qwen3.5:9b is the default candidate, while qwen3:8b retains the previous live-validation baseline.",
-		"You may enter any exact Ollama tag. A different model may use more memory, run more slowly, or fail ComplyScan's structured-output contract until independently validated.",
+		"Ollama is retained as an advanced experimental path for users who cannot send repository context to a cloud provider. No local model is currently approved as ComplyScan's standard reviewer.",
+		"Setup lists installed models and candidates, but compatibility does not establish review quality. Small local models may miss connected code, overstate evidence, or draft incorrect questionnaire answers.",
 	},
 	"install-ollama": {
 		"Ollama is a separate local runtime needed only for optional model review. Installation downloads third-party software and may change system packages or start a service.",
@@ -195,8 +195,8 @@ var setupQuestionHelp = map[string][]string{
 		"Example: https://models.example.com/v1. ComplyScan rejects HTTP, embedded credentials, query parameters, and fragments, then appends /models or /chat/completions.",
 	},
 	"remote-model": {
-		"Choose the exact remote model used for advisory review. When the API key is available, setup loads the models currently available to that account; otherwise it shows suggested IDs and manual entry.",
-		"Models differ in cost, latency, structured-output behavior, and review quality. ComplyScan applies the same bounded schema and guardrails to every provider.",
+		"Choose from ComplyScan's small provider-specific frontier-model shortlist. When the API key is available, setup verifies which shortlisted IDs are available to that account instead of presenting an unrestricted catalogue.",
+		"Shortlisting is not the same as a completed quality benchmark. Setup labels whether the exact model has passed maintained setup-drafting and technical-review evaluations; model output remains advisory even after validation.",
 	},
 	"api-key-env": {
 		"Enter only the name of the environment variable that contains the API key, such as OPENAI_API_KEY. Do not paste the credential itself.",
