@@ -50,6 +50,18 @@ type Summary struct {
 	Info     int `json:"info"`
 }
 
+// RepositoryAnalysisRunStatus records the human-report lifecycle of the
+// optional whole-repository model pass. It is not part of the versioned JSON
+// evidence contract; failures remain preserved there as scan warnings.
+type RepositoryAnalysisRunStatus string
+
+const (
+	RepositoryAnalysisNotRequested RepositoryAnalysisRunStatus = "not-requested"
+	RepositoryAnalysisPending      RepositoryAnalysisRunStatus = "pending"
+	RepositoryAnalysisIncomplete   RepositoryAnalysisRunStatus = "incomplete"
+	RepositoryAnalysisCompleted    RepositoryAnalysisRunStatus = "completed"
+)
+
 type Report struct {
 	SchemaVersion          int                                 `json:"schema_version"`
 	Tool                   Tool                                `json:"tool"`
@@ -65,6 +77,7 @@ type Report struct {
 	Reconciliation         *reconciliation.Report              `json:"reconciliation,omitempty"`
 	Review                 *providers.ReviewResult             `json:"review,omitempty"`
 	RepositoryAnalysis     *providers.RepositoryAnalysisResult `json:"repository_analysis,omitempty"`
+	RepositoryAnalysisRun  RepositoryAnalysisRunStatus         `json:"-"`
 	TechnicalReview        *providers.TechnicalReviewResult    `json:"evidence_investigation,omitempty"`
 	ExecutionVerifications []verification.Report               `json:"execution_verification,omitempty"`
 	Frameworks             []FrameworkResult                   `json:"frameworks,omitempty"`

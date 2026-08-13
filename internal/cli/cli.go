@@ -592,6 +592,12 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 			}
 			reportValue.Frameworks = frameworkResults
 			syncLegacyFrameworkFields(&reportValue)
+			repositoryAnalysisRequested := cfg.AI.Provider != "none" && cfg.AI.RepositoryAnalysis.Mode != "bounded-only" && len(result.FullRepository.Files) > 0
+			if repositoryAnalysisRequested {
+				reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisPending
+			} else {
+				reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisNotRequested
+			}
 			var artifacts report.Artifacts
 			if resolvedReportDirectory != "" && cfg.AI.Provider != "none" {
 				artifacts, err = report.WriteArtifacts(resolvedReportDirectory, reportValue)
@@ -617,7 +623,6 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 					progressWriter = cmd.ErrOrStderr()
 				}
 				modelQualified := true
-				repositoryAnalysisRequested := cfg.AI.RepositoryAnalysis.Mode != "bounded-only" && len(result.FullRepository.Files) > 0
 				if len(visible) > 0 || candidateCount > 0 || repositoryAnalysisRequested {
 					if _, err := fmt.Fprintf(progressWriter, "Checking model compatibility before repository review...\n"); err != nil {
 						return fmt.Errorf("write model qualification progress: %w", err)
@@ -627,6 +632,9 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 					activity.Finish(qualificationErr)
 					if qualificationErr != nil {
 						modelQualified = false
+						if repositoryAnalysisRequested {
+							reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisIncomplete
+						}
 						warning := fmt.Sprintf("%s review was incomplete because model qualification failed: %v. Deterministic findings and evidence remain available.", reviewProviderLabel(cfg.AI.Provider), qualificationErr)
 						reportValue.Warnings = append(reportValue.Warnings, warning)
 						if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
@@ -668,6 +676,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 						cmd.Context(), cfg.AI, result.FullRepository, frameworkEvidenceReports(frameworkResults), cfg.Systems, cfg.Ownership, progressWriter,
 					)
 					if reviewErr != nil {
+						reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisIncomplete
 						warning := fmt.Sprintf("%s repository-wide analysis was incomplete after %s: %v. Deterministic findings and bounded evidence review remain available.", reviewProviderLabel(cfg.AI.Provider), formatElapsed(time.Since(repositoryReviewStarted)), reviewErr)
 						reportValue.Warnings = append(reportValue.Warnings, warning)
 						if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
@@ -675,6 +684,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 						}
 					} else {
 						reportValue.RepositoryAnalysis = &repositoryReview
+						reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisCompleted
 						if _, err := fmt.Fprintf(progressWriter, "Repository-wide AI reasoning completed in %s using %s context.\n", formatElapsed(time.Since(repositoryReviewStarted)), repositoryReview.Coverage.Mode); err != nil {
 							return fmt.Errorf("write repository analysis completion: %w", err)
 						}

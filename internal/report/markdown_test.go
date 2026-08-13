@@ -132,7 +132,7 @@ func TestWriteMarkdownExplainsTestOnlyComponentsAndQuickScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"Whole-repository AI review: **not run**",
+		"Whole-repository AI review: **not requested**",
 		"**AI libraries or configuration found:** OpenAI",
 		"not that they are active in the deployed product",
 	} {
@@ -142,6 +142,28 @@ func TestWriteMarkdownExplainsTestOnlyComponentsAndQuickScan(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "Detailed scanner evidence") || strings.Count(output.String(), "\n") > 80 {
 		t.Fatalf("concise Markdown included scanner trace or became too long:\n%s", output.String())
+	}
+}
+
+func TestWriteMarkdownDistinguishesIncompleteRepositoryReview(t *testing.T) {
+	value := New(".", "dev", nil, []string{"OpenAI repository-wide analysis was incomplete: request too large."}, 0)
+	value.RepositoryAnalysisRun = RepositoryAnalysisIncomplete
+
+	var output bytes.Buffer
+	if err := WriteMarkdown(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"whole-repository AI review started but did not finish",
+		"Whole-repository AI review: **attempted but incomplete**",
+		"Scan incomplete or uncertain",
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "Whole-repository AI review: **not requested**") {
+		t.Fatalf("incomplete review was presented as not requested:\n%s", output.String())
 	}
 }
 

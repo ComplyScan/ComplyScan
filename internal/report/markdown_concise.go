@@ -102,10 +102,9 @@ func buildDeveloperReportView(value Report) developerReportView {
 	counts := markdownCounts(value)
 	view := developerReportView{
 		sourceFilesSeen: counts.SourceFilesSeen, filesIndexed: counts.FilesIndexed,
-		unsupportedFiles: counts.UnsupportedFiles, repositoryAnalysis: "not run",
+		unsupportedFiles: counts.UnsupportedFiles, repositoryAnalysis: developerRepositoryAnalysisLabel(value),
 	}
 	if value.RepositoryAnalysis != nil {
-		view.repositoryAnalysis = fmt.Sprintf("completed using %s", repositoryAnalysisModeLabel(value.RepositoryAnalysis.Coverage.Mode))
 		if view.sourceFilesSeen == 0 {
 			view.sourceFilesSeen = value.RepositoryAnalysis.Coverage.RepositoryFiles
 		}
@@ -254,7 +253,15 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 	if _, err := fmt.Fprintln(writer, "\n## 1. What ComplyScan found\n\n### AI features"); err != nil {
 		return err
 	}
-	if value.RepositoryAnalysis == nil {
+	if value.RepositoryAnalysis == nil && developerRepositoryAnalysisIncomplete(value) {
+		if _, err := fmt.Fprintln(writer, "\nThe whole-repository AI review started but did not finish, so ComplyScan could not identify specific AI features from the way the code works. See the next-step section for the failure."); err != nil {
+			return err
+		}
+	} else if value.RepositoryAnalysis == nil && value.RepositoryAnalysisRun == RepositoryAnalysisPending {
+		if _, err := fmt.Fprintln(writer, "\nThe whole-repository AI review has started, but this preliminary report does not contain its result yet."); err != nil {
+			return err
+		}
+	} else if value.RepositoryAnalysis == nil {
 		if _, err := fmt.Fprintln(writer, "\nThe whole-repository AI review was not run, so ComplyScan could not identify specific AI features from the way the code works."); err != nil {
 			return err
 		}
@@ -755,4 +762,34 @@ func repositoryAnalysisModeLabel(mode providers.RepositoryAnalysisMode) string {
 	default:
 		return "the available repository context"
 	}
+}
+
+func developerRepositoryAnalysisLabel(value Report) string {
+	if value.RepositoryAnalysis != nil {
+		return fmt.Sprintf("completed using %s", repositoryAnalysisModeLabel(value.RepositoryAnalysis.Coverage.Mode))
+	}
+	switch value.RepositoryAnalysisRun {
+	case RepositoryAnalysisPending:
+		return "started; result not available yet"
+	case RepositoryAnalysisIncomplete:
+		return "attempted but incomplete"
+	default:
+		if developerRepositoryAnalysisIncomplete(value) {
+			return "attempted but incomplete"
+		}
+		return "not requested"
+	}
+}
+
+func developerRepositoryAnalysisIncomplete(value Report) bool {
+	if value.RepositoryAnalysisRun == RepositoryAnalysisIncomplete {
+		return true
+	}
+	for _, warning := range value.Warnings {
+		normalized := strings.ToLower(warning)
+		if strings.Contains(normalized, "repository-wide analysis was incomplete") || strings.Contains(normalized, "review was incomplete because model qualification failed") {
+			return true
+		}
+	}
+	return false
 }
