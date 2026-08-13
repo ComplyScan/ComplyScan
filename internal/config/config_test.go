@@ -55,6 +55,27 @@ ai:
 	}
 }
 
+func TestRepositoryAnalysisConfigValidation(t *testing.T) {
+	for _, mode := range []string{"auto", "full", "hierarchical", "bounded-only"} {
+		cfg := Default()
+		cfg.AI.RepositoryAnalysis.Mode = mode
+		cfg.AI.RepositoryAnalysis.MaxInputTokens = 8_000
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("mode %s should validate: %v", mode, err)
+		}
+	}
+	cfg := Default()
+	cfg.AI.RepositoryAnalysis.Mode = "whole-repo-magic"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "ai.repository-analysis") {
+		t.Fatalf("expected repository analysis mode validation error, got %v", err)
+	}
+	cfg = Default()
+	cfg.AI.RepositoryAnalysis.MaxInputTokens = 4_000
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "at least 8000") {
+		t.Fatalf("expected repository token budget validation error, got %v", err)
+	}
+}
+
 func TestLoadAcceptsMultipleFrameworkPacks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), FileName)
 	content := `version: 1

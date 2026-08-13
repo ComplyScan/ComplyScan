@@ -56,6 +56,9 @@ type ollamaChatRequest struct {
 	Think     bool            `json:"think"`
 	KeepAlive string          `json:"keep_alive"`
 	Options   map[string]any  `json:"options"`
+	// MaxOutputTokens is used by hosted provider adapters and is not sent to
+	// Ollama, where options.num_predict controls the same bound.
+	MaxOutputTokens int `json:"-"`
 }
 
 type ollamaChatResponse struct {

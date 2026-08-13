@@ -57,9 +57,17 @@ type RuleConfig struct {
 }
 
 type AIConfig struct {
-	Provider string       `yaml:"provider"`
-	Ollama   OllamaConfig `yaml:"ollama"`
-	Remote   RemoteConfig `yaml:"remote,omitempty"`
+	Provider           string                   `yaml:"provider"`
+	RepositoryAnalysis RepositoryAnalysisConfig `yaml:"repository-analysis"`
+	Ollama             OllamaConfig             `yaml:"ollama"`
+	Remote             RemoteConfig             `yaml:"remote,omitempty"`
+}
+
+// RepositoryAnalysisConfig controls the model context strategy. A zero token
+// limit selects a conservative provider-specific default at scan time.
+type RepositoryAnalysisConfig struct {
+	Mode           string `yaml:"mode"`
+	MaxInputTokens int    `yaml:"max-input-tokens,omitempty"`
 }
 
 type OllamaConfig struct {
@@ -125,7 +133,7 @@ func Default() Config {
 		FailOn: rules.SeverityHigh,
 		Rules:  ruleConfig,
 		AI: AIConfig{
-			Provider: "none",
+			Provider: "none", RepositoryAnalysis: RepositoryAnalysisConfig{Mode: "auto"},
 			Ollama: OllamaConfig{
 				Endpoint: "http://127.0.0.1:11434", Model: "qwen3.5:9b",
 				TimeoutSeconds: 360, MaxFindings: 20,
@@ -184,6 +192,9 @@ func (c Config) Validate() error {
 	if c.AI.Provider == "" {
 		return errors.New("ai.provider must not be empty")
 	}
+	if err := c.AI.RepositoryAnalysis.Validate(); err != nil {
+		return fmt.Errorf("ai.repository-analysis: %w", err)
+	}
 	if !validAIProvider(c.AI.Provider) {
 		return fmt.Errorf("ai.provider %q is not available; use none, ollama, openai, anthropic, gemini, xai, groq, mistral, openrouter, or openai-compatible", c.AI.Provider)
 	}
@@ -232,6 +243,18 @@ func (c Config) Validate() error {
 		if suppression.Fingerprint != "" && !validFingerprint(suppression.Fingerprint) {
 			return fmt.Errorf("suppressions[%d].fingerprint must be a 64-character SHA-256 value", index)
 		}
+	}
+	return nil
+}
+
+func (c RepositoryAnalysisConfig) Validate() error {
+	switch c.Mode {
+	case "auto", "full", "hierarchical", "bounded-only":
+	default:
+		return errors.New("mode must be auto, full, hierarchical, or bounded-only")
+	}
+	if c.MaxInputTokens != 0 && c.MaxInputTokens < 8_000 {
+		return errors.New("max-input-tokens must be zero or at least 8000")
 	}
 	return nil
 }

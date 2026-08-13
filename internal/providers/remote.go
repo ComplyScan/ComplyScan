@@ -110,7 +110,7 @@ func openAICompletion(client *http.Client, apiKey, model string) func(context.Co
 			"model":             model,
 			"input":             messages,
 			"store":             false,
-			"max_output_tokens": maxRemoteOutputTokens,
+			"max_output_tokens": remoteOutputTokenLimit(request),
 			"text": map[string]any{"format": map[string]any{
 				"type": "json_schema", "name": "complyscan_output", "strict": true, "schema": request.Format,
 			}},
@@ -159,7 +159,7 @@ func anthropicCompletion(client *http.Client, apiKey, model string) func(context
 			return ollamaChatResponse{}, err
 		}
 		body := map[string]any{
-			"model": model, "max_tokens": maxRemoteOutputTokens, "system": system,
+			"model": model, "max_tokens": remoteOutputTokenLimit(request), "system": system,
 			"messages":      []map[string]string{{"role": "user", "content": user}},
 			"output_config": map[string]any{"format": map[string]any{"type": "json_schema", "schema": request.Format}},
 		}
@@ -247,7 +247,7 @@ func openAICompatibleCompletion(baseURL, label string) remoteCompletionFactory {
 				return ollamaChatResponse{}, err
 			}
 			body := map[string]any{
-				"model": model, "messages": messages, "max_tokens": maxRemoteOutputTokens,
+				"model": model, "messages": messages, "max_tokens": remoteOutputTokenLimit(request),
 				"response_format": map[string]any{"type": "json_schema", "json_schema": map[string]any{
 					"name": "complyscan_output", "strict": true, "schema": request.Format,
 				}},
@@ -282,6 +282,13 @@ func openAICompatibleCompletion(baseURL, label string) remoteCompletionFactory {
 			return remoteResponse(choice.Message.Content, payload.Usage.PromptTokens, payload.Usage.CompletionTokens, time.Since(started), label)
 		}
 	}
+}
+
+func remoteOutputTokenLimit(request ollamaChatRequest) int {
+	if request.MaxOutputTokens > maxRemoteOutputTokens && request.MaxOutputTokens <= 16_384 {
+		return request.MaxOutputTokens
+	}
+	return maxRemoteOutputTokens
 }
 
 func remoteMessages(messages []ollamaMessage) ([]map[string]string, error) {
