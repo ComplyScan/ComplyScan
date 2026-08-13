@@ -980,6 +980,21 @@ func TestLifecycleStageChoicesExplainTheirMeaningInline(t *testing.T) {
 	}
 }
 
+func TestHumanOversightChoicesExplainTheirMeaningInline(t *testing.T) {
+	want := map[profile.HumanOversight]string{
+		profile.OversightRequired:  "required — a person must review before the output or action can proceed",
+		profile.OversightAvailable: "available — a person can monitor, override, or stop it, but review is not always required",
+		profile.OversightLimited:   "limited — human intervention exists only for some cases, stages, or after action",
+		profile.OversightNone:      "none — no person can effectively review, override, or stop it",
+		profile.OversightUnknown:   "unknown — the operational oversight process has not been confirmed",
+	}
+	for value, expected := range want {
+		if actual := setupChoiceLabel("Step 3 of 5 · Question 7 of 7 — Human oversight", string(value)); actual != expected {
+			t.Errorf("label for %q = %q, want %q", value, actual, expected)
+		}
+	}
+}
+
 func TestConfirmUsesTerminalSelectorWhenAvailable(t *testing.T) {
 	var output bytes.Buffer
 	called := false

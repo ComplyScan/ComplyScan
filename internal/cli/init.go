@@ -612,6 +612,14 @@ func setupChoiceLabel(questionLabel, value string) string {
 			string(profile.LifecycleRetired):     "no longer used, though records or obligations may remain",
 			string(profile.LifecycleUnknown):     "current stage has not been established",
 		}[value]
+	case strings.HasSuffix(strings.TrimSpace(questionLabel), "Human oversight"):
+		description = map[string]string{
+			string(profile.OversightRequired):  "a person must review before the output or action can proceed",
+			string(profile.OversightAvailable): "a person can monitor, override, or stop it, but review is not always required",
+			string(profile.OversightLimited):   "human intervention exists only for some cases, stages, or after action",
+			string(profile.OversightNone):      "no person can effectively review, override, or stop it",
+			string(profile.OversightUnknown):   "the operational oversight process has not been confirmed",
+		}[value]
 	default:
 		return value
 	}
