@@ -108,7 +108,7 @@ func TestRepositoryAnalysisIsRenderedAsAdvisoryEvidence(t *testing.T) {
 	if err := WriteMarkdown(&markdown, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(markdown.String(), "Repository-wide AI analysis") || !strings.Contains(markdown.String(), "does not determine legal applicability") {
+	if !strings.Contains(markdown.String(), "## AI uses found") || !strings.Contains(markdown.String(), "Summary generation") || !strings.Contains(markdown.String(), "This is not a legal compliance decision") {
 		t.Fatalf("repository analysis boundary missing from Markdown:\n%s", markdown.String())
 	}
 }
@@ -134,7 +134,7 @@ func TestExecutionVerificationIsRenderedWithoutComplianceClaim(t *testing.T) {
 	if err := WriteMarkdown(&markdown, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(markdown.String(), "## Isolated execution verification") || !strings.Contains(markdown.String(), "Passing does not establish compliance") {
+	if !strings.Contains(markdown.String(), "Execution check: go-tests") || !strings.Contains(markdown.String(), "Passing does not establish compliance") || !strings.Contains(markdown.String(), "Isolated execution checks: **1 passed, 0 failed**") {
 		t.Fatalf("verification missing from Markdown:\n%s", markdown.String())
 	}
 	var jsonOutput bytes.Buffer

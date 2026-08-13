@@ -16,7 +16,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
 
-func TestWriteMarkdownDeduplicatesReviewerIdentity(t *testing.T) {
+func TestWriteMarkdownKeepsReviewerDiagnosticsOutOfDeveloperSummary(t *testing.T) {
 	value := New(".", "dev", nil, nil, 0)
 	value.Review = &providers.ReviewResult{Provider: providers.OpenAI, Model: "test-model"}
 	value.TechnicalReview = &providers.TechnicalReviewResult{Provider: providers.OpenAI, Model: "test-model"}
@@ -24,8 +24,8 @@ func TestWriteMarkdownDeduplicatesReviewerIdentity(t *testing.T) {
 	if err := WriteMarkdown(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(output.String(), "openai / test-model") != 1 {
-		t.Fatalf("reviewer identity should appear once:\n%s", output.String())
+	if strings.Contains(output.String(), "openai / test-model") || strings.Contains(output.String(), "AI advisory review") {
+		t.Fatalf("developer summary included model diagnostics:\n%s", output.String())
 	}
 }
 
@@ -132,9 +132,9 @@ func TestWriteMarkdownExplainsTestOnlyComponentsAndQuickScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"AI review: **Not performed — quick technical scan**",
-		"Test-only references: **1** — OpenAI",
-		"Runtime-source integration code is not proof",
+		"Repository AI analysis: **not performed**",
+		"**Integration signals:** OpenAI",
+		"not necessarily an active AI use",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
@@ -142,6 +142,79 @@ func TestWriteMarkdownExplainsTestOnlyComponentsAndQuickScan(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "Detailed scanner evidence") || strings.Count(output.String(), "\n") > 80 {
 		t.Fatalf("concise Markdown included scanner trace or became too long:\n%s", output.String())
+	}
+}
+
+func TestWriteMarkdownPrioritizesDeveloperDecisions(t *testing.T) {
+	value := New(".", "dev", []rules.Finding{{
+		Fingerprint: "secret", RuleID: "AI-SEC-001", Title: "Possible secret exposure",
+		Severity: rules.SeverityHigh, Message: "A credential may reach an AI provider.",
+		Path: "client.go", StartLine: 18, Remediation: "Remove the credential from the request.",
+	}}, nil, 0)
+	value.AIInventory = func() *inventory.Report {
+		report := inventory.NewReport(".", "dev", []inventory.Signal{{
+			Name: "OpenAI", Kind: inventory.KindProvider, EvidenceType: inventory.EvidenceImport,
+			Scope: inventory.ScopeRuntime, Path: "client.go", Line: 3, Confidence: "high",
+		}}, nil)
+		return &report
+	}()
+	assessment := profile.AssessEUAIAct([]profile.System{profile.NewDraftSystem("assistant", "Assistant")})
+	evidence := framework.TechnicalEvidenceReport{
+		Analysis: framework.RepositoryAnalysis{SourceFilesSeen: 2, FilesIndexed: 2},
+		Objectives: []framework.ObjectiveAssessment{{
+			ID: "logging", Title: "Operational logging", Status: framework.ObjectiveCandidate,
+			Matches: []framework.EvidenceMatch{{Path: "audit.go", StartLine: 11}},
+		}},
+	}
+	value.Frameworks = []FrameworkResult{{
+		ID: "eu-ai-act", Name: "EU AI Act technical code evidence", Applicability: &assessment,
+		TechnicalEvidence: evidence,
+		Reconciliation: reconciliation.Report{Systems: []reconciliation.SystemResult{{
+			SystemID: "assistant", SystemName: "Assistant", Objectives: []reconciliation.ObjectiveResult{{
+				ObjectiveID: "logging", Title: "Operational logging",
+				Requirement: reconciliation.RequirementLikelyRequired,
+				Mapping:     reconciliation.MappingRequirementWithEvidence,
+			}, {
+				ObjectiveID: "oversight", Title: "Human oversight",
+				Requirement: reconciliation.RequirementLikelyRequired,
+				Mapping:     reconciliation.MappingRequirementWithoutEvidence,
+			}},
+		}}},
+	}}
+	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{
+		Provider: providers.OpenAI, Model: "test-model",
+		Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisFull, RepositoryFiles: 2, FilesSubmitted: 2},
+		Result: providers.RepositorySectionResult{
+			AIUses: []providers.RepositoryAIUse{{
+				ID: "assistant", Name: "Answer generation", Purpose: "Generate answers for users", Confidence: "high",
+				Evidence: []providers.RepositoryCitation{{Path: "client.go", Line: 24}},
+			}},
+			ObjectiveObservations: []providers.RepositoryObjectiveObservation{{
+				ObjectiveID: "eu-ai-act/logging", Strength: providers.StrengthStrong, Confidence: "high",
+				SupportingEvidence: []providers.RepositoryCitation{{Path: "audit.go", Line: 11}},
+			}},
+		},
+	}
+
+	var output bytes.Buffer
+	if err := WriteMarkdown(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"## Overall result", "**Action required**", "## AI uses found", "Answer generation",
+		"## What needs attention", "Possible secret exposure", "Human oversight",
+		"## Supporting code evidence", "Strong code-evidence lead", "audit.go:11",
+		"## Questions to confirm", "Operating regions have not been established",
+		"## Scan coverage", "Complete evidence and diagnostics: `latest.json`",
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
+		}
+	}
+	for _, excluded := range []string{"## Technical checklist", "## AI advisory review", "No evidence detected for", "not-substantiated"} {
+		if strings.Contains(output.String(), excluded) {
+			t.Errorf("developer summary contains diagnostic detail %q:\n%s", excluded, output.String())
+		}
 	}
 }
 

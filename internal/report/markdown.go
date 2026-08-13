@@ -17,53 +17,7 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 	if _, err := fmt.Fprintln(writer, "# ComplyScan report"); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(writer, "\n> This report identifies technical signals in the repository. It does not determine legal compliance or prove that a control works in production."); err != nil {
-		return err
-	}
-	if err := writeReportOverviewMarkdown(writer, report); err != nil {
-		return err
-	}
-	if report.AIInventory != nil {
-		if err := writeAIComponentSummaryMarkdown(writer, *report.AIInventory); err != nil {
-			return err
-		}
-	}
-	if err := writeTechnicalChecklistMarkdown(writer, report); err != nil {
-		return err
-	}
-	if report.RepositoryAnalysis != nil {
-		if err := writeRepositoryAnalysisMarkdown(writer, *report.RepositoryAnalysis); err != nil {
-			return err
-		}
-	}
-	if err := writeModelReviewSummaryMarkdown(writer, report); err != nil {
-		return err
-	}
-	if err := writeRecommendedActionsMarkdown(writer, report); err != nil {
-		return err
-	}
-	if err := writeCompactVerificationMarkdown(writer, report); err != nil {
-		return err
-	}
-	if len(report.Warnings) > 0 {
-		if _, err := fmt.Fprintln(writer, "\n## Scan warnings"); err != nil {
-			return err
-		}
-		for _, warning := range report.Warnings {
-			if _, err := fmt.Fprintf(writer, "\n- %s", markdownText(warning)); err != nil {
-				return err
-			}
-		}
-		if _, err := fmt.Fprintln(writer); err != nil {
-			return err
-		}
-	}
-	if _, err := fmt.Fprintf(writer, "\n## About this scan\n\n- Scan ID: %s\n- Created: %s\n- Tool: ComplyScan %s\n- Full machine-readable evidence: %s in this report directory\n",
-		inlineCode(report.Scan.ID), inlineCode(report.Scan.CreatedAt), markdownText(report.Tool.Version), inlineCode("latest.json")); err != nil {
-		return err
-	}
-	_, err := fmt.Fprintln(writer, "\n---\n\nCandidate evidence requires technical and human verification. No evidence detected is a bounded search result, not proof that an implementation is absent.")
-	return err
+	return writeDeveloperReportMarkdown(writer, report)
 }
 
 // WriteDetailedMarkdown retains the exhaustive human-readable scanner trace
