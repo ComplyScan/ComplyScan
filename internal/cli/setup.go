@@ -737,7 +737,7 @@ func configureSetupReviewOnce(ctx context.Context, prompt promptSession, stdout 
 func promptAnalysisProvider(prompt promptSession, current string) (string, error) {
 	const (
 		hostedOption = "Cloud AI review — recommended; selected models using your API key"
-		fastOption   = "Fast technical analysis — no model and no external processing"
+		fastOption   = "Fast technical analysis — finds known code signals but cannot judge whether requirements are satisfied"
 		localOption  = "Experimental local AI — advanced Ollama setup; quality is not assured"
 	)
 	defaultMode := hostedOption
@@ -745,7 +745,7 @@ func promptAnalysisProvider(prompt promptSession, current string) (string, error
 		defaultMode = localOption
 	}
 	for {
-		selected, err := promptChoice(prompt, "Analysis mode", defaultMode, hostedOption, fastOption, localOption)
+		selected, err := promptChoice(prompt, "Analysis mode", defaultMode, hostedOption, localOption, fastOption)
 		if err != nil {
 			return "", err
 		}

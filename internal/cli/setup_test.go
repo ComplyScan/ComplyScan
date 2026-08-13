@@ -179,7 +179,7 @@ func TestPromptAnalysisProviderGroupsHostedProviders(t *testing.T) {
 			calls++
 			switch calls {
 			case 1:
-				if label != "Analysis mode" || defaultValue != "Cloud AI review — recommended; selected models using your API key" || len(options) != 3 || !strings.Contains(options[2].Label, "Experimental local AI") {
+				if label != "Analysis mode" || defaultValue != "Cloud AI review — recommended; selected models using your API key" || len(options) != 3 || !strings.Contains(options[1].Label, "Experimental local AI") || !strings.Contains(options[2].Label, "cannot judge whether requirements are satisfied") {
 					t.Fatalf("analysis selector: label=%q default=%q options=%#v", label, defaultValue, options)
 				}
 				return options[0].Value, nil
@@ -247,7 +247,7 @@ func TestPromptAnalysisProviderCanReturnFromHostedProvider(t *testing.T) {
 				}
 				return backChoiceValue, nil
 			case 3:
-				return options[1].Value, nil // Fast technical analysis.
+				return options[2].Value, nil // Fast technical analysis.
 			default:
 				t.Fatalf("unexpected selector call %d", calls)
 				return "", nil
@@ -532,7 +532,7 @@ func TestOllamaResourceEstimateUsesTransparentRanges(t *testing.T) {
 func TestInteractiveSetupCreatesRepositoryProfileAndSelectsExperimentalLocalReview(t *testing.T) {
 	target := t.TempDir()
 	input := strings.NewReader(strings.Join([]string{
-		"3", "", // experimental local analysis, Ollama model
+		"2", "", // experimental local analysis, Ollama model
 		"", "", // system name, intended purpose
 		"7", "4", "5", "5", "5", // unknown profile facts
 		"1",            // EU technical mapping
