@@ -74,7 +74,7 @@ func validateOllamaResult(value report.Report, expectedModel string) ([]string, 
 
 func validateFrameworkTarget(result report.FrameworkResult, target validationTarget, expectedModel string) ([]string, error) {
 	if result.TechnicalReview == nil {
-		return nil, fmt.Errorf("%s result has no Ollama technical review", target.Label)
+		return nil, fmt.Errorf("%s result has no model-assisted technical review", target.Label)
 	}
 	if result.TechnicalReview.Model != expectedModel {
 		return nil, fmt.Errorf("%s review model is %q, want %q", target.Label, result.TechnicalReview.Model, expectedModel)
