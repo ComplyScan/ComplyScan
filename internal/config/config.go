@@ -248,7 +248,11 @@ func (c Config) Validate() error {
 }
 
 func (c RepositoryAnalysisConfig) Validate() error {
-	switch c.Mode {
+	mode := c.Mode
+	if mode == "" {
+		mode = "auto"
+	}
+	switch mode {
 	case "auto", "full", "hierarchical", "bounded-only":
 	default:
 		return errors.New("mode must be auto, full, hierarchical, or bounded-only")
