@@ -594,16 +594,27 @@ func promptChoice[T ~string](session promptSession, label string, defaultValue T
 }
 
 func setupChoiceLabel(questionLabel, value string) string {
-	if !strings.HasSuffix(strings.TrimSpace(questionLabel), "Decision impact") {
+	var description string
+	switch {
+	case strings.HasSuffix(strings.TrimSpace(questionLabel), "Decision impact"):
+		description = map[string]string{
+			string(profile.ImpactAdvisory):    "AI suggests; a person independently reviews before action",
+			string(profile.ImpactLow):         "limited, reversible effect without material impact on people",
+			string(profile.ImpactSignificant): "materially influences an important outcome for a person",
+			string(profile.ImpactAutonomous):  "can trigger a consequential action without prior human approval",
+			string(profile.ImpactUnknown):     "downstream effect has not been established",
+		}[value]
+	case strings.HasSuffix(strings.TrimSpace(questionLabel), "Lifecycle stage"):
+		description = map[string]string{
+			string(profile.LifecycleDevelopment): "being designed or implemented; not used in normal operation",
+			string(profile.LifecycleTesting):     "controlled validation, pilot, or pre-production use",
+			string(profile.LifecycleProduction):  "available or used in normal real-world operation",
+			string(profile.LifecycleRetired):     "no longer used, though records or obligations may remain",
+			string(profile.LifecycleUnknown):     "current stage has not been established",
+		}[value]
+	default:
 		return value
 	}
-	description := map[string]string{
-		string(profile.ImpactAdvisory):    "AI suggests; a person independently reviews before action",
-		string(profile.ImpactLow):         "limited, reversible effect without material impact on people",
-		string(profile.ImpactSignificant): "materially influences an important outcome for a person",
-		string(profile.ImpactAutonomous):  "can trigger a consequential action without prior human approval",
-		string(profile.ImpactUnknown):     "downstream effect has not been established",
-	}[value]
 	if description == "" {
 		return value
 	}

@@ -965,6 +965,21 @@ func TestDecisionImpactChoicesExplainTheirMeaningInline(t *testing.T) {
 	}
 }
 
+func TestLifecycleStageChoicesExplainTheirMeaningInline(t *testing.T) {
+	want := map[profile.LifecycleStage]string{
+		profile.LifecycleDevelopment: "development — being designed or implemented; not used in normal operation",
+		profile.LifecycleTesting:     "testing — controlled validation, pilot, or pre-production use",
+		profile.LifecycleProduction:  "production — available or used in normal real-world operation",
+		profile.LifecycleRetired:     "retired — no longer used, though records or obligations may remain",
+		profile.LifecycleUnknown:     "unknown — current stage has not been established",
+	}
+	for value, expected := range want {
+		if actual := setupChoiceLabel("Step 3 of 5 · Question 6 of 7 — Lifecycle stage", string(value)); actual != expected {
+			t.Errorf("label for %q = %q, want %q", value, actual, expected)
+		}
+	}
+}
+
 func TestConfirmUsesTerminalSelectorWhenAvailable(t *testing.T) {
 	var output bytes.Buffer
 	called := false
