@@ -22,6 +22,10 @@ const (
 	maxRemoteOutputTokens  = 4096
 )
 
+// OpenAIMaxOutputTokens is the documented GPT-5.6 output ceiling used to
+// prevent an account-level token allowance from producing an invalid request.
+const OpenAIMaxOutputTokens = 128_000
+
 var (
 	remoteTokenLimitPattern = regexp.MustCompile(`(?i)limit\s+([0-9]+),\s*requested\s+([0-9]+)`)
 	remoteRetryDelayPattern = regexp.MustCompile(`(?i)try again in\s+([0-9]+(?:\.[0-9]+)?)\s*(ms|s)`)
@@ -66,6 +70,7 @@ type RemoteIncompleteError struct {
 	InputTokens     int
 	OutputTokens    int
 	ReasoningTokens int
+	TokenLimit      int
 }
 
 func (value *RemoteIncompleteError) Error() string {
@@ -182,7 +187,7 @@ func openAICompletion(client *http.Client, apiKey, model string) func(context.Co
 			"model":             model,
 			"input":             messages,
 			"store":             false,
-			"max_output_tokens": remoteOutputTokenLimit(request),
+			"max_output_tokens": remoteOutputTokenLimit(request, OpenAIMaxOutputTokens),
 			"text":              textConfig,
 		}
 		if request.ReasoningEffort != "" {
@@ -210,7 +215,8 @@ func openAICompletion(client *http.Client, apiKey, model string) func(context.Co
 			} `json:"usage"`
 		}
 		started := time.Now()
-		if err := postRemoteJSON(ctx, client, "OpenAI", openAIResponsesURL, apiKey, "Authorization", "Bearer ", body, &payload, nil); err != nil {
+		var responseHeaders http.Header
+		if err := postRemoteJSON(ctx, client, "OpenAI", openAIResponsesURL, apiKey, "Authorization", "Bearer ", body, &payload, &responseHeaders, nil); err != nil {
 			return ollamaChatResponse{}, err
 		}
 		if payload.Status != "completed" {
@@ -218,6 +224,7 @@ func openAICompletion(client *http.Client, apiKey, model string) func(context.Co
 				Provider: "OpenAI", Status: payload.Status, Reason: payload.IncompleteDetails.Reason,
 				InputTokens: payload.Usage.InputTokens, OutputTokens: payload.Usage.OutputTokens,
 				ReasoningTokens: payload.Usage.OutputDetails.ReasoningTokens,
+				TokenLimit:      remoteResponseTokenLimit(responseHeaders),
 			}
 		}
 		content := ""
@@ -244,7 +251,7 @@ func anthropicCompletion(client *http.Client, apiKey, model string) func(context
 			return ollamaChatResponse{}, err
 		}
 		body := map[string]any{
-			"model": model, "max_tokens": remoteOutputTokenLimit(request), "system": system,
+			"model": model, "max_tokens": remoteOutputTokenLimit(request, 16_384), "system": system,
 			"messages":      []map[string]string{{"role": "user", "content": user}},
 			"output_config": map[string]any{"format": map[string]any{"type": "json_schema", "schema": request.Format}},
 		}
@@ -261,7 +268,7 @@ func anthropicCompletion(client *http.Client, apiKey, model string) func(context
 		}
 		headers := map[string]string{"anthropic-version": "2023-06-01"}
 		started := time.Now()
-		if err := postRemoteJSON(ctx, client, "Anthropic", anthropicMessagesURL, apiKey, "x-api-key", "", body, &payload, headers); err != nil {
+		if err := postRemoteJSON(ctx, client, "Anthropic", anthropicMessagesURL, apiKey, "x-api-key", "", body, &payload, nil, headers); err != nil {
 			return ollamaChatResponse{}, err
 		}
 		if payload.StopReason != "end_turn" && payload.StopReason != "stop_sequence" {
@@ -303,7 +310,7 @@ func geminiCompletion(client *http.Client, apiKey, model string) func(context.Co
 			} `json:"usage"`
 		}
 		started := time.Now()
-		if err := postRemoteJSON(ctx, client, "Gemini", geminiInteractionsURL, apiKey, "x-goog-api-key", "", body, &payload, nil); err != nil {
+		if err := postRemoteJSON(ctx, client, "Gemini", geminiInteractionsURL, apiKey, "x-goog-api-key", "", body, &payload, nil, nil); err != nil {
 			return ollamaChatResponse{}, err
 		}
 		if payload.Status != "completed" {
@@ -332,7 +339,7 @@ func openAICompatibleCompletion(baseURL, label string) remoteCompletionFactory {
 				return ollamaChatResponse{}, err
 			}
 			body := map[string]any{
-				"model": model, "messages": messages, "max_tokens": remoteOutputTokenLimit(request),
+				"model": model, "messages": messages, "max_tokens": remoteOutputTokenLimit(request, 16_384),
 				"response_format": map[string]any{"type": "json_schema", "json_schema": map[string]any{
 					"name": "complyscan_output", "strict": true, "schema": request.Format,
 				}},
@@ -351,7 +358,7 @@ func openAICompatibleCompletion(baseURL, label string) remoteCompletionFactory {
 				} `json:"usage"`
 			}
 			started := time.Now()
-			if err := postRemoteJSON(ctx, client, label, baseURL+"/chat/completions", apiKey, "Authorization", "Bearer ", body, &payload, nil); err != nil {
+			if err := postRemoteJSON(ctx, client, label, baseURL+"/chat/completions", apiKey, "Authorization", "Bearer ", body, &payload, nil, nil); err != nil {
 				return ollamaChatResponse{}, err
 			}
 			if len(payload.Choices) != 1 {
@@ -369,11 +376,28 @@ func openAICompatibleCompletion(baseURL, label string) remoteCompletionFactory {
 	}
 }
 
-func remoteOutputTokenLimit(request ollamaChatRequest) int {
-	if request.MaxOutputTokens > 0 && request.MaxOutputTokens <= 16_384 {
+func remoteOutputTokenLimit(request ollamaChatRequest, maximum int) int {
+	if request.MaxOutputTokens > 0 && request.MaxOutputTokens <= maximum {
 		return request.MaxOutputTokens
 	}
 	return maxRemoteOutputTokens
+}
+
+func remoteResponseTokenLimit(headers http.Header) int {
+	limit := positiveHeaderInt(headers, "x-ratelimit-limit-tokens")
+	projectLimit := positiveHeaderInt(headers, "x-ratelimit-limit-project-tokens")
+	if projectLimit > 0 && (limit == 0 || projectLimit < limit) {
+		return projectLimit
+	}
+	return limit
+}
+
+func positiveHeaderInt(headers http.Header, name string) int {
+	value, err := strconv.Atoi(strings.TrimSpace(headers.Get(name)))
+	if err != nil || value <= 0 {
+		return 0
+	}
+	return value
 }
 
 func remoteMessages(messages []ollamaMessage) ([]map[string]string, error) {
@@ -408,7 +432,7 @@ func remotePromptPair(messages []ollamaMessage) (string, string, error) {
 	return system, user, nil
 }
 
-func postRemoteJSON(ctx context.Context, client *http.Client, label, endpoint, apiKey, keyHeader, keyPrefix string, body any, target any, extraHeaders map[string]string) error {
+func postRemoteJSON(ctx context.Context, client *http.Client, label, endpoint, apiKey, keyHeader, keyPrefix string, body any, target any, responseHeaders *http.Header, extraHeaders map[string]string) error {
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("encode %s request: %w", label, err)
@@ -428,6 +452,9 @@ func postRemoteJSON(ctx context.Context, client *http.Client, label, endpoint, a
 		return fmt.Errorf("request %s review: %w", label, err)
 	}
 	defer response.Body.Close()
+	if responseHeaders != nil {
+		*responseHeaders = response.Header.Clone()
+	}
 	responseBody, err := readLimited(response.Body, maxRemoteResponseBytes)
 	if err != nil {
 		return fmt.Errorf("read %s response: %w", label, err)

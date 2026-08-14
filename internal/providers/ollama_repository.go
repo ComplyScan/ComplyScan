@@ -54,10 +54,7 @@ func (provider *OllamaProvider) ReviewRepository(ctx context.Context, request Re
 	}
 	reasoningEffort, textVerbosity := "", ""
 	if request.Mode == RepositoryAnalysisTargeted {
-		reasoningEffort, textVerbosity = "low", "low"
-		if request.OutputRecovery {
-			reasoningEffort = "none"
-		}
+		reasoningEffort, textVerbosity = "medium", "low"
 	}
 	response, err := provider.chat(ctx, ollamaChatRequest{
 		Model: provider.model,

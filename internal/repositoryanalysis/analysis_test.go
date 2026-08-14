@@ -44,7 +44,7 @@ func (reviewer *repositoryOutputRecoveryReviewer) ReviewRepository(ctx context.C
 		reviewer.incomplete = true
 		return providers.RepositoryAnalysisResult{}, &providers.RemoteIncompleteError{
 			Provider: "OpenAI", Status: "incomplete", Reason: "max_output_tokens",
-			InputTokens: 100, OutputTokens: 4096, ReasoningTokens: 3000,
+			InputTokens: 4200, OutputTokens: 4096, ReasoningTokens: 3000, TokenLimit: 10_000,
 		}
 	}
 	reviewer.recordingReviewer.requests = reviewer.requests[:len(reviewer.requests)-1]
@@ -214,10 +214,10 @@ func TestRunTargetedUsesSecondAndFinalCallForCompactOutputRecovery(t *testing.T)
 	if len(reviewer.requests) != 2 || !reviewer.requests[0].AllowFollowUp || reviewer.requests[0].OutputRecovery || reviewer.requests[1].AllowFollowUp || !reviewer.requests[1].OutputRecovery {
 		t.Fatalf("output recovery request sequence = %#v", reviewer.requests)
 	}
-	if reviewer.requests[0].MaxOutputTokens != 4096 || reviewer.requests[1].MaxOutputTokens != 4096 {
+	if reviewer.requests[0].MaxOutputTokens != 4096 || reviewer.requests[1].MaxOutputTokens != 5800 {
 		t.Fatalf("output allowances = %d, %d", reviewer.requests[0].MaxOutputTokens, reviewer.requests[1].MaxOutputTokens)
 	}
-	if !result.OutputRecoveryUsed || result.FollowUpRequested || result.Usage.PromptTokens != 110 || result.Usage.CompletionTokens != 4098 || result.Usage.ReasoningTokens != 3000 {
+	if !result.OutputRecoveryUsed || result.FollowUpRequested || result.Usage.PromptTokens != 4210 || result.Usage.CompletionTokens != 4098 || result.Usage.ReasoningTokens != 3000 {
 		t.Fatalf("output recovery result = %#v", result)
 	}
 	recoveryEvents := 0

@@ -126,14 +126,17 @@ func TestRemoteProviderErrorsDoNotExposeCredential(t *testing.T) {
 
 func TestOpenAIIncompleteResponsePreservesReasonAndUsage(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-		return testJSONResponse(http.StatusOK, map[string]any{
+		response := testJSONResponse(http.StatusOK, map[string]any{
 			"status":             "incomplete",
 			"incomplete_details": map[string]string{"reason": "max_output_tokens"},
 			"usage": map[string]any{
 				"input_tokens": 3210, "output_tokens": 4096,
 				"output_tokens_details": map[string]int{"reasoning_tokens": 3000},
 			},
-		}), nil
+		})
+		response.Header.Set("x-ratelimit-limit-tokens", "10000")
+		response.Header.Set("x-ratelimit-limit-project-tokens", "12000")
+		return response, nil
 	})}
 	provider, err := NewOpenAI(RemoteOptions{APIKey: "test-key", Model: "test", Timeout: time.Second, MaxFindings: 1, HTTPClient: client})
 	if err != nil {
@@ -144,7 +147,7 @@ func TestOpenAIIncompleteResponsePreservesReasonAndUsage(t *testing.T) {
 		t.Fatalf("incomplete response details were lost: %v", err)
 	}
 	incomplete, ok := AsRemoteIncompleteError(err)
-	if !ok || incomplete.Reason != "max_output_tokens" || incomplete.InputTokens != 3210 || incomplete.OutputTokens != 4096 || incomplete.ReasoningTokens != 3000 {
+	if !ok || incomplete.Reason != "max_output_tokens" || incomplete.InputTokens != 3210 || incomplete.OutputTokens != 4096 || incomplete.ReasoningTokens != 3000 || incomplete.TokenLimit != 10000 {
 		t.Fatalf("incomplete response was not structured: %#v, %t", incomplete, ok)
 	}
 }
@@ -154,8 +157,8 @@ func TestOpenAITargetedRepositoryReviewUsesCompactReasoningAndSchema(t *testing.
 		name, effort string
 		recovery     bool
 	}{
-		{name: "initial", effort: "low"},
-		{name: "recovery", effort: "none", recovery: true},
+		{name: "initial", effort: "medium"},
+		{name: "recovery", effort: "medium", recovery: true},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -230,10 +233,13 @@ func TestRemoteStatusErrorParsesRetryDelayFromMessage(t *testing.T) {
 }
 
 func TestRemoteOutputTokenLimitHonorsAdaptiveReduction(t *testing.T) {
-	if got := remoteOutputTokenLimit(ollamaChatRequest{MaxOutputTokens: 2_000}); got != 2_000 {
+	if got := remoteOutputTokenLimit(ollamaChatRequest{MaxOutputTokens: 2_000}, 16_384); got != 2_000 {
 		t.Fatalf("adaptive output limit = %d, want 2000", got)
 	}
-	if got := remoteOutputTokenLimit(ollamaChatRequest{}); got != maxRemoteOutputTokens {
+	if got := remoteOutputTokenLimit(ollamaChatRequest{MaxOutputTokens: OpenAIMaxOutputTokens}, OpenAIMaxOutputTokens); got != OpenAIMaxOutputTokens {
+		t.Fatalf("OpenAI output limit = %d, want %d", got, OpenAIMaxOutputTokens)
+	}
+	if got := remoteOutputTokenLimit(ollamaChatRequest{}, 16_384); got != maxRemoteOutputTokens {
 		t.Fatalf("default output limit = %d, want %d", got, maxRemoteOutputTokens)
 	}
 }

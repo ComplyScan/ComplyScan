@@ -94,14 +94,16 @@ func runTargeted(
 		if !canRecover || incomplete.Reason != "max_output_tokens" {
 			return providers.RepositoryAnalysisResult{}, fmt.Errorf("analyze targeted repository evidence: %w", err)
 		}
+		recoveryOutputTokens := targetedRecoveryOutputTokens(request.MaxOutputTokens, incomplete)
 		if progressErr := progress(options, Progress{
 			Stage: "targeted-output-recovery", Completed: 0, Total: 1, Scope: ".", InputBytes: inputBytes,
-			Detail: fmt.Sprintf("retry compact output after %d output token(s), including %d reasoning token(s)", incomplete.OutputTokens, incomplete.ReasoningTokens),
+			Detail: fmt.Sprintf("retry compact output with %d token(s) after %d output token(s), including %d reasoning token(s)", recoveryOutputTokens, incomplete.OutputTokens, incomplete.ReasoningTokens),
 		}); progressErr != nil {
 			return providers.RepositoryAnalysisResult{}, progressErr
 		}
 		request.AllowFollowUp = false
 		request.OutputRecovery = true
+		request.MaxOutputTokens = recoveryOutputTokens
 		result, err = reviewRepositoryWithRetry(ctx, reviewer, request, options)
 		if err != nil {
 			return providers.RepositoryAnalysisResult{}, fmt.Errorf("recover targeted repository output: %w", err)
@@ -110,7 +112,7 @@ func runTargeted(
 		addUsage(&result.Usage, providers.Usage{
 			PromptTokens: incomplete.InputTokens, CompletionTokens: incomplete.OutputTokens, ReasoningTokens: incomplete.ReasoningTokens,
 		})
-		result.Notes = append(result.Notes, "The initial targeted response exhausted its output allowance. ComplyScan used its sole second call for a terse no-follow-up recovery response.")
+		result.Notes = append(result.Notes, fmt.Sprintf("The initial targeted response exhausted its output allowance. ComplyScan used its sole second call for a terse no-follow-up recovery response with medium reasoning and an output allowance of %d tokens.", request.MaxOutputTokens))
 		if progressErr := progress(options, Progress{
 			Stage: "targeted-output-recovery", Completed: 1, Total: 1, Scope: ".", InputBytes: inputBytes,
 			Detail: "compact structured result completed",
@@ -178,6 +180,20 @@ func targetedOutputTokens(provider providers.Kind) int {
 		return maximumRecoveryOutput
 	}
 	return targetedRemoteOutputTokens
+}
+
+func targetedRecoveryOutputTokens(current int, incomplete *providers.RemoteIncompleteError) int {
+	if incomplete == nil || incomplete.TokenLimit <= 0 || incomplete.InputTokens <= 0 {
+		return current
+	}
+	available := incomplete.TokenLimit - incomplete.InputTokens
+	if available > providers.OpenAIMaxOutputTokens {
+		available = providers.OpenAIMaxOutputTokens
+	}
+	if available <= current {
+		return current
+	}
+	return available
 }
 
 func targetedFollowUpFiles(repository discovery.Repository, graph codegraph.Graph, plan providers.TechnicalSearchPlan, existing []providers.RepositorySourceFile, budget int64) []providers.RepositorySourceFile {
