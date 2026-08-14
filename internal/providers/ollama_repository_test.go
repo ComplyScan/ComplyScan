@@ -40,6 +40,32 @@ func TestReviewRepositoryValidatesCitationsAndRedactsSource(t *testing.T) {
 	if result.Coverage.Mode != RepositoryAnalysisFull || result.Coverage.CitationsChecked != 2 || len(result.Result.AIUses) != 1 {
 		t.Fatalf("unexpected repository result: %#v", result)
 	}
+	if result.Result.ObjectiveObservations[0].TechnicalVerdict != RepositoryVerdictPartial {
+		t.Fatalf("technical verdict = %q", result.Result.ObjectiveObservations[0].TechnicalVerdict)
+	}
+}
+
+func TestRepositoryObjectiveObservationDerivesTechnicalVerdict(t *testing.T) {
+	support := []RepositoryCitation{{Path: "app.go", Line: 10, Summary: "Production path implements the safeguard."}}
+	for _, testCase := range []struct {
+		name  string
+		value RepositoryObjectiveObservation
+		want  RepositoryTechnicalVerdict
+	}{
+		{name: "implemented", value: RepositoryObjectiveObservation{Strength: StrengthStrong, Confidence: "high", SupportingEvidence: support}, want: RepositoryVerdictImplemented},
+		{name: "strong with missing part", value: RepositoryObjectiveObservation{Strength: StrengthStrong, Confidence: "high", SupportingEvidence: support, MissingEvidence: []string{"Bypass handling"}}, want: RepositoryVerdictPartial},
+		{name: "partial", value: RepositoryObjectiveObservation{Strength: StrengthPartial, Confidence: "medium", SupportingEvidence: support}, want: RepositoryVerdictPartial},
+		{name: "not implemented", value: RepositoryObjectiveObservation{Strength: StrengthNotSupported, Confidence: "high"}, want: RepositoryVerdictNotImplemented},
+		{name: "untrusted supplied verdict ignored", value: RepositoryObjectiveObservation{Strength: StrengthNotSupported, Confidence: "high", TechnicalVerdict: RepositoryVerdictImplemented}, want: RepositoryVerdictNotImplemented},
+		{name: "low confidence", value: RepositoryObjectiveObservation{Strength: StrengthStrong, Confidence: "low", SupportingEvidence: support}, want: RepositoryVerdictCannotDetermine},
+		{name: "uncertain", value: RepositoryObjectiveObservation{Strength: StrengthUncertain, Confidence: "medium"}, want: RepositoryVerdictCannotDetermine},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := testCase.value.DerivedTechnicalVerdict(); got != testCase.want {
+				t.Fatalf("verdict = %q, want %q", got, testCase.want)
+			}
+		})
+	}
 }
 
 func TestReviewRepositoryReturnsValidatedBoundedFollowUp(t *testing.T) {

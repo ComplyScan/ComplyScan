@@ -146,6 +146,7 @@ type TechnicalSourceContext struct {
 type EvidenceStrength string
 type TechnicalConclusion string
 type AssuranceLevel string
+type RepositoryTechnicalVerdict string
 
 const (
 	StrengthStrong       EvidenceStrength = "strong"
@@ -168,6 +169,11 @@ const (
 	AssuranceTestEvidenceObserved    AssuranceLevel = "test-evidence-observed"
 	AssuranceInvestigationNoEvidence AssuranceLevel = "investigation-no-evidence"
 	AssuranceUnableToDetermine       AssuranceLevel = "unable-to-determine"
+
+	RepositoryVerdictImplemented     RepositoryTechnicalVerdict = "implemented-in-reviewed-code"
+	RepositoryVerdictPartial         RepositoryTechnicalVerdict = "partially-implemented-in-reviewed-code"
+	RepositoryVerdictNotImplemented  RepositoryTechnicalVerdict = "not-implemented-in-reviewed-code"
+	RepositoryVerdictCannotDetermine RepositoryTechnicalVerdict = "cannot-determine-from-reviewed-code"
 )
 
 type TechnicalEvidenceClaim struct {
@@ -332,15 +338,44 @@ type RepositoryAIUse struct {
 }
 
 type RepositoryObjectiveObservation struct {
-	ObjectiveID           string               `json:"objective_id"`
-	SystemID              string               `json:"system_id,omitempty"`
-	Strength              EvidenceStrength     `json:"strength"`
-	Confidence            string               `json:"confidence"`
-	Rationale             string               `json:"rationale"`
-	SupportingEvidence    []RepositoryCitation `json:"supporting_evidence"`
-	ContradictoryEvidence []RepositoryCitation `json:"contradictory_evidence"`
-	MissingEvidence       []string             `json:"missing_evidence,omitempty"`
-	UnresolvedQuestions   []string             `json:"unresolved_questions,omitempty"`
+	ObjectiveID           string                     `json:"objective_id"`
+	SystemID              string                     `json:"system_id,omitempty"`
+	Strength              EvidenceStrength           `json:"strength"`
+	Confidence            string                     `json:"confidence"`
+	TechnicalVerdict      RepositoryTechnicalVerdict `json:"technical_verdict,omitempty"`
+	Rationale             string                     `json:"rationale"`
+	SupportingEvidence    []RepositoryCitation       `json:"supporting_evidence"`
+	ContradictoryEvidence []RepositoryCitation       `json:"contradictory_evidence"`
+	MissingEvidence       []string                   `json:"missing_evidence,omitempty"`
+	UnresolvedQuestions   []string                   `json:"unresolved_questions,omitempty"`
+}
+
+// DerivedTechnicalVerdict converts a validated model observation into a
+// bounded code-level decision. It does not decide legal applicability,
+// deployment state, or operational effectiveness.
+func (value RepositoryObjectiveObservation) DerivedTechnicalVerdict() RepositoryTechnicalVerdict {
+	if value.Confidence == "low" {
+		return RepositoryVerdictCannotDetermine
+	}
+	switch value.Strength {
+	case StrengthStrong:
+		if len(value.SupportingEvidence) == 0 {
+			return RepositoryVerdictCannotDetermine
+		}
+		if value.Confidence == "high" && len(value.ContradictoryEvidence) == 0 && len(value.MissingEvidence) == 0 {
+			return RepositoryVerdictImplemented
+		}
+		return RepositoryVerdictPartial
+	case StrengthPartial:
+		if len(value.SupportingEvidence) > 0 {
+			return RepositoryVerdictPartial
+		}
+		return RepositoryVerdictCannotDetermine
+	case StrengthWeak, StrengthNotSupported:
+		return RepositoryVerdictNotImplemented
+	default:
+		return RepositoryVerdictCannotDetermine
+	}
 }
 
 type RepositoryUnmappedObservation struct {

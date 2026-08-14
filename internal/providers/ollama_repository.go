@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const RepositoryAnalysisPromptVersion = "3"
+const RepositoryAnalysisPromptVersion = "4"
 
 const (
 	maxRepositoryUses         = 100
@@ -309,6 +309,7 @@ func validateRepositorySection(value RepositorySectionResult, scope string, allo
 		}
 		observation.MissingEvidence = cleanRepositoryList(observation.MissingEvidence, maxRepositoryQuestions)
 		observation.UnresolvedQuestions = cleanRepositoryList(observation.UnresolvedQuestions, maxRepositoryQuestions)
+		observation.TechnicalVerdict = observation.DerivedTechnicalVerdict()
 	}
 	for index := range value.UnmappedObservations {
 		observation := &value.UnmappedObservations[index]
@@ -459,6 +460,8 @@ Rules:
 - in targeted-evidence mode, treat files outside the submitted package as not reviewed, not as absent;
 - strength describes repository support for a supplied technical objective, not legal compliance;
 - use strong only for directly connected implementation and verification evidence; partial when important connections or safeguards are missing; weak for superficial, indirect, or test-only evidence; not_supported for off-topic or contradictory candidates; uncertain when repository context cannot decide;
+- make a definite technical judgment when the submitted executable evidence supports one; do not defer repository code facts to a person merely because legal applicability or runtime operation remains outside the scan;
+- before using strong, actively look for bypass paths, contradictory executable behavior, test-only reachability, missing production connections, and missing elements named by the objective; record any such issue under contradictory_evidence, missing_evidence, or unresolved_questions;
 - list AI activity that cannot be mapped to any supplied objective under unmapped_observations and explain why;
 - identify deployment status, organisation role, legal risk category, geographic operation, real human practice, and runtime effectiveness as unresolved unless repository evidence directly establishes the narrower technical fact;
 - do not invent systems, legal conclusions, requirements, code, paths, line numbers, or runtime facts;
