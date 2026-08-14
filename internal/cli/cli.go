@@ -1151,6 +1151,10 @@ func remoteProviderName(settings config.AIConfig) string {
 
 func technicalReviewProgress(output io.Writer, provider string, started time.Time, now func() time.Time) func(technicalreview.Progress) error {
 	return func(progress technicalreview.Progress) error {
+		if progress.Stage == technicalreview.ProgressStageRateLimitWait {
+			_, err := fmt.Fprintf(output, "Provider rate limit reached during evidence investigation %d/%d; waiting %s before retry %d/%d.\n", progress.Current, progress.Total, progress.Wait.Round(time.Second), progress.Attempt, progress.RetryTotal)
+			return err
+		}
 		status := "reviewing with " + reviewProviderLabel(provider)
 		if progress.Cached {
 			status = "using cached observation"

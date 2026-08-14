@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 )
@@ -21,6 +22,33 @@ type planningReviewer struct {
 
 type intermittentReviewer struct {
 	calls int
+}
+
+type rateLimitedReviewer struct {
+	reviewCalls int
+	planCalls   int
+}
+
+func (reviewer *rateLimitedReviewer) ReviewTechnical(_ context.Context, request providers.TechnicalReviewRequest) (providers.TechnicalReviewResult, error) {
+	result := providers.TechnicalReviewResult{Provider: providers.OpenAI, Model: "test", InputCandidates: len(request.Candidates), Observations: []providers.TechnicalObservation{}}
+	if len(request.Candidates) == 0 {
+		return result, nil
+	}
+	reviewer.reviewCalls++
+	if reviewer.reviewCalls == 1 {
+		return providers.TechnicalReviewResult{}, &providers.RemoteRateLimitError{Provider: "OpenAI", RetryAfter: 20 * time.Second}
+	}
+	result.Reviewed = 1
+	result.Observations = []providers.TechnicalObservation{testObservation(request.Candidates[0])}
+	return result, nil
+}
+
+func (reviewer *rateLimitedReviewer) PlanTechnicalSearch(_ context.Context, _ providers.TechnicalCandidate) (providers.TechnicalSearchPlan, providers.Usage, error) {
+	reviewer.planCalls++
+	if reviewer.planCalls == 1 {
+		return providers.TechnicalSearchPlan{}, providers.Usage{}, &providers.RemoteRateLimitError{Provider: "OpenAI", RetryAfter: 15 * time.Second}
+	}
+	return providers.TechnicalSearchPlan{Needed: false, Reason: "No follow-up needed."}, providers.Usage{PromptTokens: 10}, nil
 }
 
 func (reviewer *intermittentReviewer) ReviewTechnical(_ context.Context, request providers.TechnicalReviewRequest) (providers.TechnicalReviewResult, error) {
@@ -226,5 +254,105 @@ func TestRunContinuesAfterOneInvalidModelResponse(t *testing.T) {
 	joined := strings.Join(result.Notes, "\n")
 	if !strings.Contains(joined, "AI investigation incomplete") || !strings.Contains(joined, "review continued") {
 		t.Fatalf("partial failure was not recorded: %s", joined)
+	}
+}
+
+func TestRunWaitsAndRetriesRateLimitedTechnicalReview(t *testing.T) {
+	candidate := testCandidate("return evaluate(output)")
+	reviewer := &rateLimitedReviewer{planCalls: 1}
+	waits := []time.Duration{}
+	progress := []Progress{}
+	result, err := Run(context.Background(), reviewer, providers.TechnicalReviewRequest{Candidates: []providers.TechnicalCandidate{candidate}}, Options{
+		Identity: testIdentity(), MaxCandidates: 20,
+		Wait:       func(_ context.Context, delay time.Duration) error { waits = append(waits, delay); return nil },
+		OnProgress: func(value Progress) error { progress = append(progress, value); return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reviewer.reviewCalls != 2 || result.Reviewed != 1 || len(waits) != 1 || waits[0] != 20*time.Second {
+		t.Fatalf("rate-limited review was not retried: reviewer=%#v waits=%v result=%#v", reviewer, waits, result)
+	}
+	if len(progress) != 2 || progress[1].Stage != ProgressStageRateLimitWait || progress[1].Attempt != 1 || progress[1].RetryTotal != 3 || progress[1].Wait != 20*time.Second {
+		t.Fatalf("retry progress = %#v", progress)
+	}
+}
+
+func TestRunWaitsAndRetriesRateLimitedSearchPlanning(t *testing.T) {
+	candidate := testCandidate("return evaluate(output)")
+	candidate.InvestigationMode = "extended-search"
+	candidate.SearchCoverage.Excerpts = 0
+	reviewer := &rateLimitedReviewer{reviewCalls: 1}
+	waits := []time.Duration{}
+	result, err := Run(context.Background(), reviewer, providers.TechnicalReviewRequest{Candidates: []providers.TechnicalCandidate{candidate}}, Options{
+		Identity: testIdentity(), MaxCandidates: 20,
+		Wait: func(_ context.Context, delay time.Duration) error { waits = append(waits, delay); return nil },
+		RetrieveFollowUp: func(value providers.TechnicalCandidate, _ providers.TechnicalSearchPlan) (providers.TechnicalCandidate, int) {
+			return value, 0
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reviewer.planCalls != 2 || reviewer.reviewCalls != 2 || result.Reviewed != 1 || len(waits) != 1 || waits[0] != 15*time.Second {
+		t.Fatalf("rate-limited search planning was not retried: reviewer=%#v waits=%v result=%#v", reviewer, waits, result)
+	}
+}
+
+func TestRunDoesNotRetryIntrinsicallyOversizedTechnicalRequest(t *testing.T) {
+	candidate := testCandidate("return evaluate(output)")
+	waits := 0
+	oversized := &oversizedTechnicalReviewer{}
+	result, err := Run(context.Background(), oversized, providers.TechnicalReviewRequest{Candidates: []providers.TechnicalCandidate{candidate}}, Options{
+		Identity: testIdentity(), MaxCandidates: 20,
+		Wait: func(_ context.Context, _ time.Duration) error { waits++; return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oversized.calls != 1 || waits != 0 || result.Reviewed != 0 || !strings.Contains(strings.Join(result.Notes, "\n"), "Request too large") {
+		t.Fatalf("oversized request should remain unresolved without waiting: calls=%d waits=%d result=%#v", oversized.calls, waits, result)
+	}
+}
+
+type oversizedTechnicalReviewer struct {
+	calls int
+}
+
+func (reviewer *oversizedTechnicalReviewer) ReviewTechnical(_ context.Context, request providers.TechnicalReviewRequest) (providers.TechnicalReviewResult, error) {
+	result := providers.TechnicalReviewResult{Provider: providers.OpenAI, Model: "test", InputCandidates: len(request.Candidates), Observations: []providers.TechnicalObservation{}}
+	if len(request.Candidates) == 0 {
+		return result, nil
+	}
+	reviewer.calls++
+	return providers.TechnicalReviewResult{}, &providers.RemoteRateLimitError{Provider: "OpenAI", Message: "Request too large", RequestTooLarge: true}
+}
+
+type alwaysRateLimitedTechnicalReviewer struct {
+	calls int
+}
+
+func (reviewer *alwaysRateLimitedTechnicalReviewer) ReviewTechnical(_ context.Context, request providers.TechnicalReviewRequest) (providers.TechnicalReviewResult, error) {
+	result := providers.TechnicalReviewResult{Provider: providers.OpenAI, Model: "test", InputCandidates: len(request.Candidates), Observations: []providers.TechnicalObservation{}}
+	if len(request.Candidates) == 0 {
+		return result, nil
+	}
+	reviewer.calls++
+	return providers.TechnicalReviewResult{}, &providers.RemoteRateLimitError{Provider: "OpenAI", RetryAfter: time.Second}
+}
+
+func TestRunStopsAfterBoundedRateLimitRetries(t *testing.T) {
+	candidate := testCandidate("return evaluate(output)")
+	reviewer := &alwaysRateLimitedTechnicalReviewer{}
+	waits := 0
+	result, err := Run(context.Background(), reviewer, providers.TechnicalReviewRequest{Candidates: []providers.TechnicalCandidate{candidate}}, Options{
+		Identity: testIdentity(), MaxCandidates: 20,
+		Wait: func(_ context.Context, _ time.Duration) error { waits++; return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reviewer.calls != 4 || waits != 3 || result.Reviewed != 0 || !strings.Contains(strings.Join(result.Notes, "\n"), "HTTP 429") {
+		t.Fatalf("retry cap was not enforced: calls=%d waits=%d result=%#v", reviewer.calls, waits, result)
 	}
 }

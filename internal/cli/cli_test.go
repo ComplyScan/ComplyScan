@@ -597,7 +597,10 @@ func TestTechnicalReviewProgressDistinguishesModelAndCache(t *testing.T) {
 	if err := progress(technicalreview.Progress{Current: 2, Total: 2, Candidate: candidate, Cached: true}); err != nil {
 		t.Fatal(err)
 	}
-	if value := output.String(); !strings.Contains(value, "1/2") || !strings.Contains(value, "elapsed 12s") || !strings.Contains(value, "reviewing with Anthropic") || !strings.Contains(value, "2/2") || !strings.Contains(value, "using cached observation") || !strings.Contains(value, "system ranking, 42 owned file(s)") {
+	if err := progress(technicalreview.Progress{Stage: technicalreview.ProgressStageRateLimitWait, Current: 2, Total: 2, Candidate: candidate, Attempt: 1, RetryTotal: 3, Wait: 20 * time.Second}); err != nil {
+		t.Fatal(err)
+	}
+	if value := output.String(); !strings.Contains(value, "1/2") || !strings.Contains(value, "elapsed 12s") || !strings.Contains(value, "reviewing with Anthropic") || !strings.Contains(value, "2/2") || !strings.Contains(value, "using cached observation") || !strings.Contains(value, "system ranking, 42 owned file(s)") || !strings.Contains(value, "waiting 20s before retry 1/3") {
 		t.Fatalf("unexpected progress output:\n%s", value)
 	}
 }
