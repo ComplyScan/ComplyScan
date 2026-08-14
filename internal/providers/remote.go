@@ -152,7 +152,10 @@ func openAICompletion(client *http.Client, apiKey, model string) func(context.Co
 			}},
 		}
 		var payload struct {
-			Status string `json:"status"`
+			Status            string `json:"status"`
+			IncompleteDetails struct {
+				Reason string `json:"reason"`
+			} `json:"incomplete_details"`
 			Output []struct {
 				Type    string `json:"type"`
 				Content []struct {
@@ -171,7 +174,11 @@ func openAICompletion(client *http.Client, apiKey, model string) func(context.Co
 			return ollamaChatResponse{}, err
 		}
 		if payload.Status != "completed" {
-			return ollamaChatResponse{}, fmt.Errorf("OpenAI review returned status %q", cleanReviewText(payload.Status, 100))
+			reason := cleanReviewText(payload.IncompleteDetails.Reason, 100)
+			if reason != "" {
+				return ollamaChatResponse{}, fmt.Errorf("OpenAI review returned status %q (reason: %s; input tokens: %d; output tokens: %d)", cleanReviewText(payload.Status, 100), reason, payload.Usage.InputTokens, payload.Usage.OutputTokens)
+			}
+			return ollamaChatResponse{}, fmt.Errorf("OpenAI review returned status %q without incomplete_details.reason (input tokens: %d; output tokens: %d)", cleanReviewText(payload.Status, 100), payload.Usage.InputTokens, payload.Usage.OutputTokens)
 		}
 		content := ""
 		for _, output := range payload.Output {

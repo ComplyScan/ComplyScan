@@ -124,6 +124,24 @@ func TestRemoteProviderErrorsDoNotExposeCredential(t *testing.T) {
 	}
 }
 
+func TestOpenAIIncompleteResponsePreservesReasonAndUsage(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return testJSONResponse(http.StatusOK, map[string]any{
+			"status":             "incomplete",
+			"incomplete_details": map[string]string{"reason": "max_output_tokens"},
+			"usage":              map[string]int{"input_tokens": 3210, "output_tokens": 4096},
+		}), nil
+	})}
+	provider, err := NewOpenAI(RemoteOptions{APIKey: "test-key", Model: "test", Timeout: time.Second, MaxFindings: 1, HTTPClient: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = provider.Review(context.Background(), ReviewRequest{Findings: []rules.Finding{{RuleID: "AI-LOG-001", Message: "test"}}})
+	if err == nil || !strings.Contains(err.Error(), "reason: max_output_tokens") || !strings.Contains(err.Error(), "input tokens: 3210") || !strings.Contains(err.Error(), "output tokens: 4096") {
+		t.Fatalf("incomplete response details were lost: %v", err)
+	}
+}
+
 func TestRemoteStatusErrorPreservesRateLimitDetails(t *testing.T) {
 	body, err := json.Marshal(map[string]any{"error": map[string]string{
 		"message": "Request too large for model on tokens per min (TPM): Limit 10000, Requested 21769.",
