@@ -413,6 +413,16 @@ func WriteTerminalRepositoryAnalysis(w io.Writer, analysis providers.RepositoryA
 			return err
 		}
 	}
+	if analysis.OutputRecoveryUsed {
+		if _, err := fmt.Fprintln(w, "        Recovery: the initial output limit was reached; one terse recovery review completed"); err != nil {
+			return err
+		}
+	}
+	if analysis.Usage.PromptTokens > 0 || analysis.Usage.CompletionTokens > 0 {
+		if _, err := fmt.Fprintf(w, "        Tokens: %d input, %d output (%d reasoning)\n", analysis.Usage.PromptTokens, analysis.Usage.CompletionTokens, analysis.Usage.ReasoningTokens); err != nil {
+			return err
+		}
+	}
 	for _, use := range analysis.Result.AIUses {
 		if _, err := fmt.Fprintf(w, "AI USE  %-6s %s — %s\n", strings.ToUpper(use.Confidence), use.Name, use.Purpose); err != nil {
 			return err

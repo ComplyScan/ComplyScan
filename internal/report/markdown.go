@@ -272,6 +272,16 @@ func writeRepositoryAnalysisMarkdown(writer io.Writer, analysis providers.Reposi
 			return err
 		}
 	}
+	if analysis.OutputRecoveryUsed {
+		if _, err := fmt.Fprintln(writer, "- Output recovery: the initial response reached its output limit; one terse recovery review completed"); err != nil {
+			return err
+		}
+	}
+	if analysis.Usage.PromptTokens > 0 || analysis.Usage.CompletionTokens > 0 {
+		if _, err := fmt.Fprintf(writer, "- Model tokens: %d input, %d output (%d reasoning)\n", analysis.Usage.PromptTokens, analysis.Usage.CompletionTokens, analysis.Usage.ReasoningTokens); err != nil {
+			return err
+		}
+	}
 	coverageNote := "This is advisory technical reasoning over submitted repository evidence. It does not determine legal applicability or certify compliance."
 	if analysis.Coverage.Mode == providers.RepositoryAnalysisTargeted {
 		coverageNote = "This is advisory technical reasoning over deterministically selected repository evidence. Files outside that package were not reviewed by the model. It does not determine legal applicability or certify compliance."

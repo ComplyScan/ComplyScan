@@ -91,8 +91,11 @@ func TestRepositoryAnalysisIsRenderedAsAdvisoryEvidence(t *testing.T) {
 	value := New(".", "dev", nil, nil, 0)
 	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{
 		Provider: providers.OpenAI, Model: "test-model",
-		Coverage:          providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted, RepositoryFiles: 20, FilesSubmitted: 2, CitationsChecked: 1},
-		FollowUpRequested: true, FollowUpExcerpts: 1,
+		Coverage:           providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted, RepositoryFiles: 20, FilesSubmitted: 2, CitationsChecked: 1},
+		FollowUpRequested:  true,
+		FollowUpExcerpts:   1,
+		OutputRecoveryUsed: true,
+		Usage:              providers.Usage{PromptTokens: 200, CompletionTokens: 100, ReasoningTokens: 40},
 		Result: providers.RepositorySectionResult{Scope: ".", AIUses: []providers.RepositoryAIUse{{
 			ID: "summaries", Name: "Summary generation", Purpose: "Generate summaries", Confidence: "high",
 			Evidence: []providers.RepositoryCitation{{Path: "main.go", Line: 12, Summary: "Runtime model call"}},
@@ -102,7 +105,7 @@ func TestRepositoryAnalysisIsRenderedAsAdvisoryEvidence(t *testing.T) {
 	if err := WriteTerminalCompletion(&terminal, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(terminal.String(), "Repository AI code analysis") || !strings.Contains(terminal.String(), "2 selected file excerpt(s) from 20 discovered file(s)") || !strings.Contains(terminal.String(), "Follow-up: 1 bounded excerpt(s)") || !strings.Contains(terminal.String(), "main.go:12") {
+	if !strings.Contains(terminal.String(), "Repository AI code analysis") || !strings.Contains(terminal.String(), "2 selected file excerpt(s) from 20 discovered file(s)") || !strings.Contains(terminal.String(), "Follow-up: 1 bounded excerpt(s)") || !strings.Contains(terminal.String(), "Recovery: the initial output limit was reached") || !strings.Contains(terminal.String(), "Tokens: 200 input, 100 output (40 reasoning)") || !strings.Contains(terminal.String(), "main.go:12") {
 		t.Fatalf("repository analysis missing from terminal:\n%s", terminal.String())
 	}
 	var markdown bytes.Buffer
