@@ -1,18 +1,21 @@
-# Repository-wide AI analysis
+# Repository AI code analysis
 
-Repository-wide analysis is an advisory model layer added after deterministic discovery. Its purpose is to reduce the blind spots created when keywords choose the model's context before the model can reason about the repository.
+ComplyScan uses a hybrid analysis pipeline. Local deterministic code first discovers the repository, inventories AI signals, maps technical-objective matches, identifies production entry points, and builds a code graph. The model then receives a compact evidence package built from those anchors and their connected code. This is the default because it gives the model useful cross-file context without repeatedly uploading and analyzing every directory.
 
-## Pipeline
+## Default pipeline
 
-1. ComplyScan loads its active configuration locally, excludes that exact file, and discovers the remaining text under the existing `.gitignore`, exclusion, file-size, file-count, total-byte, binary, symlink, dependency-directory, generated-output, and nested-repository boundaries.
-2. It classifies files, redacts recognised credential formats, and builds the language-neutral Go, Python, JavaScript, and TypeScript repository graph.
-3. It loads the selected versioned code-only framework objectives and the configured system facts.
-4. If all relevant context fits the configured input budget, the provider receives it in one request. Otherwise files are grouped by top-level subsystem, every group is analyzed, and structured results are reduced through one or more synthesis levels. In `auto` or `hierarchical` mode, a provider response that says one request exceeds its token limit causes ComplyScan to divide that subsystem, large file, or synthesis batch again and continue automatically. Split file segments retain original line numbers for citation checking.
-5. The model discovers technically evidenced AI uses, maps repository evidence to only the supplied objectives, and lists activity it could not map.
-6. Trusted code validates the response. Unknown objective IDs, unknown configured system IDs, duplicate AI-use IDs, unsupported classifications, invented paths, out-of-range line citations, and system attributions that conflict with configured path ownership reject the repository-wide pass. In a multi-system repository without ownership rules, objective observations must remain system-unassigned.
-7. The result is saved separately from deterministic findings and reconciliation. The older bounded finding and technical-objective reviews still run as comparison and fallback layers.
+1. ComplyScan loads its active configuration locally and excludes that exact file from discovery and model context.
+2. Discovery applies the existing `.gitignore`, exclusion, size, count, binary, symlink, dependency-directory, generated-output, and nested-repository boundaries.
+3. Local code classifies files, redacts recognised credential formats, inventories likely AI integrations, applies technical evidence rules, and builds the Go, Python, JavaScript, and TypeScript repository graph.
+4. The selector ranks implementation files using AI inventory signals, technical-objective matches, production entry points, imports, callers, and bounded graph relationships. Documentation is not used as the primary proof of an implementation.
+5. The provider receives the selected redacted excerpts, relevant graph context, versioned code objectives, and typed declared system facts in one structured request.
+6. The model may request one follow-up containing at most three literal search terms and optional repository-relative path hints. Trusted local code—not the model—searches only eligible discovered files and returns at most three bounded excerpts. If useful excerpts are found, ComplyScan makes one final structured request. There are no further rounds.
+7. Trusted code validates objective IDs, configured system IDs, AI-use IDs, classifications, paths, line citations, and ownership boundaries. Invalid output rejects the model pass.
+8. The advisory result is saved separately from deterministic findings and does not change the scan's CI threshold.
 
-## Context modes
+The normal repository-analysis path therefore uses one model call, or at most two when a useful follow-up is requested. It does not create one request per directory or per objective.
+
+## Modes
 
 Configure the strategy under `ai.repository-analysis`:
 
@@ -23,35 +26,43 @@ ai:
     max-input-tokens: 180000
 ```
 
-- `auto` sends one request when relevant context fits and uses hierarchical analysis otherwise.
-- `full` requires one request and reports an incomplete model layer when the configured budget is too small.
-- `hierarchical` always analyzes subsystem slices and synthesizes them.
-- `bounded-only` disables repository-wide source transfer and retains the previous finding and candidate investigation flows.
-- Omitting `max-input-tokens` uses a conservative default of 180,000 for hosted providers and 24,000 for experimental Ollama. The estimate reserves space for prompts, objectives, system context, the repository graph, and model output. It is a safety budget rather than an exact provider tokenizer.
+- `auto` is the recommended default and currently selects targeted evidence.
+- `targeted` explicitly selects the same targeted-evidence strategy as `auto`.
+- `deep` enables the previous broad strategy: one full request when it fits, otherwise hierarchical subsystem analysis and synthesis.
+- `full` requires one broad request and reports an incomplete model layer when the configured budget is too small.
+- `hierarchical` always analyzes broad subsystem slices and synthesizes them.
+- `bounded-only` disables repository-level analysis and retains the older per-candidate technical investigation flow.
 
-The JSON report records the actual mode as `full-repository` or `hierarchical-synthesis`, along with discovered repository files/bytes, submitted file occurrences/bytes, subsystem count, verified citations, and provider-reported token usage.
+`max-input-tokens` remains the upper safety budget for broad modes. Targeted remote analysis additionally aims for a compact package of about 6,500 input tokens and up to 3,000 output tokens. Experimental Ollama analysis uses a larger local package because no source leaves the machine. These are conservative estimates, not exact provider tokenization or billing guarantees.
 
-Hosted-provider token-per-minute limits can be lower than a model's context window or ComplyScan's configured input budget. ComplyScan distinguishes an individually oversized HTTP 429 from a temporary rolling rate limit. Oversized repository requests are split and their output allowance is reduced from the provider-reported limit. Temporary limits honor a longer provider retry interval but always wait at least one full minute so the rolling window can clear. If the next attempt is limited again, ComplyScan waits and retries again within a ten-minute cumulative wait budget for that individual request. An interactive countdown shows the remaining and original wait on one updating line; non-interactive logs receive only the initial cooldown entry. Progress is printed before every automatic split or wait. Every wait is cancellable with Ctrl+C, and unrelated provider errors are never retried. `full` mode intentionally retains its one-request guarantee and therefore does not split an oversized full-repository request.
+The JSON evidence bundle records the actual mode as `targeted-evidence`, `full-repository`, or `hierarchical-synthesis`, together with discovered and submitted coverage, checked citations, token usage where supplied, and whether a bounded follow-up was used.
 
-An OpenAI response can also end as `incomplete` because it consumed its configured output-token allowance. In `auto` and `hierarchical` modes, ComplyScan responds by increasing the output allowance where the known token budget permits it or dividing the affected repository slice before retrying. This is separate from rate-limit waiting and avoids repeatedly sending an unchanged request that cannot produce the required structured result.
+## What is sent by default
 
-## What is sent
+Targeted analysis may send selected excerpts from source code, dependency manifests, configuration, CI, GitHub Actions, Docker, Terraform, and environment templates. Selection is grounded in scanner matches and code structure. It does not send every eligible file, and it does not treat an unselected file as evidence that an implementation is absent.
 
-The repository-wide request may contain relevant discovered source, dependency manifests, configuration, CI, GitHub Actions, Docker, Terraform, README, governance, model-card, privacy, and risk text; the selected technical objectives; declared system facts; and report-safe graph symbols, imports, relationships, and reachability. The raw active ComplyScan configuration—normally `.complyscan.yml`, or the exact file passed with `--config`—is never part of the discovered snapshot or any model request. ComplyScan separately constructs typed system context from the loaded configuration and supplies only those analysis fields where required. Other YAML files, including `.github/workflows/*.yml`, remain eligible because they can implement CI, permission, testing, release, or safeguard behavior. Generic unclassified text is omitted. Source content is secret-redacted again at the provider boundary.
+The raw active ComplyScan configuration—normally `.complyscan.yml`, or the exact file passed with `--config`—is never part of the discovered snapshot or a model request. ComplyScan separately constructs typed system facts from that configuration and supplies only fields needed to interpret technical objectives. Other YAML files, including `.github/workflows/*.yml`, remain eligible because they can implement CI, permissions, tests, deployment, or safeguards.
 
-Generated outputs, dependency trees, build directories, caches, binaries, symlinks, ignored paths, nested repositories unless explicitly enabled, files over 1 MiB, files beyond discovery limits, and complete credentials matching maintained secret patterns are not sent. Secret redaction is defence in depth, not a guarantee that arbitrary proprietary or personal data has been removed. A hosted provider remains an external source-code processing boundary.
+Generated outputs, dependency trees, build directories, caches, binaries, symlinks, ignored paths, nested repositories unless explicitly enabled, files over the discovery limit, and credentials matching maintained secret patterns are not sent. Secret redaction is defence in depth, not a guarantee that arbitrary proprietary or personal data has been removed. A hosted provider remains an external source-code processing boundary.
+
+The explicit `deep`, `full`, and `hierarchical` modes can send substantially more eligible repository text. Use them only when the extra coverage, provider limits, cost, and organisation policy have been considered.
+
+## Rate limits and retries
+
+Compact targeted packages are intended to fit ordinary provider limits rather than consume a limit through many subsystem calls. If a hosted provider still reports a temporary rolling rate limit, ComplyScan honours the provider interval, waits at least one minute, shows a cancellable countdown, and retries within the existing per-request cumulative wait budget. An intrinsically oversized targeted request is not turned into an unbounded directory sweep.
+
+Deep modes retain adaptive splitting, incomplete-response recovery, hierarchical synthesis, and rate-limit waiting. These modes can require many requests and should not be the normal developer workflow.
 
 ## What the result means
 
-An AI-use entry is a review candidate supported by repository citations. An objective observation says how strongly the submitted repository supports that code objective. An unmapped observation records detected AI activity that does not fit any supplied objective. None of these establish legal applicability, an organisation's statutory role, actual deployment, complete runtime behavior, human practice, operational effectiveness, or compliance.
+An AI-use entry is a review candidate supported by submitted repository citations. An objective observation says how strongly the submitted evidence supports a code objective. An unmapped observation records detected AI activity that does not fit a supplied objective. None establishes legal applicability, an organisation's statutory role, actual deployment, complete runtime behaviour, human practice, operational effectiveness, or compliance.
 
 No AI use identified is not proof that a repository has no AI. `not_supported` is not proof that a mechanism is absent. A checked citation proves only that the referenced discovered path and line exist; a reviewer must still decide whether the model's interpretation is correct.
 
 ## Current limitations
 
-- Hierarchical boundaries follow repository layout and are not inferred AI-system boundaries.
-- Static graph coverage is strongest for Go, Python, JavaScript, and TypeScript and remains incomplete for dynamic dispatch and runtime registration.
-- Repository-wide output is not yet merged into deterministic reconciliation or CI failure thresholds. It is deliberately non-blocking while comparative quality benchmarks are built.
-- Repository-wide analysis is not cached yet. The bounded technical investigation retains its existing source-free cache.
-- Context size and cost depend on the selected provider/model and repository. ComplyScan reports provider token usage where available but does not estimate price because provider prices change independently of the CLI.
-- Very low provider limits can require many subsystem requests and several rate-limit waits. Analysis still reports incomplete if even the smallest safe file segment or synthesis batch cannot fit, or if one request exhausts its ten-minute cumulative automatic wait budget.
+- Targeted selection can miss implementations that produce no inventory signal, objective match, production-entrypoint relationship, or supported graph relationship.
+- Static graph coverage is strongest for Go, Python, JavaScript, and TypeScript and remains incomplete for dynamic dispatch, runtime registration, metaprogramming, and other languages.
+- Repository analysis is advisory and is not merged into deterministic CI failure thresholds.
+- Targeted repository analysis is not cached yet. The older bounded technical investigation retains its source-free cache.
+- Context size and cost depend on the selected provider, model, and repository. ComplyScan records usage supplied by the provider but does not estimate price because provider prices change independently of the CLI.
