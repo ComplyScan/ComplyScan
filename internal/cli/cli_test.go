@@ -362,7 +362,7 @@ func TestScanAutomaticallySavesHumanAndMachineReports(t *testing.T) {
 			t.Fatalf("report %q was not written: %v", path, err)
 		}
 	}
-	if !strings.Contains(stdout.String(), "Reports saved:") || !strings.Contains(stdout.String(), markdownPath) {
+	if !strings.Contains(stdout.String(), "Reports saved:") || !strings.Contains(stdout.String(), markdownPath) || !strings.Contains(stdout.String(), "Historical evidence bundle:") {
 		t.Fatalf("terminal did not identify saved reports:\n%s", stdout.String())
 	}
 	data, err := os.ReadFile(jsonPath)
@@ -375,6 +375,25 @@ func TestScanAutomaticallySavesHumanAndMachineReports(t *testing.T) {
 	}
 	if decoded.TechnicalEvidence == nil || decoded.TechnicalEvidence.Summary.CandidateEvidence == 0 {
 		t.Fatalf("saved bundle lacks technical evidence: %#v", decoded.TechnicalEvidence)
+	}
+	historyEntries, err := os.ReadDir(filepath.Join(reportDirectory, "history"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(historyEntries) != 1 || !historyEntries[0].IsDir() || !strings.Contains(historyEntries[0].Name(), decoded.Scan.ID) {
+		t.Fatalf("unexpected report history entries: %#v", historyEntries)
+	}
+	historicalJSON := filepath.Join(reportDirectory, "history", historyEntries[0].Name(), "report.json")
+	historicalData, err := os.ReadFile(historicalJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var historical report.Report
+	if err := json.Unmarshal(historicalData, &historical); err != nil {
+		t.Fatal(err)
+	}
+	if historical.Scan.ID != decoded.Scan.ID {
+		t.Fatalf("historical scan ID = %q, latest = %q", historical.Scan.ID, decoded.Scan.ID)
 	}
 	for _, objective := range decoded.TechnicalEvidence.Objectives {
 		for _, match := range objective.Matches {

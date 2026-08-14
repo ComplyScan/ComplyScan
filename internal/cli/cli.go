@@ -602,7 +602,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 			}
 			var artifacts report.Artifacts
 			if resolvedReportDirectory != "" && cfg.AI.Provider != "none" {
-				artifacts, err = report.WriteArtifacts(resolvedReportDirectory, reportValue)
+				artifacts, err = report.WriteLatestArtifacts(resolvedReportDirectory, reportValue)
 				if err != nil {
 					return fmt.Errorf("save preliminary scan reports: %w", err)
 				}
@@ -718,7 +718,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 							return fmt.Errorf("write repository analysis completion: %w", err)
 						}
 						if resolvedReportDirectory != "" {
-							artifacts, err = report.WriteArtifacts(resolvedReportDirectory, reportValue)
+							artifacts, err = report.WriteLatestArtifacts(resolvedReportDirectory, reportValue)
 							if err != nil {
 								return fmt.Errorf("checkpoint repository analysis reports: %w", err)
 							}
@@ -787,7 +787,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 					reportValue.Frameworks = frameworkResults
 					syncLegacyFrameworkFields(&reportValue)
 					if resolvedReportDirectory != "" {
-						artifacts, err = report.WriteArtifacts(resolvedReportDirectory, reportValue)
+						artifacts, err = report.WriteLatestArtifacts(resolvedReportDirectory, reportValue)
 						if err != nil {
 							return fmt.Errorf("checkpoint AI review reports: %w", err)
 						}
@@ -819,7 +819,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 					return fmt.Errorf("write terminal report: %w", err)
 				}
 				if artifacts.Markdown != "" {
-					if _, err := fmt.Fprintf(stdout, "\nReports saved:\n  Human-readable: %s\n  Evidence bundle: %s\n", artifacts.Markdown, artifacts.JSON); err != nil {
+					if _, err := fmt.Fprintf(stdout, "\nReports saved:\n  Latest human-readable: %s\n  Latest evidence bundle: %s\n  Historical human-readable: %s\n  Historical evidence bundle: %s\n", artifacts.Markdown, artifacts.JSON, artifacts.HistoryMarkdown, artifacts.HistoryJSON); err != nil {
 						return fmt.Errorf("write report paths: %w", err)
 					}
 				}
@@ -849,7 +849,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 	command.Flags().StringVar(&remoteAPIKeyEnv, "api-key-env", "", "environment-variable name containing the remote-provider API key")
 	command.Flags().StringVar(&remoteProviderName, "provider-name", "", "display name for a custom OpenAI-compatible provider")
 	command.Flags().StringVar(&remoteBaseURL, "base-url", "", "HTTPS API base URL for an OpenAI-compatible provider")
-	command.Flags().StringVar(&reportDirectory, "report-dir", report.DefaultDirectory, "directory for latest.md and latest.json (relative to the scan target)")
+	command.Flags().StringVar(&reportDirectory, "report-dir", report.DefaultDirectory, "directory for immutable report history and latest snapshots (relative to the scan target)")
 	command.Flags().BoolVar(&noReport, "no-report", false, "do not save local Markdown and JSON reports")
 	command.Flags().BoolVar(&refreshReview, "refresh-review", false, "ignore cached technical observations and run the configured provider again")
 	command.Flags().BoolVar(&quickScan, "quick", false, "run deterministic discovery and checks without AI review")
