@@ -22,6 +22,11 @@ type repositoryFollowUpReviewer struct {
 	recordingReviewer
 }
 
+type repositoryOutputRecoveryReviewer struct {
+	recordingReviewer
+	incomplete bool
+}
+
 func (reviewer *repositoryFollowUpReviewer) ReviewRepository(ctx context.Context, request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
 	result, err := reviewer.recordingReviewer.ReviewRepository(ctx, request)
 	if err == nil && request.AllowFollowUp {
@@ -31,6 +36,19 @@ func (reviewer *repositoryFollowUpReviewer) ReviewRepository(ctx context.Context
 		}
 	}
 	return result, err
+}
+
+func (reviewer *repositoryOutputRecoveryReviewer) ReviewRepository(ctx context.Context, request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
+	reviewer.requests = append(reviewer.requests, request)
+	if !reviewer.incomplete {
+		reviewer.incomplete = true
+		return providers.RepositoryAnalysisResult{}, &providers.RemoteIncompleteError{
+			Provider: "OpenAI", Status: "incomplete", Reason: "max_output_tokens",
+			InputTokens: 100, OutputTokens: 4096, ReasoningTokens: 3000,
+		}
+	}
+	reviewer.recordingReviewer.requests = reviewer.requests[:len(reviewer.requests)-1]
+	return reviewer.recordingReviewer.ReviewRepository(ctx, request)
 }
 
 type adaptiveReviewer struct {
@@ -173,6 +191,43 @@ func TestRunTargetedAllowsOneBoundedFollowUp(t *testing.T) {
 	}
 	if !result.FollowUpRequested || result.FollowUpExcerpts != 1 || len(result.FollowUpQueries) != 1 || result.Usage.PromptTokens != 20 {
 		t.Fatalf("follow-up metadata or usage = %#v", result)
+	}
+}
+
+func TestRunTargetedUsesSecondAndFinalCallForCompactOutputRecovery(t *testing.T) {
+	reviewer := &repositoryOutputRecoveryReviewer{}
+	var progressEvents []Progress
+	repository := discovery.Repository{Files: []discovery.File{{
+		Path: "app.py", Kind: discovery.KindSource,
+		Content: []byte("from openai import OpenAI\nclient = OpenAI()\ndef generate(prompt):\n    return client.responses.create(model='gpt-test', input=prompt)\n"),
+	}}}
+	result, err := Run(context.Background(), reviewer, repository, nil, nil, Options{
+		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
+		OnProgress: func(value Progress) error {
+			progressEvents = append(progressEvents, value)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reviewer.requests) != 2 || !reviewer.requests[0].AllowFollowUp || reviewer.requests[0].OutputRecovery || reviewer.requests[1].AllowFollowUp || !reviewer.requests[1].OutputRecovery {
+		t.Fatalf("output recovery request sequence = %#v", reviewer.requests)
+	}
+	if reviewer.requests[0].MaxOutputTokens != 4096 || reviewer.requests[1].MaxOutputTokens != 4096 {
+		t.Fatalf("output allowances = %d, %d", reviewer.requests[0].MaxOutputTokens, reviewer.requests[1].MaxOutputTokens)
+	}
+	if !result.OutputRecoveryUsed || result.FollowUpRequested || result.Usage.PromptTokens != 110 || result.Usage.CompletionTokens != 4098 || result.Usage.ReasoningTokens != 3000 {
+		t.Fatalf("output recovery result = %#v", result)
+	}
+	recoveryEvents := 0
+	for _, event := range progressEvents {
+		if event.Stage == "targeted-output-recovery" {
+			recoveryEvents++
+		}
+	}
+	if recoveryEvents != 2 {
+		t.Fatalf("output recovery progress events = %#v", progressEvents)
 	}
 }
 

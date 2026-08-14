@@ -60,19 +60,20 @@ func AsRemoteRateLimitError(err error) (*RemoteRateLimitError, bool) {
 // provider could not complete within its output allowance. Repository
 // analysis uses the structured reason and usage to choose a smaller slice.
 type RemoteIncompleteError struct {
-	Provider     string
-	Status       string
-	Reason       string
-	InputTokens  int
-	OutputTokens int
+	Provider        string
+	Status          string
+	Reason          string
+	InputTokens     int
+	OutputTokens    int
+	ReasoningTokens int
 }
 
 func (value *RemoteIncompleteError) Error() string {
 	status := cleanReviewText(value.Status, 100)
 	if value.Reason != "" {
-		return fmt.Sprintf("%s review returned status %q (reason: %s; input tokens: %d; output tokens: %d)", value.Provider, status, cleanReviewText(value.Reason, 100), value.InputTokens, value.OutputTokens)
+		return fmt.Sprintf("%s review returned status %q (reason: %s; input tokens: %d; output tokens: %d, including %d reasoning tokens)", value.Provider, status, cleanReviewText(value.Reason, 100), value.InputTokens, value.OutputTokens, value.ReasoningTokens)
 	}
-	return fmt.Sprintf("%s review returned status %q without incomplete_details.reason (input tokens: %d; output tokens: %d)", value.Provider, status, value.InputTokens, value.OutputTokens)
+	return fmt.Sprintf("%s review returned status %q without incomplete_details.reason (input tokens: %d; output tokens: %d, including %d reasoning tokens)", value.Provider, status, value.InputTokens, value.OutputTokens, value.ReasoningTokens)
 }
 
 // AsRemoteIncompleteError unwraps a provider response that ended before a
@@ -171,14 +172,21 @@ func openAICompletion(client *http.Client, apiKey, model string) func(context.Co
 		if err != nil {
 			return ollamaChatResponse{}, err
 		}
+		textConfig := map[string]any{"format": map[string]any{
+			"type": "json_schema", "name": "complyscan_output", "strict": true, "schema": request.Format,
+		}}
+		if request.TextVerbosity != "" {
+			textConfig["verbosity"] = request.TextVerbosity
+		}
 		body := map[string]any{
 			"model":             model,
 			"input":             messages,
 			"store":             false,
 			"max_output_tokens": remoteOutputTokenLimit(request),
-			"text": map[string]any{"format": map[string]any{
-				"type": "json_schema", "name": "complyscan_output", "strict": true, "schema": request.Format,
-			}},
+			"text":              textConfig,
+		}
+		if request.ReasoningEffort != "" {
+			body["reasoning"] = map[string]any{"effort": request.ReasoningEffort}
 		}
 		var payload struct {
 			Status            string `json:"status"`
@@ -194,8 +202,11 @@ func openAICompletion(client *http.Client, apiKey, model string) func(context.Co
 				} `json:"content"`
 			} `json:"output"`
 			Usage struct {
-				InputTokens  int `json:"input_tokens"`
-				OutputTokens int `json:"output_tokens"`
+				InputTokens   int `json:"input_tokens"`
+				OutputTokens  int `json:"output_tokens"`
+				OutputDetails struct {
+					ReasoningTokens int `json:"reasoning_tokens"`
+				} `json:"output_tokens_details"`
 			} `json:"usage"`
 		}
 		started := time.Now()
@@ -206,6 +217,7 @@ func openAICompletion(client *http.Client, apiKey, model string) func(context.Co
 			return ollamaChatResponse{}, &RemoteIncompleteError{
 				Provider: "OpenAI", Status: payload.Status, Reason: payload.IncompleteDetails.Reason,
 				InputTokens: payload.Usage.InputTokens, OutputTokens: payload.Usage.OutputTokens,
+				ReasoningTokens: payload.Usage.OutputDetails.ReasoningTokens,
 			}
 		}
 		content := ""
@@ -219,7 +231,9 @@ func openAICompletion(client *http.Client, apiKey, model string) func(context.Co
 				}
 			}
 		}
-		return remoteResponse(content, payload.Usage.InputTokens, payload.Usage.OutputTokens, time.Since(started), "OpenAI")
+		response, err := remoteResponse(content, payload.Usage.InputTokens, payload.Usage.OutputTokens, time.Since(started), "OpenAI")
+		response.ReasoningCount = payload.Usage.OutputDetails.ReasoningTokens
+		return response, err
 	}
 }
 

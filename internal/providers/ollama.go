@@ -49,13 +49,15 @@ type ollamaMessage struct {
 }
 
 type ollamaChatRequest struct {
-	Model     string          `json:"model"`
-	Messages  []ollamaMessage `json:"messages"`
-	Stream    bool            `json:"stream"`
-	Format    map[string]any  `json:"format"`
-	Think     bool            `json:"think"`
-	KeepAlive string          `json:"keep_alive"`
-	Options   map[string]any  `json:"options"`
+	Model           string          `json:"model"`
+	Messages        []ollamaMessage `json:"messages"`
+	Stream          bool            `json:"stream"`
+	Format          map[string]any  `json:"format"`
+	Think           bool            `json:"think"`
+	KeepAlive       string          `json:"keep_alive"`
+	Options         map[string]any  `json:"options"`
+	ReasoningEffort string          `json:"-"`
+	TextVerbosity   string          `json:"-"`
 	// MaxOutputTokens is used by hosted provider adapters and is not sent to
 	// Ollama, where options.num_predict controls the same bound.
 	MaxOutputTokens int `json:"-"`
@@ -70,6 +72,7 @@ type ollamaChatResponse struct {
 	TotalDuration   int64  `json:"total_duration"`
 	PromptEvalCount int    `json:"prompt_eval_count"`
 	EvalCount       int    `json:"eval_count"`
+	ReasoningCount  int    `json:"-"`
 }
 
 type reviewInput struct {
@@ -196,7 +199,7 @@ func (provider *OllamaProvider) Review(ctx context.Context, request ReviewReques
 	result.Reviewed = len(observations)
 	result.Usage = Usage{
 		PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount,
-		TotalDurationNS: response.TotalDuration,
+		ReasoningTokens: response.ReasoningCount, TotalDurationNS: response.TotalDuration,
 	}
 	if result.Reviewed < len(selected) {
 		result.Notes = append(result.Notes, fmt.Sprintf("%s returned %d valid observation(s) for %d submitted findings.", provider.label, result.Reviewed, len(selected)))

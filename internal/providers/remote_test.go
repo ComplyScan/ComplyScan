@@ -129,7 +129,10 @@ func TestOpenAIIncompleteResponsePreservesReasonAndUsage(t *testing.T) {
 		return testJSONResponse(http.StatusOK, map[string]any{
 			"status":             "incomplete",
 			"incomplete_details": map[string]string{"reason": "max_output_tokens"},
-			"usage":              map[string]int{"input_tokens": 3210, "output_tokens": 4096},
+			"usage": map[string]any{
+				"input_tokens": 3210, "output_tokens": 4096,
+				"output_tokens_details": map[string]int{"reasoning_tokens": 3000},
+			},
 		}), nil
 	})}
 	provider, err := NewOpenAI(RemoteOptions{APIKey: "test-key", Model: "test", Timeout: time.Second, MaxFindings: 1, HTTPClient: client})
@@ -141,8 +144,59 @@ func TestOpenAIIncompleteResponsePreservesReasonAndUsage(t *testing.T) {
 		t.Fatalf("incomplete response details were lost: %v", err)
 	}
 	incomplete, ok := AsRemoteIncompleteError(err)
-	if !ok || incomplete.Reason != "max_output_tokens" || incomplete.InputTokens != 3210 || incomplete.OutputTokens != 4096 {
+	if !ok || incomplete.Reason != "max_output_tokens" || incomplete.InputTokens != 3210 || incomplete.OutputTokens != 4096 || incomplete.ReasoningTokens != 3000 {
 		t.Fatalf("incomplete response was not structured: %#v, %t", incomplete, ok)
+	}
+}
+
+func TestOpenAITargetedRepositoryReviewUsesCompactReasoningAndSchema(t *testing.T) {
+	for _, testCase := range []struct {
+		name, effort string
+		recovery     bool
+	}{
+		{name: "initial", effort: "low"},
+		{name: "recovery", effort: "none", recovery: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				var body map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				reasoning, _ := body["reasoning"].(map[string]any)
+				textConfig, _ := body["text"].(map[string]any)
+				if reasoning["effort"] != testCase.effort || textConfig["verbosity"] != "low" || body["max_output_tokens"] != float64(4096) {
+					t.Fatalf("compact OpenAI settings = %#v", body)
+				}
+				encoded, _ := json.Marshal(textConfig["format"])
+				if !strings.Contains(string(encoded), `"maxItems":12`) || !strings.Contains(string(encoded), `"maxLength":320`) {
+					t.Fatalf("targeted schema was not bounded: %s", encoded)
+				}
+				result := `{"result":{"scope":".","ai_uses":[],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`
+				return testJSONResponse(http.StatusOK, map[string]any{
+					"status": "completed",
+					"output": []any{map[string]any{"type": "message", "content": []any{map[string]any{"type": "output_text", "text": result}}}},
+					"usage": map[string]any{
+						"input_tokens": 120, "output_tokens": 80,
+						"output_tokens_details": map[string]int{"reasoning_tokens": 30},
+					},
+				}), nil
+			})}
+			provider, err := NewOpenAI(RemoteOptions{APIKey: "test", Model: "gpt-5.6-terra", Timeout: time.Second, MaxFindings: 1, HTTPClient: client})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := provider.ReviewRepository(context.Background(), RepositoryAnalysisRequest{
+				Mode: RepositoryAnalysisTargeted, Scope: ".", RepositoryFiles: 1, OutputRecovery: testCase.recovery, MaxOutputTokens: 4096,
+				Files: []RepositorySourceFile{{Path: "app.go", Kind: "source", Content: "package app\n"}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Usage.ReasoningTokens != 30 {
+				t.Fatalf("reasoning tokens = %d", result.Usage.ReasoningTokens)
+			}
+		})
 	}
 }
 

@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const RepositoryAnalysisPromptVersion = "2"
+const RepositoryAnalysisPromptVersion = "3"
 
 const (
 	maxRepositoryUses         = 100
@@ -17,6 +17,11 @@ const (
 	maxRepositoryUnmapped     = 100
 	maxRepositoryQuestions    = 100
 	maxRepositoryClaims       = 20
+	targetedMaximumUses       = 12
+	targetedMaximumUnmapped   = 8
+	targetedMaximumQuestions  = 6
+	targetedMaximumCitations  = 3
+	targetedMaximumTextChars  = 320
 )
 
 type repositoryAnalysisPayload struct {
@@ -44,13 +49,24 @@ func (provider *OllamaProvider) ReviewRepository(ctx context.Context, request Re
 	if request.AllowFollowUp {
 		userPrompt += " You may request one bounded follow-up using at most three literal search terms. Request it only when the missing code could materially change the result."
 	}
+	if request.OutputRecovery {
+		userPrompt += " A previous response exhausted its output allowance. Use the smallest valid answer: terse phrases, no repetition, at most two citations per item, and no optional question unless it changes the review outcome."
+	}
+	reasoningEffort, textVerbosity := "", ""
+	if request.Mode == RepositoryAnalysisTargeted {
+		reasoningEffort, textVerbosity = "low", "low"
+		if request.OutputRecovery {
+			reasoningEffort = "none"
+		}
+	}
 	response, err := provider.chat(ctx, ollamaChatRequest{
 		Model: provider.model,
 		Messages: []ollamaMessage{
 			{Role: "system", Content: repositoryAnalysisSystemPrompt},
 			{Role: "user", Content: userPrompt + "\n\n" + string(promptData)},
 		},
-		Stream: false, Format: repositoryAnalysisSchema(request.AllowFollowUp), Think: false, KeepAlive: "5m",
+		Stream: false, Format: repositoryAnalysisSchema(request.Mode, request.AllowFollowUp, len(request.Objectives)), Think: false, KeepAlive: "5m",
+		ReasoningEffort: reasoningEffort, TextVerbosity: textVerbosity,
 		Options: map[string]any{"temperature": 0, "num_predict": maxOutputTokens}, MaxOutputTokens: maxOutputTokens,
 	})
 	if err != nil {
@@ -84,7 +100,7 @@ func (provider *OllamaProvider) ReviewRepository(ctx context.Context, request Re
 			"Repository model analysis is advisory and does not establish legal applicability, compliance, deployment, or operational effectiveness.",
 			"Every returned source citation was checked against the submitted repository evidence index.",
 		},
-		Usage:        Usage{PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount, TotalDurationNS: response.TotalDuration},
+		Usage:        Usage{PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount, ReasoningTokens: response.ReasoningCount, TotalDurationNS: response.TotalDuration},
 		FollowUpPlan: plan,
 	}, nil
 }
@@ -356,17 +372,32 @@ func validRepositoryConfidence(value string) bool {
 	return value == "low" || value == "medium" || value == "high"
 }
 
-func repositoryAnalysisSchema(allowFollowUp bool) map[string]any {
+func repositoryAnalysisSchema(mode RepositoryAnalysisMode, allowFollowUp bool, objectiveCount int) map[string]any {
+	targeted := mode == RepositoryAnalysisTargeted
+	stringValue := func(limit int) map[string]any {
+		value := map[string]any{"type": "string"}
+		if targeted && limit > 0 {
+			value["maxLength"] = limit
+		}
+		return value
+	}
+	arrayValue := func(items map[string]any, limit int) map[string]any {
+		value := map[string]any{"type": "array", "items": items}
+		if targeted && limit >= 0 {
+			value["maxItems"] = limit
+		}
+		return value
+	}
 	citation := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"path": map[string]any{"type": "string"}, "line": map[string]any{"type": "integer"}, "summary": map[string]any{"type": "string"},
+			"path": stringValue(300), "line": map[string]any{"type": "integer"}, "summary": stringValue(targetedMaximumTextChars),
 		},
 		"required": []string{"path", "line", "summary"}, "additionalProperties": false,
 	}
-	citations := func() map[string]any { return map[string]any{"type": "array", "items": citation} }
+	citations := func() map[string]any { return arrayValue(citation, targetedMaximumCitations) }
 	stringsArray := func() map[string]any {
-		return map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
+		return arrayValue(stringValue(targetedMaximumTextChars), targetedMaximumQuestions)
 	}
 	confidence := map[string]any{"type": "string", "enum": []string{"low", "medium", "high"}}
 	strength := map[string]any{"type": "string", "enum": []string{string(StrengthStrong), string(StrengthPartial), string(StrengthWeak), string(StrengthUncertain), string(StrengthNotSupported)}}
@@ -374,26 +405,26 @@ func repositoryAnalysisSchema(allowFollowUp bool) map[string]any {
 		"result": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"scope": map[string]any{"type": "string"},
-				"ai_uses": map[string]any{"type": "array", "items": map[string]any{
+				"scope": stringValue(300),
+				"ai_uses": arrayValue(map[string]any{
 					"type": "object", "properties": map[string]any{
-						"id": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"}, "purpose": map[string]any{"type": "string"},
-						"lifecycle": map[string]any{"type": "string"}, "confidence": confidence, "evidence": citations(), "unresolved_questions": stringsArray(),
+						"id": stringValue(120), "name": stringValue(160), "purpose": stringValue(targetedMaximumTextChars),
+						"lifecycle": stringValue(100), "confidence": confidence, "evidence": citations(), "unresolved_questions": stringsArray(),
 					}, "required": []string{"id", "name", "purpose", "lifecycle", "confidence", "evidence", "unresolved_questions"}, "additionalProperties": false,
-				}},
-				"objective_observations": map[string]any{"type": "array", "items": map[string]any{
+				}, targetedMaximumUses),
+				"objective_observations": arrayValue(map[string]any{
 					"type": "object", "properties": map[string]any{
-						"objective_id": map[string]any{"type": "string"}, "system_id": map[string]any{"type": "string"}, "strength": strength,
-						"confidence": confidence, "rationale": map[string]any{"type": "string"}, "supporting_evidence": citations(),
+						"objective_id": stringValue(300), "system_id": stringValue(200), "strength": strength,
+						"confidence": confidence, "rationale": stringValue(targetedMaximumTextChars), "supporting_evidence": citations(),
 						"contradictory_evidence": citations(), "missing_evidence": stringsArray(), "unresolved_questions": stringsArray(),
 					}, "required": []string{"objective_id", "system_id", "strength", "confidence", "rationale", "supporting_evidence", "contradictory_evidence", "missing_evidence", "unresolved_questions"}, "additionalProperties": false,
-				}},
-				"unmapped_observations": map[string]any{"type": "array", "items": map[string]any{
+				}, objectiveCount),
+				"unmapped_observations": arrayValue(map[string]any{
 					"type": "object", "properties": map[string]any{
-						"summary": map[string]any{"type": "string"}, "reason": map[string]any{"type": "string"}, "confidence": confidence,
-						"evidence": citations(), "suggested_review": map[string]any{"type": "string"},
+						"summary": stringValue(targetedMaximumTextChars), "reason": stringValue(targetedMaximumTextChars), "confidence": confidence,
+						"evidence": citations(), "suggested_review": stringValue(targetedMaximumTextChars),
 					}, "required": []string{"summary", "reason", "confidence", "evidence", "suggested_review"}, "additionalProperties": false,
-				}},
+				}, targetedMaximumUnmapped),
 				"unresolved_questions": stringsArray(),
 			},
 			"required": []string{"scope", "ai_uses", "objective_observations", "unmapped_observations", "unresolved_questions"}, "additionalProperties": false,
@@ -420,6 +451,8 @@ Perform two connected tasks:
 2. Map that repository evidence against only the supplied technical objectives. Explain supporting evidence, contradictory executable evidence, missing evidence, and facts that code alone cannot establish.
 
 Rules:
+- be concise: short phrases, at most two citations per item, no repeated rationale, and only outcome-changing unresolved questions;
+- return no more than one observation per supplied objective;
 - reason across files, imports, callers, routes, configuration, data flow, tests, and deployment artifacts;
 - cite exact submitted paths and line numbers for every positive implementation claim;
 - when content_start_line is present, content is a segment of that file and citations must use its original file line numbers starting at content_start_line;

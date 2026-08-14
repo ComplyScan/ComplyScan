@@ -41,7 +41,7 @@ func (provider *OllamaProvider) PlanTechnicalSearch(ctx context.Context, candida
 	if err := json.Unmarshal([]byte(response.Message.Content), &payload); err != nil {
 		return TechnicalSearchPlan{}, Usage{}, fmt.Errorf("decode %s structured technical search plan: %w", provider.label, err)
 	}
-	usage := Usage{PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount, TotalDurationNS: response.TotalDuration}
+	usage := Usage{PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount, ReasoningTokens: response.ReasoningCount, TotalDurationNS: response.TotalDuration}
 	plan, err := validateTechnicalSearchPlan(payload.Plan)
 	if err != nil {
 		return TechnicalSearchPlan{

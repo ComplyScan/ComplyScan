@@ -915,6 +915,7 @@ func citedFileIndex(summaries []providers.RepositorySectionResult, files []provi
 func addUsage(total *providers.Usage, value providers.Usage) {
 	total.PromptTokens += value.PromptTokens
 	total.CompletionTokens += value.CompletionTokens
+	total.ReasoningTokens += value.ReasoningTokens
 	total.TotalDurationNS += value.TotalDurationNS
 }
 

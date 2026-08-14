@@ -52,6 +52,7 @@ type Observation struct {
 type Usage struct {
 	PromptTokens     int   `json:"prompt_tokens,omitempty"`
 	CompletionTokens int   `json:"completion_tokens,omitempty"`
+	ReasoningTokens  int   `json:"reasoning_tokens,omitempty"`
 	TotalDurationNS  int64 `json:"total_duration_ns,omitempty"`
 }
 
@@ -303,6 +304,7 @@ type RepositoryAnalysisRequest struct {
 	RepositoryBytes    int64                     `json:"repository_bytes"`
 	MaxOutputTokens    int                       `json:"-"`
 	AllowFollowUp      bool                      `json:"allow_follow_up,omitempty"`
+	OutputRecovery     bool                      `json:"output_recovery,omitempty"`
 	Files              []RepositorySourceFile    `json:"files,omitempty"`
 	FileIndex          []RepositoryFileReference `json:"file_index,omitempty"`
 	Objectives         []RepositoryObjective     `json:"objectives"`
@@ -370,14 +372,15 @@ type RepositoryCoverage struct {
 }
 
 type RepositoryAnalysisResult struct {
-	Provider          Kind                    `json:"provider"`
-	Model             string                  `json:"model"`
-	Coverage          RepositoryCoverage      `json:"coverage"`
-	Result            RepositorySectionResult `json:"result"`
-	Notes             []string                `json:"notes,omitempty"`
-	Usage             Usage                   `json:"usage,omitempty"`
-	FollowUpRequested bool                    `json:"follow_up_requested,omitempty"`
-	FollowUpQueries   []string                `json:"follow_up_queries,omitempty"`
-	FollowUpExcerpts  int                     `json:"follow_up_excerpts,omitempty"`
-	FollowUpPlan      TechnicalSearchPlan     `json:"-"`
+	Provider           Kind                    `json:"provider"`
+	Model              string                  `json:"model"`
+	Coverage           RepositoryCoverage      `json:"coverage"`
+	Result             RepositorySectionResult `json:"result"`
+	Notes              []string                `json:"notes,omitempty"`
+	Usage              Usage                   `json:"usage,omitempty"`
+	FollowUpRequested  bool                    `json:"follow_up_requested,omitempty"`
+	FollowUpQueries    []string                `json:"follow_up_queries,omitempty"`
+	FollowUpExcerpts   int                     `json:"follow_up_excerpts,omitempty"`
+	OutputRecoveryUsed bool                    `json:"output_recovery_used,omitempty"`
+	FollowUpPlan       TechnicalSearchPlan     `json:"-"`
 }

@@ -706,10 +706,13 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 						completionDetail := fmt.Sprintf("%d file excerpt(s)", repositoryReview.Coverage.FilesSubmitted)
 						if repositoryReview.Coverage.Mode == providers.RepositoryAnalysisTargeted {
 							calls := 1
-							if repositoryReview.FollowUpRequested && repositoryReview.FollowUpExcerpts > 0 {
+							if repositoryReview.OutputRecoveryUsed || (repositoryReview.FollowUpRequested && repositoryReview.FollowUpExcerpts > 0) {
 								calls = 2
 							}
 							completionDetail += fmt.Sprintf(", %d model call(s)", calls)
+						}
+						if repositoryReview.Usage.PromptTokens > 0 || repositoryReview.Usage.CompletionTokens > 0 {
+							completionDetail += fmt.Sprintf(", %d input / %d output token(s), %d reasoning", repositoryReview.Usage.PromptTokens, repositoryReview.Usage.CompletionTokens, repositoryReview.Usage.ReasoningTokens)
 						}
 						if _, err := fmt.Fprintf(progressWriter, "Repository AI reasoning completed in %s using %s context (%s).\n", formatElapsed(time.Since(repositoryReviewStarted)), repositoryReview.Coverage.Mode, completionDetail); err != nil {
 							return fmt.Errorf("write repository analysis completion: %w", err)
@@ -1017,6 +1020,13 @@ func reviewRepositoryWithProvider(
 					return err
 				}
 				_, err := fmt.Fprintf(progressWriter, "Bounded follow-up completed: %s.\n", progress.Detail)
+				return err
+			case "targeted-output-recovery":
+				if progress.Completed == 0 {
+					_, err := fmt.Fprintf(progressWriter, "Model output allowance was exhausted; %s. Using the single remaining call for a terse recovery response.\n", progress.Detail)
+					return err
+				}
+				_, err := fmt.Fprintf(progressWriter, "Targeted output recovery completed: %s.\n", progress.Detail)
 				return err
 			case "adaptive-split":
 				_, err := fmt.Fprintf(progressWriter, "Provider request was too large; splitting %s into smaller analysis slices (%s). Continuing automatically.\n", progress.Scope, progress.Detail)

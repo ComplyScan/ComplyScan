@@ -23,7 +23,7 @@ const (
 	targetedMaxFollowUpExcerpts = 3
 	targetedRemoteInputTokens   = 6_500
 	targetedLocalInputTokens    = 16_000
-	targetedRemoteOutputTokens  = 3_000
+	targetedRemoteOutputTokens  = 4_096
 )
 
 type targetedCandidate struct {
@@ -90,7 +90,33 @@ func runTargeted(
 	}
 	result, err := reviewRepositoryWithRetry(ctx, reviewer, request, options)
 	if err != nil {
-		return providers.RepositoryAnalysisResult{}, fmt.Errorf("analyze targeted repository evidence: %w", err)
+		incomplete, canRecover := providers.AsRemoteIncompleteError(err)
+		if !canRecover || incomplete.Reason != "max_output_tokens" {
+			return providers.RepositoryAnalysisResult{}, fmt.Errorf("analyze targeted repository evidence: %w", err)
+		}
+		if progressErr := progress(options, Progress{
+			Stage: "targeted-output-recovery", Completed: 0, Total: 1, Scope: ".", InputBytes: inputBytes,
+			Detail: fmt.Sprintf("retry compact output after %d output token(s), including %d reasoning token(s)", incomplete.OutputTokens, incomplete.ReasoningTokens),
+		}); progressErr != nil {
+			return providers.RepositoryAnalysisResult{}, progressErr
+		}
+		request.AllowFollowUp = false
+		request.OutputRecovery = true
+		result, err = reviewRepositoryWithRetry(ctx, reviewer, request, options)
+		if err != nil {
+			return providers.RepositoryAnalysisResult{}, fmt.Errorf("recover targeted repository output: %w", err)
+		}
+		result.OutputRecoveryUsed = true
+		addUsage(&result.Usage, providers.Usage{
+			PromptTokens: incomplete.InputTokens, CompletionTokens: incomplete.OutputTokens, ReasoningTokens: incomplete.ReasoningTokens,
+		})
+		result.Notes = append(result.Notes, "The initial targeted response exhausted its output allowance. ComplyScan used its sole second call for a terse no-follow-up recovery response.")
+		if progressErr := progress(options, Progress{
+			Stage: "targeted-output-recovery", Completed: 1, Total: 1, Scope: ".", InputBytes: inputBytes,
+			Detail: "compact structured result completed",
+		}); progressErr != nil {
+			return providers.RepositoryAnalysisResult{}, progressErr
+		}
 	}
 	if err := validateSystemAttribution(result.Result, profileSystems, options.Ownership); err != nil {
 		return providers.RepositoryAnalysisResult{}, err

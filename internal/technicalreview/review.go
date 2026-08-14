@@ -116,6 +116,7 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 			}
 			base.Usage.PromptTokens += plannerUsage.PromptTokens
 			base.Usage.CompletionTokens += plannerUsage.CompletionTokens
+			base.Usage.ReasoningTokens += plannerUsage.ReasoningTokens
 			base.Usage.TotalDurationNS += plannerUsage.TotalDurationNS
 			if strings.HasPrefix(plan.Reason, "Follow-up skipped") {
 				base.Notes = append(base.Notes, plan.Reason)
@@ -143,6 +144,7 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 		base.Observations = append(base.Observations, observation)
 		base.Usage.PromptTokens += partial.Usage.PromptTokens
 		base.Usage.CompletionTokens += partial.Usage.CompletionTokens
+		base.Usage.ReasoningTokens += partial.Usage.ReasoningTokens
 		base.Usage.TotalDurationNS += partial.Usage.TotalDurationNS
 		base.Notes = appendUnique(base.Notes, partial.Notes...)
 		if cacheEnabled {

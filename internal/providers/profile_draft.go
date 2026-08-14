@@ -113,7 +113,7 @@ func (provider *OllamaProvider) DraftProfile(ctx context.Context, request Profil
 	result.Suggestions = suggestions
 	result.Usage = Usage{
 		PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount,
-		TotalDurationNS: response.TotalDuration,
+		ReasoningTokens: response.ReasoningCount, TotalDurationNS: response.TotalDuration,
 	}
 	return result, nil
 }

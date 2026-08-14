@@ -129,7 +129,7 @@ func (provider *OllamaProvider) reviewTechnicalCandidate(ctx context.Context, ca
 	if err != nil {
 		return TechnicalObservation{}, Usage{}, false, err
 	}
-	return observation, Usage{PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount, TotalDurationNS: response.TotalDuration}, guarded, nil
+	return observation, Usage{PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount, ReasoningTokens: response.ReasoningCount, TotalDurationNS: response.TotalDuration}, guarded, nil
 }
 
 func sanitizeTechnicalCandidate(candidate TechnicalCandidate) TechnicalCandidate {
