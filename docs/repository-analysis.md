@@ -7,7 +7,7 @@ Repository-wide analysis is an advisory model layer added after deterministic di
 1. ComplyScan discovers text under the existing `.gitignore`, exclusion, file-size, file-count, total-byte, binary, symlink, dependency-directory, generated-output, and nested-repository boundaries.
 2. It classifies files, redacts recognised credential formats, and builds the language-neutral Go, Python, JavaScript, and TypeScript repository graph.
 3. It loads the selected versioned code-only framework objectives and the configured system facts.
-4. If all relevant context fits the configured input budget, the provider receives it in one request. Otherwise files are grouped by top-level subsystem, every group is analyzed, and structured results are reduced through one or more synthesis levels.
+4. If all relevant context fits the configured input budget, the provider receives it in one request. Otherwise files are grouped by top-level subsystem, every group is analyzed, and structured results are reduced through one or more synthesis levels. In `auto` or `hierarchical` mode, a provider response that says one request exceeds its token limit causes ComplyScan to divide that subsystem, large file, or synthesis batch again and continue automatically. Split file segments retain original line numbers for citation checking.
 5. The model discovers technically evidenced AI uses, maps repository evidence to only the supplied objectives, and lists activity it could not map.
 6. Trusted code validates the response. Unknown objective IDs, unknown configured system IDs, duplicate AI-use IDs, unsupported classifications, invented paths, out-of-range line citations, and system attributions that conflict with configured path ownership reject the repository-wide pass. In a multi-system repository without ownership rules, objective observations must remain system-unassigned.
 7. The result is saved separately from deterministic findings and reconciliation. The older bounded finding and technical-objective reviews still run as comparison and fallback layers.
@@ -31,6 +31,8 @@ ai:
 
 The JSON report records the actual mode as `full-repository` or `hierarchical-synthesis`, along with discovered repository files/bytes, submitted file occurrences/bytes, subsystem count, verified citations, and provider-reported token usage.
 
+Hosted-provider token-per-minute limits can be lower than a model's context window or ComplyScan's configured input budget. ComplyScan distinguishes an individually oversized HTTP 429 from a temporary rolling rate limit. Oversized repository requests are split and their output allowance is reduced from the provider-reported limit. Temporary limits wait for the provider's retry interval—or up to 60 seconds when none is supplied—and retry at most three times. Progress is printed before every automatic split or wait. The wait is cancellable, and unrelated provider errors are never retried. `full` mode intentionally retains its one-request guarantee and therefore does not split an oversized full-repository request.
+
 ## What is sent
 
 The repository-wide request may contain relevant discovered source, dependency manifests, configuration, CI, GitHub Actions, Docker, Terraform, README, governance, model-card, privacy, and risk text; the selected technical objectives; declared system facts; and report-safe graph symbols, imports, relationships, and reachability. Generic unclassified text is omitted. Source content is secret-redacted again at the provider boundary.
@@ -50,3 +52,4 @@ No AI use identified is not proof that a repository has no AI. `not_supported` i
 - Repository-wide output is not yet merged into deterministic reconciliation or CI failure thresholds. It is deliberately non-blocking while comparative quality benchmarks are built.
 - Repository-wide analysis is not cached yet. The bounded technical investigation retains its existing source-free cache.
 - Context size and cost depend on the selected provider/model and repository. ComplyScan reports provider token usage where available but does not estimate price because provider prices change independently of the CLI.
+- Very low provider limits can require many subsystem requests and several rate-limit waits. Analysis still reports incomplete if even the smallest safe file segment or synthesis batch cannot fit, or if the bounded retry count is exhausted.
