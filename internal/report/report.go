@@ -386,13 +386,18 @@ func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
 			analysis.Coverage.Mode, len(analysis.Result.AIUses), len(analysis.Result.ObjectiveObservations), len(analysis.Result.UnmappedObservations), analysis.Coverage.CitationsChecked); err != nil {
 			return err
 		}
+		implemented, partial, notImplemented, cannotDetermine := developerTechnicalVerdictCounts(value)
+		if _, err := fmt.Fprintf(w, "Code-level AI verdicts: %d implemented, %d partial, %d not demonstrated, %d unclear\n",
+			implemented, partial, notImplemented, cannotDetermine); err != nil {
+			return err
+		}
 	}
 	_, err := fmt.Fprintln(w, "Use --verbose for full terminal evidence; latest.md is concise and latest.json preserves the complete evidence bundle.")
 	return err
 }
 
-// WriteTerminalRepositoryAnalysis renders repository reasoning as a separate
-// advisory layer. It never changes deterministic findings or gates.
+// WriteTerminalRepositoryAnalysis renders repository reasoning and its bounded
+// code-level verdicts. It never changes deterministic findings or gates.
 func WriteTerminalRepositoryAnalysis(w io.Writer, analysis providers.RepositoryAnalysisResult) error {
 	if _, err := fmt.Fprintf(w, "Repository AI code analysis (%s / %s): %s\n", analysis.Provider, analysis.Model, analysis.Coverage.Mode); err != nil {
 		return err
@@ -434,7 +439,7 @@ func WriteTerminalRepositoryAnalysis(w io.Writer, analysis providers.RepositoryA
 		}
 	}
 	for _, observation := range analysis.Result.ObjectiveObservations {
-		if _, err := fmt.Fprintf(w, "REPO MAP %-13s %-6s %s\n        %s\n", observation.Strength, strings.ToUpper(observation.Confidence), observation.ObjectiveID, observation.Rationale); err != nil {
+		if _, err := fmt.Fprintf(w, "REPO MAP %-38s %-6s %s\n        %s\n", observation.DerivedTechnicalVerdict(), strings.ToUpper(observation.Confidence), observation.ObjectiveID, observation.Rationale); err != nil {
 			return err
 		}
 		for _, missing := range observation.MissingEvidence {

@@ -314,7 +314,7 @@ func writeRepositoryAnalysisMarkdown(writer io.Writer, analysis providers.Reposi
 		}
 	}
 	for _, observation := range analysis.Result.ObjectiveObservations {
-		if _, err := fmt.Fprintf(writer, "\n#### %s\n\n- Strength: %s\n- Confidence: %s\n", inlineCode(observation.ObjectiveID), markdownText(string(observation.Strength)), markdownText(observation.Confidence)); err != nil {
+		if _, err := fmt.Fprintf(writer, "\n#### %s\n\n- Code-level verdict: %s\n- Evidence strength: %s\n- Confidence: %s\n", inlineCode(observation.ObjectiveID), markdownText(string(observation.DerivedTechnicalVerdict())), markdownText(string(observation.Strength)), markdownText(observation.Confidence)); err != nil {
 			return err
 		}
 		if observation.SystemID != "" {

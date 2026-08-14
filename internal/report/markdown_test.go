@@ -225,7 +225,7 @@ func TestWriteMarkdownPrioritizesDeveloperDecisions(t *testing.T) {
 	for _, expected := range []string{
 		"## Overall result", "**Action required**", "## 1. What ComplyScan found", "Answer generation",
 		"## 2. What to do next", "Possible secret exposure", "Human oversight",
-		"### Code that may already address requirements", "Code strongly suggests this is implemented", "audit.go:11",
+		"### Code-level safeguard decisions", "Implemented in the reviewed code", "audit.go:11",
 		"## 3. What ComplyScan could not determine", "Where will this AI feature be offered or used?",
 		"<summary>Legal and technical details</summary>", "Article 12",
 		"## How this scan was performed", "Full technical results: `latest.json`",
@@ -234,7 +234,7 @@ func TestWriteMarkdownPrioritizesDeveloperDecisions(t *testing.T) {
 			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
 		}
 	}
-	for _, excluded := range []string{"## Technical checklist", "## AI advisory review", "No evidence detected for", "not-substantiated", "Candidate evidence", "technical objective", "| high |"} {
+	for _, excluded := range []string{"## Technical checklist", "## AI advisory review", "No evidence detected for", "not-substantiated", "Candidate evidence", "technical objective", "| high |", "a person still needs to check it"} {
 		if strings.Contains(output.String(), excluded) {
 			t.Errorf("developer summary contains diagnostic detail %q:\n%s", excluded, output.String())
 		}
@@ -247,6 +247,30 @@ func TestMarkdownTextRemovesLineBreaksAndEscapesMarkup(t *testing.T) {
 	}
 	if got := inlineCode("a`b"); strings.Contains(got, "`a`b`") {
 		t.Fatalf("inlineCode did not protect backtick: %q", got)
+	}
+}
+
+func TestDeveloperEvidenceUsesModelDecisionInsteadOfCandidateDisclaimer(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	value.TechnicalEvidence = &framework.TechnicalEvidenceReport{Objectives: []framework.ObjectiveAssessment{{
+		ID: "logging", Title: "Automatic event logging", Status: framework.ObjectiveCandidate,
+		Matches: []framework.EvidenceMatch{{Path: "logging.go", StartLine: 14}},
+	}}}
+	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{Result: providers.RepositorySectionResult{
+		ObjectiveObservations: []providers.RepositoryObjectiveObservation{{
+			ObjectiveID: "pack/logging", Strength: providers.StrengthNotSupported, Confidence: "high",
+			Rationale: "The cited helper logs validation progress, not AI runtime events.",
+		}},
+	}}
+	items, total := developerSupportingEvidence(value, map[string]string{"logging": "Automatic event logging"})
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("evidence = %#v, total = %d", items, total)
+	}
+	if !strings.Contains(items[0].assessment, "Not implemented in the reviewed code") || !strings.Contains(items[0].assessment, "not AI runtime events") {
+		t.Fatalf("assessment = %q", items[0].assessment)
+	}
+	if strings.Contains(items[0].assessment, "person still needs") {
+		t.Fatalf("legacy disclaimer remained: %q", items[0].assessment)
 	}
 }
 

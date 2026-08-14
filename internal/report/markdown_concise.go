@@ -32,6 +32,7 @@ type developerEvidence struct {
 	title      string
 	assessment string
 	evidence   string
+	verdict    providers.RepositoryTechnicalVerdict
 }
 
 type developerReportView struct {
@@ -51,6 +52,10 @@ type developerReportView struct {
 	repositoryAnalysis string
 	verificationPassed int
 	verificationFailed int
+	implemented        int
+	partial            int
+	notImplemented     int
+	cannotDetermine    int
 	referenceDetails   []string
 }
 
@@ -94,7 +99,7 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report) error {
 			return err
 		}
 	}
-	_, err := fmt.Fprintln(writer, "\n---\n\nCode found by ComplyScan still needs human review. If ComplyScan found nothing, that only means this scan did not locate matching code; it does not prove that an implementation is missing.")
+	_, err := fmt.Fprintln(writer, "\n---\n\nCode-level verdicts describe the repository evidence ComplyScan reviewed. They do not decide whether a legal requirement applies or whether the implementation is enabled and effective in production.")
 	return err
 }
 
@@ -114,6 +119,7 @@ func buildDeveloperReportView(value Report) developerReportView {
 	}
 	view.integrationSignals = developerIntegrationSignals(value)
 	view.referenceDetails = developerReferenceDetails(value)
+	view.implemented, view.partial, view.notImplemented, view.cannotDetermine = developerTechnicalVerdictCounts(value)
 	objectiveTitles := developerObjectiveTitles(value)
 	relevantObjectives := developerRelevantObjectives(value)
 	actionKeys := make(map[string]struct{})
@@ -165,19 +171,23 @@ func buildDeveloperReportView(value Report) developerReportView {
 	if value.RepositoryAnalysis != nil {
 		for _, observation := range value.RepositoryAnalysis.Result.ObjectiveObservations {
 			rawID := developerRawObjectiveID(observation.ObjectiveID)
-			if observation.Strength != providers.StrengthWeak && observation.Strength != providers.StrengthUncertain && observation.Strength != providers.StrengthNotSupported {
+			verdict := observation.DerivedTechnicalVerdict()
+			if verdict == providers.RepositoryVerdictImplemented {
 				continue
 			}
 			if _, relevant := relevantObjectives[rawID]; !relevant {
 				continue
 			}
-			next := "Confirm whether the safeguard is complete or add the missing part."
-			if len(observation.MissingEvidence) > 0 {
-				next = "Check the full result in latest.json, then confirm whether the missing part exists elsewhere or needs to be added."
+			why := developerVerdictLabel(verdict) + ". " + compactMarkdownText(observation.Rationale, 150)
+			next := "Add the missing implementation, then rerun ComplyScan."
+			if verdict == providers.RepositoryVerdictPartial {
+				next = "Complete the missing implementation elements listed in latest.json, then rerun ComplyScan."
+			} else if verdict == providers.RepositoryVerdictCannotDetermine {
+				next = "Provide the missing code context or ownership information listed in latest.json, then rerun ComplyScan."
 			}
 			addAction("objective/"+observation.SystemID+"/"+rawID, developerAction{
 				priority: "Review", issue: developerObjectiveTitle(rawID, objectiveTitles),
-				why: "Some related code was found, but ComplyScan could not confirm that it fully implements this safeguard.", next: compactMarkdownText(next, 180),
+				why: compactMarkdownText(why, 180), next: compactMarkdownText(next, 180),
 				evidence: developerCitationText(observation.SupportingEvidence), control: true,
 			})
 		}
@@ -231,7 +241,7 @@ func buildDeveloperReportView(value Report) developerReportView {
 	switch {
 	case developerHasUrgentAction(view.actions):
 		view.outcome = "Action required"
-	case view.actionTotal > 0 || view.questionTotal > 0 || view.evidenceTotal > 0:
+	case view.actionTotal > 0 || view.questionTotal > 0:
 		view.outcome = "Review needed"
 	default:
 		view.outcome = "No urgent code problems found"
@@ -244,8 +254,8 @@ func writeDeveloperOutcomeMarkdown(writer io.Writer, value Report, view develope
 	if value.RepositoryAnalysis != nil {
 		aiUses = len(value.RepositoryAnalysis.Result.AIUses)
 	}
-	_, err := fmt.Fprintf(writer, "\n## Overall result\n\n**%s**\n\n- AI features found: **%d**\n- Important code problems: **%d**\n- Safeguards to check: **%d**\n- Possible safeguards already found: **%d**\n- Questions only a person can answer: **%d**\n",
-		view.outcome, aiUses, view.importantRisks, view.controlsToReview, view.evidenceTotal, view.questionTotal)
+	_, err := fmt.Fprintf(writer, "\n## Overall result\n\n**%s**\n\n- AI features found: **%d**\n- Important code problems: **%d**\n- Safeguards needing code changes or more evidence: **%d**\n- AI-reviewed code safeguards: **%d implemented, %d partial, %d not demonstrated, %d unclear**\n- Questions only a person can answer: **%d**\n",
+		view.outcome, aiUses, view.importantRisks, view.controlsToReview, view.implemented, view.partial, view.notImplemented, view.cannotDetermine, view.questionTotal)
 	return err
 }
 
@@ -318,14 +328,14 @@ func writeDeveloperActionsMarkdown(writer io.Writer, view developerReportView) e
 }
 
 func writeDeveloperEvidenceMarkdown(writer io.Writer, view developerReportView) error {
-	if _, err := fmt.Fprintln(writer, "\n### Code that may already address requirements"); err != nil {
+	if _, err := fmt.Fprintln(writer, "\n### Code-level safeguard decisions"); err != nil {
 		return err
 	}
 	if len(view.evidence) == 0 {
-		_, err := fmt.Fprintln(writer, "\nComplyScan did not find code that clearly appears to implement one of the checked safeguards.")
+		_, err := fmt.Fprintln(writer, "\nComplyScan did not produce a code-level decision for any checked safeguard.")
 		return err
 	}
-	if _, err := fmt.Fprintln(writer, "\n| Safeguard | What ComplyScan thinks | Where |\n|---|---|---|"); err != nil {
+	if _, err := fmt.Fprintln(writer, "\n| Safeguard | Code-level result | Where |\n|---|---|---|"); err != nil {
 		return err
 	}
 	for _, evidence := range view.evidence {
@@ -335,7 +345,7 @@ func writeDeveloperEvidenceMarkdown(writer io.Writer, view developerReportView) 
 		}
 	}
 	if remaining := view.evidenceTotal - len(view.evidence); remaining > 0 {
-		_, err := fmt.Fprintf(writer, "\n%d more possible implementation(s) are available in %s.\n", remaining, inlineCode("latest.json"))
+		_, err := fmt.Fprintf(writer, "\n%d more code-level safeguard decision(s) are available in %s.\n", remaining, inlineCode("latest.json"))
 		return err
 	}
 	return nil
@@ -455,6 +465,7 @@ func developerObjectiveTitles(value Report) map[string]string {
 func developerSupportingEvidence(value Report, titles map[string]string) ([]developerEvidence, int) {
 	items := make([]developerEvidence, 0)
 	seen := make(map[string]struct{})
+	observations := make(map[string]providers.RepositoryObjectiveObservation)
 	add := func(key string, item developerEvidence) {
 		if _, exists := seen[key]; exists {
 			return
@@ -464,20 +475,15 @@ func developerSupportingEvidence(value Report, titles map[string]string) ([]deve
 	}
 	if value.RepositoryAnalysis != nil {
 		for _, observation := range value.RepositoryAnalysis.Result.ObjectiveObservations {
-			if observation.Strength != providers.StrengthStrong && observation.Strength != providers.StrengthPartial {
-				continue
-			}
-			if len(observation.SupportingEvidence) == 0 {
-				continue
-			}
 			rawID := developerRawObjectiveID(observation.ObjectiveID)
-			assessment := "Code strongly suggests this is implemented"
-			if observation.Strength == providers.StrengthPartial {
-				assessment = "Some relevant code was found, but important parts may be missing"
+			observations[rawID] = observation
+			verdict := observation.DerivedTechnicalVerdict()
+			if (verdict != providers.RepositoryVerdictImplemented && verdict != providers.RepositoryVerdictPartial) || len(observation.SupportingEvidence) == 0 {
+				continue
 			}
 			add(rawID, developerEvidence{
-				title: developerObjectiveTitle(rawID, titles), assessment: assessment,
-				evidence: developerCitationText(observation.SupportingEvidence),
+				title: developerObjectiveTitle(rawID, titles), assessment: developerVerdictAssessment(observation),
+				evidence: developerCitationText(observation.SupportingEvidence), verdict: verdict,
 			})
 		}
 	}
@@ -493,10 +499,21 @@ func developerSupportingEvidence(value Report, titles map[string]string) ([]deve
 				}
 				locations = append(locations, locationText(match.Path, match.StartLine))
 			}
-			add(objective.ID, developerEvidence{
-				title: objective.Title, assessment: "Possible implementation found; a person still needs to check it",
-				evidence: strings.Join(locations, ", "),
-			})
+			item := developerEvidence{title: objective.Title, evidence: strings.Join(locations, ", ")}
+			if observation, reviewed := observations[objective.ID]; reviewed {
+				item.verdict = observation.DerivedTechnicalVerdict()
+				item.assessment = developerVerdictAssessment(observation)
+				if len(observation.SupportingEvidence) > 0 {
+					item.evidence = developerCitationText(observation.SupportingEvidence)
+				}
+			} else if value.RepositoryAnalysis != nil {
+				item.verdict = providers.RepositoryVerdictCannotDetermine
+				item.assessment = "The deterministic scanner found a code match, but the AI review did not evaluate this safeguard"
+			} else {
+				item.verdict = providers.RepositoryVerdictCannotDetermine
+				item.assessment = "A code match was found; run AI code review for a technical implementation decision"
+			}
+			add(objective.ID, item)
 		}
 	}
 	for _, result := range value.Frameworks {
@@ -520,6 +537,46 @@ func developerSupportingEvidence(value Report, titles map[string]string) ([]deve
 		items = items[:maxDeveloperEvidence]
 	}
 	return items, total
+}
+
+func developerTechnicalVerdictCounts(value Report) (implemented, partial, notImplemented, cannotDetermine int) {
+	if value.RepositoryAnalysis == nil {
+		return 0, 0, 0, 0
+	}
+	for _, observation := range value.RepositoryAnalysis.Result.ObjectiveObservations {
+		switch observation.DerivedTechnicalVerdict() {
+		case providers.RepositoryVerdictImplemented:
+			implemented++
+		case providers.RepositoryVerdictPartial:
+			partial++
+		case providers.RepositoryVerdictNotImplemented:
+			notImplemented++
+		default:
+			cannotDetermine++
+		}
+	}
+	return implemented, partial, notImplemented, cannotDetermine
+}
+
+func developerVerdictAssessment(observation providers.RepositoryObjectiveObservation) string {
+	assessment := developerVerdictLabel(observation.DerivedTechnicalVerdict())
+	if rationale := compactMarkdownText(observation.Rationale, 150); rationale != "" {
+		assessment += ". " + rationale
+	}
+	return assessment
+}
+
+func developerVerdictLabel(verdict providers.RepositoryTechnicalVerdict) string {
+	switch verdict {
+	case providers.RepositoryVerdictImplemented:
+		return "Implemented in the reviewed code"
+	case providers.RepositoryVerdictPartial:
+		return "Partially implemented in the reviewed code"
+	case providers.RepositoryVerdictNotImplemented:
+		return "Not implemented in the reviewed code"
+	default:
+		return "Could not determine from the reviewed code"
+	}
 }
 
 func developerQuestions(value Report) ([]string, int) {
