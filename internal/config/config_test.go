@@ -56,7 +56,7 @@ ai:
 }
 
 func TestRepositoryAnalysisConfigValidation(t *testing.T) {
-	for _, mode := range []string{"auto", "full", "hierarchical", "bounded-only"} {
+	for _, mode := range []string{"auto", "targeted", "deep", "full", "hierarchical", "bounded-only"} {
 		cfg := Default()
 		cfg.AI.RepositoryAnalysis.Mode = mode
 		cfg.AI.RepositoryAnalysis.MaxInputTokens = 8_000

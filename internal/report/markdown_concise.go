@@ -85,7 +85,7 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report) error {
 			return err
 		}
 	}
-	if _, err := fmt.Fprintf(writer, "\n- Whole-repository AI review: **%s**\n- Parts of the scan that need attention: **%d**\n- Scan ID: %s\n- Full technical results: %s\n",
+	if _, err := fmt.Fprintf(writer, "\n- AI code review: **%s**\n- Parts of the scan that need attention: **%d**\n- Scan ID: %s\n- Full technical results: %s\n",
 		markdownText(view.repositoryAnalysis), len(value.Warnings), inlineCode(value.Scan.ID), inlineCode("latest.json")); err != nil {
 		return err
 	}
@@ -254,19 +254,19 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 		return err
 	}
 	if value.RepositoryAnalysis == nil && developerRepositoryAnalysisIncomplete(value) {
-		if _, err := fmt.Fprintln(writer, "\nThe whole-repository AI review started but did not finish, so ComplyScan could not identify specific AI features from the way the code works. See the next-step section for the failure."); err != nil {
+		if _, err := fmt.Fprintln(writer, "\nThe AI code review started but did not finish, so ComplyScan could not identify specific AI features from the selected code evidence. See the next-step section for the failure."); err != nil {
 			return err
 		}
 	} else if value.RepositoryAnalysis == nil && value.RepositoryAnalysisRun == RepositoryAnalysisPending {
-		if _, err := fmt.Fprintln(writer, "\nThe whole-repository AI review has started, but this preliminary report does not contain its result yet."); err != nil {
+		if _, err := fmt.Fprintln(writer, "\nThe AI code review has started, but this preliminary report does not contain its result yet."); err != nil {
 			return err
 		}
 	} else if value.RepositoryAnalysis == nil {
-		if _, err := fmt.Fprintln(writer, "\nThe whole-repository AI review was not run, so ComplyScan could not identify specific AI features from the way the code works."); err != nil {
+		if _, err := fmt.Fprintln(writer, "\nThe AI code review was not run, so ComplyScan could not identify specific AI features from the way the code works."); err != nil {
 			return err
 		}
 	} else if len(value.RepositoryAnalysis.Result.AIUses) == 0 {
-		if _, err := fmt.Fprintln(writer, "\nThe whole-repository AI review did not identify a specific AI feature. This does not prove that the repository contains no AI activity."); err != nil {
+		if _, err := fmt.Fprintln(writer, "\nThe AI code review did not identify a specific AI feature in the selected evidence. This does not prove that the repository contains no AI activity."); err != nil {
 			return err
 		}
 	} else {
@@ -751,6 +751,8 @@ func developerHasUrgentAction(actions []developerAction) bool {
 
 func repositoryAnalysisModeLabel(mode providers.RepositoryAnalysisMode) string {
 	switch mode {
+	case providers.RepositoryAnalysisTargeted:
+		return "selected structural code evidence"
 	case providers.RepositoryAnalysisFull:
 		return "all repository files"
 	case providers.RepositoryAnalysisSubsystem:
@@ -787,7 +789,7 @@ func developerRepositoryAnalysisIncomplete(value Report) bool {
 	}
 	for _, warning := range value.Warnings {
 		normalized := strings.ToLower(warning)
-		if strings.Contains(normalized, "repository-wide analysis was incomplete") || strings.Contains(normalized, "review was incomplete because model qualification failed") {
+		if strings.Contains(normalized, "repository analysis was incomplete") || strings.Contains(normalized, "repository-wide analysis was incomplete") || strings.Contains(normalized, "review was incomplete because model qualification failed") {
 			return true
 		}
 	}

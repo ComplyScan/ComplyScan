@@ -132,7 +132,7 @@ func TestWriteMarkdownExplainsTestOnlyComponentsAndQuickScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"Whole-repository AI review: **not requested**",
+		"AI code review: **not requested**",
 		"**AI libraries or configuration found:** OpenAI",
 		"not that they are active in the deployed product",
 	} {
@@ -154,15 +154,15 @@ func TestWriteMarkdownDistinguishesIncompleteRepositoryReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"whole-repository AI review started but did not finish",
-		"Whole-repository AI review: **attempted but incomplete**",
+		"AI code review started but did not finish",
+		"AI code review: **attempted but incomplete**",
 		"Scan incomplete or uncertain",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
 		}
 	}
-	if strings.Contains(output.String(), "Whole-repository AI review: **not requested**") {
+	if strings.Contains(output.String(), "AI code review: **not requested**") {
 		t.Fatalf("incomplete review was presented as not requested:\n%s", output.String())
 	}
 }

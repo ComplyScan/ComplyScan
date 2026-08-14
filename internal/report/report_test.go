@@ -91,7 +91,8 @@ func TestRepositoryAnalysisIsRenderedAsAdvisoryEvidence(t *testing.T) {
 	value := New(".", "dev", nil, nil, 0)
 	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{
 		Provider: providers.OpenAI, Model: "test-model",
-		Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisFull, RepositoryFiles: 2, FilesSubmitted: 2, CitationsChecked: 1},
+		Coverage:          providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted, RepositoryFiles: 20, FilesSubmitted: 2, CitationsChecked: 1},
+		FollowUpRequested: true, FollowUpExcerpts: 1,
 		Result: providers.RepositorySectionResult{Scope: ".", AIUses: []providers.RepositoryAIUse{{
 			ID: "summaries", Name: "Summary generation", Purpose: "Generate summaries", Confidence: "high",
 			Evidence: []providers.RepositoryCitation{{Path: "main.go", Line: 12, Summary: "Runtime model call"}},
@@ -101,7 +102,7 @@ func TestRepositoryAnalysisIsRenderedAsAdvisoryEvidence(t *testing.T) {
 	if err := WriteTerminalCompletion(&terminal, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(terminal.String(), "Repository-wide AI analysis") || !strings.Contains(terminal.String(), "main.go:12") {
+	if !strings.Contains(terminal.String(), "Repository AI code analysis") || !strings.Contains(terminal.String(), "2 selected file excerpt(s) from 20 discovered file(s)") || !strings.Contains(terminal.String(), "Follow-up: 1 bounded excerpt(s)") || !strings.Contains(terminal.String(), "main.go:12") {
 		t.Fatalf("repository analysis missing from terminal:\n%s", terminal.String())
 	}
 	var markdown bytes.Buffer

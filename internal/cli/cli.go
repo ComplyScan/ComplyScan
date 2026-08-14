@@ -992,7 +992,7 @@ func reviewRepositoryWithProvider(
 	}
 	mode := repositoryanalysis.Mode(settings.RepositoryAnalysis.Mode)
 	if mode == "bounded-only" {
-		return providers.RepositoryAnalysisResult{}, errors.New("repository-wide analysis is disabled by configuration")
+		return providers.RepositoryAnalysisResult{}, errors.New("repository analysis is disabled by configuration")
 	}
 	liveCountdown := llmActivityAvailable(progressWriter)
 	return repositoryanalysis.Run(ctx, reviewer, repository, evidence, systems, repositoryanalysis.Options{

@@ -252,10 +252,31 @@ func WriteDetailedMarkdown(writer io.Writer, report Report) error {
 }
 
 func writeRepositoryAnalysisMarkdown(writer io.Writer, analysis providers.RepositoryAnalysisResult) error {
-	if _, err := fmt.Fprintf(writer, "\n## Repository-wide AI analysis\n\n- Provider/model: %s / %s\n- Context mode: %s\n- Repository: %d discovered file(s), %d byte(s)\n- Submitted context: %d file submission(s), %d byte(s), %d subsystem(s)\n- Deterministically checked citations: %d\n\nThis is advisory technical reasoning over repository context. It does not determine legal applicability or certify compliance.\n",
+	if _, err := fmt.Fprintf(writer, "\n## Repository AI code analysis\n\n- Provider/model: %s / %s\n- Context mode: %s\n- Repository: %d discovered file(s), %d byte(s)\n",
 		inlineCode(string(analysis.Provider)), inlineCode(analysis.Model), markdownText(string(analysis.Coverage.Mode)), analysis.Coverage.RepositoryFiles,
-		analysis.Coverage.RepositoryBytes, analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.Subsystems,
-		analysis.Coverage.CitationsChecked); err != nil {
+		analysis.Coverage.RepositoryBytes); err != nil {
+		return err
+	}
+	if analysis.Coverage.Mode == providers.RepositoryAnalysisTargeted {
+		if _, err := fmt.Fprintf(writer, "- Selected context: %d file excerpt(s), %d byte(s)\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted); err != nil {
+			return err
+		}
+	} else if _, err := fmt.Fprintf(writer, "- Submitted context: %d file submission(s), %d byte(s), %d subsystem(s)\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.Subsystems); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(writer, "- Deterministically checked citations: %d\n", analysis.Coverage.CitationsChecked); err != nil {
+		return err
+	}
+	if analysis.FollowUpRequested {
+		if _, err := fmt.Fprintf(writer, "- Bounded follow-up: %d excerpt(s) retrieved in one additional review\n", analysis.FollowUpExcerpts); err != nil {
+			return err
+		}
+	}
+	coverageNote := "This is advisory technical reasoning over submitted repository evidence. It does not determine legal applicability or certify compliance."
+	if analysis.Coverage.Mode == providers.RepositoryAnalysisTargeted {
+		coverageNote = "This is advisory technical reasoning over deterministically selected repository evidence. Files outside that package were not reviewed by the model. It does not determine legal applicability or certify compliance."
+	}
+	if _, err := fmt.Fprintln(writer, "\n"+coverageNote); err != nil {
 		return err
 	}
 	if len(analysis.Result.AIUses) == 0 {

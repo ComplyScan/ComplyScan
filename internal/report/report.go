@@ -51,7 +51,7 @@ type Summary struct {
 }
 
 // RepositoryAnalysisRunStatus records the human-report lifecycle of the
-// optional whole-repository model pass. It is not part of the versioned JSON
+// optional repository model pass. It is not part of the versioned JSON
 // evidence contract; failures remain preserved there as scan warnings.
 type RepositoryAnalysisRunStatus string
 
@@ -391,15 +391,27 @@ func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
 	return err
 }
 
-// WriteTerminalRepositoryAnalysis renders whole-repository reasoning as a
-// separate advisory layer. It never changes deterministic findings or gates.
+// WriteTerminalRepositoryAnalysis renders repository reasoning as a separate
+// advisory layer. It never changes deterministic findings or gates.
 func WriteTerminalRepositoryAnalysis(w io.Writer, analysis providers.RepositoryAnalysisResult) error {
-	if _, err := fmt.Fprintf(w, "Repository-wide AI analysis (%s / %s): %s\n", analysis.Provider, analysis.Model, analysis.Coverage.Mode); err != nil {
+	if _, err := fmt.Fprintf(w, "Repository AI code analysis (%s / %s): %s\n", analysis.Provider, analysis.Model, analysis.Coverage.Mode); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "        Context: %d/%d relevant file submission(s), %d subsystem(s), %d verified citation(s)\n",
-		analysis.Coverage.FilesSubmitted, analysis.Coverage.RepositoryFiles, analysis.Coverage.Subsystems, analysis.Coverage.CitationsChecked); err != nil {
-		return err
+	if analysis.Coverage.Mode == providers.RepositoryAnalysisTargeted {
+		if _, err := fmt.Fprintf(w, "        Context: %d selected file excerpt(s) from %d discovered file(s), %d verified citation(s)\n",
+			analysis.Coverage.FilesSubmitted, analysis.Coverage.RepositoryFiles, analysis.Coverage.CitationsChecked); err != nil {
+			return err
+		}
+	} else {
+		if _, err := fmt.Fprintf(w, "        Context: %d/%d eligible file submission(s), %d subsystem(s), %d verified citation(s)\n",
+			analysis.Coverage.FilesSubmitted, analysis.Coverage.RepositoryFiles, analysis.Coverage.Subsystems, analysis.Coverage.CitationsChecked); err != nil {
+			return err
+		}
+	}
+	if analysis.FollowUpRequested {
+		if _, err := fmt.Fprintf(w, "        Follow-up: %d bounded excerpt(s) retrieved in one additional review\n", analysis.FollowUpExcerpts); err != nil {
+			return err
+		}
 	}
 	for _, use := range analysis.Result.AIUses {
 		if _, err := fmt.Fprintf(w, "AI USE  %-6s %s — %s\n", strings.ToUpper(use.Confidence), use.Name, use.Purpose); err != nil {

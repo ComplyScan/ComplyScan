@@ -188,7 +188,7 @@ var setupQuestionHelp = map[string][]string{
 	},
 	"review-provider": {
 		"The recommended AI path uses your OpenAI, Anthropic, or Gemini account with a small ComplyScan model shortlist. Fast technical analysis uses no model, while local Ollama review remains an advanced experimental option.",
-		"This choice is made before model-assisted repository analysis so no model receives context before its privacy boundary is clear. Cloud scans may send all relevant redacted repository text externally, using hierarchical slices when needed; every result remains advisory and requires confirmation.",
+		"This choice is made before model-assisted repository analysis so no model receives context before its privacy boundary is clear. By default, cloud scans send a compact redacted evidence package selected locally from code structure and scanner signals; every result remains advisory and requires confirmation.",
 	},
 	"ollama-model": {
 		"Ollama is retained as an advanced experimental path for users who cannot send repository context to a cloud provider. No local model is currently approved as ComplyScan's standard reviewer.",
@@ -203,8 +203,8 @@ var setupQuestionHelp = map[string][]string{
 		"Choose no to save the configuration without downloading; the exact manual command will be printed.",
 	},
 	"remote-disclosure": {
-		"Remote scans may send all relevant discovered source, configuration, manifests, infrastructure, and governance text after recognised-secret redaction. Large repositories are sent as subsystem slices for synthesis; ignored, generated, dependency, binary, oversized, and excluded files remain outside this context.",
-		"Redaction is defence in depth, not a guarantee that arbitrary proprietary or personal data has been removed. Use model-free analysis or configure repository-analysis mode bounded-only when whole-repository external processing is not permitted.",
+		"Default remote scans send selected source excerpts, configuration, manifests, infrastructure, and CI evidence after recognised-secret redaction. Selection uses local inventory signals, technical-objective matches, production entry points, and their bounded code-graph neighborhood. Ignored, generated, dependency, binary, oversized, and excluded files remain outside this context.",
+		"Redaction is defence in depth, not a guarantee that arbitrary proprietary or personal data has been removed. Use model-free analysis when external processing is not permitted. The explicit deep modes transfer substantially more repository content.",
 		"The provider may charge for usage and processes data under your account settings and its terms. Confirm only if your organisation permits this external processing.",
 	},
 	"remote-provider-name": {
