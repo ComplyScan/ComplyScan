@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const RepositoryAnalysisPromptVersion = "1"
+const RepositoryAnalysisPromptVersion = "2"
 
 const (
 	maxRepositoryUses         = 100
@@ -24,9 +24,9 @@ type repositoryAnalysisPayload struct {
 	FollowUp TechnicalSearchPlan     `json:"follow_up"`
 }
 
-// ReviewRepository performs advisory reasoning over a complete redacted
-// repository slice or over trusted subsystem summaries. The caller decides
-// whether the repository fits in one request or requires hierarchy.
+// ReviewRepository performs advisory reasoning over targeted redacted evidence,
+// a broad repository slice, or trusted subsystem summaries. The caller chooses
+// the context strategy.
 func (provider *OllamaProvider) ReviewRepository(ctx context.Context, request RepositoryAnalysisRequest) (RepositoryAnalysisResult, error) {
 	maxOutputTokens := request.MaxOutputTokens
 	if maxOutputTokens <= 0 {

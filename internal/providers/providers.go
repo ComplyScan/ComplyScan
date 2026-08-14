@@ -213,9 +213,9 @@ type TechnicalReviewResult struct {
 	Usage           Usage                  `json:"usage,omitempty"`
 }
 
-// RepositoryAnalysisMode records how much repository context was available to
-// the model. It is deliberately explicit so full-repository and hierarchical
-// results cannot be mistaken for the older bounded-candidate review.
+// RepositoryAnalysisMode records which repository context strategy was
+// available to the model. It distinguishes targeted evidence from explicit
+// full-repository, hierarchical, and older bounded-candidate review.
 type RepositoryAnalysisMode string
 
 const (
@@ -226,7 +226,7 @@ const (
 	RepositoryAnalysisBoundedOnly RepositoryAnalysisMode = "bounded-fallback"
 )
 
-// RepositorySourceFile is a redacted text file supplied to repository-wide
+// RepositorySourceFile is a redacted file or excerpt supplied to repository
 // analysis. Paths and line counts are retained so citations can be verified
 // deterministically after the model responds.
 type RepositorySourceFile struct {

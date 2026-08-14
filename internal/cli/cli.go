@@ -659,12 +659,21 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 					}
 				}
 				if modelQualified && outputFormat == "terminal" {
-					if _, err := fmt.Fprintf(stdout, "%s advisory review requested for targeted repository reasoning, %d finding(s), and %d legacy bounded target(s) with %s...\n\n", reviewProviderLabel(cfg.AI.Provider), len(visible), candidateCount, configuredReviewModel(cfg.AI)); err != nil {
+					repositoryReasoning := "targeted repository reasoning"
+					deepRepositoryAnalysis := cfg.AI.RepositoryAnalysis.Mode == "deep" || cfg.AI.RepositoryAnalysis.Mode == "full" || cfg.AI.RepositoryAnalysis.Mode == "hierarchical"
+					if deepRepositoryAnalysis {
+						repositoryReasoning = "deep repository reasoning"
+					} else if !repositoryAnalysisRequested {
+						repositoryReasoning = "no repository-level reasoning"
+					}
+					if _, err := fmt.Fprintf(stdout, "%s advisory review requested for %s, %d finding(s), and %d legacy bounded target(s) with %s...\n\n", reviewProviderLabel(cfg.AI.Provider), repositoryReasoning, len(visible), candidateCount, configuredReviewModel(cfg.AI)); err != nil {
 						return fmt.Errorf("write terminal report: %w", err)
 					}
 					if isRemoteReviewProvider(cfg.AI.Provider) {
 						disclosure := "Remote review sends a compact, structurally selected and redacted code-evidence package, plus bounded finding records, to the selected provider; usage may incur cost."
-						if !repositoryAnalysisRequested {
+						if deepRepositoryAnalysis {
+							disclosure = "Remote deep review may send substantially more eligible redacted repository text, plus bounded finding records, to the selected provider; usage may incur cost."
+						} else if !repositoryAnalysisRequested {
 							disclosure = "Remote review sends only bounded, redacted finding and source-context records to the selected provider; usage may incur cost."
 						}
 						if _, err := fmt.Fprintln(stdout, disclosure); err != nil {

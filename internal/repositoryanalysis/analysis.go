@@ -1,5 +1,5 @@
-// Package repositoryanalysis prepares safe repository-wide model context and
-// chooses between one-pass and hierarchical analysis.
+// Package repositoryanalysis prepares safe targeted model context by default
+// and retains explicit broad one-pass and hierarchical analysis modes.
 package repositoryanalysis
 
 import (
@@ -69,9 +69,8 @@ type Progress struct {
 	Detail       string
 }
 
-// Run sends all relevant discovered repository text when it fits. Larger
-// repositories are partitioned by subsystem and then synthesized from
-// structured, citation-preserving summaries.
+// Run selects compact structural evidence in auto and targeted modes. Deep,
+// full, and hierarchical modes retain broad repository analysis.
 func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository, evidence []framework.TechnicalEvidenceReport, systems []profile.System, options Options) (providers.RepositoryAnalysisResult, error) {
 	if reviewer == nil {
 		return providers.RepositoryAnalysisResult{}, errors.New("repository analysis reviewer is required")
@@ -97,7 +96,7 @@ func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository
 			Provider: options.Provider, Model: options.Model,
 			Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisFull, RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository)},
 			Result:   providers.RepositorySectionResult{Scope: ".", AIUses: []providers.RepositoryAIUse{}, ObjectiveObservations: []providers.RepositoryObjectiveObservation{}, UnmappedObservations: []providers.RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{}},
-			Notes:    []string{"No relevant text files were available for repository-wide model analysis."},
+			Notes:    []string{"No eligible text files were available for repository model analysis."},
 		}, nil
 	}
 	objectives := repositoryObjectives(evidence)
