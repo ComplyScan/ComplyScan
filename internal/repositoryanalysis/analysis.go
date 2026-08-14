@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/codegraph"
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
@@ -26,6 +27,10 @@ const (
 	minimumInputTokens       = 8_000
 	charactersPerToken       = 3
 	contextReservePercent    = 20
+	maxRateLimitRetries      = 3
+	defaultRateLimitWait     = 60 * time.Second
+	maxRateLimitWait         = 65 * time.Second
+	minimumAdaptiveOutput    = 1024
 )
 
 type Reviewer interface {
@@ -47,6 +52,7 @@ type Options struct {
 	Model          string
 	Ownership      []ownership.Rule
 	OnProgress     func(Progress) error
+	Wait           func(context.Context, time.Duration) error
 }
 
 type Progress struct {
@@ -55,6 +61,8 @@ type Progress struct {
 	Total      int
 	Scope      string
 	InputBytes int64
+	Wait       time.Duration
+	Detail     string
 }
 
 // Run sends all relevant discovered repository text when it fits. Larger
@@ -98,11 +106,15 @@ func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository
 		if err := progress(options, Progress{Stage: "full-repository", Completed: 0, Total: 1, Scope: ".", InputBytes: fullBytes}); err != nil {
 			return providers.RepositoryAnalysisResult{}, err
 		}
-		result, err := reviewer.ReviewRepository(ctx, providers.RepositoryAnalysisRequest{
+		request := providers.RepositoryAnalysisRequest{
 			Mode: providers.RepositoryAnalysisFull, Scope: ".", RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository),
-			Files: files, Objectives: objectives, Systems: systemContext, Graph: fullGraph,
-		})
+			MaxOutputTokens: repositoryOutputTokens(options.Provider, 0), Files: files, Objectives: objectives, Systems: systemContext, Graph: fullGraph,
+		}
+		result, err := reviewRepositoryWithRetry(ctx, reviewer, request, options)
 		if err != nil {
+			if rateLimit, ok := providers.AsRemoteRateLimitError(err); ok && rateLimit.RequestTooLarge && options.Mode == ModeAuto {
+				return runHierarchical(ctx, reviewer, repository, graph, files, objectives, systemContext, budget, options)
+			}
 			return providers.RepositoryAnalysisResult{}, err
 		}
 		if err := validateSystemAttribution(result.Result, systems, options.Ownership); err != nil {
@@ -127,21 +139,43 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 	}
 	summaries := make([]providers.RepositorySectionResult, 0, len(chunks))
 	aggregate := providers.RepositoryAnalysisResult{Provider: options.Provider, Model: options.Model}
-	for index, chunk := range chunks {
+	adaptiveTokenLimit := 0
+	for index := 0; index < len(chunks); {
+		chunk := chunks[index]
 		chunkGraph := repositoryGraphContext(graph, chunk.files)
 		chunkBytes := requestContextBytes(chunk.files, chunkGraph)
-		if chunkBytes > budget {
+		if chunkBytes > budget && chunk.maxOutputTokens == 0 {
 			return providers.RepositoryAnalysisResult{}, fmt.Errorf("subsystem %s requires %d context bytes, exceeding the configured budget of %d bytes after repository graph construction", chunk.scope, chunkBytes, budget)
 		}
 		if err := progress(options, Progress{Stage: "subsystem", Completed: index, Total: len(chunks), Scope: chunk.scope, InputBytes: chunkBytes}); err != nil {
 			return providers.RepositoryAnalysisResult{}, err
 		}
-		result, err := reviewer.ReviewRepository(ctx, providers.RepositoryAnalysisRequest{
+		maxOutputTokens := chunk.maxOutputTokens
+		if maxOutputTokens == 0 {
+			maxOutputTokens = repositoryOutputTokens(options.Provider, adaptiveTokenLimit)
+		}
+		request := providers.RepositoryAnalysisRequest{
 			Mode: providers.RepositoryAnalysisSubsystem, Scope: chunk.scope,
 			RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), Files: chunk.files,
-			Objectives: objectives, Systems: systems, Graph: chunkGraph,
-		})
+			Objectives: objectives, Systems: systems, Graph: chunkGraph, MaxOutputTokens: maxOutputTokens,
+		}
+		result, err := reviewRepositoryWithRetry(ctx, reviewer, request, options)
 		if err != nil {
+			if rateLimit, ok := providers.AsRemoteRateLimitError(err); ok && rateLimit.RequestTooLarge {
+				adaptiveTokenLimit = smallerPositive(adaptiveTokenLimit, rateLimit.LimitTokens)
+				parts, split := splitRepositoryChunk(chunk, repositoryOutputTokens(options.Provider, adaptiveTokenLimit))
+				if !split {
+					return providers.RepositoryAnalysisResult{}, fmt.Errorf("analyze subsystem %s: provider token limit %d is too small for the smallest safe repository segment: %w", chunk.scope, rateLimit.LimitTokens, err)
+				}
+				chunks = replaceRepositoryChunk(chunks, index, parts)
+				if err := progress(options, Progress{
+					Stage: "adaptive-split", Completed: index, Total: len(chunks), Scope: chunk.scope,
+					InputBytes: chunkBytes, Detail: fmt.Sprintf("provider limit %d tokens; split into %d smaller part(s)", rateLimit.LimitTokens, len(parts)),
+				}); err != nil {
+					return providers.RepositoryAnalysisResult{}, err
+				}
+				continue
+			}
 			return providers.RepositoryAnalysisResult{}, fmt.Errorf("analyze subsystem %s: %w", chunk.scope, err)
 		}
 		if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership); err != nil {
@@ -155,23 +189,49 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		if err := progress(options, Progress{Stage: "subsystem", Completed: index + 1, Total: len(chunks), Scope: chunk.scope, InputBytes: chunkBytes}); err != nil {
 			return providers.RepositoryAnalysisResult{}, err
 		}
+		index++
 	}
 	levels := 0
 	for len(summaries) > 1 {
 		levels++
-		groups := partitionSummaries(summaries, budget)
+		plainGroups := partitionSummaries(summaries, budget)
+		groups := make([]repositorySummaryGroup, len(plainGroups))
+		for index := range plainGroups {
+			groups[index] = repositorySummaryGroup{summaries: plainGroups[index]}
+		}
 		next := make([]providers.RepositorySectionResult, 0, len(groups))
-		for index, group := range groups {
+		for index := 0; index < len(groups); {
+			group := groups[index]
 			scope := fmt.Sprintf("synthesis-level-%d-part-%d", levels, index+1)
-			if err := progress(options, Progress{Stage: "synthesis", Completed: index, Total: len(groups), Scope: scope, InputBytes: summaryBytes(group)}); err != nil {
+			if err := progress(options, Progress{Stage: "synthesis", Completed: index, Total: len(groups), Scope: scope, InputBytes: summaryBytes(group.summaries)}); err != nil {
 				return providers.RepositoryAnalysisResult{}, err
 			}
-			result, err := reviewer.ReviewRepository(ctx, providers.RepositoryAnalysisRequest{
+			maxOutputTokens := group.maxOutputTokens
+			if maxOutputTokens == 0 {
+				maxOutputTokens = repositoryOutputTokens(options.Provider, adaptiveTokenLimit)
+			}
+			request := providers.RepositoryAnalysisRequest{
 				Mode: providers.RepositoryAnalysisSynthesis, Scope: scope,
-				RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), FileIndex: citedFileIndex(group, files),
-				Objectives: objectives, Systems: systems, SubsystemSummaries: group,
-			})
+				RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), FileIndex: citedFileIndex(group.summaries, files),
+				Objectives: objectives, Systems: systems, SubsystemSummaries: group.summaries, MaxOutputTokens: maxOutputTokens,
+			}
+			result, err := reviewRepositoryWithRetry(ctx, reviewer, request, options)
 			if err != nil {
+				if rateLimit, ok := providers.AsRemoteRateLimitError(err); ok && rateLimit.RequestTooLarge {
+					adaptiveTokenLimit = smallerPositive(adaptiveTokenLimit, rateLimit.LimitTokens)
+					parts, split := splitRepositorySummaryGroup(group, repositoryOutputTokens(options.Provider, adaptiveTokenLimit))
+					if !split {
+						return providers.RepositoryAnalysisResult{}, fmt.Errorf("synthesize repository analysis level %d part %d: provider token limit %d is too small for one subsystem summary: %w", levels, index+1, rateLimit.LimitTokens, err)
+					}
+					groups = replaceRepositorySummaryGroup(groups, index, parts)
+					if err := progress(options, Progress{
+						Stage: "adaptive-split", Completed: index, Total: len(groups), Scope: scope,
+						InputBytes: summaryBytes(group.summaries), Detail: fmt.Sprintf("provider limit %d tokens; split synthesis into %d smaller part(s)", rateLimit.LimitTokens, len(parts)),
+					}); err != nil {
+						return providers.RepositoryAnalysisResult{}, err
+					}
+					continue
+				}
 				return providers.RepositoryAnalysisResult{}, fmt.Errorf("synthesize repository analysis level %d part %d: %w", levels, index+1, err)
 			}
 			if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership); err != nil {
@@ -180,9 +240,10 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			next = append(next, result.Result)
 			addUsage(&aggregate.Usage, result.Usage)
 			aggregate.Coverage.CitationsChecked += result.Coverage.CitationsChecked
-			if err := progress(options, Progress{Stage: "synthesis", Completed: index + 1, Total: len(groups), Scope: scope, InputBytes: summaryBytes(group)}); err != nil {
+			if err := progress(options, Progress{Stage: "synthesis", Completed: index + 1, Total: len(groups), Scope: scope, InputBytes: summaryBytes(group.summaries)}); err != nil {
 				return providers.RepositoryAnalysisResult{}, err
 			}
+			index++
 		}
 		if len(next) >= len(summaries) {
 			return providers.RepositoryAnalysisResult{}, errors.New("repository synthesis could not reduce subsystem summaries within the configured input budget")
@@ -193,11 +254,13 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		// A forced hierarchical analysis still gets an explicit synthesis pass so
 		// its output follows the same global contract as larger repositories.
 		group := summaries
-		result, err := reviewer.ReviewRepository(ctx, providers.RepositoryAnalysisRequest{
+		request := providers.RepositoryAnalysisRequest{
 			Mode: providers.RepositoryAnalysisSynthesis, Scope: "repository-synthesis",
 			RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), FileIndex: citedFileIndex(group, files),
 			Objectives: objectives, Systems: systems, SubsystemSummaries: group,
-		})
+			MaxOutputTokens: repositoryOutputTokens(options.Provider, adaptiveTokenLimit),
+		}
+		result, err := reviewRepositoryWithRetry(ctx, reviewer, request, options)
 		if err != nil {
 			return providers.RepositoryAnalysisResult{}, fmt.Errorf("synthesize repository analysis: %w", err)
 		}
@@ -222,9 +285,175 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 	return aggregate, nil
 }
 
+type repositorySummaryGroup struct {
+	summaries       []providers.RepositorySectionResult
+	maxOutputTokens int
+}
+
 type repositoryChunk struct {
-	scope string
-	files []providers.RepositorySourceFile
+	scope           string
+	files           []providers.RepositorySourceFile
+	maxOutputTokens int
+}
+
+func reviewRepositoryWithRetry(ctx context.Context, reviewer Reviewer, request providers.RepositoryAnalysisRequest, options Options) (providers.RepositoryAnalysisResult, error) {
+	for attempt := 0; ; attempt++ {
+		result, err := reviewer.ReviewRepository(ctx, request)
+		if err == nil {
+			return result, nil
+		}
+		rateLimit, ok := providers.AsRemoteRateLimitError(err)
+		if !ok || rateLimit.RequestTooLarge || attempt >= maxRateLimitRetries {
+			return providers.RepositoryAnalysisResult{}, err
+		}
+		delay := rateLimit.RetryAfter
+		if delay <= 0 {
+			delay = defaultRateLimitWait
+		}
+		if delay > maxRateLimitWait {
+			return providers.RepositoryAnalysisResult{}, fmt.Errorf("provider requested a rate-limit wait of %s, exceeding the safe automatic wait of %s: %w", delay.Round(time.Second), maxRateLimitWait, err)
+		}
+		if err := progress(options, Progress{
+			Stage: "rate-limit-wait", Completed: attempt + 1, Total: maxRateLimitRetries,
+			Scope: request.Scope, Wait: delay, Detail: "temporary provider token limit",
+		}); err != nil {
+			return providers.RepositoryAnalysisResult{}, err
+		}
+		wait := options.Wait
+		if wait == nil {
+			wait = waitForRateLimit
+		}
+		if err := wait(ctx, delay); err != nil {
+			return providers.RepositoryAnalysisResult{}, err
+		}
+	}
+}
+
+func waitForRateLimit(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func repositoryOutputTokens(provider providers.Kind, tokenLimit int) int {
+	if provider == providers.Ollama || tokenLimit <= 0 {
+		return 8192
+	}
+	value := tokenLimit / 5
+	if value < minimumAdaptiveOutput {
+		return minimumAdaptiveOutput
+	}
+	if value > 4096 {
+		return 4096
+	}
+	return value
+}
+
+func smallerPositive(current, candidate int) int {
+	if candidate <= 0 {
+		return current
+	}
+	if current == 0 || candidate < current {
+		return candidate
+	}
+	return current
+}
+
+func splitRepositoryChunk(chunk repositoryChunk, maxOutputTokens int) ([]repositoryChunk, bool) {
+	if len(chunk.files) > 1 {
+		split := balancedFileSplit(chunk.files)
+		if split <= 0 || split >= len(chunk.files) {
+			return nil, false
+		}
+		return []repositoryChunk{
+			{scope: chunk.scope + " (adaptive part 1)", files: append([]providers.RepositorySourceFile(nil), chunk.files[:split]...), maxOutputTokens: maxOutputTokens},
+			{scope: chunk.scope + " (adaptive part 2)", files: append([]providers.RepositorySourceFile(nil), chunk.files[split:]...), maxOutputTokens: maxOutputTokens},
+		}, true
+	}
+	if len(chunk.files) != 1 {
+		return nil, false
+	}
+	left, right, ok := splitRepositorySourceFile(chunk.files[0])
+	if !ok {
+		return nil, false
+	}
+	return []repositoryChunk{
+		{scope: chunk.scope + " (adaptive segment 1)", files: []providers.RepositorySourceFile{left}, maxOutputTokens: maxOutputTokens},
+		{scope: chunk.scope + " (adaptive segment 2)", files: []providers.RepositorySourceFile{right}, maxOutputTokens: maxOutputTokens},
+	}, true
+}
+
+func balancedFileSplit(files []providers.RepositorySourceFile) int {
+	total := sourceFileBytes(files)
+	var size int64
+	for index := 0; index < len(files)-1; index++ {
+		size += sourceFileBytes(files[index : index+1])
+		if size >= total/2 {
+			return index + 1
+		}
+	}
+	return len(files) / 2
+}
+
+func splitRepositorySourceFile(file providers.RepositorySourceFile) (providers.RepositorySourceFile, providers.RepositorySourceFile, bool) {
+	if len(file.Content) < 2 {
+		return providers.RepositorySourceFile{}, providers.RepositorySourceFile{}, false
+	}
+	start := file.ContentStartLine
+	if start <= 0 {
+		start = 1
+	}
+	middle := len(file.Content) / 2
+	leftBreak := strings.LastIndex(file.Content[:middle], "\n")
+	rightBreak := strings.Index(file.Content[middle:], "\n")
+	split := middle
+	if leftBreak >= 0 {
+		split = leftBreak + 1
+	}
+	if rightBreak >= 0 && (leftBreak < 0 || rightBreak < middle-leftBreak) {
+		split = middle + rightBreak + 1
+	}
+	if split <= 0 || split >= len(file.Content) {
+		return providers.RepositorySourceFile{}, providers.RepositorySourceFile{}, false
+	}
+	left, right := file, file
+	left.Content = file.Content[:split]
+	right.Content = file.Content[split:]
+	left.ContentStartLine = start
+	right.ContentStartLine = start + strings.Count(left.Content, "\n")
+	return left, right, true
+}
+
+func replaceRepositoryChunk(values []repositoryChunk, index int, replacements []repositoryChunk) []repositoryChunk {
+	result := make([]repositoryChunk, 0, len(values)-1+len(replacements))
+	result = append(result, values[:index]...)
+	result = append(result, replacements...)
+	result = append(result, values[index+1:]...)
+	return result
+}
+
+func splitRepositorySummaryGroup(group repositorySummaryGroup, maxOutputTokens int) ([]repositorySummaryGroup, bool) {
+	if len(group.summaries) < 3 {
+		return nil, false
+	}
+	middle := len(group.summaries) / 2
+	return []repositorySummaryGroup{
+		{summaries: append([]providers.RepositorySectionResult(nil), group.summaries[:middle]...), maxOutputTokens: maxOutputTokens},
+		{summaries: append([]providers.RepositorySectionResult(nil), group.summaries[middle:]...), maxOutputTokens: maxOutputTokens},
+	}, true
+}
+
+func replaceRepositorySummaryGroup(values []repositorySummaryGroup, index int, replacements []repositorySummaryGroup) []repositorySummaryGroup {
+	result := make([]repositorySummaryGroup, 0, len(values)-1+len(replacements))
+	result = append(result, values[:index]...)
+	result = append(result, replacements...)
+	result = append(result, values[index+1:]...)
+	return result
 }
 
 func partitionRepository(files []providers.RepositorySourceFile, budget int64) ([]repositoryChunk, error) {
@@ -248,19 +477,22 @@ func partitionRepository(files []providers.RepositorySourceFile, budget int64) (
 		current := repositoryChunk{scope: scope}
 		var size int64
 		for _, file := range groups[scope] {
-			fileSize := int64(len(file.Content) + len(file.Path) + 100)
-			if fileSize > budget {
-				return nil, fmt.Errorf("repository file %s requires %d bytes and cannot fit the configured analysis budget of %d bytes", file.Path, fileSize, budget)
+			segments, err := repositoryFileSegments(file, budget)
+			if err != nil {
+				return nil, err
 			}
-			if len(current.files) > 0 && size+fileSize > budget {
-				current.scope = fmt.Sprintf("%s (part %d)", scope, part)
-				chunks = append(chunks, current)
-				part++
-				current = repositoryChunk{scope: scope}
-				size = 0
+			for _, segment := range segments {
+				fileSize := int64(len(segment.Content) + len(segment.Path) + 100)
+				if len(current.files) > 0 && size+fileSize > budget {
+					current.scope = fmt.Sprintf("%s (part %d)", scope, part)
+					chunks = append(chunks, current)
+					part++
+					current = repositoryChunk{scope: scope}
+					size = 0
+				}
+				current.files = append(current.files, segment)
+				size += fileSize
 			}
-			current.files = append(current.files, file)
-			size += fileSize
 		}
 		if len(current.files) > 0 {
 			if part > 1 {
@@ -270,6 +502,26 @@ func partitionRepository(files []providers.RepositorySourceFile, budget int64) (
 		}
 	}
 	return chunks, nil
+}
+
+func repositoryFileSegments(file providers.RepositorySourceFile, budget int64) ([]providers.RepositorySourceFile, error) {
+	queue := []providers.RepositorySourceFile{file}
+	result := make([]providers.RepositorySourceFile, 0, 1)
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		fileSize := int64(len(current.Content) + len(current.Path) + 100)
+		if fileSize <= budget {
+			result = append(result, current)
+			continue
+		}
+		left, right, ok := splitRepositorySourceFile(current)
+		if !ok {
+			return nil, fmt.Errorf("repository file %s requires %d bytes and cannot be safely divided to fit the configured analysis budget of %d bytes", file.Path, fileSize, budget)
+		}
+		queue = append([]providers.RepositorySourceFile{left, right}, queue...)
+	}
+	return result, nil
 }
 
 func partitionSummaries(values []providers.RepositorySectionResult, budget int64) [][]providers.RepositorySectionResult {
@@ -301,7 +553,7 @@ func repositoryFiles(repository discovery.Repository) []providers.RepositorySour
 		}
 		content := rules.RedactSecrets(strings.ReplaceAll(string(file.Content), "\r\n", "\n"))
 		files = append(files, providers.RepositorySourceFile{
-			Path: file.Path, Kind: string(file.Kind), LineCount: strings.Count(content, "\n") + 1, Content: content,
+			Path: file.Path, Kind: string(file.Kind), LineCount: strings.Count(content, "\n") + 1, ContentStartLine: 1, Content: content,
 		})
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
@@ -430,9 +682,14 @@ func requestContextBytes(files []providers.RepositorySourceFile, graph providers
 }
 
 func repositoryGraphContext(graph codegraph.Graph, files []providers.RepositorySourceFile) providers.RepositoryGraphContext {
-	paths := make(map[string]struct{}, len(files))
+	type submittedRange struct{ start, end int }
+	paths := make(map[string]submittedRange, len(files))
 	for _, file := range files {
-		paths[file.Path] = struct{}{}
+		start := file.ContentStartLine
+		if start <= 0 {
+			start = 1
+		}
+		paths[file.Path] = submittedRange{start: start, end: start + strings.Count(file.Content, "\n")}
 	}
 	result := providers.RepositoryGraphContext{}
 	for _, language := range graph.Languages {
@@ -455,7 +712,8 @@ func repositoryGraphContext(graph codegraph.Graph, files []providers.RepositoryS
 			name = symbol.Name
 		}
 		names[symbol.ID] = name
-		if _, included := paths[symbol.Path]; !included {
+		submitted, included := paths[symbol.Path]
+		if !included || symbol.StartLine < submitted.start || symbol.EndLine > submitted.end {
 			continue
 		}
 		result.Symbols = append(result.Symbols, providers.RepositoryGraphSymbol{
@@ -468,7 +726,8 @@ func repositoryGraphContext(graph codegraph.Graph, files []providers.RepositoryS
 		}
 	}
 	for _, edge := range graph.Edges {
-		if _, included := paths[edge.Path]; !included {
+		submitted, included := paths[edge.Path]
+		if !included || edge.Line < submitted.start || edge.Line > submitted.end {
 			continue
 		}
 		from := names[edge.From]

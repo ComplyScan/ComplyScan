@@ -977,6 +977,14 @@ func reviewRepositoryWithProvider(
 	return repositoryanalysis.Run(ctx, reviewer, repository, evidence, systems, repositoryanalysis.Options{
 		Mode: mode, MaxInputTokens: settings.RepositoryAnalysis.MaxInputTokens, Provider: kind, Model: model, Ownership: ownershipRules,
 		OnProgress: func(progress repositoryanalysis.Progress) error {
+			switch progress.Stage {
+			case "adaptive-split":
+				_, err := fmt.Fprintf(progressWriter, "Provider request was too large; splitting %s into smaller analysis slices (%s). Continuing automatically.\n", progress.Scope, progress.Detail)
+				return err
+			case "rate-limit-wait":
+				_, err := fmt.Fprintf(progressWriter, "Provider token limit reached; waiting %s before retry %d/%d for %s.\n", progress.Wait.Round(time.Second), progress.Completed, progress.Total, progress.Scope)
+				return err
+			}
 			if progress.Completed == 0 {
 				return nil
 			}
