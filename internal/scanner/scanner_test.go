@@ -59,6 +59,26 @@ func TestScannerRunsAgainstPreDiscoveredRepository(t *testing.T) {
 	}
 }
 
+func TestScannerAppliesExclusionsToReusedDiscovery(t *testing.T) {
+	target := t.TempDir()
+	discovered := discovery.Result{Repository: discovery.Repository{Root: target, Files: []discovery.File{
+		{Path: ".complyscan.yml", Kind: discovery.KindConfig, Content: []byte("private configuration")},
+		{Path: "fixtures/.complyscan.yml", Kind: discovery.KindConfig, Content: []byte("non-active fixture")},
+		{Path: ".github/workflows/complyscan.yml", Kind: discovery.KindGitHubAction, Content: []byte("name: ComplyScan")},
+	}}}
+	result, err := New().ScanDiscovered(context.Background(), target, discovered, Options{ExcludeFiles: []string{".complyscan.yml"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := make(map[string]bool, len(result.FullRepository.Files))
+	for _, file := range result.FullRepository.Files {
+		paths[file.Path] = true
+	}
+	if len(paths) != 2 || paths[".complyscan.yml"] || !paths["fixtures/.complyscan.yml"] || !paths[".github/workflows/complyscan.yml"] {
+		t.Fatalf("reused discovery did not enforce the final exclusion boundary: %#v", result.FullRepository.Files)
+	}
+}
+
 func TestFindingFingerprintSurvivesLineMovement(t *testing.T) {
 	first := rules.Finding{RuleID: "TEST-001", Title: "Test", Path: "src/app.go", StartLine: 4, Evidence: "logger.Info(prompt)"}
 	second := first

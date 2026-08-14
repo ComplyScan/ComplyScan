@@ -55,6 +55,7 @@ type Repository struct {
 
 type Options struct {
 	Exclude                   []string
+	ExcludeFiles              []string
 	MaxFileSize               int64
 	MaxFiles                  int
 	MaxTotalBytes             int64
@@ -83,6 +84,23 @@ type Progress struct {
 }
 
 type ProgressHandler func(Progress) error
+
+// ApplyExclusions filters an existing discovery snapshot with the same path
+// rules used during filesystem traversal. This keeps reused setup snapshots
+// inside the scan's final privacy and scope boundary.
+func ApplyExclusions(repository Repository, exclusions, excludedFiles []string) Repository {
+	if len(exclusions) == 0 && len(excludedFiles) == 0 {
+		return repository
+	}
+	filtered := Repository{Root: repository.Root, Files: make([]File, 0, len(repository.Files))}
+	for _, file := range repository.Files {
+		if isExcluded(file.Path, filepath.Base(filepath.FromSlash(file.Path)), exclusions) || isExcludedFile(file.Path, excludedFiles) {
+			continue
+		}
+		filtered.Files = append(filtered.Files, file)
+	}
+	return filtered
+}
 
 type gitignoreContext struct {
 	base    string
@@ -198,7 +216,7 @@ func walk(ctx context.Context, root, relDir string, parents []gitignoreContext, 
 			}
 			continue
 		}
-		if isIgnored(relPath, false, contexts) || isExcluded(relPath, name, options.Exclude) {
+		if isIgnored(relPath, false, contexts) || isExcluded(relPath, name, options.Exclude) || isExcludedFile(relPath, options.ExcludeFiles) {
 			continue
 		}
 		info, err := entry.Info()
@@ -303,6 +321,17 @@ func isExcluded(relPath, name string, excludes []string) bool {
 			return true
 		}
 		if relPath == pattern || strings.HasPrefix(relPath, pattern+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func isExcludedFile(relPath string, excludedFiles []string) bool {
+	relPath = filepath.ToSlash(filepath.Clean(filepath.FromSlash(relPath)))
+	for _, value := range excludedFiles {
+		candidate := filepath.ToSlash(filepath.Clean(filepath.FromSlash(value)))
+		if candidate != "." && relPath == candidate {
 			return true
 		}
 	}

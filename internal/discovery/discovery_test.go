@@ -113,6 +113,44 @@ func TestDiscoverTrackedOnly(t *testing.T) {
 	}
 }
 
+func TestDiscoverExcludesOnlyTheExactProtectedFile(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, ".complyscan.yml", "private active config\n")
+	writeTestFile(t, root, "fixtures/.complyscan.yml", "public fixture\n")
+	writeTestFile(t, root, ".github/workflows/complyscan.yml", "name: ComplyScan\n")
+	result, err := Discover(context.Background(), root, Options{ExcludeFiles: []string{".complyscan.yml"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := repositoryPaths(result.Repository)
+	if contains(paths, ".complyscan.yml") || !contains(paths, "fixtures/.complyscan.yml") || !contains(paths, ".github/workflows/complyscan.yml") {
+		t.Fatalf("exact-file exclusion paths = %v", paths)
+	}
+}
+
+func TestTrackedDiscoveryHonorsExactProtectedFile(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	root := t.TempDir()
+	writeTestFile(t, root, ".complyscan.yml", "private active config\n")
+	writeTestFile(t, root, ".github/workflows/complyscan.yml", "name: ComplyScan\n")
+	for _, args := range [][]string{{"init"}, {"add", ".complyscan.yml", ".github/workflows/complyscan.yml"}} {
+		command := exec.Command("git", append([]string{"-C", root}, args...)...)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	result, err := Discover(context.Background(), root, Options{TrackedOnly: true, ExcludeFiles: []string{".complyscan.yml"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := repositoryPaths(result.Repository)
+	if len(paths) != 1 || paths[0] != ".github/workflows/complyscan.yml" {
+		t.Fatalf("tracked exact-file exclusion paths = %v", paths)
+	}
+}
+
 func TestDiscoverExcludesBinaryAndLargeFiles(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, root, "text.txt", "hello\n")

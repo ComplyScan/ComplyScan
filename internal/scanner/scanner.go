@@ -13,6 +13,7 @@ import (
 
 type Options struct {
 	Exclude                   []string
+	ExcludeFiles              []string
 	MaxFiles                  int
 	MaxTotalBytes             int64
 	IncludeNestedRepositories bool
@@ -46,6 +47,7 @@ func New(ruleSet ...rules.Rule) *Engine {
 func (e *Engine) Scan(ctx context.Context, target string, options Options) (Result, error) {
 	discovered, err := discovery.Discover(ctx, target, discovery.Options{
 		Exclude:                   options.Exclude,
+		ExcludeFiles:              options.ExcludeFiles,
 		MaxFiles:                  options.MaxFiles,
 		MaxTotalBytes:             options.MaxTotalBytes,
 		IncludeNestedRepositories: options.IncludeNestedRepositories,
@@ -62,7 +64,7 @@ func (e *Engine) Scan(ctx context.Context, target string, options Options) (Resu
 // repository. It is used by scan-first onboarding so the final scan does not
 // read and classify every repository file a second time.
 func (e *Engine) ScanDiscovered(ctx context.Context, target string, discovered discovery.Result, options Options) (Result, error) {
-	fullRepository := discovered.Repository
+	fullRepository := discovery.ApplyExclusions(discovered.Repository, options.Exclude, options.ExcludeFiles)
 	scopedRepository := fullRepository
 	if options.ChangedSince != "" {
 		changed, err := discovery.ChangedPaths(ctx, target, options.ChangedSince)

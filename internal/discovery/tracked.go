@@ -25,7 +25,7 @@ func discoverTracked(ctx context.Context, root string, options Options, result *
 			continue
 		}
 		relPath := filepath.ToSlash(string(rawPath))
-		if !safeRelativePath(relPath) || isExcludedTrackedPath(relPath, options.Exclude) {
+		if !safeRelativePath(relPath) || isExcludedTrackedPath(relPath, options.Exclude) || isExcludedFile(relPath, options.ExcludeFiles) {
 			continue
 		}
 		info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(relPath)))
