@@ -34,11 +34,12 @@ const (
 	setupScanNone  setupScanMode = "none"
 )
 
-func inspectRepositoryForSetup(ctx context.Context, prompt promptSession, target string, cfg config.Config, build BuildInfo) (setupRepositorySummary, error) {
+func inspectRepositoryForSetup(ctx context.Context, prompt promptSession, target string, activeConfigPath string, cfg config.Config, build BuildInfo) (setupRepositorySummary, error) {
 	if _, err := fmt.Fprintln(prompt.output, "Inspecting repository files and technical AI signals locally. No model is used in this step."); err != nil {
 		return setupRepositorySummary{}, err
 	}
 	excludes := withGeneratedReportExclusion(append([]string(nil), cfg.Scan.Exclude...))
+	activeConfigExclusion := resolvedPathExclusion(target, activeConfigPath)
 	if cfg.Baseline != "" {
 		if exclusion := targetExclusion(target, resolveTargetPath(target, cfg.Baseline)); exclusion != "" {
 			excludes = append(excludes, exclusion)
@@ -46,6 +47,7 @@ func inspectRepositoryForSetup(ctx context.Context, prompt promptSession, target
 	}
 	result, err := discovery.Discover(ctx, target, discovery.Options{
 		Exclude:                   excludes,
+		ExcludeFiles:              nonEmptyValues(activeConfigExclusion),
 		MaxFiles:                  cfg.Scan.MaxFiles,
 		MaxTotalBytes:             cfg.Scan.MaxTotalBytes,
 		IncludeNestedRepositories: cfg.Scan.IncludeNestedRepositories,

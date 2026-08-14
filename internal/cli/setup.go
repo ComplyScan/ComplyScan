@@ -176,7 +176,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		if err := setupStepTitle(prompt, 1, totalSteps, "Repository inspection", false); err != nil {
 			return err
 		}
-		summary, inspectErr := inspectRepositoryForSetup(cmd.Context(), prompt, target, cfg, build)
+		summary, inspectErr := inspectRepositoryForSetup(cmd.Context(), prompt, target, path, cfg, build)
 		if inspectErr != nil {
 			return inspectErr
 		}
@@ -315,7 +315,6 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	}
 	if interactive {
 		repositorySummary.Discovery, err = refreshSetupDiscovery(repositorySummary.Discovery, target,
-			setupGeneratedFile{Path: path, Kind: discovery.KindConfig},
 			setupGeneratedFile{Path: filepath.Join(target, ".gitignore"), Kind: discovery.KindOtherText},
 		)
 		if err != nil {

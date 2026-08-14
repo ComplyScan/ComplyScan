@@ -663,6 +663,33 @@ func TestRefreshSetupDiscoveryAddsAndReplacesGeneratedFiles(t *testing.T) {
 	}
 }
 
+func TestSetupInspectionExcludesActiveConfig(t *testing.T) {
+	target := t.TempDir()
+	configPath := filepath.Join(target, config.FileName)
+	if err := config.Write(configPath, config.Default(), false); err != nil {
+		t.Fatal(err)
+	}
+	workflowPath := filepath.Join(target, ".github", "workflows", "complyscan.yml")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workflowPath, []byte("name: ComplyScan\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	summary, err := inspectRepositoryForSetup(context.Background(), promptSession{output: &output}, target, configPath, config.Default(), testBuild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := make(map[string]bool, len(summary.Discovery.Repository.Files))
+	for _, file := range summary.Discovery.Repository.Files {
+		paths[file.Path] = true
+	}
+	if paths[config.FileName] || !paths[".github/workflows/complyscan.yml"] {
+		t.Fatalf("setup discovery paths = %#v", paths)
+	}
+}
+
 func TestRelevantEUContextAsksHighRiskFollowUpQuestions(t *testing.T) {
 	system := basicApplicabilityTestSystem()
 	input := strings.NewReader("4\n1\n3\nrecruiters\njob applicants\n1\n2\n2\nProduct owner\n")

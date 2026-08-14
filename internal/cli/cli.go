@@ -310,7 +310,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 			if err != nil {
 				return fmt.Errorf("--severity: %w", err)
 			}
-			cfg, _, err := config.Resolve(target, configPath)
+			cfg, resolvedConfigPath, err := config.Resolve(target, configPath)
 			if err != nil {
 				return err
 			}
@@ -442,6 +442,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 				effectiveMaxTotalBytes = maxTotalBytes
 			}
 			excludes := withGeneratedReportExclusion(append(append([]string(nil), cfg.Scan.Exclude...), additionalExcludes...))
+			activeConfigExclusion := resolvedPathExclusion(target, resolvedConfigPath)
 			if resolvedReportDirectory != "" {
 				if exclusion := targetExclusion(target, resolvedReportDirectory); exclusion != "" {
 					excludes = append(excludes, exclusion)
@@ -454,6 +455,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 			}
 			scanOptions := scanner.Options{
 				Exclude:                   excludes,
+				ExcludeFiles:              nonEmptyValues(activeConfigExclusion),
 				MaxFiles:                  effectiveMaxFiles,
 				MaxTotalBytes:             effectiveMaxTotalBytes,
 				IncludeNestedRepositories: cfg.Scan.IncludeNestedRepositories || includeNestedRepositories,
@@ -1323,6 +1325,38 @@ func targetExclusion(target, value string) string {
 		return ""
 	}
 	return filepath.ToSlash(relative)
+}
+
+// resolvedPathExclusion converts a path already resolved relative to the
+// process working directory into a repository-relative exclusion. Config.Resolve
+// returns paths in this form, including for a relative scan target.
+func resolvedPathExclusion(target, value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	targetPath, err := filepath.Abs(target)
+	if err != nil {
+		return ""
+	}
+	resolvedPath, err := filepath.Abs(value)
+	if err != nil {
+		return ""
+	}
+	relative, err := filepath.Rel(targetPath, resolvedPath)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	return filepath.ToSlash(relative)
+}
+
+func nonEmptyValues(values ...string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func formatByteCount(value int64) string {

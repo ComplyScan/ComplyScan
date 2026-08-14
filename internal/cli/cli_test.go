@@ -66,6 +66,56 @@ func TestScanCommandReusesGuidedSetupDiscovery(t *testing.T) {
 	}
 }
 
+func TestScanExcludesActiveConfigButKeepsGitHubWorkflowYAML(t *testing.T) {
+	target := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(target, ".github", "workflows"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workflow := "endpoint: https://api." + "openai.com/v1/responses\n"
+	if err := os.WriteFile(filepath.Join(target, ".github", "workflows", "complyscan.yml"), []byte(workflow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--quick", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	output := stdout.String()
+	if strings.Contains(output, "Ollama") {
+		t.Fatalf("active config's Ollama endpoint entered scan evidence:\n%s", output)
+	}
+	if !strings.Contains(output, "AI provider or framework detected: OpenAI") || !strings.Contains(output, ".github/workflows/complyscan.yml") {
+		t.Fatalf("GitHub workflow YAML was excluded with the active config:\n%s", output)
+	}
+}
+
+func TestScanExcludesCustomActiveConfigPath(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(target, "private", "review.yml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Write(configPath, config.Default(), false); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--quick", "--no-report", "--config", configPath, target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if strings.Contains(stdout.String(), "AI-DISC-001") || strings.Contains(stdout.String(), "Ollama") {
+		t.Fatalf("custom active config entered scan evidence:\n%s", stdout.String())
+	}
+}
+
 func TestScanAutomaticallyUsesConfiguredAIReview(t *testing.T) {
 	target := t.TempDir()
 	if err := os.WriteFile(filepath.Join(target, "main.go"), []byte("package main\n"), 0o644); err != nil {
@@ -980,6 +1030,28 @@ func TestTargetExclusionHandlesAbsolutePaths(t *testing.T) {
 	}
 	if got := targetExclusion(target, filepath.Join(t.TempDir(), "baseline.json")); got != "" {
 		t.Fatalf("outside exclusion = %q", got)
+	}
+}
+
+func TestResolvedPathExclusionHandlesRelativeScanTarget(t *testing.T) {
+	parent := t.TempDir()
+	target := filepath.Join(parent, "repository")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(parent); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(original) })
+	if got := resolvedPathExclusion("repository", filepath.Join("repository", config.FileName)); got != config.FileName {
+		t.Fatalf("relative active config exclusion = %q", got)
+	}
+	if got := resolvedPathExclusion("repository", filepath.Join(parent, "outside.yml")); got != "" {
+		t.Fatalf("outside active config exclusion = %q", got)
 	}
 }
 
