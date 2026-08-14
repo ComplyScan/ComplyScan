@@ -4,7 +4,7 @@ Repository-wide analysis is an advisory model layer added after deterministic di
 
 ## Pipeline
 
-1. ComplyScan discovers text under the existing `.gitignore`, exclusion, file-size, file-count, total-byte, binary, symlink, dependency-directory, generated-output, and nested-repository boundaries.
+1. ComplyScan loads its active configuration locally, excludes that exact file, and discovers the remaining text under the existing `.gitignore`, exclusion, file-size, file-count, total-byte, binary, symlink, dependency-directory, generated-output, and nested-repository boundaries.
 2. It classifies files, redacts recognised credential formats, and builds the language-neutral Go, Python, JavaScript, and TypeScript repository graph.
 3. It loads the selected versioned code-only framework objectives and the configured system facts.
 4. If all relevant context fits the configured input budget, the provider receives it in one request. Otherwise files are grouped by top-level subsystem, every group is analyzed, and structured results are reduced through one or more synthesis levels. In `auto` or `hierarchical` mode, a provider response that says one request exceeds its token limit causes ComplyScan to divide that subsystem, large file, or synthesis batch again and continue automatically. Split file segments retain original line numbers for citation checking.
@@ -35,7 +35,7 @@ Hosted-provider token-per-minute limits can be lower than a model's context wind
 
 ## What is sent
 
-The repository-wide request may contain relevant discovered source, dependency manifests, configuration, CI, GitHub Actions, Docker, Terraform, README, governance, model-card, privacy, and risk text; the selected technical objectives; declared system facts; and report-safe graph symbols, imports, relationships, and reachability. Generic unclassified text is omitted. Source content is secret-redacted again at the provider boundary.
+The repository-wide request may contain relevant discovered source, dependency manifests, configuration, CI, GitHub Actions, Docker, Terraform, README, governance, model-card, privacy, and risk text; the selected technical objectives; declared system facts; and report-safe graph symbols, imports, relationships, and reachability. The raw active ComplyScan configuration—normally `.complyscan.yml`, or the exact file passed with `--config`—is never part of the discovered snapshot or any model request. ComplyScan separately constructs typed system context from the loaded configuration and supplies only those analysis fields where required. Other YAML files, including `.github/workflows/*.yml`, remain eligible because they can implement CI, permission, testing, release, or safeguard behavior. Generic unclassified text is omitted. Source content is secret-redacted again at the provider boundary.
 
 Generated outputs, dependency trees, build directories, caches, binaries, symlinks, ignored paths, nested repositories unless explicitly enabled, files over 1 MiB, files beyond discovery limits, and complete credentials matching maintained secret patterns are not sent. Secret redaction is defence in depth, not a guarantee that arbitrary proprietary or personal data has been removed. A hosted provider remains an external source-code processing boundary.
 
