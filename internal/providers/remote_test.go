@@ -124,6 +124,35 @@ func TestRemoteProviderErrorsDoNotExposeCredential(t *testing.T) {
 	}
 }
 
+func TestRemoteStatusErrorPreservesRateLimitDetails(t *testing.T) {
+	body, err := json.Marshal(map[string]any{"error": map[string]string{
+		"message": "Request too large for model on tokens per min (TPM): Limit 10000, Requested 21769.",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rateErr, ok := AsRemoteRateLimitError(remoteStatusError("OpenAI", http.StatusTooManyRequests, body, "2.5"))
+	if !ok {
+		t.Fatal("HTTP 429 was not preserved as a structured rate-limit error")
+	}
+	if !rateErr.RequestTooLarge || rateErr.LimitTokens != 10_000 || rateErr.RequestedTokens != 21_769 || rateErr.RetryAfter != 2500*time.Millisecond {
+		t.Fatalf("unexpected rate-limit details: %#v", rateErr)
+	}
+}
+
+func TestRemoteStatusErrorParsesRetryDelayFromMessage(t *testing.T) {
+	body, err := json.Marshal(map[string]any{"error": map[string]string{
+		"message": "Rate limit reached. Please try again in 750ms.",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rateErr, ok := AsRemoteRateLimitError(remoteStatusError("OpenAI", http.StatusTooManyRequests, body, ""))
+	if !ok || rateErr.RequestTooLarge || rateErr.RetryAfter != 750*time.Millisecond {
+		t.Fatalf("unexpected retry details: %#v, %t", rateErr, ok)
+	}
+}
+
 func TestRemoteProviderRequiresCredential(t *testing.T) {
 	if _, err := NewGemini(RemoteOptions{Model: "test", Timeout: time.Second, MaxFindings: 1}); err == nil || !strings.Contains(err.Error(), "API key is not available") {
 		t.Fatalf("error = %v", err)

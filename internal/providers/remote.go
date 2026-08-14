@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -19,6 +21,40 @@ const (
 	maxRemoteResponseBytes = 2 << 20
 	maxRemoteOutputTokens  = 4096
 )
+
+var (
+	remoteTokenLimitPattern = regexp.MustCompile(`(?i)limit\s+([0-9]+),\s*requested\s+([0-9]+)`)
+	remoteRetryDelayPattern = regexp.MustCompile(`(?i)try again in\s+([0-9]+(?:\.[0-9]+)?)\s*(ms|s)`)
+)
+
+// RemoteRateLimitError retains the structured parts of an HTTP 429 response
+// needed by repository analysis to distinguish an individually oversized
+// request from a temporary rolling rate limit.
+type RemoteRateLimitError struct {
+	Provider        string
+	Message         string
+	LimitTokens     int
+	RequestedTokens int
+	RetryAfter      time.Duration
+	RequestTooLarge bool
+}
+
+func (value *RemoteRateLimitError) Error() string {
+	if value.Message != "" {
+		return fmt.Sprintf("%s review failed with HTTP 429: %s", value.Provider, value.Message)
+	}
+	return fmt.Sprintf("%s review failed with HTTP 429", value.Provider)
+}
+
+// AsRemoteRateLimitError unwraps a provider error without requiring callers to
+// parse user-facing error strings.
+func AsRemoteRateLimitError(err error) (*RemoteRateLimitError, bool) {
+	var value *RemoteRateLimitError
+	if !errors.As(err, &value) {
+		return nil, false
+	}
+	return value, true
+}
 
 // RemoteOptions contains a credential value only in process memory. Callers
 // must resolve it from an environment variable and must never persist it.
@@ -348,7 +384,7 @@ func postRemoteJSON(ctx context.Context, client *http.Client, label, endpoint, a
 		return fmt.Errorf("read %s response: %w", label, err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return remoteStatusError(label, response.StatusCode, responseBody)
+		return remoteStatusError(label, response.StatusCode, responseBody, response.Header.Get("Retry-After"))
 	}
 	if err := json.Unmarshal(responseBody, target); err != nil {
 		return fmt.Errorf("decode %s response: %w", label, err)
@@ -356,16 +392,62 @@ func postRemoteJSON(ctx context.Context, client *http.Client, label, endpoint, a
 	return nil
 }
 
-func remoteStatusError(label string, status int, body []byte) error {
+func remoteStatusError(label string, status int, body []byte, retryAfterHeader string) error {
 	var payload struct {
 		Error struct {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if json.Unmarshal(body, &payload) == nil && strings.TrimSpace(payload.Error.Message) != "" {
-		return fmt.Errorf("%s review failed with HTTP %d: %s", label, status, cleanReviewText(payload.Error.Message, maxReviewMessageChars))
+	message := ""
+	if json.Unmarshal(body, &payload) == nil {
+		message = cleanReviewText(payload.Error.Message, maxReviewMessageChars)
+	}
+	if status == http.StatusTooManyRequests {
+		limit, requested := remoteTokenLimit(message)
+		return &RemoteRateLimitError{
+			Provider: label, Message: message, LimitTokens: limit, RequestedTokens: requested,
+			RetryAfter:      remoteRetryAfter(retryAfterHeader, message),
+			RequestTooLarge: strings.Contains(strings.ToLower(message), "request too large") || limit > 0 && requested > limit,
+		}
+	}
+	if message != "" {
+		return fmt.Errorf("%s review failed with HTTP %d: %s", label, status, message)
 	}
 	return fmt.Errorf("%s review failed with HTTP %d", label, status)
+}
+
+func remoteTokenLimit(message string) (int, int) {
+	match := remoteTokenLimitPattern.FindStringSubmatch(message)
+	if len(match) != 3 {
+		return 0, 0
+	}
+	limit, _ := strconv.Atoi(match[1])
+	requested, _ := strconv.Atoi(match[2])
+	return limit, requested
+}
+
+func remoteRetryAfter(header, message string) time.Duration {
+	if seconds, err := strconv.ParseFloat(strings.TrimSpace(header), 64); err == nil && seconds > 0 {
+		return time.Duration(seconds * float64(time.Second))
+	}
+	if timestamp, err := http.ParseTime(strings.TrimSpace(header)); err == nil {
+		if delay := time.Until(timestamp); delay > 0 {
+			return delay
+		}
+	}
+	match := remoteRetryDelayPattern.FindStringSubmatch(message)
+	if len(match) != 3 {
+		return 0
+	}
+	value, err := strconv.ParseFloat(match[1], 64)
+	if err != nil || value <= 0 {
+		return 0
+	}
+	unit := time.Second
+	if strings.EqualFold(match[2], "ms") {
+		unit = time.Millisecond
+	}
+	return time.Duration(value * float64(unit))
 }
 
 func remoteResponse(content string, inputTokens, outputTokens int, duration time.Duration, label string) (ollamaChatResponse, error) {
