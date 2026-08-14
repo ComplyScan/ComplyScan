@@ -140,6 +140,10 @@ func TestOpenAIIncompleteResponsePreservesReasonAndUsage(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "reason: max_output_tokens") || !strings.Contains(err.Error(), "input tokens: 3210") || !strings.Contains(err.Error(), "output tokens: 4096") {
 		t.Fatalf("incomplete response details were lost: %v", err)
 	}
+	incomplete, ok := AsRemoteIncompleteError(err)
+	if !ok || incomplete.Reason != "max_output_tokens" || incomplete.InputTokens != 3210 || incomplete.OutputTokens != 4096 {
+		t.Fatalf("incomplete response was not structured: %#v, %t", incomplete, ok)
+	}
 }
 
 func TestRemoteStatusErrorPreservesRateLimitDetails(t *testing.T) {

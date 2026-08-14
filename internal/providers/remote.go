@@ -56,6 +56,35 @@ func AsRemoteRateLimitError(err error) (*RemoteRateLimitError, bool) {
 	return value, true
 }
 
+// RemoteIncompleteError preserves a successful HTTP response that the
+// provider could not complete within its output allowance. Repository
+// analysis uses the structured reason and usage to choose a smaller slice.
+type RemoteIncompleteError struct {
+	Provider     string
+	Status       string
+	Reason       string
+	InputTokens  int
+	OutputTokens int
+}
+
+func (value *RemoteIncompleteError) Error() string {
+	status := cleanReviewText(value.Status, 100)
+	if value.Reason != "" {
+		return fmt.Sprintf("%s review returned status %q (reason: %s; input tokens: %d; output tokens: %d)", value.Provider, status, cleanReviewText(value.Reason, 100), value.InputTokens, value.OutputTokens)
+	}
+	return fmt.Sprintf("%s review returned status %q without incomplete_details.reason (input tokens: %d; output tokens: %d)", value.Provider, status, value.InputTokens, value.OutputTokens)
+}
+
+// AsRemoteIncompleteError unwraps a provider response that ended before a
+// complete structured result was available.
+func AsRemoteIncompleteError(err error) (*RemoteIncompleteError, bool) {
+	var value *RemoteIncompleteError
+	if !errors.As(err, &value) {
+		return nil, false
+	}
+	return value, true
+}
+
 // RemoteOptions contains a credential value only in process memory. Callers
 // must resolve it from an environment variable and must never persist it.
 type RemoteOptions struct {
@@ -174,11 +203,10 @@ func openAICompletion(client *http.Client, apiKey, model string) func(context.Co
 			return ollamaChatResponse{}, err
 		}
 		if payload.Status != "completed" {
-			reason := cleanReviewText(payload.IncompleteDetails.Reason, 100)
-			if reason != "" {
-				return ollamaChatResponse{}, fmt.Errorf("OpenAI review returned status %q (reason: %s; input tokens: %d; output tokens: %d)", cleanReviewText(payload.Status, 100), reason, payload.Usage.InputTokens, payload.Usage.OutputTokens)
+			return ollamaChatResponse{}, &RemoteIncompleteError{
+				Provider: "OpenAI", Status: payload.Status, Reason: payload.IncompleteDetails.Reason,
+				InputTokens: payload.Usage.InputTokens, OutputTokens: payload.Usage.OutputTokens,
 			}
-			return ollamaChatResponse{}, fmt.Errorf("OpenAI review returned status %q without incomplete_details.reason (input tokens: %d; output tokens: %d)", cleanReviewText(payload.Status, 100), payload.Usage.InputTokens, payload.Usage.OutputTokens)
 		}
 		content := ""
 		for _, output := range payload.Output {
