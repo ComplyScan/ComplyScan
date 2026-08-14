@@ -18,6 +18,21 @@ type recordingReviewer struct {
 	requests []providers.RepositoryAnalysisRequest
 }
 
+type repositoryFollowUpReviewer struct {
+	recordingReviewer
+}
+
+func (reviewer *repositoryFollowUpReviewer) ReviewRepository(ctx context.Context, request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
+	result, err := reviewer.recordingReviewer.ReviewRepository(ctx, request)
+	if err == nil && request.AllowFollowUp {
+		result.FollowUpPlan = providers.TechnicalSearchPlan{
+			Needed: true, Reason: "Approval handling could change the oversight conclusion.",
+			Queries: []providers.TechnicalSearchQuery{{Text: "approve_response", PathHint: "review", Reason: "Find the approval implementation."}},
+		}
+	}
+	return result, err
+}
+
 type adaptiveReviewer struct {
 	recordingReviewer
 	maxSourceBytes      int64
@@ -130,6 +145,34 @@ func TestRunAutoSelectsStructuralAIEvidenceInsteadOfWholeRepository(t *testing.T
 	}
 	if len(reviewer.requests[0].Objectives) != 2 || result.Coverage.Mode != providers.RepositoryAnalysisTargeted {
 		t.Fatalf("targeted objectives or coverage missing: request=%#v result=%#v", reviewer.requests[0], result)
+	}
+}
+
+func TestRunTargetedAllowsOneBoundedFollowUp(t *testing.T) {
+	reviewer := &repositoryFollowUpReviewer{}
+	repository := discovery.Repository{Files: []discovery.File{
+		{Path: "app.py", Kind: discovery.KindSource, Content: []byte("from openai import OpenAI\nclient = OpenAI()\ndef generate(prompt):\n    return client.responses.create(model='gpt-test', input=prompt)\n")},
+		{Path: "review/approval.py", Kind: discovery.KindSource, Content: []byte("def approve_response(value):\n    return ask_human(value)\n")},
+		{Path: "other.py", Kind: discovery.KindSource, Content: []byte("def unrelated():\n    return 1\n")},
+	}}
+	result, err := Run(context.Background(), reviewer, repository, nil, nil, Options{
+		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reviewer.requests) != 2 || !reviewer.requests[0].AllowFollowUp || reviewer.requests[1].AllowFollowUp {
+		t.Fatalf("follow-up request sequence = %#v", reviewer.requests)
+	}
+	paths := map[string]bool{}
+	for _, file := range reviewer.requests[1].Files {
+		paths[file.Path] = true
+	}
+	if !paths["app.py"] || !paths["review/approval.py"] || paths["other.py"] {
+		t.Fatalf("final targeted paths = %#v", paths)
+	}
+	if !result.FollowUpRequested || result.FollowUpExcerpts != 1 || len(result.FollowUpQueries) != 1 || result.Usage.PromptTokens != 20 {
+		t.Fatalf("follow-up metadata or usage = %#v", result)
 	}
 }
 

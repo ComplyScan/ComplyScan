@@ -97,30 +97,34 @@ func ollamaTechnicalSearchSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"plan": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"needed": map[string]any{"type": "boolean"},
-					"queries": map[string]any{
-						"type": "array",
-						"items": map[string]any{
-							"type": "object",
-							"properties": map[string]any{
-								"text":      map[string]any{"type": "string"},
-								"path_hint": map[string]any{"type": "string"},
-								"reason":    map[string]any{"type": "string"},
-							},
-							"required":             []string{"text", "path_hint", "reason"},
-							"additionalProperties": false,
-						},
-					},
-					"reason": map[string]any{"type": "string"},
-				},
-				"required":             []string{"needed", "queries", "reason"},
-				"additionalProperties": false,
-			},
+			"plan": technicalSearchPlanSchema(),
 		},
 		"required":             []string{"plan"},
+		"additionalProperties": false,
+	}
+}
+
+func technicalSearchPlanSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"needed": map[string]any{"type": "boolean"},
+			"queries": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"text":      map[string]any{"type": "string"},
+						"path_hint": map[string]any{"type": "string"},
+						"reason":    map[string]any{"type": "string"},
+					},
+					"required":             []string{"text", "path_hint", "reason"},
+					"additionalProperties": false,
+				},
+			},
+			"reason": map[string]any{"type": "string"},
+		},
+		"required":             []string{"needed", "queries", "reason"},
 		"additionalProperties": false,
 	}
 }

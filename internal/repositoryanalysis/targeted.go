@@ -3,6 +3,7 @@ package repositoryanalysis
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -19,6 +20,10 @@ const (
 	targetedSourceBudgetPercent = 70
 	targetedMaximumFileBytes    = 12_000
 	targetedContextLines        = 60
+	targetedMaxFollowUpExcerpts = 3
+	targetedRemoteInputTokens   = 6_500
+	targetedLocalInputTokens    = 16_000
+	targetedRemoteOutputTokens  = 3_000
 )
 
 type targetedCandidate struct {
@@ -39,6 +44,17 @@ func runTargeted(
 	budget int64,
 	options Options,
 ) (providers.RepositoryAnalysisResult, error) {
+	targetTokens := targetedRemoteInputTokens
+	if options.Provider == providers.Ollama {
+		targetTokens = targetedLocalInputTokens
+	}
+	if options.MaxInputTokens > 0 && options.MaxInputTokens < targetTokens {
+		targetTokens = options.MaxInputTokens
+	}
+	targetBudget := sourceBudget(targetTokens, objectives, systems)
+	if targetBudget < budget {
+		budget = targetBudget
+	}
 	selected, considered := targetedRepositoryFiles(repository, graph, evidence, budget*targetedSourceBudgetPercent/100)
 	if len(selected) == 0 {
 		return providers.RepositoryAnalysisResult{
@@ -69,8 +85,8 @@ func runTargeted(
 	request := providers.RepositoryAnalysisRequest{
 		Mode: providers.RepositoryAnalysisTargeted, Scope: ".",
 		RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository),
-		Files: selected, Objectives: objectives, Systems: systems, Graph: graphContext,
-		MaxOutputTokens: repositoryOutputTokens(options.Provider, 0),
+		Files: selected, Objectives: objectives, Systems: systems, Graph: graphContext, AllowFollowUp: true,
+		MaxOutputTokens: targetedOutputTokens(options.Provider),
 	}
 	result, err := reviewRepositoryWithRetry(ctx, reviewer, request, options)
 	if err != nil {
@@ -78,6 +94,46 @@ func runTargeted(
 	}
 	if err := validateSystemAttribution(result.Result, profileSystems, options.Ownership); err != nil {
 		return providers.RepositoryAnalysisResult{}, err
+	}
+	if result.FollowUpPlan.Needed {
+		result.FollowUpRequested = true
+		result.FollowUpQueries = repositorySearchQueryLabels(result.FollowUpPlan.Queries)
+		followUpFiles := targetedFollowUpFiles(repository, graph, result.FollowUpPlan, selected, budget)
+		result.FollowUpExcerpts = len(followUpFiles)
+		if len(followUpFiles) > 0 {
+			if err := progress(options, Progress{
+				Stage: "targeted-follow-up", Completed: 0, Total: 1, Scope: ".",
+				InputBytes: sourceFileBytes(followUpFiles), Detail: fmt.Sprintf("retrieved %d bounded excerpt(s)", len(followUpFiles)),
+			}); err != nil {
+				return providers.RepositoryAnalysisResult{}, err
+			}
+			finalFiles := append(append([]providers.RepositorySourceFile(nil), selected...), followUpFiles...)
+			finalGraph := repositoryGraphContext(graph, finalFiles)
+			request.Files = finalFiles
+			request.Graph = finalGraph
+			request.AllowFollowUp = false
+			final, finalErr := reviewRepositoryWithRetry(ctx, reviewer, request, options)
+			if finalErr != nil {
+				return providers.RepositoryAnalysisResult{}, fmt.Errorf("analyze targeted repository follow-up: %w", finalErr)
+			}
+			if err := validateSystemAttribution(final.Result, profileSystems, options.Ownership); err != nil {
+				return providers.RepositoryAnalysisResult{}, err
+			}
+			addUsage(&final.Usage, result.Usage)
+			final.FollowUpRequested = true
+			final.FollowUpQueries = result.FollowUpQueries
+			final.FollowUpExcerpts = len(followUpFiles)
+			result = final
+			selected = finalFiles
+			if err := progress(options, Progress{
+				Stage: "targeted-follow-up", Completed: 1, Total: 1, Scope: ".",
+				InputBytes: requestContextBytes(finalFiles, finalGraph), Detail: fmt.Sprintf("reviewed %d bounded excerpt(s)", len(followUpFiles)),
+			}); err != nil {
+				return providers.RepositoryAnalysisResult{}, err
+			}
+		} else {
+			result.Notes = append(result.Notes, "The model requested a bounded follow-up, but trusted local retrieval found no new eligible excerpt; the initial grounded result was retained.")
+		}
 	}
 	result.Coverage.Mode = providers.RepositoryAnalysisTargeted
 	result.Notes = append(result.Notes,
@@ -89,6 +145,69 @@ func runTargeted(
 		return providers.RepositoryAnalysisResult{}, err
 	}
 	return result, nil
+}
+
+func targetedOutputTokens(provider providers.Kind) int {
+	if provider == providers.Ollama {
+		return maximumRecoveryOutput
+	}
+	return targetedRemoteOutputTokens
+}
+
+func targetedFollowUpFiles(repository discovery.Repository, graph codegraph.Graph, plan providers.TechnicalSearchPlan, existing []providers.RepositorySourceFile, budget int64) []providers.RepositorySourceFile {
+	selectedPaths := make(map[string]struct{}, len(existing))
+	for _, file := range existing {
+		selectedPaths[file.Path] = struct{}{}
+	}
+	result := make([]providers.RepositorySourceFile, 0, len(plan.Queries))
+	for _, query := range plan.Queries {
+		term := strings.ToLower(strings.TrimSpace(query.Text))
+		hint := strings.ToLower(strings.TrimSpace(filepath.ToSlash(query.PathHint)))
+		if term == "" {
+			continue
+		}
+		for _, file := range repository.Files {
+			if !targetedFileKind(file.Kind) {
+				continue
+			}
+			if _, exists := selectedPaths[file.Path]; exists {
+				continue
+			}
+			if hint != "" && !strings.Contains(strings.ToLower(filepath.ToSlash(file.Path)), hint) {
+				continue
+			}
+			content := strings.ReplaceAll(string(file.Content), "\r\n", "\n")
+			match := strings.Index(strings.ToLower(content), term)
+			if match < 0 {
+				continue
+			}
+			line := strings.Count(content[:match], "\n") + 1
+			prepared := targetedSourceFile(file, []int{line}, 2_000)
+			trial := append(append(append([]providers.RepositorySourceFile(nil), existing...), result...), prepared)
+			if requestContextBytes(trial, repositoryGraphContext(graph, trial)) > budget {
+				continue
+			}
+			result = append(result, prepared)
+			selectedPaths[file.Path] = struct{}{}
+			break
+		}
+		if len(result) >= targetedMaxFollowUpExcerpts {
+			break
+		}
+	}
+	return result
+}
+
+func repositorySearchQueryLabels(queries []providers.TechnicalSearchQuery) []string {
+	result := make([]string, 0, len(queries))
+	for _, query := range queries {
+		label := query.Text
+		if query.PathHint != "" {
+			label += " in " + query.PathHint
+		}
+		result = append(result, label)
+	}
+	return result
 }
 
 func targetedRepositoryFiles(repository discovery.Repository, graph codegraph.Graph, reports []framework.TechnicalEvidenceReport, budget int64) ([]providers.RepositorySourceFile, int) {

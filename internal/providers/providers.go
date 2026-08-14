@@ -302,6 +302,7 @@ type RepositoryAnalysisRequest struct {
 	RepositoryFiles    int                       `json:"repository_files"`
 	RepositoryBytes    int64                     `json:"repository_bytes"`
 	MaxOutputTokens    int                       `json:"-"`
+	AllowFollowUp      bool                      `json:"allow_follow_up,omitempty"`
 	Files              []RepositorySourceFile    `json:"files,omitempty"`
 	FileIndex          []RepositoryFileReference `json:"file_index,omitempty"`
 	Objectives         []RepositoryObjective     `json:"objectives"`
@@ -369,10 +370,14 @@ type RepositoryCoverage struct {
 }
 
 type RepositoryAnalysisResult struct {
-	Provider Kind                    `json:"provider"`
-	Model    string                  `json:"model"`
-	Coverage RepositoryCoverage      `json:"coverage"`
-	Result   RepositorySectionResult `json:"result"`
-	Notes    []string                `json:"notes,omitempty"`
-	Usage    Usage                   `json:"usage,omitempty"`
+	Provider          Kind                    `json:"provider"`
+	Model             string                  `json:"model"`
+	Coverage          RepositoryCoverage      `json:"coverage"`
+	Result            RepositorySectionResult `json:"result"`
+	Notes             []string                `json:"notes,omitempty"`
+	Usage             Usage                   `json:"usage,omitempty"`
+	FollowUpRequested bool                    `json:"follow_up_requested,omitempty"`
+	FollowUpQueries   []string                `json:"follow_up_queries,omitempty"`
+	FollowUpExcerpts  int                     `json:"follow_up_excerpts,omitempty"`
+	FollowUpPlan      TechnicalSearchPlan     `json:"-"`
 }

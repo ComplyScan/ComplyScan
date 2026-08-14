@@ -613,12 +613,15 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 				}
 			}
 			if cfg.AI.Provider != "none" {
+				boundedReviewRequested := cfg.AI.RepositoryAnalysis.Mode == "bounded-only"
 				candidateCount := 0
 				investigationRequests := make([]providers.TechnicalReviewRequest, len(frameworkResults))
-				for index := range frameworkResults {
-					investigationRequests[index] = reviewcontext.BuildInvestigations(frameworkResults[index].TechnicalEvidence, result.FullRepository, frameworkResults[index].Reconciliation)
-					investigationRequests[index] = reviewcontext.AttachVerifications(investigationRequests[index], verificationResults)
-					candidateCount += len(investigationRequests[index].Candidates)
+				if boundedReviewRequested {
+					for index := range frameworkResults {
+						investigationRequests[index] = reviewcontext.BuildInvestigations(frameworkResults[index].TechnicalEvidence, result.FullRepository, frameworkResults[index].Reconciliation)
+						investigationRequests[index] = reviewcontext.AttachVerifications(investigationRequests[index], verificationResults)
+						candidateCount += len(investigationRequests[index].Candidates)
+					}
 				}
 				progressWriter := io.Writer(stdout)
 				if outputFormat != "terminal" {
@@ -656,11 +659,11 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 					}
 				}
 				if modelQualified && outputFormat == "terminal" {
-					if _, err := fmt.Fprintf(stdout, "%s advisory review requested for repository-wide reasoning, %d finding(s), and %d bounded technical evidence target(s) with %s...\n\n", reviewProviderLabel(cfg.AI.Provider), len(visible), candidateCount, configuredReviewModel(cfg.AI)); err != nil {
+					if _, err := fmt.Fprintf(stdout, "%s advisory review requested for targeted repository reasoning, %d finding(s), and %d legacy bounded target(s) with %s...\n\n", reviewProviderLabel(cfg.AI.Provider), len(visible), candidateCount, configuredReviewModel(cfg.AI)); err != nil {
 						return fmt.Errorf("write terminal report: %w", err)
 					}
 					if isRemoteReviewProvider(cfg.AI.Provider) {
-						disclosure := "Remote review sends redacted relevant repository text for whole-repository reasoning, plus bounded finding and evidence records, to the selected provider; usage may incur cost."
+						disclosure := "Remote review sends a compact, structurally selected and redacted code-evidence package, plus bounded finding records, to the selected provider; usage may incur cost."
 						if !repositoryAnalysisRequested {
 							disclosure = "Remote review sends only bounded, redacted finding and source-context records to the selected provider; usage may incur cost."
 						}
@@ -671,7 +674,11 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 				}
 				if modelQualified && repositoryAnalysisRequested {
 					repositoryReviewStarted := time.Now()
-					if _, err := fmt.Fprintf(progressWriter, "Starting repository-wide AI reasoning with %s %q...\n", reviewProviderLabel(cfg.AI.Provider), configuredReviewModel(cfg.AI)); err != nil {
+					analysisKind := "targeted repository"
+					if cfg.AI.RepositoryAnalysis.Mode == "deep" || cfg.AI.RepositoryAnalysis.Mode == "full" || cfg.AI.RepositoryAnalysis.Mode == "hierarchical" {
+						analysisKind = "deep repository"
+					}
+					if _, err := fmt.Fprintf(progressWriter, "Starting %s AI reasoning with %s %q...\n", analysisKind, reviewProviderLabel(cfg.AI.Provider), configuredReviewModel(cfg.AI)); err != nil {
 						return fmt.Errorf("write repository analysis progress: %w", err)
 					}
 					repositoryReview, reviewErr := reviewRepositoryWithProvider(
@@ -679,7 +686,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 					)
 					if reviewErr != nil {
 						reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisIncomplete
-						warning := fmt.Sprintf("%s repository-wide analysis was incomplete after %s: %v. Deterministic findings and bounded evidence review remain available.", reviewProviderLabel(cfg.AI.Provider), formatElapsed(time.Since(repositoryReviewStarted)), reviewErr)
+						warning := fmt.Sprintf("%s repository analysis was incomplete after %s: %v. Deterministic findings and technical evidence remain available.", reviewProviderLabel(cfg.AI.Provider), formatElapsed(time.Since(repositoryReviewStarted)), reviewErr)
 						reportValue.Warnings = append(reportValue.Warnings, warning)
 						if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
 							return fmt.Errorf("write repository analysis warning: %w", err)
@@ -687,7 +694,15 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 					} else {
 						reportValue.RepositoryAnalysis = &repositoryReview
 						reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisCompleted
-						if _, err := fmt.Fprintf(progressWriter, "Repository-wide AI reasoning completed in %s using %s context.\n", formatElapsed(time.Since(repositoryReviewStarted)), repositoryReview.Coverage.Mode); err != nil {
+						completionDetail := fmt.Sprintf("%d file excerpt(s)", repositoryReview.Coverage.FilesSubmitted)
+						if repositoryReview.Coverage.Mode == providers.RepositoryAnalysisTargeted {
+							calls := 1
+							if repositoryReview.FollowUpRequested && repositoryReview.FollowUpExcerpts > 0 {
+								calls = 2
+							}
+							completionDetail += fmt.Sprintf(", %d model call(s)", calls)
+						}
+						if _, err := fmt.Fprintf(progressWriter, "Repository AI reasoning completed in %s using %s context (%s).\n", formatElapsed(time.Since(repositoryReviewStarted)), repositoryReview.Coverage.Mode, completionDetail); err != nil {
 							return fmt.Errorf("write repository analysis completion: %w", err)
 						}
 						if resolvedReportDirectory != "" {
@@ -725,6 +740,9 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 								}
 							}
 						}
+					}
+					if !boundedReviewRequested {
+						continue
 					}
 					technicalReviewStarted := time.Now()
 					if len(investigationRequests[index].Candidates) > 0 {
@@ -981,6 +999,16 @@ func reviewRepositoryWithProvider(
 		Mode: mode, MaxInputTokens: settings.RepositoryAnalysis.MaxInputTokens, Provider: kind, Model: model, Ownership: ownershipRules,
 		OnProgress: func(progress repositoryanalysis.Progress) error {
 			switch progress.Stage {
+			case "targeted-selection":
+				_, err := fmt.Fprintf(progressWriter, "Local structural selection complete: %s; %d byte(s) of code and graph context prepared.\n", progress.Detail, progress.InputBytes)
+				return err
+			case "targeted-follow-up":
+				if progress.Completed == 0 {
+					_, err := fmt.Fprintf(progressWriter, "Model requested one bounded follow-up; %s. Running the final targeted review.\n", progress.Detail)
+					return err
+				}
+				_, err := fmt.Fprintf(progressWriter, "Bounded follow-up completed: %s.\n", progress.Detail)
+				return err
 			case "adaptive-split":
 				_, err := fmt.Fprintf(progressWriter, "Provider request was too large; splitting %s into smaller analysis slices (%s). Continuing automatically.\n", progress.Scope, progress.Detail)
 				return err
@@ -1019,6 +1047,9 @@ func reviewRepositoryWithProvider(
 				return err
 			case "synthesis":
 				_, err := fmt.Fprintf(progressWriter, "Synthesis batch %d/%d completed: %s\n", progress.Completed, progress.Total, progress.Scope)
+				return err
+			case "targeted-analysis":
+				_, err := fmt.Fprintf(progressWriter, "Targeted repository evidence analyzed (%d byte(s)).\n", progress.InputBytes)
 				return err
 			default:
 				return nil

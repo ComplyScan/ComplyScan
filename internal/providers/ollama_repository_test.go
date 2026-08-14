@@ -42,6 +42,31 @@ func TestReviewRepositoryValidatesCitationsAndRedactsSource(t *testing.T) {
 	}
 }
 
+func TestReviewRepositoryReturnsValidatedBoundedFollowUp(t *testing.T) {
+	provider := &OllamaProvider{
+		kind: OpenAI, label: "OpenAI", model: "test-model",
+		completion: func(_ context.Context, request ollamaChatRequest) (ollamaChatResponse, error) {
+			if !strings.Contains(request.Messages[1].Content, `"allow_follow_up":true`) {
+				t.Fatal("follow-up permission was not explicit in the request")
+			}
+			var response ollamaChatResponse
+			response.Done = true
+			response.Message.Content = `{"result":{"scope":".","ai_uses":[],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]},"follow_up":{"needed":true,"queries":[{"text":"approve_response","path_hint":"review","reason":"Find the human approval path."}],"reason":"Approval code could change the oversight conclusion."}}`
+			return response, nil
+		},
+	}
+	result, err := provider.ReviewRepository(context.Background(), RepositoryAnalysisRequest{
+		Mode: RepositoryAnalysisTargeted, Scope: ".", RepositoryFiles: 1, AllowFollowUp: true,
+		Files: []RepositorySourceFile{{Path: "main.go", Kind: "source", Content: "package main\n"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.FollowUpPlan.Needed || len(result.FollowUpPlan.Queries) != 1 || result.FollowUpPlan.Queries[0].Text != "approve_response" {
+		t.Fatalf("follow-up plan = %#v", result.FollowUpPlan)
+	}
+}
+
 func repositoryTestCredential() string {
 	return "sk-" + "proj-" + "abcdefghijklmnopqrstuvwxyz" + "123456"
 }
