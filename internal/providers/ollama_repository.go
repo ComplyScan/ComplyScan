@@ -83,7 +83,7 @@ type repositoryLineRange struct {
 
 func sanitizeRepositoryAnalysisRequest(request RepositoryAnalysisRequest) (RepositoryAnalysisRequest, map[string]int, map[string]repositoryLineRange, map[string]struct{}, map[string]struct{}, int64, error) {
 	switch request.Mode {
-	case RepositoryAnalysisFull, RepositoryAnalysisSubsystem:
+	case RepositoryAnalysisTargeted, RepositoryAnalysisFull, RepositoryAnalysisSubsystem:
 		if len(request.Files) == 0 {
 			return request, nil, nil, nil, nil, 0, errors.New("repository source analysis requires at least one file")
 		}

@@ -86,7 +86,7 @@ func TestRunUsesOneRequestWhenRepositoryFits(t *testing.T) {
 	}}
 	result, err := Run(context.Background(), reviewer, repository, []framework.TechnicalEvidenceReport{{
 		Pack: framework.PackReference{ID: "pack"}, Objectives: []framework.ObjectiveAssessment{{ID: "OBJ", Title: "Objective"}},
-	}}, nil, Options{Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000})
+	}}, nil, Options{Mode: ModeDeep, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,6 +101,35 @@ func TestRunUsesOneRequestWhenRepositoryFits(t *testing.T) {
 	}
 	if result.Coverage.Mode != providers.RepositoryAnalysisFull {
 		t.Fatalf("unexpected coverage: %#v", result.Coverage)
+	}
+}
+
+func TestRunAutoSelectsStructuralAIEvidenceInsteadOfWholeRepository(t *testing.T) {
+	reviewer := &recordingReviewer{}
+	repository := discovery.Repository{Files: []discovery.File{
+		{Path: "app.py", Kind: discovery.KindSource, Content: []byte("from openai import OpenAI\nclient = OpenAI()\ndef generate(prompt):\n    return client.responses.create(model='gpt-test', input=prompt)\n")},
+		{Path: "service.py", Kind: discovery.KindSource, Content: []byte("from app import generate\ndef handler(value):\n    return generate(value)\n")},
+		{Path: "docs/providers.md", Kind: discovery.KindDocumentation, Content: []byte("Example endpoint: https://api.openai.com/v1/responses\n")},
+		{Path: "unrelated.go", Kind: discovery.KindSource, Content: []byte("package unrelated\nfunc Add(a, b int) int { return a + b }\n")},
+	}}
+	result, err := Run(context.Background(), reviewer, repository, []framework.TechnicalEvidenceReport{{
+		Pack: framework.PackReference{ID: "pack"}, Objectives: []framework.ObjectiveAssessment{{ID: "LOG", Title: "Log AI events"}, {ID: "ROBUST", Title: "Handle failures"}},
+	}}, nil, Options{Mode: ModeAuto, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reviewer.requests) != 1 || reviewer.requests[0].Mode != providers.RepositoryAnalysisTargeted {
+		t.Fatalf("expected one targeted request, got %#v", reviewer.requests)
+	}
+	paths := map[string]bool{}
+	for _, file := range reviewer.requests[0].Files {
+		paths[file.Path] = true
+	}
+	if !paths["app.py"] || !paths["service.py"] || paths["docs/providers.md"] || paths["unrelated.go"] {
+		t.Fatalf("targeted paths = %#v", paths)
+	}
+	if len(reviewer.requests[0].Objectives) != 2 || result.Coverage.Mode != providers.RepositoryAnalysisTargeted {
+		t.Fatalf("targeted objectives or coverage missing: request=%#v result=%#v", reviewer.requests[0], result)
 	}
 }
 
@@ -220,7 +249,7 @@ func TestRunWaitsAndRetriesTemporaryRateLimit(t *testing.T) {
 	result, err := Run(context.Background(), reviewer, discovery.Repository{Files: []discovery.File{{
 		Path: "main.go", Kind: discovery.KindSource, Content: []byte("package main\n"),
 	}}}, nil, nil, Options{
-		Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
+		Mode: ModeDeep, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
 		Wait: func(_ context.Context, delay time.Duration) error {
 			waits = append(waits, delay)
 			return nil
@@ -240,7 +269,7 @@ func TestRunRepeatsFullCooldownUntilTemporaryRateLimitClears(t *testing.T) {
 	result, err := Run(context.Background(), reviewer, discovery.Repository{Files: []discovery.File{{
 		Path: "main.go", Kind: discovery.KindSource, Content: []byte("package main\n"),
 	}}}, nil, nil, Options{
-		Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
+		Mode: ModeDeep, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
 		Wait: func(_ context.Context, delay time.Duration) error {
 			waits = append(waits, delay)
 			return nil
@@ -265,7 +294,7 @@ func TestRunRedactsRepositorySourceBeforeReviewer(t *testing.T) {
 	redacted := "sk-proj-" + "****3456"
 	_, err := Run(context.Background(), reviewer, discovery.Repository{Files: []discovery.File{{
 		Path: "main.go", Kind: discovery.KindSource, Content: []byte(fmt.Sprintf("var key = %q\n", secret)),
-	}}}, nil, nil, Options{Provider: providers.OpenAI, MaxInputTokens: 8_000})
+	}}}, nil, nil, Options{Mode: ModeFull, Provider: providers.OpenAI, MaxInputTokens: 8_000})
 	if err != nil {
 		t.Fatal(err)
 	}

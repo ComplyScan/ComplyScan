@@ -253,9 +253,9 @@ func (c RepositoryAnalysisConfig) Validate() error {
 		mode = "auto"
 	}
 	switch mode {
-	case "auto", "full", "hierarchical", "bounded-only":
+	case "auto", "targeted", "deep", "full", "hierarchical", "bounded-only":
 	default:
-		return errors.New("mode must be auto, full, hierarchical, or bounded-only")
+		return errors.New("mode must be auto, targeted, deep, full, hierarchical, or bounded-only")
 	}
 	if c.MaxInputTokens != 0 && c.MaxInputTokens < 8_000 {
 		return errors.New("max-input-tokens must be zero or at least 8000")

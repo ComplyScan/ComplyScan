@@ -219,6 +219,7 @@ type TechnicalReviewResult struct {
 type RepositoryAnalysisMode string
 
 const (
+	RepositoryAnalysisTargeted    RepositoryAnalysisMode = "targeted-evidence"
 	RepositoryAnalysisFull        RepositoryAnalysisMode = "full-repository"
 	RepositoryAnalysisSubsystem   RepositoryAnalysisMode = "subsystem"
 	RepositoryAnalysisSynthesis   RepositoryAnalysisMode = "hierarchical-synthesis"

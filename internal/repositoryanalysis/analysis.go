@@ -42,6 +42,8 @@ type Mode string
 
 const (
 	ModeAuto         Mode = "auto"
+	ModeTargeted     Mode = "targeted"
+	ModeDeep         Mode = "deep"
 	ModeFull         Mode = "full"
 	ModeHierarchical Mode = "hierarchical"
 )
@@ -77,7 +79,7 @@ func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository
 	if options.Mode == "" {
 		options.Mode = ModeAuto
 	}
-	if options.Mode != ModeAuto && options.Mode != ModeFull && options.Mode != ModeHierarchical {
+	if options.Mode != ModeAuto && options.Mode != ModeTargeted && options.Mode != ModeDeep && options.Mode != ModeFull && options.Mode != ModeHierarchical {
 		return providers.RepositoryAnalysisResult{}, fmt.Errorf("unsupported repository analysis mode %q", options.Mode)
 	}
 	if options.MaxInputTokens == 0 {
@@ -102,6 +104,12 @@ func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository
 	systemContext := repositorySystems(systems, options.Ownership)
 	budget := sourceBudget(options.MaxInputTokens, objectives, systemContext)
 	graph := codegraph.Build(repository)
+	if options.Mode == ModeAuto || options.Mode == ModeTargeted {
+		return runTargeted(ctx, reviewer, repository, graph, evidence, objectives, systemContext, systems, budget, options)
+	}
+	if options.Mode == ModeDeep {
+		options.Mode = ModeAuto
+	}
 	fullGraph := repositoryGraphContext(graph, files)
 	fullBytes := requestContextBytes(files, fullGraph)
 	if options.Mode != ModeHierarchical && fullBytes <= budget {
