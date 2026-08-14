@@ -74,6 +74,20 @@ func (activity *llmActivity) Finish(err error) {
 	})
 }
 
+// Dismiss clears an in-progress animation without presenting a retryable
+// provider limit as a terminal request failure. The retry coordinator prints
+// the cooldown and next attempt immediately afterwards.
+func (activity *llmActivity) Dismiss() {
+	if activity == nil || !activity.active {
+		return
+	}
+	activity.once.Do(func() {
+		close(activity.stop)
+		<-activity.done
+		_, _ = fmt.Fprint(activity.output, "\r\x1b[2K")
+	})
+}
+
 func (activity *llmActivity) animate() {
 	defer close(activity.done)
 	ticker := time.NewTicker(llmActivityInterval)
@@ -145,7 +159,11 @@ func (reviewer *technicalActivityReviewer) ReviewTechnical(ctx context.Context, 
 	}
 	activity := startConfiguredLLMActivity(reviewer.output, reviewer.settings, action, "Technical-evidence response received", "Technical-evidence request failed")
 	result, err := reviewer.reviewer.ReviewTechnical(ctx, request)
-	activity.Finish(err)
+	if rateLimit, retryable := providers.AsRemoteRateLimitError(err); retryable && !rateLimit.RequestTooLarge {
+		activity.Dismiss()
+	} else {
+		activity.Finish(err)
+	}
 	return result, err
 }
 
@@ -156,6 +174,10 @@ func (reviewer *technicalActivityReviewer) PlanTechnicalSearch(ctx context.Conte
 	}
 	activity := startConfiguredLLMActivity(reviewer.output, reviewer.settings, action, "Evidence-search plan received", "Evidence-search planning failed")
 	result, usage, err := reviewer.reviewer.PlanTechnicalSearch(ctx, candidate)
-	activity.Finish(err)
+	if rateLimit, retryable := providers.AsRemoteRateLimitError(err); retryable && !rateLimit.RequestTooLarge {
+		activity.Dismiss()
+	} else {
+		activity.Finish(err)
+	}
 	return result, usage, err
 }

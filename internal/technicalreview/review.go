@@ -21,14 +21,13 @@ type SearchPlanner interface {
 type FollowUpRetriever func(providers.TechnicalCandidate, providers.TechnicalSearchPlan) (providers.TechnicalCandidate, int)
 
 type Progress struct {
-	Stage      string
-	Current    int
-	Total      int
-	Candidate  providers.TechnicalCandidate
-	Cached     bool
-	Attempt    int
-	RetryTotal int
-	Wait       time.Duration
+	Stage     string
+	Current   int
+	Total     int
+	Candidate providers.TechnicalCandidate
+	Cached    bool
+	Attempt   int
+	Wait      time.Duration
 }
 
 type Options struct {
@@ -45,9 +44,8 @@ type Options struct {
 const (
 	ProgressStageCandidate     = "candidate"
 	ProgressStageRateLimitWait = "rate-limit-wait"
-	maxRateLimitRetries        = 3
-	defaultRateLimitWait       = 60 * time.Second
-	maxRateLimitWait           = 65 * time.Second
+	minimumRateLimitCooldown   = 60 * time.Second
+	maxRateLimitTotalWait      = 10 * time.Minute
 )
 
 // Run applies source-context-free cache reuse around one-candidate model requests.
@@ -181,26 +179,28 @@ func planTechnicalSearchWithRetry(ctx context.Context, planner SearchPlanner, ca
 }
 
 func retryRateLimited(ctx context.Context, candidate providers.TechnicalCandidate, current, total int, options Options, operation func() error) error {
+	totalWait := time.Duration(0)
 	for attempt := 0; ; attempt++ {
 		err := operation()
 		if err == nil {
 			return nil
 		}
 		rateLimit, ok := providers.AsRemoteRateLimitError(err)
-		if !ok || rateLimit.RequestTooLarge || attempt >= maxRateLimitRetries {
+		if !ok || rateLimit.RequestTooLarge {
 			return err
 		}
 		delay := rateLimit.RetryAfter
-		if delay <= 0 {
-			delay = defaultRateLimitWait
+		if delay < minimumRateLimitCooldown {
+			delay = minimumRateLimitCooldown
 		}
-		if delay > maxRateLimitWait {
-			return fmt.Errorf("provider requested a rate-limit wait of %s, exceeding the safe automatic wait of %s: %w", delay.Round(time.Second), maxRateLimitWait, err)
+		if totalWait+delay > maxRateLimitTotalWait {
+			return fmt.Errorf("provider rate limit exceeded the %s automatic wait budget after %d retry cycle(s): %w", maxRateLimitTotalWait, attempt, err)
 		}
+		totalWait += delay
 		if options.OnProgress != nil {
 			if progressErr := options.OnProgress(Progress{
 				Stage: ProgressStageRateLimitWait, Current: current, Total: total, Candidate: candidate,
-				Attempt: attempt + 1, RetryTotal: maxRateLimitRetries, Wait: delay,
+				Attempt: attempt + 1, Wait: delay,
 			}); progressErr != nil {
 				return progressErr
 			}

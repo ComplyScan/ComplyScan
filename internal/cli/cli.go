@@ -983,8 +983,14 @@ func reviewRepositoryWithProvider(
 			case "adaptive-split":
 				_, err := fmt.Fprintf(progressWriter, "Provider request was too large; splitting %s into smaller analysis slices (%s). Continuing automatically.\n", progress.Scope, progress.Detail)
 				return err
+			case "adaptive-output-split":
+				_, err := fmt.Fprintf(progressWriter, "Model exhausted its output space; splitting %s into smaller analysis slices (%s). Continuing automatically.\n", progress.Scope, progress.Detail)
+				return err
+			case "adaptive-output-retry":
+				_, err := fmt.Fprintf(progressWriter, "Model exhausted its output space; retrying %s with more response space (%s).\n", progress.Scope, progress.Detail)
+				return err
 			case "rate-limit-wait":
-				_, err := fmt.Fprintf(progressWriter, "Provider token limit reached; waiting %s before retry %d/%d for %s.\n", progress.Wait.Round(time.Second), progress.Completed, progress.Total, progress.Scope)
+				_, err := fmt.Fprintf(progressWriter, "Provider rate limit reached; waiting a full %s cooldown before retry %d for %s. Press Ctrl+C to stop.\n", progress.Wait.Round(time.Second), progress.Completed, progress.Scope)
 				return err
 			}
 			if progress.Completed == 0 {
@@ -1154,7 +1160,7 @@ func remoteProviderName(settings config.AIConfig) string {
 func technicalReviewProgress(output io.Writer, provider string, started time.Time, now func() time.Time) func(technicalreview.Progress) error {
 	return func(progress technicalreview.Progress) error {
 		if progress.Stage == technicalreview.ProgressStageRateLimitWait {
-			_, err := fmt.Fprintf(output, "Provider rate limit reached during evidence investigation %d/%d; waiting %s before retry %d/%d.\n", progress.Current, progress.Total, progress.Wait.Round(time.Second), progress.Attempt, progress.RetryTotal)
+			_, err := fmt.Fprintf(output, "Provider rate limit reached during evidence investigation %d/%d; waiting a full %s cooldown before retry %d. Press Ctrl+C to stop.\n", progress.Current, progress.Total, progress.Wait.Round(time.Second), progress.Attempt)
 			return err
 		}
 		status := "reviewing with " + reviewProviderLabel(provider)

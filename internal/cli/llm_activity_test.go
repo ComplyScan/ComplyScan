@@ -56,6 +56,22 @@ func TestLLMActivityShowsFailure(t *testing.T) {
 	}
 }
 
+func TestLLMActivityDismissesRetryWithoutFailureMarker(t *testing.T) {
+	originalTerminal := llmActivityTerminal
+	t.Cleanup(func() { llmActivityTerminal = originalTerminal })
+	llmActivityTerminal = func(any) bool { return true }
+	t.Setenv("CI", "")
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv(accessiblePromptEnvironment, "")
+
+	var output bytes.Buffer
+	activity := startLLMActivity(&output, llmActivityOptions{Waiting: "Waiting for model", Failure: "Model request failed"})
+	activity.Dismiss()
+	if value := output.String(); strings.Contains(value, "✗") || strings.Contains(value, "Model request failed") || !strings.HasSuffix(value, "\r\x1b[2K") {
+		t.Fatalf("dismissed retry output = %q", value)
+	}
+}
+
 func TestLLMActivityIsSilentOutsideInteractiveTerminal(t *testing.T) {
 	var output bytes.Buffer
 	activity := startLLMActivity(&output, llmActivityOptions{Waiting: "Waiting for model"})

@@ -27,10 +27,11 @@ const (
 	minimumInputTokens       = 8_000
 	charactersPerToken       = 3
 	contextReservePercent    = 20
-	maxRateLimitRetries      = 3
-	defaultRateLimitWait     = 60 * time.Second
-	maxRateLimitWait         = 65 * time.Second
+	minimumRateLimitCooldown = 60 * time.Second
+	maxRateLimitTotalWait    = 10 * time.Minute
 	minimumAdaptiveOutput    = 1024
+	minimumRecoveryOutput    = 4096
+	maximumRecoveryOutput    = 8192
 )
 
 type Reviewer interface {
@@ -115,6 +116,9 @@ func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository
 			if rateLimit, ok := providers.AsRemoteRateLimitError(err); ok && rateLimit.RequestTooLarge && options.Mode == ModeAuto {
 				return runHierarchical(ctx, reviewer, repository, graph, files, objectives, systemContext, budget, options)
 			}
+			if incomplete, ok := providers.AsRemoteIncompleteError(err); ok && incomplete.Reason == "max_output_tokens" && options.Mode == ModeAuto {
+				return runHierarchical(ctx, reviewer, repository, graph, files, objectives, systemContext, budget, options)
+			}
 			return providers.RepositoryAnalysisResult{}, err
 		}
 		if err := validateSystemAttribution(result.Result, systems, options.Ownership); err != nil {
@@ -176,6 +180,31 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 				}
 				continue
 			}
+			if incomplete, ok := providers.AsRemoteIncompleteError(err); ok && incomplete.Reason == "max_output_tokens" {
+				recoveryOutput := repositoryRecoveryOutputTokens(maxOutputTokens)
+				if recoveryOutput > maxOutputTokens && outputFitsTokenLimit(incomplete.InputTokens, recoveryOutput, adaptiveTokenLimit) {
+					chunks[index].maxOutputTokens = recoveryOutput
+					if err := progress(options, Progress{
+						Stage: "adaptive-output-retry", Completed: index, Total: len(chunks), Scope: chunk.scope,
+						InputBytes: chunkBytes, Detail: fmt.Sprintf("increase output allowance from %d to %d tokens", maxOutputTokens, recoveryOutput),
+					}); err != nil {
+						return providers.RepositoryAnalysisResult{}, err
+					}
+					continue
+				}
+				parts, split := splitRepositoryChunk(chunk, recoveryOutput)
+				if !split {
+					return providers.RepositoryAnalysisResult{}, fmt.Errorf("analyze subsystem %s: model exhausted %d output tokens for the smallest safe repository segment: %w", chunk.scope, maxOutputTokens, err)
+				}
+				chunks = replaceRepositoryChunk(chunks, index, parts)
+				if err := progress(options, Progress{
+					Stage: "adaptive-output-split", Completed: index, Total: len(chunks), Scope: chunk.scope,
+					InputBytes: chunkBytes, Detail: fmt.Sprintf("output limit %d tokens; split into %d smaller part(s) with %d output tokens", maxOutputTokens, len(parts), recoveryOutput),
+				}); err != nil {
+					return providers.RepositoryAnalysisResult{}, err
+				}
+				continue
+			}
 			return providers.RepositoryAnalysisResult{}, fmt.Errorf("analyze subsystem %s: %w", chunk.scope, err)
 		}
 		if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership); err != nil {
@@ -232,6 +261,31 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 					}
 					continue
 				}
+				if incomplete, ok := providers.AsRemoteIncompleteError(err); ok && incomplete.Reason == "max_output_tokens" {
+					recoveryOutput := repositoryRecoveryOutputTokens(maxOutputTokens)
+					if recoveryOutput > maxOutputTokens && outputFitsTokenLimit(incomplete.InputTokens, recoveryOutput, adaptiveTokenLimit) {
+						groups[index].maxOutputTokens = recoveryOutput
+						if err := progress(options, Progress{
+							Stage: "adaptive-output-retry", Completed: index, Total: len(groups), Scope: scope,
+							InputBytes: summaryBytes(group.summaries), Detail: fmt.Sprintf("increase synthesis output allowance from %d to %d tokens", maxOutputTokens, recoveryOutput),
+						}); err != nil {
+							return providers.RepositoryAnalysisResult{}, err
+						}
+						continue
+					}
+					parts, split := splitRepositorySummaryGroup(group, recoveryOutput)
+					if !split {
+						return providers.RepositoryAnalysisResult{}, fmt.Errorf("synthesize repository analysis level %d part %d: model exhausted %d output tokens and the synthesis input cannot be divided further: %w", levels, index+1, maxOutputTokens, err)
+					}
+					groups = replaceRepositorySummaryGroup(groups, index, parts)
+					if err := progress(options, Progress{
+						Stage: "adaptive-output-split", Completed: index, Total: len(groups), Scope: scope,
+						InputBytes: summaryBytes(group.summaries), Detail: fmt.Sprintf("synthesis output limit %d tokens; split into %d smaller part(s) with %d output tokens", maxOutputTokens, len(parts), recoveryOutput),
+					}); err != nil {
+						return providers.RepositoryAnalysisResult{}, err
+					}
+					continue
+				}
 				return providers.RepositoryAnalysisResult{}, fmt.Errorf("synthesize repository analysis level %d part %d: %w", levels, index+1, err)
 			}
 			if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership); err != nil {
@@ -254,15 +308,30 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		// A forced hierarchical analysis still gets an explicit synthesis pass so
 		// its output follows the same global contract as larger repositories.
 		group := summaries
-		request := providers.RepositoryAnalysisRequest{
-			Mode: providers.RepositoryAnalysisSynthesis, Scope: "repository-synthesis",
-			RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), FileIndex: citedFileIndex(group, files),
-			Objectives: objectives, Systems: systems, SubsystemSummaries: group,
-			MaxOutputTokens: repositoryOutputTokens(options.Provider, adaptiveTokenLimit),
-		}
-		result, err := reviewRepositoryWithRetry(ctx, reviewer, request, options)
-		if err != nil {
-			return providers.RepositoryAnalysisResult{}, fmt.Errorf("synthesize repository analysis: %w", err)
+		maxOutputTokens := repositoryOutputTokens(options.Provider, adaptiveTokenLimit)
+		var result providers.RepositoryAnalysisResult
+		for {
+			request := providers.RepositoryAnalysisRequest{
+				Mode: providers.RepositoryAnalysisSynthesis, Scope: "repository-synthesis",
+				RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), FileIndex: citedFileIndex(group, files),
+				Objectives: objectives, Systems: systems, SubsystemSummaries: group, MaxOutputTokens: maxOutputTokens,
+			}
+			result, err = reviewRepositoryWithRetry(ctx, reviewer, request, options)
+			if err == nil {
+				break
+			}
+			incomplete, ok := providers.AsRemoteIncompleteError(err)
+			recoveryOutput := repositoryRecoveryOutputTokens(maxOutputTokens)
+			if !ok || incomplete.Reason != "max_output_tokens" || recoveryOutput <= maxOutputTokens || !outputFitsTokenLimit(incomplete.InputTokens, recoveryOutput, adaptiveTokenLimit) {
+				return providers.RepositoryAnalysisResult{}, fmt.Errorf("synthesize repository analysis: %w", err)
+			}
+			if progressErr := progress(options, Progress{
+				Stage: "adaptive-output-retry", Scope: "repository-synthesis", InputBytes: summaryBytes(group),
+				Detail: fmt.Sprintf("increase synthesis output allowance from %d to %d tokens", maxOutputTokens, recoveryOutput),
+			}); progressErr != nil {
+				return providers.RepositoryAnalysisResult{}, progressErr
+			}
+			maxOutputTokens = recoveryOutput
 		}
 		if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership); err != nil {
 			return providers.RepositoryAnalysisResult{}, fmt.Errorf("synthesize repository analysis: %w", err)
@@ -297,24 +366,26 @@ type repositoryChunk struct {
 }
 
 func reviewRepositoryWithRetry(ctx context.Context, reviewer Reviewer, request providers.RepositoryAnalysisRequest, options Options) (providers.RepositoryAnalysisResult, error) {
+	totalWait := time.Duration(0)
 	for attempt := 0; ; attempt++ {
 		result, err := reviewer.ReviewRepository(ctx, request)
 		if err == nil {
 			return result, nil
 		}
 		rateLimit, ok := providers.AsRemoteRateLimitError(err)
-		if !ok || rateLimit.RequestTooLarge || attempt >= maxRateLimitRetries {
+		if !ok || rateLimit.RequestTooLarge {
 			return providers.RepositoryAnalysisResult{}, err
 		}
 		delay := rateLimit.RetryAfter
-		if delay <= 0 {
-			delay = defaultRateLimitWait
+		if delay < minimumRateLimitCooldown {
+			delay = minimumRateLimitCooldown
 		}
-		if delay > maxRateLimitWait {
-			return providers.RepositoryAnalysisResult{}, fmt.Errorf("provider requested a rate-limit wait of %s, exceeding the safe automatic wait of %s: %w", delay.Round(time.Second), maxRateLimitWait, err)
+		if totalWait+delay > maxRateLimitTotalWait {
+			return providers.RepositoryAnalysisResult{}, fmt.Errorf("provider rate limit exceeded the %s automatic wait budget after %d retry cycle(s): %w", maxRateLimitTotalWait, attempt, err)
 		}
+		totalWait += delay
 		if err := progress(options, Progress{
-			Stage: "rate-limit-wait", Completed: attempt + 1, Total: maxRateLimitRetries,
+			Stage: "rate-limit-wait", Completed: attempt + 1,
 			Scope: request.Scope, Wait: delay, Detail: "temporary provider token limit",
 		}); err != nil {
 			return providers.RepositoryAnalysisResult{}, err
@@ -352,6 +423,24 @@ func repositoryOutputTokens(provider providers.Kind, tokenLimit int) int {
 		return 4096
 	}
 	return value
+}
+
+func repositoryRecoveryOutputTokens(current int) int {
+	if current < minimumRecoveryOutput {
+		return minimumRecoveryOutput
+	}
+	if current >= maximumRecoveryOutput {
+		return maximumRecoveryOutput
+	}
+	value := current * 2
+	if value > maximumRecoveryOutput {
+		return maximumRecoveryOutput
+	}
+	return value
+}
+
+func outputFitsTokenLimit(inputTokens, outputTokens, tokenLimit int) bool {
+	return tokenLimit <= 0 || inputTokens+outputTokens <= tokenLimit
 }
 
 func smallerPositive(current, candidate int) int {

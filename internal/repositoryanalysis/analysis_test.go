@@ -20,14 +20,19 @@ type recordingReviewer struct {
 
 type adaptiveReviewer struct {
 	recordingReviewer
-	maxSourceBytes int64
-	temporary429   bool
+	maxSourceBytes      int64
+	temporary429        bool
+	temporary429Count   int
+	minimumOutputTokens int
 }
 
 func (reviewer *adaptiveReviewer) ReviewRepository(ctx context.Context, request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
 	reviewer.requests = append(reviewer.requests, request)
-	if reviewer.temporary429 {
+	if reviewer.temporary429 || reviewer.temporary429Count > 0 {
 		reviewer.temporary429 = false
+		if reviewer.temporary429Count > 0 {
+			reviewer.temporary429Count--
+		}
 		return providers.RepositoryAnalysisResult{}, &providers.RemoteRateLimitError{
 			Provider: "OpenAI", Message: "Rate limit reached. Try again.", RetryAfter: 2 * time.Second,
 		}
@@ -36,6 +41,12 @@ func (reviewer *adaptiveReviewer) ReviewRepository(ctx context.Context, request 
 		return providers.RepositoryAnalysisResult{}, &providers.RemoteRateLimitError{
 			Provider: "OpenAI", Message: "Request too large.", LimitTokens: 10_000,
 			RequestedTokens: 21_769, RequestTooLarge: true,
+		}
+	}
+	if request.Mode == providers.RepositoryAnalysisSubsystem && reviewer.minimumOutputTokens > 0 && request.MaxOutputTokens < reviewer.minimumOutputTokens {
+		return providers.RepositoryAnalysisResult{}, &providers.RemoteIncompleteError{
+			Provider: "OpenAI", Status: "incomplete", Reason: "max_output_tokens",
+			InputTokens: 7_000, OutputTokens: request.MaxOutputTokens,
 		}
 	}
 	// Avoid appending the successful request twice when delegating.
@@ -156,6 +167,53 @@ func TestRunAdaptivelySplitsOversizedSubsystemAndLargeFile(t *testing.T) {
 	}
 }
 
+func TestRunRecoversWhenSubsystemExhaustsOutputTokens(t *testing.T) {
+	reviewer := &adaptiveReviewer{maxSourceBytes: 700, minimumOutputTokens: 4_096}
+	var progressEvents []Progress
+	repository := discovery.Repository{Files: []discovery.File{{
+		Path: "docs/guide.md", Kind: discovery.KindDocumentation, Content: []byte(strings.Repeat("documented line\n", 160)),
+	}}}
+	result, err := Run(context.Background(), reviewer, repository, nil, nil, Options{
+		Mode: ModeHierarchical, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
+		OnProgress: func(value Progress) error {
+			progressEvents = append(progressEvents, value)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundIncompleteRequest, foundRecoveredRequest, foundOutputSplit := false, false, false
+	for _, request := range reviewer.requests {
+		if request.Mode != providers.RepositoryAnalysisSubsystem {
+			continue
+		}
+		if request.MaxOutputTokens == 2_000 {
+			foundIncompleteRequest = true
+		}
+		if request.MaxOutputTokens >= 4_096 {
+			foundRecoveredRequest = true
+		}
+	}
+	for _, value := range progressEvents {
+		if value.Stage == "adaptive-output-split" {
+			foundOutputSplit = true
+		}
+	}
+	if result.Coverage.Subsystems < 2 || !foundIncompleteRequest || !foundRecoveredRequest || !foundOutputSplit {
+		t.Fatalf("output recovery missing: coverage=%#v incomplete=%t recovered=%t split=%t requests=%#v", result.Coverage, foundIncompleteRequest, foundRecoveredRequest, foundOutputSplit, reviewer.requests)
+	}
+}
+
+func TestRepositoryRecoveryOutputTokens(t *testing.T) {
+	tests := map[int]int{2_000: 4_096, 4_096: 8_192, 8_192: 8_192}
+	for input, want := range tests {
+		if got := repositoryRecoveryOutputTokens(input); got != want {
+			t.Fatalf("repositoryRecoveryOutputTokens(%d) = %d, want %d", input, got, want)
+		}
+	}
+}
+
 func TestRunWaitsAndRetriesTemporaryRateLimit(t *testing.T) {
 	reviewer := &adaptiveReviewer{maxSourceBytes: 10_000, temporary429: true}
 	var waits []time.Duration
@@ -171,8 +229,33 @@ func TestRunWaitsAndRetriesTemporaryRateLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(waits) != 1 || waits[0] != 2*time.Second || len(reviewer.requests) != 2 || result.Coverage.Mode != providers.RepositoryAnalysisFull {
+	if len(waits) != 1 || waits[0] != time.Minute || len(reviewer.requests) != 2 || result.Coverage.Mode != providers.RepositoryAnalysisFull {
 		t.Fatalf("unexpected retry: waits=%v requests=%d result=%#v", waits, len(reviewer.requests), result)
+	}
+}
+
+func TestRunRepeatsFullCooldownUntilTemporaryRateLimitClears(t *testing.T) {
+	reviewer := &adaptiveReviewer{maxSourceBytes: 10_000, temporary429Count: 3}
+	var waits []time.Duration
+	result, err := Run(context.Background(), reviewer, discovery.Repository{Files: []discovery.File{{
+		Path: "main.go", Kind: discovery.KindSource, Content: []byte("package main\n"),
+	}}}, nil, nil, Options{
+		Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
+		Wait: func(_ context.Context, delay time.Duration) error {
+			waits = append(waits, delay)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(waits) != 3 || len(reviewer.requests) != 4 || result.Coverage.Mode != providers.RepositoryAnalysisFull {
+		t.Fatalf("unexpected repeated retry: waits=%v requests=%d result=%#v", waits, len(reviewer.requests), result)
+	}
+	for _, wait := range waits {
+		if wait != time.Minute {
+			t.Fatalf("wait = %s, want one minute", wait)
+		}
 	}
 }
 

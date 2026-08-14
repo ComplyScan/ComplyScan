@@ -270,10 +270,10 @@ func TestRunWaitsAndRetriesRateLimitedTechnicalReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reviewer.reviewCalls != 2 || result.Reviewed != 1 || len(waits) != 1 || waits[0] != 20*time.Second {
+	if reviewer.reviewCalls != 2 || result.Reviewed != 1 || len(waits) != 1 || waits[0] != time.Minute {
 		t.Fatalf("rate-limited review was not retried: reviewer=%#v waits=%v result=%#v", reviewer, waits, result)
 	}
-	if len(progress) != 2 || progress[1].Stage != ProgressStageRateLimitWait || progress[1].Attempt != 1 || progress[1].RetryTotal != 3 || progress[1].Wait != 20*time.Second {
+	if len(progress) != 2 || progress[1].Stage != ProgressStageRateLimitWait || progress[1].Attempt != 1 || progress[1].Wait != time.Minute {
 		t.Fatalf("retry progress = %#v", progress)
 	}
 }
@@ -294,7 +294,7 @@ func TestRunWaitsAndRetriesRateLimitedSearchPlanning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reviewer.planCalls != 2 || reviewer.reviewCalls != 2 || result.Reviewed != 1 || len(waits) != 1 || waits[0] != 15*time.Second {
+	if reviewer.planCalls != 2 || reviewer.reviewCalls != 2 || result.Reviewed != 1 || len(waits) != 1 || waits[0] != time.Minute {
 		t.Fatalf("rate-limited search planning was not retried: reviewer=%#v waits=%v result=%#v", reviewer, waits, result)
 	}
 }
@@ -344,15 +344,20 @@ func (reviewer *alwaysRateLimitedTechnicalReviewer) ReviewTechnical(_ context.Co
 func TestRunStopsAfterBoundedRateLimitRetries(t *testing.T) {
 	candidate := testCandidate("return evaluate(output)")
 	reviewer := &alwaysRateLimitedTechnicalReviewer{}
-	waits := 0
+	var waits []time.Duration
 	result, err := Run(context.Background(), reviewer, providers.TechnicalReviewRequest{Candidates: []providers.TechnicalCandidate{candidate}}, Options{
 		Identity: testIdentity(), MaxCandidates: 20,
-		Wait: func(_ context.Context, _ time.Duration) error { waits++; return nil },
+		Wait: func(_ context.Context, delay time.Duration) error { waits = append(waits, delay); return nil },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reviewer.calls != 4 || waits != 3 || result.Reviewed != 0 || !strings.Contains(strings.Join(result.Notes, "\n"), "HTTP 429") {
-		t.Fatalf("retry cap was not enforced: calls=%d waits=%d result=%#v", reviewer.calls, waits, result)
+	if reviewer.calls != 11 || len(waits) != 10 || result.Reviewed != 0 || !strings.Contains(strings.Join(result.Notes, "\n"), "10m0s automatic wait budget") {
+		t.Fatalf("retry wait budget was not enforced: calls=%d waits=%v result=%#v", reviewer.calls, waits, result)
+	}
+	for _, wait := range waits {
+		if wait != time.Minute {
+			t.Fatalf("wait = %s, want one full rolling window", wait)
+		}
 	}
 }
