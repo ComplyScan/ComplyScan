@@ -153,6 +153,15 @@ func TestRemoteStatusErrorParsesRetryDelayFromMessage(t *testing.T) {
 	}
 }
 
+func TestRemoteOutputTokenLimitHonorsAdaptiveReduction(t *testing.T) {
+	if got := remoteOutputTokenLimit(ollamaChatRequest{MaxOutputTokens: 2_000}); got != 2_000 {
+		t.Fatalf("adaptive output limit = %d, want 2000", got)
+	}
+	if got := remoteOutputTokenLimit(ollamaChatRequest{}); got != maxRemoteOutputTokens {
+		t.Fatalf("default output limit = %d, want %d", got, maxRemoteOutputTokens)
+	}
+}
+
 func TestRemoteProviderRequiresCredential(t *testing.T) {
 	if _, err := NewGemini(RemoteOptions{Model: "test", Timeout: time.Second, MaxFindings: 1}); err == nil || !strings.Contains(err.Error(), "API key is not available") {
 		t.Fatalf("error = %v", err)

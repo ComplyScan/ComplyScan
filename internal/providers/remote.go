@@ -321,7 +321,7 @@ func openAICompatibleCompletion(baseURL, label string) remoteCompletionFactory {
 }
 
 func remoteOutputTokenLimit(request ollamaChatRequest) int {
-	if request.MaxOutputTokens > maxRemoteOutputTokens && request.MaxOutputTokens <= 16_384 {
+	if request.MaxOutputTokens > 0 && request.MaxOutputTokens <= 16_384 {
 		return request.MaxOutputTokens
 	}
 	return maxRemoteOutputTokens

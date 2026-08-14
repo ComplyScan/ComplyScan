@@ -229,10 +229,11 @@ const (
 // analysis. Paths and line counts are retained so citations can be verified
 // deterministically after the model responds.
 type RepositorySourceFile struct {
-	Path      string `json:"path"`
-	Kind      string `json:"kind"`
-	LineCount int    `json:"line_count"`
-	Content   string `json:"content"`
+	Path             string `json:"path"`
+	Kind             string `json:"kind"`
+	LineCount        int    `json:"line_count"`
+	ContentStartLine int    `json:"content_start_line,omitempty"`
+	Content          string `json:"content"`
 }
 
 type RepositoryFileReference struct {
@@ -299,6 +300,7 @@ type RepositoryAnalysisRequest struct {
 	Scope              string                    `json:"scope"`
 	RepositoryFiles    int                       `json:"repository_files"`
 	RepositoryBytes    int64                     `json:"repository_bytes"`
+	MaxOutputTokens    int                       `json:"-"`
 	Files              []RepositorySourceFile    `json:"files,omitempty"`
 	FileIndex          []RepositoryFileReference `json:"file_index,omitempty"`
 	Objectives         []RepositoryObjective     `json:"objectives"`

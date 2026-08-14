@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -61,6 +62,42 @@ func TestReviewRepositoryRejectsInventedCitation(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), `unknown path "invented.go"`) {
 		t.Fatalf("expected invented citation error, got %v", err)
+	}
+}
+
+func TestReviewRepositoryValidatesSegmentOriginalLineNumbers(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		line    int
+		wantErr bool
+	}{
+		{name: "original segment line", line: 51},
+		{name: "line outside segment", line: 1, wantErr: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			provider := &OllamaProvider{
+				kind: OpenAI, label: "OpenAI", model: "test-model",
+				completion: func(context.Context, ollamaChatRequest) (ollamaChatResponse, error) {
+					var response ollamaChatResponse
+					response.Done = true
+					response.Message.Content = `{"result":{"scope":"segment","ai_uses":[{"id":"use","name":"Use","purpose":"Purpose","lifecycle":"unknown","confidence":"low","evidence":[{"path":"main.go","line":` + fmt.Sprint(testCase.line) + `,"summary":"Segment citation"}],"unresolved_questions":[]}],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`
+					return response, nil
+				},
+			}
+			_, err := provider.ReviewRepository(context.Background(), RepositoryAnalysisRequest{
+				Mode: RepositoryAnalysisSubsystem, Scope: "segment", RepositoryFiles: 1,
+				Files: []RepositorySourceFile{{
+					Path: "main.go", Kind: "source", LineCount: 100, ContentStartLine: 51,
+					Content: "func segment() {}\nfunc next() {}",
+				}},
+			})
+			if testCase.wantErr && (err == nil || !strings.Contains(err.Error(), "outside submitted lines 51-52")) {
+				t.Fatalf("expected segment citation error, got %v", err)
+			}
+			if !testCase.wantErr && err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
