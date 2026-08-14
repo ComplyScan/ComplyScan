@@ -9,7 +9,7 @@ ComplyScan uses a hybrid analysis pipeline. Local deterministic code first disco
 3. Local code classifies files, redacts recognised credential formats, inventories likely AI integrations, applies technical evidence rules, and builds the Go, Python, JavaScript, and TypeScript repository graph.
 4. The selector ranks implementation files using AI inventory signals, technical-objective matches, production entry points, imports, callers, and bounded graph relationships. Documentation is not used as the primary proof of an implementation.
 5. The provider receives the selected redacted excerpts, relevant graph context, versioned code objectives, and typed declared system facts in one structured request.
-6. The model may request one follow-up containing at most three literal search terms and optional repository-relative path hints. Trusted local code—not the model—searches only eligible discovered files and returns at most three bounded excerpts. If useful excerpts are found, ComplyScan makes one final structured request. There are no further rounds.
+6. The model may request one follow-up containing at most three literal search terms and optional repository-relative path hints. Trusted local code—not the model—searches only eligible discovered files and returns at most three bounded excerpts. If useful excerpts are found, ComplyScan makes one final structured request. If the initial model response instead exhausts its output allowance, ComplyScan uses that same sole second-call budget for a terse no-follow-up recovery. There are no further rounds.
 7. Trusted code validates objective IDs, configured system IDs, AI-use IDs, classifications, paths, line citations, and ownership boundaries. Invalid output rejects the model pass.
 8. The advisory result is saved separately from deterministic findings and does not change the scan's CI threshold.
 
@@ -33,7 +33,7 @@ ai:
 - `hierarchical` always analyzes broad subsystem slices and synthesizes them.
 - `bounded-only` disables repository-level analysis and retains the older per-candidate technical investigation flow.
 
-`max-input-tokens` remains the upper safety budget for broad modes. Targeted remote analysis additionally aims for a compact package of about 6,500 input tokens and up to 3,000 output tokens. Experimental Ollama analysis uses a larger local package because no source leaves the machine. These are conservative estimates, not exact provider tokenization or billing guarantees.
+`max-input-tokens` remains the upper safety budget for broad modes. Targeted remote analysis additionally aims for a compact package of about 6,500 input tokens and up to 4,096 output tokens. For OpenAI GPT-5.6, the request sets low reasoning effort and low text verbosity so hidden reasoning leaves room for the structured result. A recovery request uses no reasoning effort. Experimental Ollama analysis uses a larger local package because no source leaves the machine. These are conservative estimates, not exact provider tokenization or billing guarantees.
 
 The JSON evidence bundle records the actual mode as `targeted-evidence`, `full-repository`, or `hierarchical-synthesis`, together with discovered and submitted coverage, checked citations, token usage where supplied, and whether a bounded follow-up was used.
 
@@ -49,7 +49,7 @@ The explicit `deep`, `full`, and `hierarchical` modes can send substantially mor
 
 ## Rate limits and retries
 
-Compact targeted packages are intended to fit ordinary provider limits rather than consume a limit through many subsystem calls. If a hosted provider still reports a temporary rolling rate limit, ComplyScan honours the provider interval, waits at least one minute, shows a cancellable countdown, and retries within the existing per-request cumulative wait budget. An intrinsically oversized targeted request is not turned into an unbounded directory sweep.
+Compact targeted packages and bounded output schemas are intended to fit ordinary provider limits rather than consume a limit through many subsystem calls. Targeted responses cap AI uses, objective observations, unmapped activity, citations, unresolved questions, and individual text fields. Reports and JSON distinguish input, total output, and reasoning tokens where the provider supplies that breakdown. If a hosted provider still reports a temporary rolling rate limit, ComplyScan honours the provider interval, waits at least one minute, shows a cancellable countdown, and retries within the existing per-request cumulative wait budget. An intrinsically oversized targeted request is not turned into an unbounded directory sweep.
 
 Deep modes retain adaptive splitting, incomplete-response recovery, hierarchical synthesis, and rate-limit waiting. These modes can require many requests and should not be the normal developer workflow.
 
