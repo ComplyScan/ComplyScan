@@ -647,11 +647,47 @@ func TestTechnicalReviewProgressDistinguishesModelAndCache(t *testing.T) {
 	if err := progress(technicalreview.Progress{Current: 2, Total: 2, Candidate: candidate, Cached: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := progress(technicalreview.Progress{Stage: technicalreview.ProgressStageRateLimitWait, Current: 2, Total: 2, Candidate: candidate, Attempt: 1, Wait: time.Minute}); err != nil {
+	if err := progress(technicalreview.Progress{Stage: technicalreview.ProgressStageRateLimitWait, Current: 2, Total: 2, Candidate: candidate, Attempt: 1, Wait: time.Minute, OriginalWait: time.Minute}); err != nil {
 		t.Fatal(err)
 	}
-	if value := output.String(); !strings.Contains(value, "1/2") || !strings.Contains(value, "elapsed 12s") || !strings.Contains(value, "reviewing with Anthropic") || !strings.Contains(value, "2/2") || !strings.Contains(value, "using cached observation") || !strings.Contains(value, "system ranking, 42 owned file(s)") || !strings.Contains(value, "waiting a full 1m0s cooldown before retry 1") {
+	if value := output.String(); !strings.Contains(value, "1/2") || !strings.Contains(value, "elapsed 12s") || !strings.Contains(value, "reviewing with Anthropic") || !strings.Contains(value, "2/2") || !strings.Contains(value, "using cached observation") || !strings.Contains(value, "system ranking, 42 owned file(s)") || !strings.Contains(value, "Rate limited · retry 1 in 1m · original wait 1m · Ctrl+C to stop") {
 		t.Fatalf("unexpected progress output:\n%s", value)
+	}
+}
+
+func TestRateLimitCountdownMessageShowsRemainingAndOriginalWait(t *testing.T) {
+	got := rateLimitCountdownMessage(2, 44*time.Second, time.Minute)
+	want := "Rate limited · retry 2 in 44s · original wait 1m · Ctrl+C to stop"
+	if got != want {
+		t.Fatalf("countdown message = %q, want %q", got, want)
+	}
+}
+
+func TestTechnicalRateLimitCountdownUpdatesInteractiveLine(t *testing.T) {
+	originalTerminal := llmActivityTerminal
+	t.Cleanup(func() { llmActivityTerminal = originalTerminal })
+	llmActivityTerminal = func(any) bool { return true }
+	t.Setenv("CI", "")
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv(accessiblePromptEnvironment, "")
+
+	var output bytes.Buffer
+	progress := technicalReviewProgress(&output, "openai", time.Now(), time.Now)
+	base := technicalreview.Progress{Stage: technicalreview.ProgressStageRateLimitWait, Current: 1, Total: 1, Attempt: 1, OriginalWait: time.Minute}
+	base.Wait = time.Minute
+	if err := progress(base); err != nil {
+		t.Fatal(err)
+	}
+	base.Wait = 44 * time.Second
+	if err := progress(base); err != nil {
+		t.Fatal(err)
+	}
+	if err := progress(technicalreview.Progress{Stage: technicalreview.ProgressStageRateLimitResume, Attempt: 1}); err != nil {
+		t.Fatal(err)
+	}
+	value := output.String()
+	if !strings.Contains(value, "retry 1 in 1m · original wait 1m") || !strings.Contains(value, "retry 1 in 44s · original wait 1m") || !strings.Contains(value, "Cooldown complete · starting retry 1") {
+		t.Fatalf("interactive countdown output = %q", value)
 	}
 }
 

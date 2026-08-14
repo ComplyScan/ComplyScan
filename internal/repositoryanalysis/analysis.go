@@ -57,13 +57,14 @@ type Options struct {
 }
 
 type Progress struct {
-	Stage      string
-	Completed  int
-	Total      int
-	Scope      string
-	InputBytes int64
-	Wait       time.Duration
-	Detail     string
+	Stage        string
+	Completed    int
+	Total        int
+	Scope        string
+	InputBytes   int64
+	Wait         time.Duration
+	OriginalWait time.Duration
+	Detail       string
 }
 
 // Run sends all relevant discovered repository text when it fits. Larger
@@ -386,28 +387,57 @@ func reviewRepositoryWithRetry(ctx context.Context, reviewer Reviewer, request p
 		totalWait += delay
 		if err := progress(options, Progress{
 			Stage: "rate-limit-wait", Completed: attempt + 1,
-			Scope: request.Scope, Wait: delay, Detail: "temporary provider token limit",
+			Scope: request.Scope, Wait: delay, OriginalWait: delay, Detail: "temporary provider token limit",
 		}); err != nil {
 			return providers.RepositoryAnalysisResult{}, err
 		}
-		wait := options.Wait
-		if wait == nil {
-			wait = waitForRateLimit
+		if options.Wait != nil {
+			if err := options.Wait(ctx, delay); err != nil {
+				return providers.RepositoryAnalysisResult{}, err
+			}
+			continue
 		}
-		if err := wait(ctx, delay); err != nil {
+		if err := waitForRateLimit(ctx, delay, func(remaining time.Duration) error {
+			return progress(options, Progress{
+				Stage: "rate-limit-wait", Completed: attempt + 1,
+				Scope: request.Scope, Wait: remaining, OriginalWait: delay, Detail: "temporary provider token limit",
+			})
+		}); err != nil {
+			return providers.RepositoryAnalysisResult{}, err
+		}
+		if err := progress(options, Progress{
+			Stage: "rate-limit-resume", Completed: attempt + 1,
+			Scope: request.Scope, OriginalWait: delay, Detail: "temporary provider token limit",
+		}); err != nil {
 			return providers.RepositoryAnalysisResult{}, err
 		}
 	}
 }
 
-func waitForRateLimit(ctx context.Context, delay time.Duration) error {
+func waitForRateLimit(ctx context.Context, delay time.Duration, onTick func(time.Duration) error) error {
+	deadline := time.Now().Add(delay)
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return nil
+		case <-ticker.C:
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				continue
+			}
+			remaining = ((remaining + time.Second - 1) / time.Second) * time.Second
+			if onTick != nil {
+				if err := onTick(remaining); err != nil {
+					return err
+				}
+			}
+		}
 	}
 }
 

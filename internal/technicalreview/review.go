@@ -21,13 +21,14 @@ type SearchPlanner interface {
 type FollowUpRetriever func(providers.TechnicalCandidate, providers.TechnicalSearchPlan) (providers.TechnicalCandidate, int)
 
 type Progress struct {
-	Stage     string
-	Current   int
-	Total     int
-	Candidate providers.TechnicalCandidate
-	Cached    bool
-	Attempt   int
-	Wait      time.Duration
+	Stage        string
+	Current      int
+	Total        int
+	Candidate    providers.TechnicalCandidate
+	Cached       bool
+	Attempt      int
+	Wait         time.Duration
+	OriginalWait time.Duration
 }
 
 type Options struct {
@@ -42,10 +43,11 @@ type Options struct {
 }
 
 const (
-	ProgressStageCandidate     = "candidate"
-	ProgressStageRateLimitWait = "rate-limit-wait"
-	minimumRateLimitCooldown   = 60 * time.Second
-	maxRateLimitTotalWait      = 10 * time.Minute
+	ProgressStageCandidate       = "candidate"
+	ProgressStageRateLimitWait   = "rate-limit-wait"
+	ProgressStageRateLimitResume = "rate-limit-resume"
+	minimumRateLimitCooldown     = 60 * time.Second
+	maxRateLimitTotalWait        = 10 * time.Minute
 )
 
 // Run applies source-context-free cache reuse around one-candidate model requests.
@@ -200,29 +202,63 @@ func retryRateLimited(ctx context.Context, candidate providers.TechnicalCandidat
 		if options.OnProgress != nil {
 			if progressErr := options.OnProgress(Progress{
 				Stage: ProgressStageRateLimitWait, Current: current, Total: total, Candidate: candidate,
-				Attempt: attempt + 1, Wait: delay,
+				Attempt: attempt + 1, Wait: delay, OriginalWait: delay,
 			}); progressErr != nil {
 				return progressErr
 			}
 		}
-		wait := options.Wait
-		if wait == nil {
-			wait = waitForRateLimit
+		if options.Wait != nil {
+			if err := options.Wait(ctx, delay); err != nil {
+				return err
+			}
+			continue
 		}
-		if err := wait(ctx, delay); err != nil {
+		if err := waitForRateLimit(ctx, delay, func(remaining time.Duration) error {
+			if options.OnProgress == nil {
+				return nil
+			}
+			return options.OnProgress(Progress{
+				Stage: ProgressStageRateLimitWait, Current: current, Total: total, Candidate: candidate,
+				Attempt: attempt + 1, Wait: remaining, OriginalWait: delay,
+			})
+		}); err != nil {
 			return err
+		}
+		if options.OnProgress != nil {
+			if err := options.OnProgress(Progress{
+				Stage: ProgressStageRateLimitResume, Current: current, Total: total, Candidate: candidate,
+				Attempt: attempt + 1, OriginalWait: delay,
+			}); err != nil {
+				return err
+			}
 		}
 	}
 }
 
-func waitForRateLimit(ctx context.Context, delay time.Duration) error {
+func waitForRateLimit(ctx context.Context, delay time.Duration, onTick func(time.Duration) error) error {
+	deadline := time.Now().Add(delay)
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return nil
+		case <-ticker.C:
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				continue
+			}
+			remaining = ((remaining + time.Second - 1) / time.Second) * time.Second
+			if onTick != nil {
+				if err := onTick(remaining); err != nil {
+					return err
+				}
+			}
+		}
 	}
 }
 

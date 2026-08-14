@@ -976,6 +976,7 @@ func reviewRepositoryWithProvider(
 	if mode == "bounded-only" {
 		return providers.RepositoryAnalysisResult{}, errors.New("repository-wide analysis is disabled by configuration")
 	}
+	liveCountdown := llmActivityAvailable(progressWriter)
 	return repositoryanalysis.Run(ctx, reviewer, repository, evidence, systems, repositoryanalysis.Options{
 		Mode: mode, MaxInputTokens: settings.RepositoryAnalysis.MaxInputTokens, Provider: kind, Model: model, Ownership: ownershipRules,
 		OnProgress: func(progress repositoryanalysis.Progress) error {
@@ -990,7 +991,20 @@ func reviewRepositoryWithProvider(
 				_, err := fmt.Fprintf(progressWriter, "Model exhausted its output space; retrying %s with more response space (%s).\n", progress.Scope, progress.Detail)
 				return err
 			case "rate-limit-wait":
-				_, err := fmt.Fprintf(progressWriter, "Provider rate limit reached; waiting a full %s cooldown before retry %d for %s. Press Ctrl+C to stop.\n", progress.Wait.Round(time.Second), progress.Completed, progress.Scope)
+				if liveCountdown {
+					_, err := fmt.Fprintf(progressWriter, "\r\x1b[2K%s", rateLimitCountdownMessage(progress.Completed, progress.Wait, progress.OriginalWait))
+					return err
+				}
+				if progress.Wait != progress.OriginalWait {
+					return nil
+				}
+				_, err := fmt.Fprintln(progressWriter, rateLimitCountdownMessage(progress.Completed, progress.Wait, progress.OriginalWait))
+				return err
+			case "rate-limit-resume":
+				if !liveCountdown {
+					return nil
+				}
+				_, err := fmt.Fprintf(progressWriter, "\r\x1b[2KCooldown complete · starting retry %d...\n", progress.Completed)
 				return err
 			}
 			if progress.Completed == 0 {
@@ -1158,9 +1172,24 @@ func remoteProviderName(settings config.AIConfig) string {
 }
 
 func technicalReviewProgress(output io.Writer, provider string, started time.Time, now func() time.Time) func(technicalreview.Progress) error {
+	liveCountdown := llmActivityAvailable(output)
 	return func(progress technicalreview.Progress) error {
 		if progress.Stage == technicalreview.ProgressStageRateLimitWait {
-			_, err := fmt.Fprintf(output, "Provider rate limit reached during evidence investigation %d/%d; waiting a full %s cooldown before retry %d. Press Ctrl+C to stop.\n", progress.Current, progress.Total, progress.Wait.Round(time.Second), progress.Attempt)
+			if liveCountdown {
+				_, err := fmt.Fprintf(output, "\r\x1b[2K%s", rateLimitCountdownMessage(progress.Attempt, progress.Wait, progress.OriginalWait))
+				return err
+			}
+			if progress.Wait != progress.OriginalWait {
+				return nil
+			}
+			_, err := fmt.Fprintln(output, rateLimitCountdownMessage(progress.Attempt, progress.Wait, progress.OriginalWait))
+			return err
+		}
+		if progress.Stage == technicalreview.ProgressStageRateLimitResume {
+			if !liveCountdown {
+				return nil
+			}
+			_, err := fmt.Fprintf(output, "\r\x1b[2KCooldown complete · starting retry %d...\n", progress.Attempt)
 			return err
 		}
 		status := "reviewing with " + reviewProviderLabel(provider)
@@ -1174,6 +1203,21 @@ func technicalReviewProgress(output io.Writer, provider string, started time.Tim
 		_, err := fmt.Fprintf(output, "Evidence investigation %d/%d [elapsed %s]: %s — %s [%s] (%s)\n", progress.Current, progress.Total, formatElapsed(now().Sub(started)), progress.Candidate.ObjectiveID, progress.Candidate.Path, scope, status)
 		return err
 	}
+}
+
+func rateLimitCountdownMessage(retry int, remaining, original time.Duration) string {
+	return fmt.Sprintf("Rate limited · retry %d in %s · original wait %s · Ctrl+C to stop", retry, formatCountdownDuration(remaining), formatCountdownDuration(original))
+}
+
+func formatCountdownDuration(value time.Duration) string {
+	value = value.Round(time.Second)
+	if value >= time.Hour && value%time.Hour == 0 {
+		return fmt.Sprintf("%dh", int(value/time.Hour))
+	}
+	if value >= time.Minute && value%time.Minute == 0 {
+		return fmt.Sprintf("%dm", int(value/time.Minute))
+	}
+	return value.String()
 }
 
 func formatElapsed(value time.Duration) string {
