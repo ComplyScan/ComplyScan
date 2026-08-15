@@ -740,7 +740,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						return fmt.Errorf("write repository analysis progress: %w", err)
 					}
 					repositoryReview, reviewErr := reviewRepositoryWithProvider(
-						cmd.Context(), cfg.AI, aiReviewRepository, frameworkEvidenceReports(frameworkResults), cfg.Systems, cfg.Ownership, progressWriter,
+						cmd.Context(), cfg.AI, aiReviewRepository, frameworkEvidenceReports(frameworkResults), cfg.Systems, cfg.Ownership, refreshReview, progressWriter,
 					)
 					if reviewErr != nil {
 						aiReviewIncomplete = true
@@ -757,7 +757,9 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						reportValue.RepositoryAnalysis = &repositoryReview
 						reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisCompleted
 						completionDetail := fmt.Sprintf("%d file excerpt(s)", repositoryReview.Coverage.FilesSubmitted)
-						if repositoryReview.Coverage.Mode == providers.RepositoryAnalysisTargeted {
+						if repositoryReview.CacheHit {
+							completionDetail += ", private cache hit, no model call"
+						} else if repositoryReview.Coverage.Mode == providers.RepositoryAnalysisTargeted {
 							calls := 1
 							if repositoryReview.OutputRecoveryUsed || (repositoryReview.FollowUpRequested && repositoryReview.FollowUpExcerpts > 0) {
 								calls = 2
@@ -910,7 +912,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 	command.Flags().StringVar(&remoteBaseURL, "base-url", "", "HTTPS API base URL for an OpenAI-compatible provider")
 	command.Flags().StringVar(&reportDirectory, "report-dir", report.DefaultDirectory, "directory for immutable report history and latest snapshots (relative to the scan target)")
 	command.Flags().BoolVar(&noReport, "no-report", false, "do not save local Markdown and JSON reports")
-	command.Flags().BoolVar(&refreshReview, "refresh-review", false, "ignore cached technical observations and run the configured provider again")
+	command.Flags().BoolVar(&refreshReview, "refresh-review", false, "ignore cached repository and technical observations and run the configured provider again")
 	command.Flags().BoolVar(&requireAIReview, "require-ai-review", false, "return exit code 2 when any requested AI review layer is incomplete")
 	command.Flags().BoolVar(&quickScan, "quick", false, "run deterministic discovery and checks without AI review")
 	command.Flags().BoolVar(&deepScan, "deep", false, "require the configured AI review provider for a deep scan")
@@ -1069,6 +1071,8 @@ func reviewFindingsWithProvider(
 	return findingResult, nil
 }
 
+var repositoryAnalysisCacheDefaultPath = repositoryanalysis.DefaultCachePath
+
 func reviewRepositoryWithProvider(
 	ctx context.Context,
 	settings config.AIConfig,
@@ -1076,18 +1080,54 @@ func reviewRepositoryWithProvider(
 	evidence []framework.TechnicalEvidenceReport,
 	systems []profile.System,
 	ownershipRules []ownership.Rule,
+	refresh bool,
 	progressWriter io.Writer,
 ) (providers.RepositoryAnalysisResult, error) {
-	reviewer, _, _, model, kind, err := configuredReviewer(settings)
-	if err != nil {
-		return providers.RepositoryAnalysisResult{}, err
-	}
 	mode := repositoryanalysis.Mode(settings.RepositoryAnalysis.Mode)
 	if mode == "bounded-only" {
 		return providers.RepositoryAnalysisResult{}, errors.New("repository analysis is disabled by configuration")
 	}
+	kind := providers.Kind(settings.Provider)
+	model := configuredReviewModel(settings)
+	identity := repositoryanalysis.CacheIdentity{
+		Provider: kind, Model: model, PromptVersion: providers.RepositoryAnalysisPromptVersion,
+		EndpointDigest: repositoryanalysis.DigestEndpoint(repositoryAnalysisEndpointIdentity(settings)),
+	}
+	inputDigest, digestErr := repositoryanalysis.RepositoryInputDigest(
+		repository, evidence, systems, mode, settings.RepositoryAnalysis.MaxInputTokens, ownershipRules,
+	)
+	var repositoryCache *repositoryanalysis.Cache
+	cacheWarning := digestErr
+	if cacheWarning == nil {
+		cachePath, pathErr := repositoryAnalysisCacheDefaultPath()
+		if pathErr != nil {
+			cacheWarning = pathErr
+		} else if opened, openErr := repositoryanalysis.OpenCache(cachePath); openErr != nil {
+			cacheWarning = openErr
+		} else {
+			repositoryCache = opened
+		}
+	}
+	if repositoryCache != nil && !refresh {
+		cached, found, lookupErr := repositoryCache.Lookup(identity, inputDigest)
+		if lookupErr != nil {
+			cacheWarning = lookupErr
+			repositoryCache = nil
+		} else if found {
+			if _, err := fmt.Fprintln(progressWriter, "Repository AI reasoning reused a matching private cache entry; no model request was made for this layer."); err != nil {
+				return providers.RepositoryAnalysisResult{}, err
+			}
+			return cached, nil
+		}
+	}
+	reviewer, _, _, configuredModel, configuredKind, err := configuredReviewer(settings)
+	if err != nil {
+		return providers.RepositoryAnalysisResult{}, err
+	}
+	model = configuredModel
+	kind = configuredKind
 	liveCountdown := llmActivityAvailable(progressWriter)
-	return repositoryanalysis.Run(ctx, reviewer, repository, evidence, systems, repositoryanalysis.Options{
+	result, err := repositoryanalysis.Run(ctx, reviewer, repository, evidence, systems, repositoryanalysis.Options{
 		Mode: mode, MaxInputTokens: settings.RepositoryAnalysis.MaxInputTokens, Provider: kind, Model: model, Ownership: ownershipRules,
 		OnProgress: func(progress repositoryanalysis.Progress) error {
 			switch progress.Stage {
@@ -1155,6 +1195,28 @@ func reviewRepositoryWithProvider(
 			}
 		},
 	})
+	if err != nil {
+		return providers.RepositoryAnalysisResult{}, err
+	}
+	if repositoryCache != nil {
+		if storeErr := repositoryCache.Store(identity, inputDigest, result); storeErr != nil {
+			cacheWarning = storeErr
+		}
+	}
+	if cacheWarning != nil {
+		result.Notes = append(result.Notes, "The private repository-analysis cache was unavailable; review continued without cache reuse.")
+		if _, writeErr := fmt.Fprintf(progressWriter, "Warning: repository AI cache was unavailable: %v\n", cacheWarning); writeErr != nil {
+			return providers.RepositoryAnalysisResult{}, writeErr
+		}
+	}
+	return result, nil
+}
+
+func repositoryAnalysisEndpointIdentity(settings config.AIConfig) string {
+	if settings.Provider == "ollama" {
+		return "ollama\x00" + strings.TrimSpace(settings.Ollama.Endpoint)
+	}
+	return strings.Join([]string{settings.Provider, strings.TrimSpace(settings.Remote.ProviderName), strings.TrimSpace(settings.Remote.BaseURL)}, "\x00")
 }
 
 func frameworkEvidenceReports(results []report.FrameworkResult) []framework.TechnicalEvidenceReport {

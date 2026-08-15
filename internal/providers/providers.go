@@ -420,6 +420,7 @@ const (
 type RepositoryAnalysisResult struct {
 	Provider           Kind                    `json:"provider"`
 	Model              string                  `json:"model"`
+	CacheHit           bool                    `json:"cache_hit,omitempty"`
 	Coverage           RepositoryCoverage      `json:"coverage"`
 	Result             RepositorySectionResult `json:"result"`
 	Notes              []string                `json:"notes,omitempty"`

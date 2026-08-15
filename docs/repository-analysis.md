@@ -72,5 +72,5 @@ No AI use identified is not proof that a repository has no AI. `not_supported` i
 - Targeted selection can miss implementations that produce no inventory signal, objective match, production-entrypoint relationship, or supported graph relationship.
 - Static graph coverage is strongest for Go, Python, JavaScript, and TypeScript and remains incomplete for dynamic dispatch, runtime registration, metaprogramming, and other languages.
 - Repository analysis is advisory and is not merged into deterministic CI failure thresholds.
-- Targeted repository analysis is not cached yet. The older bounded technical investigation retains its source-free cache.
+- Completed repository results are reused only for an exact private-cache identity covering repository content, framework evidence, profiles, ownership, provider endpoint, model, prompt contract, context strategy, and token budget. Any changed input causes a new request; `--refresh-review` always bypasses reuse.
 - Context size and cost depend on the selected provider, model, and repository. ComplyScan records usage supplied by the provider but does not estimate price because provider prices change independently of the CLI.

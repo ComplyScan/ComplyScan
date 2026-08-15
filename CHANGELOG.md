@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Explicit AI review now reuses exact-match repository-analysis results from a private, source-excerpt-free cache. Repository, framework, profile, ownership, provider endpoint, model, prompt, strategy, or budget changes invalidate reuse; `--refresh-review` forces fresh inference and reports identify cache hits.
 - `complyscan scan` is now guaranteed local and deterministic even when provider settings are saved. The new explicit `complyscan review` command runs the same deterministic foundation before activating the configured or one-run provider, preserves reports when AI is unavailable, and supports `--require-ai-review` for automation that requires a complete model layer.
 - Guided setup's first run and the GitHub Action now default to deterministic scanning. Setup prints the separate review command when a provider is configured; the Action requires `review: configured` or an explicit provider to activate AI processing.
 - Guided setup now recommends BYOK cloud review, retains model-free technical analysis, and moves Ollama behind an explicitly experimental advanced choice. The standard provider picker contains only OpenAI, Anthropic, and Google Gemini.

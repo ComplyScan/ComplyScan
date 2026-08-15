@@ -68,6 +68,8 @@ For explicit `review --changed-since` runs, `internal/repositoryanalysis` derive
 
 `internal/technicalreview` orchestrates one-target evidence-investigation requests, live progress, and source-context-free reuse. Its OS user-cache key binds the provider, model tag, prompt version, technical-pack identity/digest, objective, evidence fingerprint, and a SHA-256 digest of the complete bounded input. Cached observations are validated against their binding, conclusion, assurance, grounded evidence claims, and size limits, then written atomically with user-only file permissions. Submitted source-context records are not stored; bounded redacted model rationales and evidence summaries may still describe repository details.
 
+`internal/repositoryanalysis` separately caches a completed repository-level result outside the repository. Its identity binds the provider endpoint by digest, exact model and prompt contract, context-selection version and mode, token budget, every path/content byte in the active review scope, framework evidence, declared systems, and ownership rules. Entries contain the validated advisory result and input digests but no submitted source excerpt or credential. Files are size- and entry-bounded, symlink-refusing, atomically replaced with user-only permissions, and ignored when `--refresh-review` is supplied. Cache hits clear current-run token usage and are labelled in terminal, Markdown, and JSON output.
+
 `internal/providers` defines the optional review boundary:
 
 ```go

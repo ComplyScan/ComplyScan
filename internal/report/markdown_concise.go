@@ -827,10 +827,14 @@ func repositoryAnalysisModeLabel(mode providers.RepositoryAnalysisMode) string {
 
 func developerRepositoryAnalysisLabel(value Report) string {
 	if value.RepositoryAnalysis != nil {
-		if value.RepositoryAnalysis.Coverage.ReviewScope == providers.RepositoryReviewScopeChanged {
-			return fmt.Sprintf("completed for %d changed and %d connected code file(s)", value.RepositoryAnalysis.Coverage.ChangedFiles, value.RepositoryAnalysis.Coverage.ConnectedFiles)
+		cacheSuffix := ""
+		if value.RepositoryAnalysis.CacheHit {
+			cacheSuffix = " (reused private cache)"
 		}
-		return fmt.Sprintf("completed using %s", repositoryAnalysisModeLabel(value.RepositoryAnalysis.Coverage.Mode))
+		if value.RepositoryAnalysis.Coverage.ReviewScope == providers.RepositoryReviewScopeChanged {
+			return fmt.Sprintf("completed for %d changed and %d connected code file(s)%s", value.RepositoryAnalysis.Coverage.ChangedFiles, value.RepositoryAnalysis.Coverage.ConnectedFiles, cacheSuffix)
+		}
+		return fmt.Sprintf("completed using %s%s", repositoryAnalysisModeLabel(value.RepositoryAnalysis.Coverage.Mode), cacheSuffix)
 	}
 	switch value.RepositoryAnalysisRun {
 	case RepositoryAnalysisPending:

@@ -123,7 +123,7 @@ func TestChangedReviewCoverageExplainsModelBoundary(t *testing.T) {
 		ChangedSince: "main", AIReview: string(providers.RepositoryReviewScopeChanged), AIReviewFiles: 3, AIReviewChangedFiles: 1, AIReviewConnectedFiles: 2,
 	}, time.Now(), nil, nil, 0)
 	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{
-		Provider: providers.OpenAI, Model: "test-model",
+		Provider: providers.OpenAI, Model: "test-model", CacheHit: true,
 		Coverage: providers.RepositoryCoverage{
 			Mode: providers.RepositoryAnalysisTargeted, ReviewScope: providers.RepositoryReviewScopeChanged,
 			RepositoryFiles: 50, ScopeFiles: 3, ChangedFiles: 1, ConnectedFiles: 2, FilesSubmitted: 2,
@@ -135,7 +135,7 @@ func TestChangedReviewCoverageExplainsModelBoundary(t *testing.T) {
 	if err := WriteTerminalRepositoryAnalysis(&terminal, *value.RepositoryAnalysis); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"2 selected file excerpt(s) from 3 eligible review-scope file(s)", "1 changed eligible + 2 connected file(s)", "full 50-file repository governance remained local"} {
+	for _, expected := range []string{"reused matching private cache", "2 selected file excerpt(s) from 3 eligible review-scope file(s)", "1 changed eligible + 2 connected file(s)", "full 50-file repository governance remained local"} {
 		if !strings.Contains(terminal.String(), expected) {
 			t.Errorf("terminal changed scope missing %q:\n%s", expected, terminal.String())
 		}
@@ -145,10 +145,17 @@ func TestChangedReviewCoverageExplainsModelBoundary(t *testing.T) {
 	if err := WriteDetailedMarkdown(&markdown, value); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"AI review scope: changed-plus-connected", "1 changed eligible file(s) plus 2 connected file(s)", "Changed-code review boundary"} {
+	for _, expected := range []string{"AI review scope: changed-plus-connected", "matching private cache entry", "1 changed eligible file(s) plus 2 connected file(s)", "Changed-code review boundary"} {
 		if !strings.Contains(markdown.String(), expected) {
 			t.Errorf("Markdown changed scope missing %q:\n%s", expected, markdown.String())
 		}
+	}
+	var concise bytes.Buffer
+	if err := WriteMarkdown(&concise, value); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(concise.String(), "reused private cache") {
+		t.Fatalf("concise report omitted repository cache reuse:\n%s", concise.String())
 	}
 }
 

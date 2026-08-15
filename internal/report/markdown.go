@@ -275,6 +275,11 @@ func writeRepositoryAnalysisMarkdown(writer io.Writer, analysis providers.Reposi
 		analysis.Coverage.RepositoryBytes); err != nil {
 		return err
 	}
+	if analysis.CacheHit {
+		if _, err := fmt.Fprintln(writer, "- Result source: matching private cache entry; no model request was made for this layer"); err != nil {
+			return err
+		}
+	}
 	if analysis.Coverage.ReviewScope == providers.RepositoryReviewScopeChanged {
 		if _, err := fmt.Fprintf(writer, "- Changed-code review boundary: %d changed eligible file(s) plus %d connected file(s); %d file(s) entered local model-context selection\n",
 			analysis.Coverage.ChangedFiles, analysis.Coverage.ConnectedFiles, analysis.Coverage.ScopeFiles); err != nil {

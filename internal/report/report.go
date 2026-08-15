@@ -406,6 +406,11 @@ func WriteTerminalRepositoryAnalysis(w io.Writer, analysis providers.RepositoryA
 	if _, err := fmt.Fprintf(w, "Repository AI code analysis (%s / %s): %s\n", analysis.Provider, analysis.Model, analysis.Coverage.Mode); err != nil {
 		return err
 	}
+	if analysis.CacheHit {
+		if _, err := fmt.Fprintln(w, "        Result: reused matching private cache; no model request for this layer"); err != nil {
+			return err
+		}
+	}
 	if analysis.Coverage.Mode == providers.RepositoryAnalysisTargeted {
 		if analysis.Coverage.ReviewScope == providers.RepositoryReviewScopeChanged {
 			if _, err := fmt.Fprintf(w, "        Context: %d selected file excerpt(s) from %d eligible review-scope file(s), %d verified citation(s)\n",
