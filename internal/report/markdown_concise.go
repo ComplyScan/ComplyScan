@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ComplyScan/ComplyScan/internal/aiuse"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
@@ -139,6 +140,57 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 			view.controlsToReview++
 		}
 	}
+	if value.AIUseInventory != nil {
+		inventory := value.AIUseInventory
+		if inventory.Summary.Draft > 0 {
+			issue := fmt.Sprintf("%d draft AI-use records still need confirmation", inventory.Summary.Draft)
+			if inventory.Summary.Draft == 1 {
+				issue = "1 draft AI-use record still needs confirmation"
+			}
+			addAction("ai-uses/draft", developerAction{
+				priority: "Review", issue: issue,
+				why:  "Draft entries are saved project context, but no developer has confirmed them yet.",
+				next: "Review the draft name, purpose, paths, and system association before marking it confirmed.", evidence: aiuse.DefaultPath,
+			})
+		}
+		if inventory.Summary.Suggested > 0 {
+			issue := fmt.Sprintf("%d AI-use suggestions need a developer decision", inventory.Summary.Suggested)
+			if inventory.Summary.Suggested == 1 {
+				issue = "1 AI-use suggestion needs a developer decision"
+			}
+			addAction("ai-uses/suggested", developerAction{
+				priority: "Review", issue: issue,
+				why:  "The optional model review proposed these groupings, but they are not part of the human-owned AI-use register.",
+				next: "Run `complyscan ai-uses setup` to confirm, merge, dismiss, or defer each suggestion.", evidence: aiuse.DefaultPath,
+			})
+		}
+		if inventory.Summary.UngroupedSignals > 0 {
+			issue := fmt.Sprintf("%d technical AI signals are not grouped", inventory.Summary.UngroupedSignals)
+			if inventory.Summary.UngroupedSignals == 1 {
+				issue = "1 technical AI signal is not grouped"
+			}
+			next := "Run `complyscan review`, then `complyscan ai-uses setup`, to investigate and classify these signals."
+			if value.RepositoryAnalysisRun == RepositoryAnalysisCompleted {
+				next = "Review the unmatched code and update the AI-use register if it belongs to a product AI use."
+			}
+			addAction("ai-uses/ungrouped", developerAction{
+				priority: "Review", issue: issue,
+				why:  "Local discovery found AI-related code or configuration outside every saved AI-use path.",
+				next: next, evidence: developerSignalLocationSummary(inventory.UngroupedSignals),
+			})
+		}
+		for _, observed := range inventory.Retired {
+			if observed.Observation == aiuse.ObservationNotReviewed {
+				continue
+			}
+			addAction("ai-uses/retired/"+observed.Use.ID, developerAction{
+				priority: "Review", issue: "Current signals match retired AI use: " + observed.Use.Name,
+				why:      "A retired register entry still matches repository evidence in this scan.",
+				next:     "Check whether the use was reactivated or whether its saved repository paths need updating.",
+				evidence: strings.Join(observed.Use.Paths, ", "),
+			})
+		}
+	}
 
 	for _, finding := range value.Findings {
 		if rules.SeverityRank(finding.Severity) < rules.SeverityRank(rules.SeverityMedium) {
@@ -196,11 +248,11 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 		for index, observation := range value.RepositoryAnalysis.Result.UnmappedObservations {
 			next := observation.SuggestedReview
 			if next == "" {
-				next = "Confirm what this code does and whether it belongs to one of the AI features listed above."
+				next = "Confirm what this code does and whether it belongs to one of the AI uses listed above."
 			}
 			addAction(fmt.Sprintf("unmapped/%d/%s", index, observation.Summary), developerAction{
 				priority: "Review", issue: observation.Summary,
-				why: "AI-related code was found, but ComplyScan could not connect it to a known AI feature or safeguard.", next: compactMarkdownText(next, 180),
+				why: "AI-related code was found, but ComplyScan could not connect it to a saved AI use or safeguard.", next: compactMarkdownText(next, 180),
 				evidence: developerCitationText(observation.Evidence),
 			})
 		}
@@ -252,45 +304,82 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 }
 
 func writeDeveloperOutcomeMarkdown(writer io.Writer, value Report, view developerReportView) error {
-	aiUses := 0
-	if value.RepositoryAnalysis != nil {
-		aiUses = len(value.RepositoryAnalysis.Result.AIUses)
+	confirmed, draft, retired, suggested, ungrouped := 0, 0, 0, 0, 0
+	if value.AIUseInventory != nil {
+		summary := value.AIUseInventory.Summary
+		confirmed, draft, retired, suggested, ungrouped = summary.Confirmed, summary.Draft, summary.Retired, summary.Suggested, summary.UngroupedSignals
+	} else if value.RepositoryAnalysis != nil {
+		suggested = len(value.RepositoryAnalysis.Result.AIUses)
 	}
-	_, err := fmt.Fprintf(writer, "\n## Overall result\n\n**%s**\n\n- AI features found: **%d**\n- Important code problems: **%d**\n- Safeguards needing code changes or more evidence: **%d**\n- AI-reviewed code safeguards: **%d implemented, %d partial, %d not demonstrated, %d unclear**\n- Questions only a person can answer: **%d**\n",
-		view.outcome, aiUses, view.importantRisks, view.controlsToReview, view.implemented, view.partial, view.notImplemented, view.cannotDetermine, view.questionTotal)
+	_, err := fmt.Fprintf(writer, "\n## Overall result\n\n**%s**\n\n- Saved AI uses: **%d confirmed, %d draft, %d retired**\n- New model suggestions: **%d**\n- Ungrouped technical signals: **%d**\n- Important code problems: **%d**\n- Safeguards needing code changes or more evidence: **%d**\n- AI-reviewed code safeguards: **%d implemented, %d partial, %d not demonstrated, %d unclear**\n- Questions only a person can answer: **%d**\n",
+		view.outcome, confirmed, draft, retired, suggested, ungrouped, view.importantRisks, view.controlsToReview, view.implemented, view.partial, view.notImplemented, view.cannotDetermine, view.questionTotal)
 	return err
 }
 
 func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developerReportView) error {
-	if _, err := fmt.Fprintln(writer, "\n## 1. What ComplyScan found\n\n### AI features"); err != nil {
+	if _, err := fmt.Fprintln(writer, "\n## 1. What ComplyScan found\n\n### AI uses and technical signals"); err != nil {
 		return err
 	}
+	if value.AIUseInventory != nil {
+		if err := writeDeveloperSavedAIUsesMarkdown(writer, "Developer-confirmed AI uses", value.AIUseInventory.Confirmed, value.AIUseInventory.ChangedScope); err != nil {
+			return err
+		}
+		if err := writeDeveloperSavedAIUsesMarkdown(writer, "Draft AI uses", value.AIUseInventory.Draft, value.AIUseInventory.ChangedScope); err != nil {
+			return err
+		}
+		if err := writeDeveloperSavedAIUsesMarkdown(writer, "Retired AI uses", value.AIUseInventory.Retired, value.AIUseInventory.ChangedScope); err != nil {
+			return err
+		}
+		if len(value.AIUseInventory.Suggested) > 0 {
+			if _, err := fmt.Fprintln(writer, "\n#### Model-suggested AI uses\n\nThese suggestions came from the optional code review. They are not saved or developer-confirmed.\n\n| Suggested AI use | What it may do | Where the model found it |\n|---|---|---|"); err != nil {
+				return err
+			}
+			for _, suggestion := range value.AIUseInventory.Suggested {
+				if _, err := fmt.Fprintf(writer, "| %s | %s | %s |\n",
+					markdownTableText(developerPlainLanguage(suggestion.Name)), markdownTableText(developerPlainLanguage(compactMarkdownText(suggestion.Purpose, 160))),
+					markdownTableText(developerCitationText(suggestion.Evidence))); err != nil {
+					return err
+				}
+			}
+		}
+		if len(value.AIUseInventory.UngroupedSignals) > 0 {
+			if _, err := fmt.Fprintf(writer, "\n**Ungrouped technical signals (%d):** %s. These local code signals are not yet assigned to a saved AI use.\n",
+				len(value.AIUseInventory.UngroupedSignals), markdownText(developerSignalLocationSummary(value.AIUseInventory.UngroupedSignals))); err != nil {
+				return err
+			}
+		}
+		if value.AIUseInventory.Summary.Confirmed == 0 && value.AIUseInventory.Summary.Draft == 0 && value.AIUseInventory.Summary.Suggested == 0 && value.AIUseInventory.Summary.UngroupedSignals == 0 {
+			if _, err := fmt.Fprintln(writer, "\nNo saved AI uses, model suggestions, or ungrouped technical signals were recorded."); err != nil {
+				return err
+			}
+		}
+	} else if value.RepositoryAnalysis != nil && len(value.RepositoryAnalysis.Result.AIUses) > 0 {
+		if _, err := fmt.Fprintln(writer, "\n#### Model-suggested AI uses\n\nThese suggestions came from the optional code review. They are not saved or developer-confirmed.\n\n| Suggested AI use | What it may do | Where the model found it |\n|---|---|---|"); err != nil {
+			return err
+		}
+		for _, suggestion := range value.RepositoryAnalysis.Result.AIUses {
+			if _, err := fmt.Fprintf(writer, "| %s | %s | %s |\n",
+				markdownTableText(developerPlainLanguage(suggestion.Name)), markdownTableText(developerPlainLanguage(compactMarkdownText(suggestion.Purpose, 160))),
+				markdownTableText(developerCitationText(suggestion.Evidence))); err != nil {
+				return err
+			}
+		}
+	}
 	if value.RepositoryAnalysis == nil && developerRepositoryAnalysisIncomplete(value) {
-		if _, err := fmt.Fprintln(writer, "\nThe AI code review started but did not finish, so ComplyScan could not identify specific AI features from the selected code evidence. See the next-step section for the failure."); err != nil {
+		if _, err := fmt.Fprintln(writer, "\nThe AI code review started but did not finish, so no complete set of model suggestions is available. See the next-step section for the failure."); err != nil {
 			return err
 		}
 	} else if value.RepositoryAnalysis == nil && value.RepositoryAnalysisRun == RepositoryAnalysisPending {
-		if _, err := fmt.Fprintln(writer, "\nThe AI code review has started, but this preliminary report does not contain its result yet."); err != nil {
+		if _, err := fmt.Fprintln(writer, "\nThe AI code review has started, but this preliminary report does not contain its suggestions yet."); err != nil {
 			return err
 		}
 	} else if value.RepositoryAnalysis == nil {
-		if _, err := fmt.Fprintln(writer, "\nThis local scan did not run AI code review. Run `complyscan review` when you want ComplyScan to reason about specific AI features from the selected code evidence."); err != nil {
+		if _, err := fmt.Fprintln(writer, "\nThis local scan did not run AI code review. Run `complyscan review` to add model suggestions based on selected code evidence."); err != nil {
 			return err
 		}
-	} else if len(value.RepositoryAnalysis.Result.AIUses) == 0 {
-		if _, err := fmt.Fprintln(writer, "\nThe AI code review did not identify a specific AI feature in the selected evidence. This does not prove that the repository contains no AI activity."); err != nil {
+	} else if value.AIUseInventory == nil && len(value.RepositoryAnalysis.Result.AIUses) == 0 {
+		if _, err := fmt.Fprintln(writer, "\nThe AI code review did not suggest a specific AI use from the selected evidence. This does not prove that the repository contains no AI activity."); err != nil {
 			return err
-		}
-	} else {
-		if _, err := fmt.Fprintln(writer, "\n| AI feature | What it does | Where ComplyScan found it |\n|---|---|---|"); err != nil {
-			return err
-		}
-		for _, use := range value.RepositoryAnalysis.Result.AIUses {
-			if _, err := fmt.Fprintf(writer, "| %s | %s | %s |\n",
-				markdownTableText(developerPlainLanguage(use.Name)), markdownTableText(developerPlainLanguage(compactMarkdownText(use.Purpose, 160))),
-				markdownTableText(developerCitationText(use.Evidence))); err != nil {
-				return err
-			}
 		}
 	}
 	if len(view.integrationSignals) > 0 {
@@ -298,6 +387,52 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 		return err
 	}
 	return nil
+}
+
+func writeDeveloperSavedAIUsesMarkdown(writer io.Writer, title string, values []aiuse.ObservedUse, changedScope bool) error {
+	if len(values) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintf(writer, "\n#### %s\n\n| AI use | Description | Current scan | Configured repository scope |\n|---|---|---|---|\n", markdownText(title)); err != nil {
+		return err
+	}
+	for _, observed := range values {
+		if _, err := fmt.Fprintf(writer, "| %s | %s | %s | %s |\n",
+			markdownTableText(observed.Use.Name), markdownTableText(compactMarkdownText(observed.Use.Description, 160)),
+			markdownTableText(developerAIUseObservationLabel(observed.Observation, changedScope)),
+			markdownTableText(strings.Join(observed.Use.Paths, ", "))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func developerAIUseObservationLabel(status aiuse.ObservationStatus, changedScope bool) string {
+	switch status {
+	case aiuse.ObservationModelReviewed:
+		return "Matched by the completed AI review"
+	case aiuse.ObservationTechnicalSignal:
+		return "Matching local technical signal found"
+	default:
+		if changedScope {
+			return "Not reviewed in this change-focused run"
+		}
+		return "No matching signal was observed in this scan"
+	}
+}
+
+func developerSignalLocationSummary(values []aiuse.SignalLocation) string {
+	parts := make([]string, 0, 3)
+	for index, signal := range values {
+		if index == 3 {
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s at %s", signal.Component, locationText(signal.Path, signal.Line)))
+	}
+	if remaining := len(values) - len(parts); remaining > 0 {
+		parts = append(parts, fmt.Sprintf("%d more", remaining))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func writeDeveloperActionsMarkdown(writer io.Writer, view developerReportView) error {

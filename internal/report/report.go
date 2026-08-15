@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ComplyScan/ComplyScan/internal/aiuse"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/inventory"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
@@ -54,9 +55,8 @@ type Summary struct {
 	Info     int `json:"info"`
 }
 
-// RepositoryAnalysisRunStatus records the human-report lifecycle of the
-// optional repository model pass. It is not part of the versioned JSON
-// evidence contract; failures remain preserved there as scan warnings.
+// RepositoryAnalysisRunStatus records the lifecycle of the optional
+// repository model pass independently from any returned analysis payload.
 type RepositoryAnalysisRunStatus string
 
 const (
@@ -78,10 +78,11 @@ type Report struct {
 	Applicability          *profile.AssessmentReport           `json:"applicability,omitempty"`
 	TechnicalEvidence      *framework.TechnicalEvidenceReport  `json:"technical_evidence,omitempty"`
 	AIInventory            *inventory.Report                   `json:"ai_inventory,omitempty"`
+	AIUseInventory         *aiuse.Snapshot                     `json:"ai_use_inventory,omitempty"`
 	Reconciliation         *reconciliation.Report              `json:"reconciliation,omitempty"`
 	Review                 *providers.ReviewResult             `json:"review,omitempty"`
 	RepositoryAnalysis     *providers.RepositoryAnalysisResult `json:"repository_analysis,omitempty"`
-	RepositoryAnalysisRun  RepositoryAnalysisRunStatus         `json:"-"`
+	RepositoryAnalysisRun  RepositoryAnalysisRunStatus         `json:"repository_analysis_run"`
 	TechnicalReview        *providers.TechnicalReviewResult    `json:"evidence_investigation,omitempty"`
 	ExecutionVerifications []verification.Report               `json:"execution_verification,omitempty"`
 	Frameworks             []FrameworkResult                   `json:"frameworks,omitempty"`
@@ -129,8 +130,9 @@ func NewWithMetadata(target string, tool Tool, scope ScanScope, createdAt time.T
 	created := createdAt.UTC().Format(time.RFC3339Nano)
 	identifier := sha256.Sum256([]byte(strings.Join([]string{target, tool.Version, tool.Commit, created}, "\x00")))
 	return Report{
-		SchemaVersion: 6,
-		Tool:          tool,
+		SchemaVersion:         7,
+		RepositoryAnalysisRun: RepositoryAnalysisNotRequested,
+		Tool:                  tool,
 		Scan: ScanMetadata{
 			ID: "scan-" + fmt.Sprintf("%x", identifier[:12]), CreatedAt: created, Scope: scope,
 		},
@@ -178,6 +180,9 @@ func MeetsThreshold(findings []rules.Finding, threshold rules.Severity) bool {
 }
 
 func WriteJSON(w io.Writer, report Report) error {
+	if report.SchemaVersion >= 7 && report.RepositoryAnalysisRun == "" {
+		report.RepositoryAnalysisRun = RepositoryAnalysisNotRequested
+	}
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	encoder.SetEscapeHTML(false)
@@ -203,6 +208,11 @@ func WriteTerminal(w io.Writer, report Report, options TerminalOptions) error {
 	}
 	if report.AIInventory != nil {
 		if err := writeAIInventoryTerminal(w, *report.AIInventory); err != nil {
+			return err
+		}
+	}
+	if report.AIUseInventory != nil {
+		if err := writeAIUseInventoryTerminal(w, *report.AIUseInventory); err != nil {
 			return err
 		}
 	}
@@ -289,6 +299,11 @@ func WriteTerminalCompletion(w io.Writer, report Report) error {
 			return err
 		}
 	}
+	if report.AIUseInventory != nil {
+		if err := writeAIUseInventoryTerminal(w, *report.AIUseInventory); err != nil {
+			return err
+		}
+	}
 	if len(report.Frameworks) == 0 && report.Reconciliation != nil {
 		if err := writeReconciliationTerminal(w, *report.Reconciliation); err != nil {
 			return err
@@ -339,6 +354,11 @@ func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
 	}
 	if value.AIInventory != nil {
 		if _, err := fmt.Fprintf(w, "AI inventory: %d component(s), %d technical signal(s)\n", value.AIInventory.Summary.Components, value.AIInventory.Summary.Signals); err != nil {
+			return err
+		}
+	}
+	if value.AIUseInventory != nil {
+		if err := writeAIUseInventoryTerminal(w, *value.AIUseInventory); err != nil {
 			return err
 		}
 	}
@@ -396,7 +416,14 @@ func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
 			return err
 		}
 	}
-	_, err := fmt.Fprintln(w, "Use --verbose for full terminal evidence; latest.md is concise and latest.json preserves the complete evidence bundle.")
+	_, err := fmt.Fprintln(w, "Use --verbose for full terminal evidence.")
+	return err
+}
+
+func writeAIUseInventoryTerminal(w io.Writer, value aiuse.Snapshot) error {
+	summary := value.Summary
+	_, err := fmt.Fprintf(w, "AI uses: %d confirmed, %d draft, %d retired; %d model-suggested; %d ungrouped technical signal(s)\n",
+		summary.Confirmed, summary.Draft, summary.Retired, summary.Suggested, summary.UngroupedSignals)
 	return err
 }
 

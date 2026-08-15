@@ -709,6 +709,13 @@ func TestOllamaTechnicalReviewSkipsHTTPWithoutCandidates(t *testing.T) {
 	}
 }
 
+func TestCleanReviewTextRemovesTerminalAndBidirectionalControls(t *testing.T) {
+	cleaned := cleanReviewText("safe\x1b[2J\u202etext\nnext", 100)
+	if strings.Contains(cleaned, "\x1b") || strings.Contains(cleaned, "\u202e") || cleaned != "safe [2J text next" {
+		t.Fatalf("cleanReviewText() = %q", cleaned)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {

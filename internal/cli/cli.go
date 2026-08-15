@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ComplyScan/ComplyScan/internal/aiuse"
 	"github.com/ComplyScan/ComplyScan/internal/baseline"
 	"github.com/ComplyScan/ComplyScan/internal/config"
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
@@ -92,6 +93,7 @@ func newRootCommand(stdout, stderr io.Writer, build BuildInfo) *cobra.Command {
 	root.AddCommand(newSetupCommand(stdout, build))
 	root.AddCommand(newProfileCommand(stdout))
 	root.AddCommand(newOwnershipCommand(stdout))
+	root.AddCommand(newAIUsesCommand(stdout))
 	root.AddCommand(newFrameworkCommand(stdout))
 	root.AddCommand(newDoctorCommand(stdout, build))
 	root.AddCommand(newVerifyCommand(stdout))
@@ -411,6 +413,11 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			if noReport && cmd.Flags().Changed("report-dir") {
 				return errors.New("--report-dir and --no-report cannot be used together")
 			}
+			aiUseManifestPath := resolveTargetPath(target, aiuse.DefaultPath)
+			aiUseManifest, _, err := aiuse.LoadOptional(aiUseManifestPath)
+			if err != nil {
+				return err
+			}
 			adHocVerification := cmd.Flags().Changed("verify-runtime") || cmd.Flags().Changed("verify-image") || cmd.Flags().Changed("verify-command") || cmd.Flags().Changed("verify-arg") || cmd.Flags().Changed("verify-objective") || cmd.Flags().Changed("verify-system") || cmd.Flags().Changed("verify-timeout")
 			if verifyConfigured && adHocVerification {
 				return errors.New("--verify runs configured recipes and cannot be combined with ad-hoc --verify-* options")
@@ -466,6 +473,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			}
 			excludes := withGeneratedReportExclusion(append(append([]string(nil), cfg.Scan.Exclude...), additionalExcludes...))
 			activeConfigExclusion := resolvedPathExclusion(target, resolvedConfigPath)
+			activeAIUseManifestExclusion := resolvedPathExclusion(target, aiUseManifestPath)
 			if resolvedReportDirectory != "" {
 				if exclusion := targetExclusion(target, resolvedReportDirectory); exclusion != "" {
 					excludes = append(excludes, exclusion)
@@ -478,7 +486,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			}
 			scanOptions := scanner.Options{
 				Exclude:                   excludes,
-				ExcludeFiles:              nonEmptyValues(activeConfigExclusion),
+				ExcludeFiles:              nonEmptyValues(activeConfigExclusion, activeAIUseManifestExclusion),
 				MaxFiles:                  effectiveMaxFiles,
 				MaxTotalBytes:             effectiveMaxTotalBytes,
 				IncludeNestedRepositories: cfg.Scan.IncludeNestedRepositories || includeNestedRepositories,
@@ -559,6 +567,8 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			)
 			aiInventory := inventory.NewReport(target, build.Version, inventory.Analyze(result.FullRepository), result.Warnings)
 			reportValue.AIInventory = &aiInventory
+			aiUseInventory := aiuse.BuildSnapshot(aiUseManifest, aiInventory, nil, changedSince != "")
+			reportValue.AIUseInventory = &aiUseInventory
 			gateFindings := append([]rules.Finding(nil), result.Findings...)
 			frameworkResults := make([]report.FrameworkResult, 0, len(cfg.Frameworks))
 			for _, packID := range cfg.Frameworks {
@@ -756,6 +766,8 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						}
 						reportValue.RepositoryAnalysis = &repositoryReview
 						reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisCompleted
+						aiUseInventory = aiuse.BuildSnapshot(aiUseManifest, aiInventory, &repositoryReview, changedSince != "")
+						reportValue.AIUseInventory = &aiUseInventory
 						completionDetail := fmt.Sprintf("%d file excerpt(s)", repositoryReview.Coverage.FilesSubmitted)
 						if repositoryReview.CacheHit {
 							completionDetail += ", private cache hit, no model call"

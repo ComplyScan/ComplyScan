@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
@@ -346,6 +347,12 @@ func ollamaStatusError(status int, body []byte) error {
 }
 
 func cleanReviewText(value string, limit int) string {
+	value = strings.Map(func(character rune) rune {
+		if unicode.IsControl(character) || unicode.Is(unicode.Cf, character) || unicode.Is(unicode.Zl, character) || unicode.Is(unicode.Zp, character) {
+			return ' '
+		}
+		return character
+	}, value)
 	value = rules.RedactSecrets(value)
 	value = strings.Join(strings.Fields(value), " ")
 	runes := []rune(value)

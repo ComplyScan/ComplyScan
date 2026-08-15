@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ComplyScan/ComplyScan/internal/aiuse"
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/inventory"
@@ -42,6 +43,7 @@ func TestWriteJSON(t *testing.T) {
 	}, time.Date(2026, 8, 3, 10, 30, 0, 0, time.FixedZone("test", 2*60*60)), []rules.Finding{{
 		RuleID: "AI-DOC-001", Title: "Missing docs", Severity: rules.SeverityMedium,
 	}}, nil, 2)
+	value.AIUseInventory = &aiuse.Snapshot{Summary: aiuse.SnapshotSummary{Confirmed: 1}}
 	var output bytes.Buffer
 	if err := WriteJSON(&output, value); err != nil {
 		t.Fatal(err)
@@ -50,8 +52,14 @@ func TestWriteJSON(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 6 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
+	if decoded.SchemaVersion != 7 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
 		t.Fatalf("unexpected tool: %#v", decoded.Tool)
+	}
+	if decoded.RepositoryAnalysisRun != RepositoryAnalysisNotRequested {
+		t.Fatalf("repository analysis run = %q", decoded.RepositoryAnalysisRun)
+	}
+	if decoded.AIUseInventory == nil || decoded.AIUseInventory.Summary.Confirmed != 1 {
+		t.Fatalf("AI-use inventory was not serialized: %#v", decoded.AIUseInventory)
 	}
 	if !strings.HasPrefix(decoded.Scan.ID, "scan-") || decoded.Scan.CreatedAt != "2026-08-03T08:30:00Z" || decoded.Scan.Scope.Findings != "changed-files" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
 		t.Fatalf("unexpected scan metadata: %#v", decoded.Scan)
@@ -67,7 +75,22 @@ func TestWriteJSON(t *testing.T) {
 	}
 }
 
-func TestWriteJSONUsesSchemaSixEvidenceInvestigationContract(t *testing.T) {
+func TestWriteJSONDefaultsSchemaSevenRepositoryAnalysisLifecycle(t *testing.T) {
+	value := Report{SchemaVersion: 7}
+	var output bytes.Buffer
+	if err := WriteJSON(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	var decoded Report
+	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.RepositoryAnalysisRun != RepositoryAnalysisNotRequested {
+		t.Fatalf("repository analysis run = %q", decoded.RepositoryAnalysisRun)
+	}
+}
+
+func TestWriteJSONUsesSchemaSevenEvidenceInvestigationContract(t *testing.T) {
 	value := New(".", "dev", nil, nil, 0)
 	value.TechnicalReview = &providers.TechnicalReviewResult{
 		Provider: providers.Ollama, Model: "qwen3:8b", InputCandidates: 1, Reviewed: 1,
@@ -82,8 +105,68 @@ func TestWriteJSONUsesSchemaSixEvidenceInvestigationContract(t *testing.T) {
 	if err := WriteJSON(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), `"schema_version": 6`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
-		t.Fatalf("unexpected schema-version-6 investigation JSON:\n%s", output.String())
+	if !strings.Contains(output.String(), `"schema_version": 7`) || !strings.Contains(output.String(), `"repository_analysis_run": "not-requested"`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
+		t.Fatalf("unexpected schema-version-7 investigation JSON:\n%s", output.String())
+	}
+}
+
+func TestConciseMarkdownSeparatesSavedSuggestedAndUngroupedAIUses(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	value.AIUseInventory = &aiuse.Snapshot{
+		Summary: aiuse.SnapshotSummary{Confirmed: 1, Draft: 1, Retired: 1, Suggested: 1, UngroupedSignals: 1},
+		Confirmed: []aiuse.ObservedUse{{Use: aiuse.Use{
+			ID: "confirmed", Name: "Confirmed generation", Description: "Generates summaries.", Paths: []string{"runtime/**"},
+		}}},
+		Draft: []aiuse.ObservedUse{{Use: aiuse.Use{
+			ID: "draft", Name: "Draft ranking", Description: "Ranks candidates.", Paths: []string{"ranking/**"},
+		}}},
+		Retired: []aiuse.ObservedUse{{Use: aiuse.Use{
+			ID: "retired", Name: "Retired classifier", Description: "Previously classified documents.", Paths: []string{"legacy/**"},
+		}, Observation: aiuse.ObservationTechnicalSignal}},
+		Suggested: []aiuse.Suggestion{{
+			Name: "Suggested assistant", Purpose: "May answer questions.", Confidence: "medium",
+			Evidence: []providers.RepositoryCitation{{Path: "assistant.go", Line: 12}},
+		}},
+		UngroupedSignals: []aiuse.SignalLocation{{
+			Component: "OpenAI", Kind: inventory.KindProvider, Path: "unowned.py", Line: 4, Scope: inventory.ScopeRuntime,
+		}},
+	}
+
+	var output bytes.Buffer
+	if err := WriteMarkdown(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"Saved AI uses: **1 confirmed, 1 draft, 1 retired**", "New model suggestions: **1**", "Ungrouped technical signals: **1**",
+		"#### Developer-confirmed AI uses", "Confirmed generation", "#### Draft AI uses", "Draft ranking",
+		"#### Retired AI uses", "Retired classifier", "Current signals match retired AI use", "Matching local technical signal found", "No matching signal was observed in this scan",
+		"#### Model-suggested AI uses", "Suggested assistant", "**Ungrouped technical signals (1):** OpenAI at unowned.py:4",
+		"1 draft AI-use record still needs confirmation", "Run `complyscan ai-uses setup` to confirm, merge, dismiss, or defer each suggestion.",
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("concise Markdown missing %q:\n%s", expected, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "AI features found") {
+		t.Fatalf("concise Markdown retained misleading feature count:\n%s", output.String())
+	}
+}
+
+func TestConciseMarkdownDoesNotPresentUnchangedUseAsReviewed(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	value.AIUseInventory = &aiuse.Snapshot{
+		ChangedScope: true,
+		Summary:      aiuse.SnapshotSummary{Confirmed: 1},
+		Confirmed: []aiuse.ObservedUse{{Use: aiuse.Use{
+			ID: "unchanged", Name: "Unchanged assistant", Description: "Lives outside this pull request.", Paths: []string{"stable/**"},
+		}, Observation: aiuse.ObservationNotReviewed}},
+	}
+	var output bytes.Buffer
+	if err := WriteMarkdown(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Not reviewed in this change-focused run") {
+		t.Fatalf("changed-scope limitation missing:\n%s", output.String())
 	}
 }
 
@@ -290,6 +373,7 @@ func TestWriteTerminalCompletion(t *testing.T) {
 func TestWriteTerminalConciseCompletionSummarizesWithoutEvidenceDump(t *testing.T) {
 	value := New(".", "0.1.5-dev", []rules.Finding{{Severity: rules.SeverityMedium}}, nil, 0)
 	value.AIInventory = &inventory.Report{Summary: inventory.Summary{Components: 3, Signals: 12}}
+	value.AIUseInventory = &aiuse.Snapshot{Summary: aiuse.SnapshotSummary{Confirmed: 1, Draft: 2, Suggested: 3, UngroupedSignals: 4}}
 	value.Frameworks = []FrameworkResult{{
 		Applicability: func() *profile.AssessmentReport {
 			assessment := profile.AssessEUAIAct([]profile.System{profile.NewDraftSystem("example", "Example")})
@@ -303,7 +387,7 @@ func TestWriteTerminalConciseCompletionSummarizesWithoutEvidenceDump(t *testing.
 	if err := WriteTerminalConciseCompletion(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"Scan complete: 1 potential issue", "AI inventory: 3 component", "Applicability context: Example — incomplete", "unresolved fact(s); requirement mapping is provisional", "Technical objectives: 7 total", "Requirement mapping: 5 likely required", "3/4 technical target", "Use --verbose"} {
+	for _, expected := range []string{"Scan complete: 1 potential issue", "AI inventory: 3 component", "AI uses: 1 confirmed, 2 draft, 0 retired; 3 model-suggested; 4 ungrouped technical signal", "Applicability context: Example — incomplete", "unresolved fact(s); requirement mapping is provisional", "Technical objectives: 7 total", "Requirement mapping: 5 likely required", "3/4 technical target", "Use --verbose"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("concise completion missing %q:\n%s", expected, output.String())
 		}

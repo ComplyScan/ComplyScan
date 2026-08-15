@@ -8,11 +8,13 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/ComplyScan/ComplyScan/internal/aiuse"
 	"github.com/ComplyScan/ComplyScan/internal/config"
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
@@ -146,6 +148,137 @@ func TestScanNeverUsesConfiguredAIReview(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "Checking model compatibility before repository review") || !strings.Contains(stdout.String(), "COMPLYSCAN_TEST_MISSING_KEY is not set") {
 		t.Fatalf("explicit review did not report unavailable configured AI:\n%s", stdout.String())
+	}
+}
+
+func TestScanBuildsAIUseInventoryWithoutProvider(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\nclient = OpenAI()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeTestAIUseManifest(t, target, aiuse.Use{
+		ID: "answer-generation", Name: "Answer generation", Description: "Generate answers with a hosted model.",
+		Paths: []string{"app.py"}, Status: aiuse.StatusActive, Review: profile.ProfileReview{Status: profile.ReviewDraft},
+	})
+
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	var decoded report.Report
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.RepositoryAnalysis != nil || decoded.RepositoryAnalysisRun != report.RepositoryAnalysisNotRequested {
+		t.Fatalf("plain scan unexpectedly ran repository analysis: %#v", decoded.RepositoryAnalysis)
+	}
+	if decoded.AIUseInventory == nil || decoded.AIUseInventory.ChangedScope || decoded.AIUseInventory.Summary.Draft != 1 || decoded.AIUseInventory.Summary.UngroupedSignals != 0 {
+		t.Fatalf("unexpected local AI-use inventory: %#v", decoded.AIUseInventory)
+	}
+	if got := decoded.AIUseInventory.Draft[0].Observation; got != aiuse.ObservationTechnicalSignal {
+		t.Fatalf("draft observation = %q", got)
+	}
+}
+
+func TestScanExcludesAIUseManifestFromRepositoryEvidence(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeTestAIUseManifest(t, target, aiuse.Use{
+		ID: "declared-use", Name: "Declared use", Description: "Calls https://api.openai.com for generated text.",
+		Paths: []string{"main.go"}, Status: aiuse.StatusActive,
+		Review: profile.ProfileReview{Status: profile.ReviewConfirmed, ReviewedBy: "Product owner", ReviewedAt: "2026-08-15"},
+	})
+
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	var decoded report.Report
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.AIInventory == nil || decoded.AIInventory.Summary.Components != 0 || decoded.AIInventory.Summary.Signals != 0 {
+		t.Fatalf("manifest content entered deterministic/model repository evidence: %#v", decoded.AIInventory)
+	}
+	if decoded.AIUseInventory == nil || decoded.AIUseInventory.Summary.Confirmed != 1 {
+		t.Fatalf("excluded manifest was not loaded as user-owned state: %#v", decoded.AIUseInventory)
+	}
+}
+
+func TestScanRejectsInvalidAIUseManifest(t *testing.T) {
+	target := t.TempDir()
+	manifestPath := filepath.Join(target, aiuse.DefaultPath)
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, []byte("version: 1\nuses:\n  - id: INVALID ID\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 2 {
+		t.Fatalf("scan code=%d, want 2; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "validate AI-use manifest") {
+		t.Fatalf("invalid manifest error was not actionable: %s", stderr.String())
+	}
+}
+
+func TestChangedScanKeepsSavedAIUsesAndFullDeterministicSignals(t *testing.T) {
+	target := t.TempDir()
+	stablePath := filepath.Join(target, "stable.py")
+	changedPath := filepath.Join(target, "changed.go")
+	if err := os.WriteFile(stablePath, []byte("from openai import OpenAI\nclient = OpenAI()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(changedPath, []byte("package changed\nconst Version = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, target, "init", "--quiet")
+	runTestGit(t, target, "add", "stable.py", "changed.go")
+	runTestGit(t, target, "-c", "user.name=ComplyScan Test", "-c", "user.email=test@localhost", "commit", "--quiet", "-m", "fixture baseline")
+	if err := os.WriteFile(changedPath, []byte("package changed\nconst Version = 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeTestAIUseManifest(t, target, aiuse.Use{
+		ID: "stable-generation", Name: "Stable generation", Description: "Generate text in the unchanged runtime path.",
+		Paths: []string{"stable.py"}, Status: aiuse.StatusActive,
+		Review: profile.ProfileReview{Status: profile.ReviewConfirmed, ReviewedBy: "Product owner", ReviewedAt: "2026-08-15"},
+	})
+
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--no-report", "--format", "json", "--severity", "critical", "--changed-since", "HEAD", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("changed scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	var decoded report.Report
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := decoded.AIUseInventory
+	if snapshot == nil || !snapshot.ChangedScope || snapshot.Summary.Confirmed != 1 || len(snapshot.Confirmed) != 1 {
+		t.Fatalf("changed scan lost saved AI use: %#v", snapshot)
+	}
+	if len(snapshot.Confirmed[0].TechnicalSignals) != 1 || snapshot.Confirmed[0].TechnicalSignals[0].Path != "stable.py" {
+		t.Fatalf("changed scan did not use full deterministic inventory: %#v", snapshot.Confirmed[0])
+	}
+}
+
+func writeTestAIUseManifest(t *testing.T, target string, uses ...aiuse.Use) {
+	t.Helper()
+	manifest := aiuse.NewManifest()
+	manifest.Uses = append(manifest.Uses, uses...)
+	if err := aiuse.Write(filepath.Join(target, aiuse.DefaultPath), manifest); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runTestGit(t *testing.T, target string, arguments ...string) {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", target}, arguments...)...)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(arguments, " "), err, output)
 	}
 }
 
@@ -347,7 +480,7 @@ func TestScanJSONOutputAndSeverityFilter(t *testing.T) {
 	if decoded.Summary.High == 0 || decoded.Summary.Medium != 0 || decoded.Summary.Info != 0 {
 		t.Fatalf("severity filter not reflected in summary: %#v", decoded.Summary)
 	}
-	if decoded.SchemaVersion != 6 || decoded.Tool.Commit != "test" || decoded.Scan.ID == "" || decoded.Scan.Scope.Findings != "full-repository" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
+	if decoded.SchemaVersion != 7 || decoded.Tool.Commit != "test" || decoded.Scan.ID == "" || decoded.Scan.Scope.Findings != "full-repository" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
 		t.Fatalf("missing evidence-bundle metadata: %#v", decoded)
 	}
 }
@@ -1541,7 +1674,7 @@ func TestScanMapsSharedEvidenceAcrossEUAndNISTFrameworks(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 6 || len(decoded.Frameworks) != 2 {
+	if decoded.SchemaVersion != 7 || len(decoded.Frameworks) != 2 {
 		t.Fatalf("multi-framework contract missing: %#v", decoded.Frameworks)
 	}
 	var fingerprints []string
