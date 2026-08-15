@@ -1,6 +1,6 @@
 # Architecture
 
-ComplyScan has an offline-by-default pipeline:
+ComplyScan has a local deterministic scan with a separate explicit AI review pipeline:
 
 ```text
 target directory
@@ -18,9 +18,11 @@ target directory
   → deterministic reconciliation per selected framework
        → legal-readiness mappings or voluntary recommendations
        → mapped candidate evidence, non-detections, mismatches, and unresolved ownership
-  → conservative policy gate
+  → conservative policy gate and local scan report
        → high-severity gap only for a human-reviewed, likely-required objective without detected evidence
-	  → optional, separate advisory local-Ollama or BYOK-provider model layers
+
+explicit `complyscan review`
+	  → separate advisory local-Ollama or BYOK-provider model layers
 	       → one compact structural evidence package by default
 	       → at most one trusted local retrieval and final model follow-up
 	       → broad full or hierarchical analysis only in explicit deep modes
@@ -28,9 +30,9 @@ target directory
   → terminal output plus atomic Markdown and schema-version 6 JSON reports, or SARIF
 ```
 
-Installation and onboarding are a separate pre-scan path: the POSIX installer selects a release archive for the host platform, verifies it against `checksums.txt`, atomically places the binary in the selected user directory, and invokes `complyscan setup` only when a terminal is present. Interactive setup first performs local model-free discovery and typed inventory, then establishes a local, explicitly consented remote, or model-free analysis boundary. It uses deterministic signals and, when configured and available, bounded model context to prepare editable profile suggestions before the operator confirms facts that source code cannot establish. The operator then selects technical mappings and supplies only their relevant follow-up context. `complyscan setup --advanced` remains available for multiple systems, the complete profile, evidence ownership, and attributed human applicability decisions. Private recovery checkpoints save configuration fields—not repository source or credential values—under the operating system's user-cache directory after each major setup stage; they are keyed to the absolute repository path, written atomically with user-only permissions, and deleted after the repository configuration is saved. The final review offers one unified first scan or saving without scanning. That scan reuses the discovery snapshot, always runs deterministic analysis, and automatically adds the configured model layer. Setup preserves existing repository configuration and keeps external provisioning behind individual confirmations. It may invoke Homebrew or Ollama's official Linux installer, start a Homebrew Ollama service, and run `ollama pull`; none of these operations occur during a normal scan. The separate `complyscan verify setup` wizard reads the existing profile and repository, computes the same conservative objective mapping, detects bounded test-runner signals, and writes a user-confirmed inert recipe. It has no executor path and cannot run, build, pull, or preload anything.
+Installation and onboarding are a separate pre-scan path: the POSIX installer selects and verifies a release archive, then invokes `complyscan setup` only in a terminal. Interactive setup performs local discovery before establishing any optional model boundary. With consent, a configured model may prepare editable profile suggestions before the operator confirms facts that source code cannot establish. Setup finishes by offering a local deterministic scan or saving configuration only; provider settings are activated later only by `complyscan review`. Private recovery checkpoints store configuration fields—not repository source or credential values—in the operating-system user cache and are removed after save. External provisioning such as installing Ollama or pulling weights remains behind separate confirmation and never occurs during a normal scan.
 
-`internal/modelqualification` separates automatic compatibility from maintained quality validation. It sends one source-free synthetic finding containing instruction-shaped untrusted text and accepts only one correctly bound structured observation. A successful result is cached privately for 30 days against the provider, exact model, available Ollama digest, and all model prompt-contract versions. Interactive setup runs or reuses this check automatically; non-interactive setup requires `--qualify-model`. A scan qualifies an unseen configured model before any repository context is sent. Failure is not cached and disables only that model layer, leaving deterministic setup and reports intact. Compatibility never means benchmark validation, model quality, compliance, or legal approval.
+`internal/modelqualification` separates automatic compatibility from maintained quality validation. It sends one source-free synthetic finding containing instruction-shaped untrusted text and accepts only one correctly bound structured observation. A successful result is cached privately for 30 days against the provider, exact model, available Ollama digest, and all model prompt-contract versions. Interactive setup runs or reuses this check automatically; non-interactive setup requires `--qualify-model`. An explicit review qualifies an unseen configured model before repository context is sent. Failure is not cached and disables only that model layer, leaving deterministic reports intact. Compatibility never means benchmark validation, model quality, compliance, or legal approval.
 
 `internal/discovery` owns filesystem traversal and file classification. It returns repository-relative slash-separated paths so findings are stable across macOS, Linux, and Windows. It skips nested repositories by default and supports Git-tracked-only scans, progress callbacks, and explicit scan budgets.
 

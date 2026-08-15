@@ -4,6 +4,8 @@
 
 ### Changed
 
+- `complyscan scan` is now guaranteed local and deterministic even when provider settings are saved. The new explicit `complyscan review` command runs the same deterministic foundation before activating the configured or one-run provider, preserves reports when AI is unavailable, and supports `--require-ai-review` for automation that requires a complete model layer.
+- Guided setup's first run and the GitHub Action now default to deterministic scanning. Setup prints the separate review command when a provider is configured; the Action requires `review: configured` or an explicit provider to activate AI processing.
 - Guided setup now recommends BYOK cloud review, retains model-free technical analysis, and moves Ollama behind an explicitly experimental advanced choice. The standard provider picker contains only OpenAI, Anthropic, and Google Gemini.
 - Standard cloud setup now exposes two exact quality-oriented candidates per provider, filters live account catalogues against that shortlist, and shows separate setup-draft and technical-review benchmark status. Compatibility no longer appears as a substitute for measured quality; explicit automation and existing configurations retain experimental provider and model compatibility.
 - Guided setup questions now support the physical ← key wherever a previous answer can be revisited, without adding a Back row to selector choices. The accessible and redirected text interface accepts `back`. Completed answers remain selected or become the text default when revisited, while `Ctrl+C` continues to cancel setup.

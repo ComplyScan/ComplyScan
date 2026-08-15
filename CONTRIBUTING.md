@@ -7,7 +7,7 @@ Thank you for helping make AI engineering review more practical.
 - Search existing issues and explain the technical risk or evidence gap the change addresses.
 - Keep deterministic detection separate from legal interpretation.
 - Prefer conservative signals with an explainable path, line, confidence, and remediation.
-- Do not add telemetry, background network access, or source upload behavior.
+- Do not add telemetry or background network access. Any external processing must remain explicit, bounded, consented, documented, and covered by privacy and failure-path tests.
 - Never add real credentials or sensitive production material to fixtures.
 
 ## Development workflow

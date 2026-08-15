@@ -1,6 +1,6 @@
 # Repository AI code analysis
 
-ComplyScan uses a hybrid analysis pipeline. Local deterministic code first discovers the repository, inventories AI signals, maps technical-objective matches, identifies production entry points, and builds a code graph. The model then receives a compact evidence package built from those anchors and their connected code. This is the default because it gives the model useful cross-file context without repeatedly uploading and analyzing every directory.
+`complyscan review` uses a hybrid analysis pipeline. Local deterministic code first discovers the repository, inventories AI signals, maps technical-objective matches, identifies production entry points, and builds a code graph. The model then receives a compact evidence package built from those anchors and their connected code. Plain `complyscan scan` stops after the deterministic layer and never enters this pipeline.
 
 ## Default pipeline
 
@@ -13,7 +13,7 @@ ComplyScan uses a hybrid analysis pipeline. Local deterministic code first disco
 7. Trusted code validates objective IDs, configured system IDs, AI-use IDs, classifications, paths, line citations, and ownership boundaries. Invalid output rejects the model pass.
 8. The advisory result is saved separately from deterministic findings and does not change the scan's CI threshold.
 
-The normal repository-analysis path therefore uses one model call, or at most two when a useful follow-up is requested. It does not create one request per directory or per objective.
+The normal explicit-review path therefore uses one model call, or at most two when a useful follow-up is requested. It does not create one request per directory or per objective.
 
 ## Modes
 

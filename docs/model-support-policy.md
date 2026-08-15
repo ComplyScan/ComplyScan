@@ -30,7 +30,7 @@ When an API key is available, setup queries the provider only to determine which
 
 ## Model-free and local paths
 
-Fast technical analysis remains available without a model, API key, or external processing. It inventories AI use and runs deterministic repository rules, graph construction, technical-objective matching, reconciliation, reporting, and configured failure thresholds. It does not receive model-assisted questionnaire drafts or semantic evidence investigation.
+`complyscan scan` always remains available without a model, API key, or external processing. It inventories AI use and runs deterministic repository rules, graph construction, technical-objective matching, reconciliation, reporting, and configured failure thresholds. `complyscan review` is the separate explicit path for semantic evidence investigation.
 
 Ollama remains available as an advanced experimental path for organisations that cannot send repository context to a hosted provider. No local model is currently approved as ComplyScan's standard reviewer. Historical `qwen3:8b` and `qwen3.5:9b` results remain attributed to their exact fixtures and prompt versions; they do not justify a general local-review claim.
 

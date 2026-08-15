@@ -61,8 +61,8 @@ The maintained verification baseline includes:
 - unit and integration tests for discovery, rules, fingerprints, suppressions, baselines, reports, and CLI exit codes;
 - labelled detector-corpus metrics with enforced precision and recall thresholds;
 - changed-since tests covering committed, staged, unstaged, untracked, subdirectory, and repository-wide governance behavior;
-- race-enabled tests and `go vet` for each release;
-- a self-scan that exercises the published composite action and GitHub SARIF upload;
+- race-enabled tests and `go vet` available for release verification; the release workflow must remain aligned with the complete CI gate;
+- a self-scan that exercises the repository's current composite action and GitHub SARIF upload;
 - secret-redaction and false-positive regression tests;
 - fake-transport model tests covering Ollama, native hosted providers, OpenAI-compatible chat and model-list endpoints, environment-only credentials, storage controls, separate finding and technical schemas, bounded source redaction, prompt-injection containment, exact identifier binding, API errors, unsafe-endpoint rejection, and empty-input behavior;
 - bounded follow-up tests covering literal-query validation, traversal/glob rejection, eligible-file filtering, three-excerpt limits, repository-wide cache invalidation, malformed-plan fallback, and real `qwen3:8b` smoke behavior;

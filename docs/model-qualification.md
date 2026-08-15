@@ -4,7 +4,7 @@ ComplyScan's explicit configuration and automation interfaces accept arbitrary e
 
 Before an unseen model receives repository context, ComplyScan sends one small synthetic record through the configured provider. The record contains no repository data and includes instruction-shaped untrusted text. A model is marked **compatible** only when it returns the required structured object, preserves the trusted record binding, and does not create an extra record from the untrusted instruction.
 
-Interactive setup runs this check automatically after the selected local model is installed or the selected remote credential is available. A scan also runs it automatically when its configured model has no valid cached result. Non-interactive setup does not contact a provider unless `--qualify-model` is explicitly supplied; remote qualification may incur a small provider charge.
+Interactive setup runs this check automatically after the selected local model is installed or the selected remote credential is available. `complyscan review` also runs it when its configured model has no valid cached result. A plain scan never performs qualification or contacts a provider. Non-interactive setup does not contact a provider unless `--qualify-model` is explicitly supplied; remote qualification may incur a small provider charge.
 
 Successful results are cached under the operating system's private user-cache directory for 30 days. The cache key binds:
 
@@ -26,7 +26,7 @@ Force a fresh check with:
 complyscan doctor --probe-review .
 ```
 
-If qualification fails during setup, setup continues with deterministic suggestions and human questions. If it fails before deep review, ComplyScan preserves the deterministic report and skips repository submission to that model.
+If qualification fails during setup, setup continues with deterministic suggestions and human questions. If it fails during an explicit review, ComplyScan preserves the deterministic report and skips repository submission to that model. `--require-ai-review` makes that incomplete review return exit code 2 after the report is saved.
 
 ## Compatibility is not validation
 
