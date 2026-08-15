@@ -599,6 +599,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			}
 			reportValue.Frameworks = frameworkResults
 			reportValue.AIUseMappings = buildAIUseMappings(aiUseManifest, cfg.Systems, frameworkResults, aiInventory, nil)
+			confirmedAIUseReviewContexts := buildConfirmedAIUseReviewContexts(reportValue.AIUseMappings, frameworkResults)
 			if cfg.RuleEnabled(policy.TechnicalGapRuleID) {
 				for _, frameworkResult := range frameworkResults {
 					for _, finding := range policy.TechnicalGapFindings(frameworkResult.ID, config.FileName, cfg.Systems, frameworkResult.Reconciliation) {
@@ -752,7 +753,8 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						return fmt.Errorf("write repository analysis progress: %w", err)
 					}
 					repositoryReview, reviewErr := reviewRepositoryWithProvider(
-						cmd.Context(), cfg.AI, aiReviewRepository, frameworkEvidenceReports(frameworkResults), cfg.Systems, cfg.Ownership, refreshReview, progressWriter,
+						cmd.Context(), cfg.AI, aiReviewRepository, frameworkEvidenceReports(frameworkResults), cfg.Systems, cfg.Ownership,
+						confirmedAIUseReviewContexts, refreshReview, progressWriter,
 					)
 					if reviewErr != nil {
 						aiReviewIncomplete = true
@@ -1119,6 +1121,7 @@ func reviewRepositoryWithProvider(
 	evidence []framework.TechnicalEvidenceReport,
 	systems []profile.System,
 	ownershipRules []ownership.Rule,
+	confirmedAIUses []providers.RepositoryConfirmedAIUse,
 	refresh bool,
 	progressWriter io.Writer,
 ) (providers.RepositoryAnalysisResult, error) {
@@ -1133,7 +1136,7 @@ func reviewRepositoryWithProvider(
 		EndpointDigest: repositoryanalysis.DigestEndpoint(repositoryAnalysisEndpointIdentity(settings)),
 	}
 	inputDigest, digestErr := repositoryanalysis.RepositoryInputDigest(
-		repository, evidence, systems, mode, settings.RepositoryAnalysis.MaxInputTokens, ownershipRules,
+		repository, evidence, systems, mode, settings.RepositoryAnalysis.MaxInputTokens, ownershipRules, confirmedAIUses,
 	)
 	var repositoryCache *repositoryanalysis.Cache
 	cacheWarning := digestErr
@@ -1167,7 +1170,8 @@ func reviewRepositoryWithProvider(
 	kind = configuredKind
 	liveCountdown := llmActivityAvailable(progressWriter)
 	result, err := repositoryanalysis.Run(ctx, reviewer, repository, evidence, systems, repositoryanalysis.Options{
-		Mode: mode, MaxInputTokens: settings.RepositoryAnalysis.MaxInputTokens, Provider: kind, Model: model, Ownership: ownershipRules,
+		Mode: mode, MaxInputTokens: settings.RepositoryAnalysis.MaxInputTokens, Provider: kind, Model: model,
+		Ownership: ownershipRules, ConfirmedAIUses: confirmedAIUses,
 		OnProgress: func(progress repositoryanalysis.Progress) error {
 			switch progress.Stage {
 			case "targeted-selection":

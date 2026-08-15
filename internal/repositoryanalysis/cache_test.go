@@ -28,7 +28,7 @@ func TestRepositoryAnalysisCacheRoundTripAndInvalidation(t *testing.T) {
 		{Path: "go.mod", Kind: discovery.KindManifest, Size: 12, Content: []byte("module demo\n")},
 	}}
 	systems := []profile.System{profile.NewDraftSystem("demo", "Demo")}
-	digest, err := RepositoryInputDigest(repository, nil, systems, ModeTargeted, 12_000, nil)
+	digest, err := RepositoryInputDigest(repository, nil, systems, ModeTargeted, 12_000, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestRepositoryAnalysisCacheRoundTripAndInvalidation(t *testing.T) {
 	}
 
 	reordered := discovery.Repository{Files: []discovery.File{repository.Files[1], repository.Files[0]}}
-	reorderedDigest, err := RepositoryInputDigest(reordered, nil, systems, ModeTargeted, 12_000, nil)
+	reorderedDigest, err := RepositoryInputDigest(reordered, nil, systems, ModeTargeted, 12_000, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestRepositoryAnalysisCacheRoundTripAndInvalidation(t *testing.T) {
 	changed.Files = append([]discovery.File(nil), repository.Files...)
 	changed.Files[0].Content = []byte("run_model(redacted_prompt)\n")
 	changed.Files[0].Size = int64(len(changed.Files[0].Content))
-	changedDigest, err := RepositoryInputDigest(changed, nil, systems, ModeTargeted, 12_000, nil)
+	changedDigest, err := RepositoryInputDigest(changed, nil, systems, ModeTargeted, 12_000, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestRepositoryInputDigestCoversEveryReviewInput(t *testing.T) {
 	systems := []profile.System{profile.NewDraftSystem("demo", "Demo")}
 	ownershipRules := []ownership.Rule{{Paths: []string{"app.go"}, Systems: []string{"demo"}}}
 	digest := func(reports []framework.TechnicalEvidenceReport, declared []profile.System, mode Mode, tokens int, rules []ownership.Rule) string {
-		value, err := RepositoryInputDigest(repository, reports, declared, mode, tokens, rules)
+		value, err := RepositoryInputDigest(repository, reports, declared, mode, tokens, rules, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -146,6 +146,15 @@ func TestRepositoryInputDigestCoversEveryReviewInput(t *testing.T) {
 		"token budget":       digest(evidence, systems, ModeTargeted, 12_000, ownershipRules),
 		"ownership":          digest(evidence, systems, ModeTargeted, 8_000, changedOwnership),
 	}
+	confirmedUses := []providers.RepositoryConfirmedAIUse{{
+		ID: "demo-use", Name: "Demo use", Paths: []string{"app.go"}, SystemIDs: []string{"demo"},
+		Objectives: []providers.RepositoryAIUseObjectiveContext{{ObjectiveID: "pack/objective", SystemID: "demo", Requirement: "likely-required"}},
+	}}
+	withConfirmedUse, err := RepositoryInputDigest(repository, evidence, systems, ModeTargeted, 8_000, ownershipRules, confirmedUses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases["confirmed AI-use scope"] = withConfirmedUse
 	for name, changed := range cases {
 		if changed == baseline {
 			t.Errorf("%s did not invalidate repository analysis digest", name)

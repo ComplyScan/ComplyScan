@@ -266,6 +266,26 @@ type RepositorySystemContext struct {
 	MissingContext []string `json:"missing_context,omitempty"`
 }
 
+// RepositoryConfirmedAIUse is human-owned project context supplied to an
+// explicit repository review. Paths describe the durable repository scope;
+// SubmittedFiles is the smaller, trusted set actually present in this model
+// request. Objectives contain only checks selected for this use and context.
+type RepositoryConfirmedAIUse struct {
+	ID             string                            `json:"id"`
+	Name           string                            `json:"name"`
+	Description    string                            `json:"description"`
+	Paths          []string                          `json:"paths"`
+	SystemIDs      []string                          `json:"system_ids"`
+	SubmittedFiles []string                          `json:"submitted_files"`
+	Objectives     []RepositoryAIUseObjectiveContext `json:"objectives"`
+}
+
+type RepositoryAIUseObjectiveContext struct {
+	ObjectiveID string `json:"objective_id"`
+	SystemID    string `json:"system_id,omitempty"`
+	Requirement string `json:"requirement_status"`
+}
+
 type RepositoryGraphContext struct {
 	Languages              []string                      `json:"languages,omitempty"`
 	IndexedSourceFiles     int                           `json:"indexed_source_files"`
@@ -304,19 +324,20 @@ type RepositoryGraphRelationship struct {
 // file index so every returned citation can still be checked against the
 // discovered repository.
 type RepositoryAnalysisRequest struct {
-	Mode               RepositoryAnalysisMode    `json:"mode"`
-	Scope              string                    `json:"scope"`
-	RepositoryFiles    int                       `json:"repository_files"`
-	RepositoryBytes    int64                     `json:"repository_bytes"`
-	MaxOutputTokens    int                       `json:"-"`
-	AllowFollowUp      bool                      `json:"allow_follow_up,omitempty"`
-	OutputRecovery     bool                      `json:"output_recovery,omitempty"`
-	Files              []RepositorySourceFile    `json:"files,omitempty"`
-	FileIndex          []RepositoryFileReference `json:"file_index,omitempty"`
-	Objectives         []RepositoryObjective     `json:"objectives"`
-	Systems            []RepositorySystemContext `json:"systems,omitempty"`
-	Graph              RepositoryGraphContext    `json:"repository_graph,omitempty"`
-	SubsystemSummaries []RepositorySectionResult `json:"subsystem_summaries,omitempty"`
+	Mode               RepositoryAnalysisMode     `json:"mode"`
+	Scope              string                     `json:"scope"`
+	RepositoryFiles    int                        `json:"repository_files"`
+	RepositoryBytes    int64                      `json:"repository_bytes"`
+	MaxOutputTokens    int                        `json:"-"`
+	AllowFollowUp      bool                       `json:"allow_follow_up,omitempty"`
+	OutputRecovery     bool                       `json:"output_recovery,omitempty"`
+	Files              []RepositorySourceFile     `json:"files,omitempty"`
+	FileIndex          []RepositoryFileReference  `json:"file_index,omitempty"`
+	Objectives         []RepositoryObjective      `json:"objectives"`
+	Systems            []RepositorySystemContext  `json:"systems,omitempty"`
+	ConfirmedAIUses    []RepositoryConfirmedAIUse `json:"confirmed_ai_uses,omitempty"`
+	Graph              RepositoryGraphContext     `json:"repository_graph,omitempty"`
+	SubsystemSummaries []RepositorySectionResult  `json:"subsystem_summaries,omitempty"`
 }
 
 type RepositoryCitation struct {
@@ -339,6 +360,7 @@ type RepositoryAIUse struct {
 
 type RepositoryObjectiveObservation struct {
 	ObjectiveID           string                     `json:"objective_id"`
+	AIUseID               string                     `json:"ai_use_id,omitempty"`
 	SystemID              string                     `json:"system_id,omitempty"`
 	Strength              EvidenceStrength           `json:"strength"`
 	Confidence            string                     `json:"confidence"`

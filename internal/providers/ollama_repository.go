@@ -6,10 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
-const RepositoryAnalysisPromptVersion = "4"
+const RepositoryAnalysisPromptVersion = "5"
 
 const (
 	maxRepositoryUses         = 100
@@ -37,7 +38,7 @@ func (provider *OllamaProvider) ReviewRepository(ctx context.Context, request Re
 	if maxOutputTokens <= 0 {
 		maxOutputTokens = 8192
 	}
-	request, allowedPaths, citationRanges, objectiveIDs, systemIDs, submittedBytes, err := sanitizeRepositoryAnalysisRequest(request)
+	request, allowedPaths, citationRanges, objectiveIDs, systemIDs, confirmedUses, submittedBytes, err := sanitizeRepositoryAnalysisRequest(request)
 	if err != nil {
 		return RepositoryAnalysisResult{}, err
 	}
@@ -62,7 +63,7 @@ func (provider *OllamaProvider) ReviewRepository(ctx context.Context, request Re
 			{Role: "system", Content: repositoryAnalysisSystemPrompt},
 			{Role: "user", Content: userPrompt + "\n\n" + string(promptData)},
 		},
-		Stream: false, Format: repositoryAnalysisSchema(request.Mode, request.AllowFollowUp, len(request.Objectives)), Think: false, KeepAlive: "5m",
+		Stream: false, Format: repositoryAnalysisSchema(request.Mode, request.AllowFollowUp, repositoryObservationLimit(request)), Think: false, KeepAlive: "5m",
 		ReasoningEffort: reasoningEffort, TextVerbosity: textVerbosity,
 		Options: map[string]any{"temperature": 0, "num_predict": maxOutputTokens}, MaxOutputTokens: maxOutputTokens,
 	})
@@ -73,7 +74,7 @@ func (provider *OllamaProvider) ReviewRepository(ctx context.Context, request Re
 	if err := json.Unmarshal([]byte(response.Message.Content), &payload); err != nil {
 		return RepositoryAnalysisResult{}, fmt.Errorf("decode %s structured repository analysis: %w", provider.label, err)
 	}
-	section, citations, err := validateRepositorySection(payload.Result, request.Scope, allowedPaths, citationRanges, objectiveIDs, systemIDs)
+	section, citations, err := validateRepositorySection(payload.Result, request.Scope, allowedPaths, citationRanges, objectiveIDs, systemIDs, confirmedUses)
 	if err != nil {
 		return RepositoryAnalysisResult{}, fmt.Errorf("validate %s repository analysis: %w", provider.label, err)
 	}
@@ -107,18 +108,23 @@ type repositoryLineRange struct {
 	end   int
 }
 
-func sanitizeRepositoryAnalysisRequest(request RepositoryAnalysisRequest) (RepositoryAnalysisRequest, map[string]int, map[string]repositoryLineRange, map[string]struct{}, map[string]struct{}, int64, error) {
+type repositoryConfirmedUseScope struct {
+	submittedFiles map[string]struct{}
+	objectives     map[string]struct{}
+}
+
+func sanitizeRepositoryAnalysisRequest(request RepositoryAnalysisRequest) (RepositoryAnalysisRequest, map[string]int, map[string]repositoryLineRange, map[string]struct{}, map[string]struct{}, map[string]repositoryConfirmedUseScope, int64, error) {
 	switch request.Mode {
 	case RepositoryAnalysisTargeted, RepositoryAnalysisFull, RepositoryAnalysisSubsystem:
 		if len(request.Files) == 0 {
-			return request, nil, nil, nil, nil, 0, errors.New("repository source analysis requires at least one file")
+			return request, nil, nil, nil, nil, nil, 0, errors.New("repository source analysis requires at least one file")
 		}
 	case RepositoryAnalysisSynthesis:
 		if len(request.SubsystemSummaries) == 0 {
-			return request, nil, nil, nil, nil, 0, errors.New("repository synthesis requires subsystem summaries")
+			return request, nil, nil, nil, nil, nil, 0, errors.New("repository synthesis requires subsystem summaries")
 		}
 	default:
-		return request, nil, nil, nil, nil, 0, fmt.Errorf("unsupported repository analysis mode %q", request.Mode)
+		return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("unsupported repository analysis mode %q", request.Mode)
 	}
 	request.Scope = cleanReviewText(request.Scope, 300)
 	if request.Scope == "" {
@@ -132,7 +138,7 @@ func sanitizeRepositoryAnalysisRequest(request RepositoryAnalysisRequest) (Repos
 		file.Path = filepath.ToSlash(strings.TrimSpace(file.Path))
 		file.Kind = cleanReviewText(file.Kind, 100)
 		if file.Path == "" || filepath.IsAbs(file.Path) || strings.HasPrefix(file.Path, "../") {
-			return request, nil, nil, nil, nil, 0, fmt.Errorf("repository analysis contains unsafe path %q", file.Path)
+			return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("repository analysis contains unsafe path %q", file.Path)
 		}
 		file.Content = cleanRepositorySource(file.Content)
 		if file.ContentStartLine <= 0 {
@@ -143,7 +149,7 @@ func sanitizeRepositoryAnalysisRequest(request RepositoryAnalysisRequest) (Repos
 			file.LineCount = segmentEnd
 		}
 		if segmentEnd > file.LineCount {
-			return request, nil, nil, nil, nil, 0, fmt.Errorf("repository analysis segment %s:%d-%d exceeds its %d line file", file.Path, file.ContentStartLine, segmentEnd, file.LineCount)
+			return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("repository analysis segment %s:%d-%d exceeds its %d line file", file.Path, file.ContentStartLine, segmentEnd, file.LineCount)
 		}
 		allowedPaths[file.Path] = file.LineCount
 		citationRanges[file.Path] = repositoryLineRange{start: file.ContentStartLine, end: segmentEnd}
@@ -154,7 +160,7 @@ func sanitizeRepositoryAnalysisRequest(request RepositoryAnalysisRequest) (Repos
 		file.Path = filepath.ToSlash(strings.TrimSpace(file.Path))
 		file.Kind = cleanReviewText(file.Kind, 100)
 		if file.Path == "" || filepath.IsAbs(file.Path) || strings.HasPrefix(file.Path, "../") || file.LineCount < 1 {
-			return request, nil, nil, nil, nil, 0, fmt.Errorf("repository analysis contains invalid file reference %q", file.Path)
+			return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("repository analysis contains invalid file reference %q", file.Path)
 		}
 		allowedPaths[file.Path] = file.LineCount
 		citationRanges[file.Path] = repositoryLineRange{start: 1, end: file.LineCount}
@@ -168,10 +174,10 @@ func sanitizeRepositoryAnalysisRequest(request RepositoryAnalysisRequest) (Repos
 		objective.Description = cleanReviewText(objective.Description, maxReviewMessageChars)
 		objective.Verification = cleanReviewText(objective.Verification, maxReviewActionChars)
 		if objective.ID == "" {
-			return request, nil, nil, nil, nil, 0, errors.New("repository objective ID must not be empty")
+			return request, nil, nil, nil, nil, nil, 0, errors.New("repository objective ID must not be empty")
 		}
 		if _, duplicate := objectiveIDs[objective.ID]; duplicate {
-			return request, nil, nil, nil, nil, 0, fmt.Errorf("duplicate repository objective %q", objective.ID)
+			return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("duplicate repository objective %q", objective.ID)
 		}
 		objectiveIDs[objective.ID] = struct{}{}
 	}
@@ -193,13 +199,83 @@ func sanitizeRepositoryAnalysisRequest(request RepositoryAnalysisRequest) (Repos
 			system.MissingContext[missingIndex] = cleanReviewText(system.MissingContext[missingIndex], maxReviewMessageChars)
 		}
 	}
+	confirmedUses := make(map[string]repositoryConfirmedUseScope, len(request.ConfirmedAIUses))
+	directObjectiveCount := 0
+	for index := range request.ConfirmedAIUses {
+		use := &request.ConfirmedAIUses[index]
+		use.ID = cleanReviewText(use.ID, 200)
+		use.Name = cleanReviewText(use.Name, maxReviewMessageChars)
+		use.Description = cleanReviewText(use.Description, maxReviewMessageChars)
+		if use.ID == "" || use.Name == "" {
+			return request, nil, nil, nil, nil, nil, 0, errors.New("confirmed AI-use context must include a stable ID and name")
+		}
+		if _, duplicate := confirmedUses[use.ID]; duplicate {
+			return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("duplicate confirmed AI-use context %q", use.ID)
+		}
+		scope := repositoryConfirmedUseScope{submittedFiles: make(map[string]struct{}), objectives: make(map[string]struct{})}
+		for pathIndex := range use.Paths {
+			use.Paths[pathIndex] = cleanReviewText(use.Paths[pathIndex], maxReviewEvidenceChars)
+			if use.Paths[pathIndex] == "" {
+				return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("confirmed AI use %q contains an empty path scope", use.ID)
+			}
+		}
+		seenSystems := make(map[string]struct{}, len(use.SystemIDs))
+		for systemIndex := range use.SystemIDs {
+			use.SystemIDs[systemIndex] = cleanReviewText(use.SystemIDs[systemIndex], 200)
+			if _, exists := systemIDs[use.SystemIDs[systemIndex]]; !exists {
+				return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("confirmed AI use %q references unknown system %q", use.ID, use.SystemIDs[systemIndex])
+			}
+			if _, duplicate := seenSystems[use.SystemIDs[systemIndex]]; duplicate {
+				return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("confirmed AI use %q repeats system %q", use.ID, use.SystemIDs[systemIndex])
+			}
+			seenSystems[use.SystemIDs[systemIndex]] = struct{}{}
+		}
+		for fileIndex := range use.SubmittedFiles {
+			path := filepath.ToSlash(strings.TrimSpace(use.SubmittedFiles[fileIndex]))
+			if _, exists := allowedPaths[path]; !exists {
+				return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("confirmed AI use %q references unsubmitted file %q", use.ID, path)
+			}
+			if _, duplicate := scope.submittedFiles[path]; duplicate {
+				return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("confirmed AI use %q repeats submitted file %q", use.ID, path)
+			}
+			use.SubmittedFiles[fileIndex] = path
+			scope.submittedFiles[path] = struct{}{}
+		}
+		for objectiveIndex := range use.Objectives {
+			objective := &use.Objectives[objectiveIndex]
+			objective.ObjectiveID = cleanReviewText(objective.ObjectiveID, 200)
+			objective.SystemID = cleanReviewText(objective.SystemID, 200)
+			objective.Requirement = cleanReviewText(objective.Requirement, 100)
+			if _, exists := objectiveIDs[objective.ObjectiveID]; !exists {
+				return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("confirmed AI use %q references unknown objective %q", use.ID, objective.ObjectiveID)
+			}
+			if objective.SystemID != "" {
+				if _, exists := seenSystems[objective.SystemID]; !exists {
+					return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("confirmed AI use %q objective %q references unassociated system %q", use.ID, objective.ObjectiveID, objective.SystemID)
+				}
+			}
+			if objective.Requirement == "" {
+				return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("confirmed AI use %q objective %q has no requirement status", use.ID, objective.ObjectiveID)
+			}
+			key := objective.ObjectiveID + "\x00" + objective.SystemID
+			if _, duplicate := scope.objectives[key]; duplicate {
+				return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("confirmed AI use %q repeats objective %q for system %q", use.ID, objective.ObjectiveID, objective.SystemID)
+			}
+			scope.objectives[key] = struct{}{}
+			directObjectiveCount++
+			if directObjectiveCount > maxRepositoryObservations {
+				return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("confirmed AI-use review contains more than %d direct objective contexts", maxRepositoryObservations)
+			}
+		}
+		confirmedUses[use.ID] = scope
+	}
 	for index := range request.Graph.Languages {
 		request.Graph.Languages[index] = cleanReviewText(request.Graph.Languages[index], 100)
 	}
 	for index := range request.Graph.UnsupportedSourceFiles {
 		path := filepath.ToSlash(strings.TrimSpace(request.Graph.UnsupportedSourceFiles[index]))
 		if _, exists := allowedPaths[path]; !exists {
-			return request, nil, nil, nil, nil, 0, fmt.Errorf("repository graph contains unknown unsupported source path %q", path)
+			return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("repository graph contains unknown unsupported source path %q", path)
 		}
 		request.Graph.UnsupportedSourceFiles[index] = path
 	}
@@ -207,7 +283,7 @@ func sanitizeRepositoryAnalysisRequest(request RepositoryAnalysisRequest) (Repos
 		value := &request.Graph.Imports[index]
 		value.Path = filepath.ToSlash(strings.TrimSpace(value.Path))
 		if _, exists := allowedPaths[value.Path]; !exists {
-			return request, nil, nil, nil, nil, 0, fmt.Errorf("repository graph import contains unknown path %q", value.Path)
+			return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("repository graph import contains unknown path %q", value.Path)
 		}
 		value.ImportedPath = cleanReviewText(value.ImportedPath, maxReviewEvidenceChars)
 	}
@@ -216,7 +292,7 @@ func sanitizeRepositoryAnalysisRequest(request RepositoryAnalysisRequest) (Repos
 		value.Path = filepath.ToSlash(strings.TrimSpace(value.Path))
 		lineCount, exists := allowedPaths[value.Path]
 		if !exists || value.StartLine < 1 || value.StartLine > lineCount || value.EndLine < value.StartLine || value.EndLine > lineCount {
-			return request, nil, nil, nil, nil, 0, fmt.Errorf("repository graph symbol has invalid location %s:%d-%d", value.Path, value.StartLine, value.EndLine)
+			return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("repository graph symbol has invalid location %s:%d-%d", value.Path, value.StartLine, value.EndLine)
 		}
 		value.Name = cleanReviewText(value.Name, maxReviewEvidenceChars)
 		value.Kind = cleanReviewText(value.Kind, 100)
@@ -227,14 +303,14 @@ func sanitizeRepositoryAnalysisRequest(request RepositoryAnalysisRequest) (Repos
 		value.Path = filepath.ToSlash(strings.TrimSpace(value.Path))
 		lineCount, exists := allowedPaths[value.Path]
 		if !exists || value.Line < 1 || value.Line > lineCount {
-			return request, nil, nil, nil, nil, 0, fmt.Errorf("repository graph relationship has invalid location %s:%d", value.Path, value.Line)
+			return request, nil, nil, nil, nil, nil, 0, fmt.Errorf("repository graph relationship has invalid location %s:%d", value.Path, value.Line)
 		}
 		value.Kind = cleanReviewText(value.Kind, 100)
 		value.From = cleanReviewText(value.From, maxReviewEvidenceChars)
 		value.To = cleanReviewText(value.To, maxReviewEvidenceChars)
 		value.Label = cleanReviewText(value.Label, maxReviewEvidenceChars)
 	}
-	return request, allowedPaths, citationRanges, objectiveIDs, systemIDs, submittedBytes, nil
+	return request, allowedPaths, citationRanges, objectiveIDs, systemIDs, confirmedUses, submittedBytes, nil
 }
 
 func cleanRepositorySource(value string) string {
@@ -248,7 +324,7 @@ func countSourceLines(value string) int {
 	return strings.Count(value, "\n") + 1
 }
 
-func validateRepositorySection(value RepositorySectionResult, scope string, allowedPaths map[string]int, citationRanges map[string]repositoryLineRange, objectiveIDs, systemIDs map[string]struct{}) (RepositorySectionResult, int, error) {
+func validateRepositorySection(value RepositorySectionResult, scope string, allowedPaths map[string]int, citationRanges map[string]repositoryLineRange, objectiveIDs, systemIDs map[string]struct{}, confirmedUses map[string]repositoryConfirmedUseScope) (RepositorySectionResult, int, error) {
 	value.Scope = cleanReviewText(value.Scope, 300)
 	if value.Scope == "" {
 		value.Scope = scope
@@ -281,14 +357,32 @@ func validateRepositorySection(value RepositorySectionResult, scope string, allo
 		}
 		use.UnresolvedQuestions = cleanRepositoryList(use.UnresolvedQuestions, maxRepositoryQuestions)
 	}
+	seenObservations := make(map[string]struct{}, len(value.ObjectiveObservations))
 	for index := range value.ObjectiveObservations {
 		observation := &value.ObjectiveObservations[index]
+		observation.AIUseID = cleanReviewText(observation.AIUseID, 200)
 		if _, exists := objectiveIDs[observation.ObjectiveID]; !exists {
 			return RepositorySectionResult{}, 0, fmt.Errorf("model returned unknown objective %q", observation.ObjectiveID)
 		}
 		if observation.SystemID != "" {
 			if _, exists := systemIDs[observation.SystemID]; !exists {
 				return RepositorySectionResult{}, 0, fmt.Errorf("model returned unknown system %q", observation.SystemID)
+			}
+		}
+		observationKey := observation.AIUseID + "\x00" + observation.ObjectiveID + "\x00" + observation.SystemID
+		if _, duplicate := seenObservations[observationKey]; duplicate {
+			return RepositorySectionResult{}, 0, fmt.Errorf("model returned duplicate objective %q for AI use %q and system %q", observation.ObjectiveID, observation.AIUseID, observation.SystemID)
+		}
+		seenObservations[observationKey] = struct{}{}
+		var confirmedScope repositoryConfirmedUseScope
+		if observation.AIUseID != "" {
+			var exists bool
+			confirmedScope, exists = confirmedUses[observation.AIUseID]
+			if !exists {
+				return RepositorySectionResult{}, 0, fmt.Errorf("model returned unknown confirmed AI use %q", observation.AIUseID)
+			}
+			if _, allowed := confirmedScope.objectives[observation.ObjectiveID+"\x00"+observation.SystemID]; !allowed {
+				return RepositorySectionResult{}, 0, fmt.Errorf("model returned objective %q for AI use %q under an unrequested system context %q", observation.ObjectiveID, observation.AIUseID, observation.SystemID)
 			}
 		}
 		if !validEvidenceStrength(observation.Strength) || !validRepositoryConfidence(observation.Confidence) {
@@ -307,9 +401,39 @@ func validateRepositorySection(value RepositorySectionResult, scope string, allo
 		if err != nil {
 			return RepositorySectionResult{}, 0, fmt.Errorf("objective %q contradictory evidence: %w", observation.ObjectiveID, err)
 		}
+		if observation.AIUseID != "" {
+			directCitations := append(append([]RepositoryCitation(nil), observation.SupportingEvidence...), observation.ContradictoryEvidence...)
+			if len(directCitations) == 0 && observation.Strength != StrengthUncertain {
+				return RepositorySectionResult{}, 0, fmt.Errorf("objective %q for confirmed AI use %q has no checked citation", observation.ObjectiveID, observation.AIUseID)
+			}
+			for _, citation := range directCitations {
+				if _, allowed := confirmedScope.submittedFiles[citation.Path]; !allowed {
+					return RepositorySectionResult{}, 0, fmt.Errorf("objective %q attributed citation %q outside confirmed AI use %q submitted scope", observation.ObjectiveID, citation.Path, observation.AIUseID)
+				}
+			}
+		}
 		observation.MissingEvidence = cleanRepositoryList(observation.MissingEvidence, maxRepositoryQuestions)
 		observation.UnresolvedQuestions = cleanRepositoryList(observation.UnresolvedQuestions, maxRepositoryQuestions)
 		observation.TechnicalVerdict = observation.DerivedTechnicalVerdict()
+	}
+	confirmedUseIDs := make([]string, 0, len(confirmedUses))
+	for useID := range confirmedUses {
+		confirmedUseIDs = append(confirmedUseIDs, useID)
+	}
+	sort.Strings(confirmedUseIDs)
+	for _, useID := range confirmedUseIDs {
+		objectiveKeys := make([]string, 0, len(confirmedUses[useID].objectives))
+		for objectiveKey := range confirmedUses[useID].objectives {
+			objectiveKeys = append(objectiveKeys, objectiveKey)
+		}
+		sort.Strings(objectiveKeys)
+		for _, objectiveKey := range objectiveKeys {
+			if _, exists := seenObservations[useID+"\x00"+objectiveKey]; exists {
+				continue
+			}
+			objectiveID, systemID, _ := strings.Cut(objectiveKey, "\x00")
+			return RepositorySectionResult{}, 0, fmt.Errorf("model omitted objective %q for confirmed AI use %q and system %q", objectiveID, useID, systemID)
+		}
 	}
 	for index := range value.UnmappedObservations {
 		observation := &value.UnmappedObservations[index]
@@ -327,6 +451,17 @@ func validateRepositorySection(value RepositorySectionResult, scope string, allo
 	}
 	value.UnresolvedQuestions = cleanRepositoryList(value.UnresolvedQuestions, maxRepositoryQuestions)
 	return value, citations, nil
+}
+
+func repositoryObservationLimit(request RepositoryAnalysisRequest) int {
+	limit := len(request.Objectives)
+	for _, use := range request.ConfirmedAIUses {
+		limit += len(use.Objectives)
+	}
+	if limit > maxRepositoryObservations {
+		return maxRepositoryObservations
+	}
+	return limit
 }
 
 func validateRepositoryCitations(values []RepositoryCitation, allowedRanges map[string]repositoryLineRange, total int) ([]RepositoryCitation, int, error) {
@@ -412,10 +547,10 @@ func repositoryAnalysisSchema(mode RepositoryAnalysisMode, allowFollowUp bool, o
 				}, targetedMaximumUses),
 				"objective_observations": arrayValue(map[string]any{
 					"type": "object", "properties": map[string]any{
-						"objective_id": stringValue(300), "system_id": stringValue(200), "strength": strength,
+						"objective_id": stringValue(300), "ai_use_id": stringValue(200), "system_id": stringValue(200), "strength": strength,
 						"confidence": confidence, "rationale": stringValue(targetedMaximumTextChars), "supporting_evidence": citations(),
 						"contradictory_evidence": citations(), "missing_evidence": stringsArray(), "unresolved_questions": stringsArray(),
-					}, "required": []string{"objective_id", "system_id", "strength", "confidence", "rationale", "supporting_evidence", "contradictory_evidence", "missing_evidence", "unresolved_questions"}, "additionalProperties": false,
+					}, "required": []string{"objective_id", "ai_use_id", "system_id", "strength", "confidence", "rationale", "supporting_evidence", "contradictory_evidence", "missing_evidence", "unresolved_questions"}, "additionalProperties": false,
 				}, objectiveCount),
 				"unmapped_observations": arrayValue(map[string]any{
 					"type": "object", "properties": map[string]any{
@@ -450,9 +585,12 @@ Perform two connected tasks:
 
 Rules:
 - be concise: short phrases, at most two citations per item, no repeated rationale, and only outcome-changing unresolved questions;
-- return no more than one observation per supplied objective;
+- when confirmed_ai_uses is present, treat those stable IDs and path scopes as operator-owned context: do not rename, merge, or recreate them under ai_uses;
+- evaluate each supplied confirmed-use objective separately and return exactly one observation for every supplied AI-use, objective, and system combination, copying its exact id into ai_use_id; use an empty ai_use_id only for additional evidence that cannot safely be assigned to one confirmed use;
+- return no more than one generic observation per objective and system combination;
+- a use-specific observation may cite only files listed in that use's submitted_files; never infer that the durable path scope was fully reviewed when only a subset was submitted;
 - reason across files, imports, callers, routes, configuration, data flow, tests, and deployment artifacts;
-- cite exact submitted paths and line numbers for every positive implementation claim;
+- cite exact submitted paths and line numbers for every use-specific technical decision and every positive implementation claim; a missing safeguard must be grounded in the reviewed executable flow or remain uncertain;
 - when content_start_line is present, content is a segment of that file and citations must use its original file line numbers starting at content_start_line;
 - never cite a path not present in files or file_index;
 - do not treat comments, documentation, names, imports, or dependencies alone as proof of an implementation;

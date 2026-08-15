@@ -123,7 +123,7 @@ func OpenCache(path string) (*Cache, error) {
 // RepositoryInputDigest hashes every input that can affect context selection
 // or model interpretation. Source bytes are hashed in memory and are not
 // retained in the returned identity or cache file.
-func RepositoryInputDigest(repository discovery.Repository, evidence []framework.TechnicalEvidenceReport, systems []profile.System, mode Mode, maxInputTokens int, ownershipRules []ownership.Rule) (string, error) {
+func RepositoryInputDigest(repository discovery.Repository, evidence []framework.TechnicalEvidenceReport, systems []profile.System, mode Mode, maxInputTokens int, ownershipRules []ownership.Rule, confirmedAIUses []providers.RepositoryConfirmedAIUse) (string, error) {
 	hash := sha256.New()
 	files := append([]discovery.File(nil), repository.Files...)
 	sort.Slice(files, func(i, j int) bool {
@@ -141,13 +141,14 @@ func RepositoryInputDigest(repository discovery.Repository, evidence []framework
 		writeRepositoryCacheField(hash, file.Content)
 	}
 	metadata := struct {
-		ContextVersion string                              `json:"context_version"`
-		Evidence       []framework.TechnicalEvidenceReport `json:"evidence"`
-		Systems        []profile.System                    `json:"systems"`
-		Mode           Mode                                `json:"mode"`
-		MaxInputTokens int                                 `json:"max_input_tokens"`
-		Ownership      []ownership.Rule                    `json:"ownership"`
-	}{repositoryCacheContextVersion, evidence, systems, mode, maxInputTokens, ownershipRules}
+		ContextVersion  string                               `json:"context_version"`
+		Evidence        []framework.TechnicalEvidenceReport  `json:"evidence"`
+		Systems         []profile.System                     `json:"systems"`
+		Mode            Mode                                 `json:"mode"`
+		MaxInputTokens  int                                  `json:"max_input_tokens"`
+		Ownership       []ownership.Rule                     `json:"ownership"`
+		ConfirmedAIUses []providers.RepositoryConfirmedAIUse `json:"confirmed_ai_uses"`
+	}{repositoryCacheContextVersion, evidence, systems, mode, maxInputTokens, ownershipRules, confirmedAIUses}
 	encoded, err := json.Marshal(metadata)
 	if err != nil {
 		return "", fmt.Errorf("encode repository analysis cache identity: %w", err)

@@ -171,3 +171,142 @@ func TestReviewRepositoryRejectsUnknownObjective(t *testing.T) {
 		t.Fatalf("expected unknown objective error, got %v", err)
 	}
 }
+
+func TestReviewRepositoryValidatesExplicitConfirmedUseScope(t *testing.T) {
+	provider := &OllamaProvider{
+		kind: OpenAI, label: "OpenAI", model: "test-model",
+		completion: func(_ context.Context, request ollamaChatRequest) (ollamaChatResponse, error) {
+			if !strings.Contains(request.Messages[1].Content, `"confirmed_ai_uses":[{"id":"support-replies"`) ||
+				!strings.Contains(request.Messages[1].Content, `"submitted_files":["support/review.go"]`) {
+				t.Fatalf("confirmed use context missing from bounded request: %s", request.Messages[1].Content)
+			}
+			var response ollamaChatResponse
+			response.Done = true
+			response.Message.Content = `{"result":{"scope":".","ai_uses":[],"objective_observations":[{"objective_id":"PACK/REVIEW","ai_use_id":"support-replies","system_id":"support","strength":"partial","confidence":"high","rationale":"The reviewed flow contains a human gate but still has a bypass.","supporting_evidence":[{"path":"support/review.go","line":2,"summary":"Human approval is called."}],"contradictory_evidence":[],"missing_evidence":["Bypass prevention"],"unresolved_questions":[]}],"unmapped_observations":[],"unresolved_questions":[]}}`
+			return response, nil
+		},
+	}
+	result, err := provider.ReviewRepository(context.Background(), RepositoryAnalysisRequest{
+		Mode: RepositoryAnalysisTargeted, Scope: ".", RepositoryFiles: 2,
+		Files: []RepositorySourceFile{
+			{Path: "support/review.go", Kind: "source", Content: "package support\nfunc approve() {}\n"},
+			{Path: "ranking/review.go", Kind: "source", Content: "package ranking\nfunc approve() {}\n"},
+		},
+		Objectives: []RepositoryObjective{{ID: "PACK/REVIEW", Title: "Human review"}},
+		Systems:    []RepositorySystemContext{{ID: "support", Name: "Support"}},
+		ConfirmedAIUses: []RepositoryConfirmedAIUse{{
+			ID: "support-replies", Name: "Support replies", Description: "Draft replies", Paths: []string{"support/**"},
+			SystemIDs: []string{"support"}, SubmittedFiles: []string{"support/review.go"},
+			Objectives: []RepositoryAIUseObjectiveContext{{ObjectiveID: "PACK/REVIEW", SystemID: "support", Requirement: "likely-required"}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := result.Result.ObjectiveObservations[0]
+	if observation.AIUseID != "support-replies" || observation.TechnicalVerdict != RepositoryVerdictPartial {
+		t.Fatalf("use-scoped observation = %#v", observation)
+	}
+}
+
+func TestReviewRepositoryRejectsConfirmedUseCitationOutsideSubmittedScope(t *testing.T) {
+	provider := &OllamaProvider{
+		kind: OpenAI, label: "OpenAI", model: "test-model",
+		completion: func(context.Context, ollamaChatRequest) (ollamaChatResponse, error) {
+			var response ollamaChatResponse
+			response.Done = true
+			response.Message.Content = `{"result":{"scope":".","ai_uses":[],"objective_observations":[{"objective_id":"PACK/REVIEW","ai_use_id":"support-replies","system_id":"support","strength":"strong","confidence":"high","rationale":"Wrong sibling scope.","supporting_evidence":[{"path":"ranking/review.go","line":2,"summary":"Sibling review path."}],"contradictory_evidence":[],"missing_evidence":[],"unresolved_questions":[]}],"unmapped_observations":[],"unresolved_questions":[]}}`
+			return response, nil
+		},
+	}
+	_, err := provider.ReviewRepository(context.Background(), RepositoryAnalysisRequest{
+		Mode: RepositoryAnalysisTargeted, Scope: ".", RepositoryFiles: 2,
+		Files: []RepositorySourceFile{
+			{Path: "support/review.go", Kind: "source", Content: "package support\nfunc approve() {}\n"},
+			{Path: "ranking/review.go", Kind: "source", Content: "package ranking\nfunc approve() {}\n"},
+		},
+		Objectives: []RepositoryObjective{{ID: "PACK/REVIEW"}}, Systems: []RepositorySystemContext{{ID: "support", Name: "Support"}},
+		ConfirmedAIUses: []RepositoryConfirmedAIUse{{
+			ID: "support-replies", Name: "Support replies", Paths: []string{"support/**"}, SystemIDs: []string{"support"},
+			SubmittedFiles: []string{"support/review.go"}, Objectives: []RepositoryAIUseObjectiveContext{{ObjectiveID: "PACK/REVIEW", SystemID: "support", Requirement: "likely-required"}},
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), `outside confirmed AI use "support-replies" submitted scope`) {
+		t.Fatalf("expected use-scope citation error, got %v", err)
+	}
+}
+
+func TestReviewRepositoryAcceptsUncitedUncertainConfirmedUseObservation(t *testing.T) {
+	provider := &OllamaProvider{
+		kind: OpenAI, label: "OpenAI", model: "test-model",
+		completion: func(context.Context, ollamaChatRequest) (ollamaChatResponse, error) {
+			var response ollamaChatResponse
+			response.Done = true
+			response.Message.Content = `{"result":{"scope":".","ai_uses":[],"objective_observations":[{"objective_id":"PACK/REVIEW","ai_use_id":"support-replies","system_id":"support","strength":"uncertain","confidence":"medium","rationale":"No bounded decision can be grounded.","supporting_evidence":[],"contradictory_evidence":[],"missing_evidence":["Reviewed executable flow"],"unresolved_questions":[]}],"unmapped_observations":[],"unresolved_questions":[]}}`
+			return response, nil
+		},
+	}
+	result, err := provider.ReviewRepository(context.Background(), RepositoryAnalysisRequest{
+		Mode: RepositoryAnalysisTargeted, Scope: ".", RepositoryFiles: 1,
+		Files:      []RepositorySourceFile{{Path: "support/review.go", Kind: "source", Content: "package support\nfunc approve() {}\n"}},
+		Objectives: []RepositoryObjective{{ID: "PACK/REVIEW"}}, Systems: []RepositorySystemContext{{ID: "support", Name: "Support"}},
+		ConfirmedAIUses: []RepositoryConfirmedAIUse{{
+			ID: "support-replies", Name: "Support replies", Paths: []string{"support/**"}, SystemIDs: []string{"support"},
+			SubmittedFiles: []string{"support/review.go"}, Objectives: []RepositoryAIUseObjectiveContext{{ObjectiveID: "PACK/REVIEW", SystemID: "support", Requirement: "likely-required"}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := result.Result.ObjectiveObservations[0]
+	if observation.AIUseID != "support-replies" || observation.TechnicalVerdict != RepositoryVerdictCannotDetermine {
+		t.Fatalf("uncited uncertain use observation = %#v", observation)
+	}
+}
+
+func TestReviewRepositoryRejectsIncompleteConfirmedUseEvaluation(t *testing.T) {
+	provider := &OllamaProvider{
+		kind: OpenAI, label: "OpenAI", model: "test-model",
+		completion: func(context.Context, ollamaChatRequest) (ollamaChatResponse, error) {
+			var response ollamaChatResponse
+			response.Done = true
+			response.Message.Content = `{"result":{"scope":".","ai_uses":[],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`
+			return response, nil
+		},
+	}
+	_, err := provider.ReviewRepository(context.Background(), RepositoryAnalysisRequest{
+		Mode: RepositoryAnalysisTargeted, Scope: ".", RepositoryFiles: 1,
+		Files:      []RepositorySourceFile{{Path: "support/review.go", Kind: "source", Content: "package support\nfunc approve() {}\n"}},
+		Objectives: []RepositoryObjective{{ID: "PACK/REVIEW"}}, Systems: []RepositorySystemContext{{ID: "support", Name: "Support"}},
+		ConfirmedAIUses: []RepositoryConfirmedAIUse{{
+			ID: "support-replies", Name: "Support replies", Paths: []string{"support/**"}, SystemIDs: []string{"support"},
+			SubmittedFiles: []string{"support/review.go"}, Objectives: []RepositoryAIUseObjectiveContext{{ObjectiveID: "PACK/REVIEW", SystemID: "support", Requirement: "likely-required"}},
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), `omitted objective "PACK/REVIEW" for confirmed AI use "support-replies"`) {
+		t.Fatalf("expected incomplete direct-use evaluation error, got %v", err)
+	}
+}
+
+func TestRepositoryAnalysisRejectsTooManyDirectUseObjectivesBeforeInference(t *testing.T) {
+	request := RepositoryAnalysisRequest{
+		Mode: RepositoryAnalysisTargeted, Scope: ".", RepositoryFiles: 1,
+		Files:   []RepositorySourceFile{{Path: "support/review.go", Kind: "source", Content: "package support\n"}},
+		Systems: []RepositorySystemContext{{ID: "support", Name: "Support"}},
+		ConfirmedAIUses: []RepositoryConfirmedAIUse{{
+			ID: "support-replies", Name: "Support replies", Paths: []string{"support/**"}, SystemIDs: []string{"support"},
+			SubmittedFiles: []string{"support/review.go"},
+		}},
+	}
+	for index := 0; index <= maxRepositoryObservations; index++ {
+		objectiveID := fmt.Sprintf("PACK/OBJECTIVE-%03d", index)
+		request.Objectives = append(request.Objectives, RepositoryObjective{ID: objectiveID})
+		request.ConfirmedAIUses[0].Objectives = append(request.ConfirmedAIUses[0].Objectives, RepositoryAIUseObjectiveContext{
+			ObjectiveID: objectiveID, SystemID: "support", Requirement: "likely-required",
+		})
+	}
+	_, _, _, _, _, _, _, err := sanitizeRepositoryAnalysisRequest(request)
+	if err == nil || !strings.Contains(err.Error(), "more than 500 direct objective contexts") {
+		t.Fatalf("expected direct objective limit, got %v", err)
+	}
+}

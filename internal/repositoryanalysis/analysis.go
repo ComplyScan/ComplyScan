@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ComplyScan/ComplyScan/internal/aiuse"
 	"github.com/ComplyScan/ComplyScan/internal/codegraph"
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
@@ -49,13 +50,14 @@ const (
 )
 
 type Options struct {
-	Mode           Mode
-	MaxInputTokens int
-	Provider       providers.Kind
-	Model          string
-	Ownership      []ownership.Rule
-	OnProgress     func(Progress) error
-	Wait           func(context.Context, time.Duration) error
+	Mode            Mode
+	MaxInputTokens  int
+	Provider        providers.Kind
+	Model           string
+	Ownership       []ownership.Rule
+	ConfirmedAIUses []providers.RepositoryConfirmedAIUse
+	OnProgress      func(Progress) error
+	Wait            func(context.Context, time.Duration) error
 }
 
 type Progress struct {
@@ -101,10 +103,11 @@ func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository
 	}
 	objectives := repositoryObjectives(evidence)
 	systemContext := repositorySystems(systems, options.Ownership)
-	budget := sourceBudget(options.MaxInputTokens, objectives, systemContext)
+	confirmedUses := append([]providers.RepositoryConfirmedAIUse(nil), options.ConfirmedAIUses...)
+	budget := sourceBudget(options.MaxInputTokens, objectives, systemContext, confirmedUses)
 	graph := codegraph.Build(repository)
 	if options.Mode == ModeAuto || options.Mode == ModeTargeted {
-		return runTargeted(ctx, reviewer, repository, graph, evidence, objectives, systemContext, systems, budget, options)
+		return runTargeted(ctx, reviewer, repository, graph, evidence, objectives, systemContext, confirmedUses, systems, budget, options)
 	}
 	if options.Mode == ModeDeep {
 		options.Mode = ModeAuto
@@ -117,19 +120,20 @@ func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository
 		}
 		request := providers.RepositoryAnalysisRequest{
 			Mode: providers.RepositoryAnalysisFull, Scope: ".", RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository),
-			MaxOutputTokens: repositoryOutputTokens(options.Provider, 0), Files: files, Objectives: objectives, Systems: systemContext, Graph: fullGraph,
+			MaxOutputTokens: repositoryOutputTokens(options.Provider, 0), Files: files, Objectives: objectives, Systems: systemContext,
+			ConfirmedAIUses: bindConfirmedAIUses(confirmedUses, sourceFilePaths(files)), Graph: fullGraph,
 		}
 		result, err := reviewRepositoryWithRetry(ctx, reviewer, request, options)
 		if err != nil {
 			if rateLimit, ok := providers.AsRemoteRateLimitError(err); ok && rateLimit.RequestTooLarge && options.Mode == ModeAuto {
-				return runHierarchical(ctx, reviewer, repository, graph, files, objectives, systemContext, budget, options)
+				return runHierarchical(ctx, reviewer, repository, graph, files, objectives, systemContext, confirmedUses, budget, options)
 			}
 			if incomplete, ok := providers.AsRemoteIncompleteError(err); ok && incomplete.Reason == "max_output_tokens" && options.Mode == ModeAuto {
-				return runHierarchical(ctx, reviewer, repository, graph, files, objectives, systemContext, budget, options)
+				return runHierarchical(ctx, reviewer, repository, graph, files, objectives, systemContext, confirmedUses, budget, options)
 			}
 			return providers.RepositoryAnalysisResult{}, err
 		}
-		if err := validateSystemAttribution(result.Result, systems, options.Ownership); err != nil {
+		if err := validateSystemAttribution(result.Result, systems, options.Ownership, confirmedUses); err != nil {
 			return providers.RepositoryAnalysisResult{}, err
 		}
 		if err := progress(options, Progress{Stage: "full-repository", Completed: 1, Total: 1, Scope: ".", InputBytes: fullBytes}); err != nil {
@@ -141,10 +145,10 @@ func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository
 	if options.Mode == ModeFull {
 		return providers.RepositoryAnalysisResult{}, fmt.Errorf("relevant repository context is %d bytes, exceeding the configured full-analysis budget of %d bytes", fullBytes, budget)
 	}
-	return runHierarchical(ctx, reviewer, repository, graph, files, objectives, systemContext, budget, options)
+	return runHierarchical(ctx, reviewer, repository, graph, files, objectives, systemContext, confirmedUses, budget, options)
 }
 
-func runHierarchical(ctx context.Context, reviewer Reviewer, repository discovery.Repository, graph codegraph.Graph, files []providers.RepositorySourceFile, objectives []providers.RepositoryObjective, systems []providers.RepositorySystemContext, budget int64, options Options) (providers.RepositoryAnalysisResult, error) {
+func runHierarchical(ctx context.Context, reviewer Reviewer, repository discovery.Repository, graph codegraph.Graph, files []providers.RepositorySourceFile, objectives []providers.RepositoryObjective, systems []providers.RepositorySystemContext, confirmedUses []providers.RepositoryConfirmedAIUse, budget int64, options Options) (providers.RepositoryAnalysisResult, error) {
 	chunks, err := partitionRepository(files, budget*80/100)
 	if err != nil {
 		return providers.RepositoryAnalysisResult{}, err
@@ -169,7 +173,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		request := providers.RepositoryAnalysisRequest{
 			Mode: providers.RepositoryAnalysisSubsystem, Scope: chunk.scope,
 			RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), Files: chunk.files,
-			Objectives: objectives, Systems: systems, Graph: chunkGraph, MaxOutputTokens: maxOutputTokens,
+			Objectives: objectives, Systems: systems, ConfirmedAIUses: bindConfirmedAIUses(confirmedUses, sourceFilePaths(chunk.files)), Graph: chunkGraph, MaxOutputTokens: maxOutputTokens,
 		}
 		result, err := reviewRepositoryWithRetry(ctx, reviewer, request, options)
 		if err != nil {
@@ -215,7 +219,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			}
 			return providers.RepositoryAnalysisResult{}, fmt.Errorf("analyze subsystem %s: %w", chunk.scope, err)
 		}
-		if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership); err != nil {
+		if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership, confirmedUses); err != nil {
 			return providers.RepositoryAnalysisResult{}, fmt.Errorf("analyze subsystem %s: %w", chunk.scope, err)
 		}
 		summaries = append(summaries, result.Result)
@@ -250,7 +254,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			request := providers.RepositoryAnalysisRequest{
 				Mode: providers.RepositoryAnalysisSynthesis, Scope: scope,
 				RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), FileIndex: citedFileIndex(group.summaries, files),
-				Objectives: objectives, Systems: systems, SubsystemSummaries: group.summaries, MaxOutputTokens: maxOutputTokens,
+				Objectives: objectives, Systems: systems, ConfirmedAIUses: bindConfirmedAIUses(confirmedUses, fileReferencePaths(citedFileIndex(group.summaries, files))), SubsystemSummaries: group.summaries, MaxOutputTokens: maxOutputTokens,
 			}
 			result, err := reviewRepositoryWithRetry(ctx, reviewer, request, options)
 			if err != nil {
@@ -296,7 +300,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 				}
 				return providers.RepositoryAnalysisResult{}, fmt.Errorf("synthesize repository analysis level %d part %d: %w", levels, index+1, err)
 			}
-			if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership); err != nil {
+			if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership, confirmedUses); err != nil {
 				return providers.RepositoryAnalysisResult{}, fmt.Errorf("synthesize repository analysis level %d part %d: %w", levels, index+1, err)
 			}
 			next = append(next, result.Result)
@@ -322,7 +326,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			request := providers.RepositoryAnalysisRequest{
 				Mode: providers.RepositoryAnalysisSynthesis, Scope: "repository-synthesis",
 				RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), FileIndex: citedFileIndex(group, files),
-				Objectives: objectives, Systems: systems, SubsystemSummaries: group, MaxOutputTokens: maxOutputTokens,
+				Objectives: objectives, Systems: systems, ConfirmedAIUses: bindConfirmedAIUses(confirmedUses, fileReferencePaths(citedFileIndex(group, files))), SubsystemSummaries: group, MaxOutputTokens: maxOutputTokens,
 			}
 			result, err = reviewRepositoryWithRetry(ctx, reviewer, request, options)
 			if err == nil {
@@ -341,7 +345,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			}
 			maxOutputTokens = recoveryOutput
 		}
-		if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership); err != nil {
+		if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership, confirmedUses); err != nil {
 			return providers.RepositoryAnalysisResult{}, fmt.Errorf("synthesize repository analysis: %w", err)
 		}
 		summaries[0] = result.Result
@@ -739,12 +743,28 @@ func profileSystems(values []providers.RepositorySystemContext) []profile.System
 	return result
 }
 
-func validateSystemAttribution(result providers.RepositorySectionResult, systems []profile.System, rules []ownership.Rule) error {
-	if len(systems) <= 1 && len(rules) == 0 {
-		return nil
-	}
+func validateSystemAttribution(result providers.RepositorySectionResult, systems []profile.System, rules []ownership.Rule, confirmedUses []providers.RepositoryConfirmedAIUse) error {
 	resolver := ownership.New(rules)
 	for _, observation := range result.ObjectiveObservations {
+		if observation.AIUseID != "" {
+			use, found := confirmedAIUseByID(confirmedUses, observation.AIUseID)
+			if !found {
+				return fmt.Errorf("objective %q references unknown confirmed AI use %q", observation.ObjectiveID, observation.AIUseID)
+			}
+			if observation.SystemID != "" && !containsSystem(use.SystemIDs, observation.SystemID) {
+				return fmt.Errorf("objective %q attributed confirmed AI use %q to unassociated system %q", observation.ObjectiveID, observation.AIUseID, observation.SystemID)
+			}
+			definition := aiuse.Use{Paths: append([]string(nil), use.Paths...)}
+			for _, citation := range append(append([]providers.RepositoryCitation(nil), observation.SupportingEvidence...), observation.ContradictoryEvidence...) {
+				if !aiuse.UseMatchesPath(definition, citation.Path) {
+					return fmt.Errorf("objective %q attributed %s outside confirmed AI use %q paths", observation.ObjectiveID, citation.Path, observation.AIUseID)
+				}
+			}
+			continue
+		}
+		if len(systems) <= 1 && len(rules) == 0 {
+			continue
+		}
 		if observation.SystemID == "" {
 			continue
 		}
@@ -771,6 +791,15 @@ func validateSystemAttribution(result providers.RepositorySectionResult, systems
 	return nil
 }
 
+func confirmedAIUseByID(values []providers.RepositoryConfirmedAIUse, id string) (providers.RepositoryConfirmedAIUse, bool) {
+	for _, value := range values {
+		if value.ID == id {
+			return value, true
+		}
+	}
+	return providers.RepositoryConfirmedAIUse{}, false
+}
+
 func containsSystem(values []string, wanted string) bool {
 	for _, value := range values {
 		if value == wanted {
@@ -780,11 +809,12 @@ func containsSystem(values []string, wanted string) bool {
 	return false
 }
 
-func sourceBudget(tokens int, objectives []providers.RepositoryObjective, systems []providers.RepositorySystemContext) int64 {
+func sourceBudget(tokens int, objectives []providers.RepositoryObjective, systems []providers.RepositorySystemContext, confirmedUses []providers.RepositoryConfirmedAIUse) int64 {
 	overhead, _ := json.Marshal(struct {
-		Objectives []providers.RepositoryObjective
-		Systems    []providers.RepositorySystemContext
-	}{objectives, systems})
+		Objectives      []providers.RepositoryObjective
+		Systems         []providers.RepositorySystemContext
+		ConfirmedAIUses []providers.RepositoryConfirmedAIUse
+	}{objectives, systems, confirmedUses})
 	total := int64(tokens * charactersPerToken)
 	reserve := total * contextReservePercent / 100
 	budget := total - reserve - int64(len(overhead))
@@ -792,6 +822,42 @@ func sourceBudget(tokens int, objectives []providers.RepositoryObjective, system
 		return 1
 	}
 	return budget
+}
+
+func bindConfirmedAIUses(values []providers.RepositoryConfirmedAIUse, submittedPaths []string) []providers.RepositoryConfirmedAIUse {
+	result := make([]providers.RepositoryConfirmedAIUse, 0, len(values))
+	for _, value := range values {
+		copy := value
+		copy.SubmittedFiles = nil
+		definition := aiuse.Use{Paths: append([]string(nil), value.Paths...)}
+		for _, path := range submittedPaths {
+			if aiuse.UseMatchesPath(definition, path) {
+				copy.SubmittedFiles = append(copy.SubmittedFiles, path)
+			}
+		}
+		if len(copy.SubmittedFiles) == 0 {
+			continue
+		}
+		sort.Strings(copy.SubmittedFiles)
+		result = append(result, copy)
+	}
+	return result
+}
+
+func sourceFilePaths(values []providers.RepositorySourceFile) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, value.Path)
+	}
+	return result
+}
+
+func fileReferencePaths(values []providers.RepositoryFileReference) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, value.Path)
+	}
+	return result
 }
 
 func sourceFileBytes(files []providers.RepositorySourceFile) int64 {

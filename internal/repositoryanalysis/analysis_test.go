@@ -166,6 +166,40 @@ func TestRunAutoSelectsStructuralAIEvidenceInsteadOfWholeRepository(t *testing.T
 	}
 }
 
+func TestRunTargetedIncludesConfirmedUseScopeAndStableObjectives(t *testing.T) {
+	reviewer := &recordingReviewer{}
+	repository := discovery.Repository{Files: []discovery.File{
+		{Path: "support/handler.go", Kind: discovery.KindSource, Content: []byte("package support\nfunc Handle(value string) string { return value }\n")},
+		{Path: "unrelated/math.go", Kind: discovery.KindSource, Content: []byte("package unrelated\nfunc Add(a, b int) int { return a + b }\n")},
+	}}
+	result, err := Run(context.Background(), reviewer, repository, []framework.TechnicalEvidenceReport{{
+		Pack: framework.PackReference{ID: "pack"}, Objectives: []framework.ObjectiveAssessment{{ID: "REVIEW", Title: "Human review"}},
+	}}, []profile.System{profile.NewDraftSystem("support", "Support")}, Options{
+		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
+		ConfirmedAIUses: []providers.RepositoryConfirmedAIUse{{
+			ID: "support-replies", Name: "Support replies", Description: "Draft replies", Paths: []string{"support/**"},
+			SystemIDs: []string{"support"}, Objectives: []providers.RepositoryAIUseObjectiveContext{{
+				ObjectiveID: "pack/REVIEW", SystemID: "support", Requirement: "likely-required",
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Coverage.Mode != providers.RepositoryAnalysisTargeted || len(reviewer.requests) != 1 {
+		t.Fatalf("targeted result or request missing: %#v %#v", result.Coverage, reviewer.requests)
+	}
+	request := reviewer.requests[0]
+	if len(request.Files) != 1 || request.Files[0].Path != "support/handler.go" {
+		t.Fatalf("confirmed use did not drive bounded selection: %#v", request.Files)
+	}
+	if len(request.ConfirmedAIUses) != 1 || request.ConfirmedAIUses[0].ID != "support-replies" ||
+		len(request.ConfirmedAIUses[0].SubmittedFiles) != 1 || request.ConfirmedAIUses[0].SubmittedFiles[0] != "support/handler.go" ||
+		len(request.ConfirmedAIUses[0].Objectives) != 1 {
+		t.Fatalf("bounded confirmed-use context = %#v", request.ConfirmedAIUses)
+	}
+}
+
 func TestRunTargetedAllowsOneBoundedFollowUp(t *testing.T) {
 	reviewer := &repositoryFollowUpReviewer{}
 	repository := discovery.Repository{Files: []discovery.File{
@@ -422,11 +456,11 @@ func TestValidateSystemAttributionRequiresOwnedCitations(t *testing.T) {
 		ObjectiveID: "pack/objective", SystemID: "assistant",
 		SupportingEvidence: []providers.RepositoryCitation{{Path: "apps/ranking/model.go", Line: 1}},
 	}}}
-	if err := validateSystemAttribution(result, systems, rules); err == nil || !strings.Contains(err.Error(), "path ownership") {
+	if err := validateSystemAttribution(result, systems, rules, nil); err == nil || !strings.Contains(err.Error(), "path ownership") {
 		t.Fatalf("expected cross-system attribution rejection, got %v", err)
 	}
 	result.ObjectiveObservations[0].SupportingEvidence[0].Path = "apps/assistant/model.go"
-	if err := validateSystemAttribution(result, systems, rules); err != nil {
+	if err := validateSystemAttribution(result, systems, rules, nil); err != nil {
 		t.Fatalf("owned citation should validate: %v", err)
 	}
 }
@@ -436,7 +470,7 @@ func TestValidateSystemAttributionLeavesMultiSystemEvidenceUnresolvedWithoutOwne
 		ObjectiveID: "pack/objective", SystemID: "assistant",
 		SupportingEvidence: []providers.RepositoryCitation{{Path: "main.go", Line: 1}},
 	}}}
-	err := validateSystemAttribution(result, []profile.System{{ID: "assistant"}, {ID: "ranking"}}, nil)
+	err := validateSystemAttribution(result, []profile.System{{ID: "assistant"}, {ID: "ranking"}}, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "without configured path ownership") {
 		t.Fatalf("expected unresolved multi-system attribution, got %v", err)
 	}
@@ -447,7 +481,24 @@ func TestValidateSystemAttributionAllowsNoEvidenceForSoleSystem(t *testing.T) {
 		ObjectiveID: "pack/objective", SystemID: "assistant", Strength: providers.StrengthNotSupported,
 	}}}
 	rules := []ownership.Rule{{Paths: []string{"apps/assistant/**"}, Systems: []string{"assistant"}}}
-	if err := validateSystemAttribution(result, []profile.System{{ID: "assistant"}}, rules); err != nil {
+	if err := validateSystemAttribution(result, []profile.System{{ID: "assistant"}}, rules, nil); err != nil {
 		t.Fatalf("no-evidence observation should remain attached to the sole system: %v", err)
+	}
+}
+
+func TestValidateSystemAttributionUsesConfirmedUseScopeWithoutGlobalOwnership(t *testing.T) {
+	uses := []providers.RepositoryConfirmedAIUse{{
+		ID: "support-replies", Name: "Support replies", Paths: []string{"support/**"}, SystemIDs: []string{"support"},
+	}}
+	result := providers.RepositorySectionResult{ObjectiveObservations: []providers.RepositoryObjectiveObservation{{
+		ObjectiveID: "pack/review", AIUseID: "support-replies", SystemID: "support",
+		SupportingEvidence: []providers.RepositoryCitation{{Path: "support/review.go", Line: 2, Summary: "Approval path"}},
+	}}}
+	if err := validateSystemAttribution(result, []profile.System{{ID: "support"}, {ID: "ranking"}}, nil, uses); err != nil {
+		t.Fatalf("confirmed use scope should provide explicit attribution: %v", err)
+	}
+	result.ObjectiveObservations[0].SupportingEvidence[0].Path = "ranking/review.go"
+	if err := validateSystemAttribution(result, []profile.System{{ID: "support"}, {ID: "ranking"}}, nil, uses); err == nil || !strings.Contains(err.Error(), "outside confirmed AI use") {
+		t.Fatalf("expected confirmed-use scope failure, got %v", err)
 	}
 }

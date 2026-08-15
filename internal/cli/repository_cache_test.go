@@ -29,7 +29,7 @@ func TestRepositoryReviewReusesCacheWithoutProviderCredential(t *testing.T) {
 		Path: "app.py", Kind: discovery.KindSource, Size: 20, Content: []byte("from openai import OpenAI\n"),
 	}}}
 	systems := []profile.System{profile.NewDraftSystem("demo", "Demo")}
-	digest, err := repositoryanalysis.RepositoryInputDigest(repository, nil, systems, repositoryanalysis.ModeTargeted, 8_000, nil)
+	digest, err := repositoryanalysis.RepositoryInputDigest(repository, nil, systems, repositoryanalysis.ModeTargeted, 8_000, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestRepositoryReviewReusesCacheWithoutProviderCredential(t *testing.T) {
 	t.Cleanup(func() { repositoryAnalysisCacheDefaultPath = previousPath })
 
 	var output bytes.Buffer
-	result, err := reviewRepositoryWithProvider(context.Background(), settings, repository, nil, systems, nil, false, &output)
+	result, err := reviewRepositoryWithProvider(context.Background(), settings, repository, nil, systems, nil, nil, false, &output)
 	if err != nil {
 		t.Fatalf("cache hit unexpectedly required provider credential: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestRepositoryReviewReusesCacheWithoutProviderCredential(t *testing.T) {
 		t.Fatalf("repository cache was not reported truthfully: result=%+v output=%q", result, output.String())
 	}
 
-	if _, err := reviewRepositoryWithProvider(context.Background(), settings, repository, nil, systems, nil, true, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), settings.Remote.APIKeyEnv) {
+	if _, err := reviewRepositoryWithProvider(context.Background(), settings, repository, nil, systems, nil, nil, true, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), settings.Remote.APIKeyEnv) {
 		t.Fatalf("refresh did not bypass the cache and require the provider: %v", err)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ComplyScan/ComplyScan/internal/aiuse"
 	"github.com/ComplyScan/ComplyScan/internal/codegraph"
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/framework"
@@ -40,6 +41,7 @@ func runTargeted(
 	evidence []framework.TechnicalEvidenceReport,
 	objectives []providers.RepositoryObjective,
 	systems []providers.RepositorySystemContext,
+	confirmedUses []providers.RepositoryConfirmedAIUse,
 	profileSystems []profile.System,
 	budget int64,
 	options Options,
@@ -51,11 +53,11 @@ func runTargeted(
 	if options.MaxInputTokens > 0 && options.MaxInputTokens < targetTokens {
 		targetTokens = options.MaxInputTokens
 	}
-	targetBudget := sourceBudget(targetTokens, objectives, systems)
+	targetBudget := sourceBudget(targetTokens, objectives, systems, confirmedUses)
 	if targetBudget < budget {
 		budget = targetBudget
 	}
-	selected, considered := targetedRepositoryFiles(repository, graph, evidence, budget*targetedSourceBudgetPercent/100)
+	selected, considered := targetedRepositoryFiles(repository, graph, evidence, confirmedUses, budget*targetedSourceBudgetPercent/100)
 	if len(selected) == 0 {
 		return providers.RepositoryAnalysisResult{
 			Provider: options.Provider, Model: options.Model,
@@ -85,7 +87,8 @@ func runTargeted(
 	request := providers.RepositoryAnalysisRequest{
 		Mode: providers.RepositoryAnalysisTargeted, Scope: ".",
 		RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository),
-		Files: selected, Objectives: objectives, Systems: systems, Graph: graphContext, AllowFollowUp: true,
+		Files: selected, Objectives: objectives, Systems: systems,
+		ConfirmedAIUses: bindConfirmedAIUses(confirmedUses, sourceFilePaths(selected)), Graph: graphContext, AllowFollowUp: true,
 		MaxOutputTokens: targetedOutputTokens(options.Provider),
 	}
 	result, err := reviewRepositoryWithRetry(ctx, reviewer, request, options)
@@ -120,7 +123,7 @@ func runTargeted(
 			return providers.RepositoryAnalysisResult{}, progressErr
 		}
 	}
-	if err := validateSystemAttribution(result.Result, profileSystems, options.Ownership); err != nil {
+	if err := validateSystemAttribution(result.Result, profileSystems, options.Ownership, confirmedUses); err != nil {
 		return providers.RepositoryAnalysisResult{}, err
 	}
 	if result.FollowUpPlan.Needed {
@@ -138,13 +141,14 @@ func runTargeted(
 			finalFiles := append(append([]providers.RepositorySourceFile(nil), selected...), followUpFiles...)
 			finalGraph := repositoryGraphContext(graph, finalFiles)
 			request.Files = finalFiles
+			request.ConfirmedAIUses = bindConfirmedAIUses(confirmedUses, sourceFilePaths(finalFiles))
 			request.Graph = finalGraph
 			request.AllowFollowUp = false
 			final, finalErr := reviewRepositoryWithRetry(ctx, reviewer, request, options)
 			if finalErr != nil {
 				return providers.RepositoryAnalysisResult{}, fmt.Errorf("analyze targeted repository follow-up: %w", finalErr)
 			}
-			if err := validateSystemAttribution(final.Result, profileSystems, options.Ownership); err != nil {
+			if err := validateSystemAttribution(final.Result, profileSystems, options.Ownership, confirmedUses); err != nil {
 				return providers.RepositoryAnalysisResult{}, err
 			}
 			addUsage(&final.Usage, result.Usage)
@@ -252,7 +256,7 @@ func repositorySearchQueryLabels(queries []providers.TechnicalSearchQuery) []str
 	return result
 }
 
-func targetedRepositoryFiles(repository discovery.Repository, graph codegraph.Graph, reports []framework.TechnicalEvidenceReport, budget int64) ([]providers.RepositorySourceFile, int) {
+func targetedRepositoryFiles(repository discovery.Repository, graph codegraph.Graph, reports []framework.TechnicalEvidenceReport, confirmedUses []providers.RepositoryConfirmedAIUse, budget int64) ([]providers.RepositorySourceFile, int) {
 	files := make(map[string]discovery.File, len(repository.Files))
 	for _, file := range repository.Files {
 		files[file.Path] = file
@@ -309,6 +313,14 @@ func targetedRepositoryFiles(repository discovery.Repository, graph codegraph.Gr
 			for _, match := range objective.Matches {
 				add(match.Path, match.StartLine, 90)
 				addContext(match.Context, 85)
+			}
+		}
+	}
+	for _, use := range confirmedUses {
+		definition := aiuse.Use{Paths: append([]string(nil), use.Paths...)}
+		for path, file := range files {
+			if targetedFileKind(file.Kind) && aiuse.UseMatchesPath(definition, path) {
+				add(path, 1, 70)
 			}
 		}
 	}
