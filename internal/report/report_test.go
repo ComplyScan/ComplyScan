@@ -16,6 +16,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
+	"github.com/ComplyScan/ComplyScan/internal/usemapping"
 	"github.com/ComplyScan/ComplyScan/internal/verification"
 )
 
@@ -44,6 +45,10 @@ func TestWriteJSON(t *testing.T) {
 		RuleID: "AI-DOC-001", Title: "Missing docs", Severity: rules.SeverityMedium,
 	}}, nil, 2)
 	value.AIUseInventory = &aiuse.Snapshot{Summary: aiuse.SnapshotSummary{Confirmed: 1}}
+	value.AIUseMappings = &usemapping.Report{SchemaVersion: 1, Summary: usemapping.Summary{
+		Uses: 1, FrameworkSystemContexts: 1, WithInScopeCodeEvidence: 1, ObjectivesWithEvidenceOutsideUse: 1,
+		LikelyRequiredWithoutInScopeEvidence: 1, RecommendedWithoutInScopeEvidence: 1,
+	}, Uses: []usemapping.UseResult{{UseID: "assistant", UseName: "Assistant"}}}
 	var output bytes.Buffer
 	if err := WriteJSON(&output, value); err != nil {
 		t.Fatal(err)
@@ -52,7 +57,7 @@ func TestWriteJSON(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 7 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
+	if decoded.SchemaVersion != 8 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
 		t.Fatalf("unexpected tool: %#v", decoded.Tool)
 	}
 	if decoded.RepositoryAnalysisRun != RepositoryAnalysisNotRequested {
@@ -60,6 +65,17 @@ func TestWriteJSON(t *testing.T) {
 	}
 	if decoded.AIUseInventory == nil || decoded.AIUseInventory.Summary.Confirmed != 1 {
 		t.Fatalf("AI-use inventory was not serialized: %#v", decoded.AIUseInventory)
+	}
+	if decoded.AIUseMappings == nil || decoded.AIUseMappings.SchemaVersion != 1 || decoded.AIUseMappings.Summary.Uses != 1 {
+		t.Fatalf("AI-use mappings were not serialized: %#v", decoded.AIUseMappings)
+	}
+	if !strings.Contains(output.String(), `"framework_system_contexts": 1`) ||
+		!strings.Contains(output.String(), `"with_in_scope_code_evidence": 1`) ||
+		!strings.Contains(output.String(), `"objectives_with_evidence_outside_use": 1`) ||
+		!strings.Contains(output.String(), `"likely_required_without_in_scope_code_evidence": 1`) ||
+		!strings.Contains(output.String(), `"recommended_without_in_scope_code_evidence": 1`) ||
+		strings.Contains(output.String(), `"required_without_code_evidence"`) {
+		t.Fatalf("per-use summary schema is ambiguous:\n%s", output.String())
 	}
 	if !strings.HasPrefix(decoded.Scan.ID, "scan-") || decoded.Scan.CreatedAt != "2026-08-03T08:30:00Z" || decoded.Scan.Scope.Findings != "changed-files" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
 		t.Fatalf("unexpected scan metadata: %#v", decoded.Scan)
@@ -90,7 +106,7 @@ func TestWriteJSONDefaultsSchemaSevenRepositoryAnalysisLifecycle(t *testing.T) {
 	}
 }
 
-func TestWriteJSONUsesSchemaSevenEvidenceInvestigationContract(t *testing.T) {
+func TestWriteJSONUsesCurrentEvidenceInvestigationContract(t *testing.T) {
 	value := New(".", "dev", nil, nil, 0)
 	value.TechnicalReview = &providers.TechnicalReviewResult{
 		Provider: providers.Ollama, Model: "qwen3:8b", InputCandidates: 1, Reviewed: 1,
@@ -105,8 +121,8 @@ func TestWriteJSONUsesSchemaSevenEvidenceInvestigationContract(t *testing.T) {
 	if err := WriteJSON(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), `"schema_version": 7`) || !strings.Contains(output.String(), `"repository_analysis_run": "not-requested"`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
-		t.Fatalf("unexpected schema-version-7 investigation JSON:\n%s", output.String())
+	if !strings.Contains(output.String(), `"schema_version": 8`) || !strings.Contains(output.String(), `"repository_analysis_run": "not-requested"`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
+		t.Fatalf("unexpected current-schema investigation JSON:\n%s", output.String())
 	}
 }
 
@@ -167,6 +183,188 @@ func TestConciseMarkdownDoesNotPresentUnchangedUseAsReviewed(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "Not reviewed in this change-focused run") {
 		t.Fatalf("changed-scope limitation missing:\n%s", output.String())
+	}
+}
+
+func TestConciseMarkdownAndTerminalMapRequirementsPerConfirmedAIUse(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	value.AIUseMappings = &usemapping.Report{
+		SchemaVersion: 1,
+		Summary:       usemapping.Summary{Uses: 2, FrameworkSystemContexts: 2, LikelyRequired: 1, Unresolved: 1, WithInScopeCodeEvidence: 1, LikelyRequiredWithoutInScopeEvidence: 1},
+		Uses: []usemapping.UseResult{
+			{
+				UseID: "support-chat", UseName: "Support answer generation", Description: "Drafts support replies.", Paths: []string{"apps/support/**"},
+				Summary: usemapping.Summary{Uses: 1, FrameworkSystemContexts: 1, LikelyRequired: 1, WithInScopeCodeEvidence: 1},
+				Frameworks: []usemapping.FrameworkResult{{ID: "eu-ai-act", Name: "EU AI Act", Contexts: []usemapping.ContextResult{{
+					Association: usemapping.Association{Status: usemapping.AssociationConfigured, SystemID: "support", SystemName: "Support"},
+					Objectives: []usemapping.ObjectiveResult{{
+						ObjectiveResult: reconciliation.ObjectiveResult{
+							ObjectiveID: "eu-aia-14-human-review-gate", Title: "Human review gate", SourceReference: "Article 14",
+							Requirement: reconciliation.RequirementLikelyRequired, Evidence: framework.ObjectiveCandidate,
+							Mapping:            reconciliation.MappingRequirementWithEvidence,
+							EvidenceReferences: []reconciliation.EvidenceReference{{Path: "apps/support/review.go", Line: 12}},
+						},
+						AIReview: &usemapping.CodeReview{
+							RepositoryObjectiveID: "eu-ai-act-pack/eu-aia-14-human-review-gate", SystemID: "support",
+							Verdict: providers.RepositoryVerdictPartial, Strength: providers.StrengthPartial, Confidence: "high",
+							SupportingEvidence: []providers.RepositoryCitation{{Path: "apps/support/review.go", Line: 12}}, Attribution: usemapping.ReviewAttributionMatchingCitations,
+						},
+					}},
+				}}}},
+			},
+			{
+				UseID: "unlinked", UseName: "Unlinked classifier", Paths: []string{"classifier/**"},
+				Summary: usemapping.Summary{Uses: 1, FrameworkSystemContexts: 1, Unresolved: 1, UnassociatedUses: 1},
+				Frameworks: []usemapping.FrameworkResult{{ID: "eu-ai-act", Name: "EU AI Act", Contexts: []usemapping.ContextResult{{
+					Association: usemapping.Association{Status: usemapping.AssociationNone, Message: "No system association."},
+					Objectives: []usemapping.ObjectiveResult{{ObjectiveResult: reconciliation.ObjectiveResult{
+						ObjectiveID: "eu-aia-15-safe-stop", Title: "Safe stop", SourceReference: "Article 15",
+						Requirement: reconciliation.RequirementUnresolved, Evidence: framework.ObjectiveNotDetected, Mapping: reconciliation.MappingApplicabilityUnresolved,
+					}}},
+				}}}},
+			},
+		},
+	}
+	value.RepositoryAnalysisRun = RepositoryAnalysisCompleted
+	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{Result: providers.RepositorySectionResult{ObjectiveObservations: []providers.RepositoryObjectiveObservation{
+		{
+			ObjectiveID: "eu-ai-act-pack/eu-aia-14-human-review-gate", SystemID: "support", Strength: providers.StrengthPartial, Confidence: "high",
+			Rationale: "The gate covers only one path.", SupportingEvidence: []providers.RepositoryCitation{{Path: "apps/support/review.go", Line: 12}},
+			UnresolvedQuestions: []string{"Is human review enforced?"},
+		},
+		{
+			ObjectiveID: "eu-ai-act-pack/eu-aia-15-safe-stop", Strength: providers.StrengthStrong, Confidence: "high",
+			Rationale: "The repository-level implementation is visible but overlaps use scopes.", SupportingEvidence: []providers.RepositoryCitation{{Path: "shared/stop.go", Line: 7}},
+		},
+	}}}
+	value.AIUseMappings.Uses[0].Frameworks[0].Contexts[0].Objectives[0].AIReview.UnresolvedQuestions = []string{"Is human review enforced?"}
+
+	var markdown bytes.Buffer
+	if err := WriteMarkdown(&markdown, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"### Requirements and code evidence by confirmed AI use", "Support answer generation", "Support (support)",
+		"Human review gate", "Likely required from declared context", "Partially implemented in the reviewed code", "apps/support/review.go:12",
+		"Unlinked classifier", "No configured system association", "Cannot determine from saved context",
+		"AI use has no configured system context", "Which configured system contains the AI use Unlinked classifier?",
+		"Repository-level, not assigned to one confirmed AI use: Safe stop", "shared/stop.go:7",
+		"Support answer generation: Is human review enforced?",
+	} {
+		if !strings.Contains(markdown.String(), expected) {
+			t.Errorf("per-use Markdown missing %q:\n%s", expected, markdown.String())
+		}
+	}
+	if strings.Count(markdown.String(), "Is human review enforced?") != 1 {
+		t.Fatalf("covered repository question was duplicated:\n%s", markdown.String())
+	}
+	if strings.Contains(markdown.String(), "| **Review** | Human review gate |") {
+		t.Fatalf("covered repository observation produced a duplicate generic action:\n%s", markdown.String())
+	}
+	if strings.Contains(markdown.String(), "### Code-level safeguard decisions") || !strings.Contains(markdown.String(), "### Other code-level evidence") {
+		t.Fatalf("per-use decisions were duplicated in the generic evidence section:\n%s", markdown.String())
+	}
+	var terminal bytes.Buffer
+	if err := WriteTerminalConciseCompletion(&terminal, value); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(terminal.String(), "Per-use requirement mapping: 2 confirmed AI use(s), 2 framework/system context(s)") ||
+		!strings.Contains(terminal.String(), "Support answer generation: 1 likely-required check(s)") ||
+		!strings.Contains(terminal.String(), "Unlinked classifier: 0 likely-required check(s)") ||
+		!strings.Contains(terminal.String(), "no system association (context needed)") {
+		t.Fatalf("per-use terminal summary missing:\n%s", terminal.String())
+	}
+}
+
+func TestVoluntaryFrameworkRecommendationDoesNotRequireSystemAssociation(t *testing.T) {
+	context := usemapping.ContextResult{
+		Association: usemapping.Association{Status: usemapping.AssociationNone},
+		Objectives: []usemapping.ObjectiveResult{{ObjectiveResult: reconciliation.ObjectiveResult{
+			ObjectiveID: "practice", Requirement: reconciliation.RequirementRecommended,
+			Mapping: reconciliation.MappingRecommendedWithoutEvidence,
+		}}},
+	}
+	if developerUseContextNeedsAssociation(context) {
+		t.Fatal("framework-wide voluntary recommendation incorrectly required a system association")
+	}
+}
+
+func TestPerUseReportOmitsEmptyDuplicateEvidenceSection(t *testing.T) {
+	var output bytes.Buffer
+	if err := writeDeveloperEvidenceMarkdown(&output, developerReportView{hasPerUseMappings: true}); err != nil {
+		t.Fatal(err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("empty duplicate evidence section = %q", output.String())
+	}
+}
+
+func TestPerUseActionsRespectApplicabilityBeforeAIImplementationVerdict(t *testing.T) {
+	use := usemapping.UseResult{UseID: "assistant", UseName: "Assistant"}
+	association := usemapping.Association{Status: usemapping.AssociationConfigured, SystemID: "assistant", SystemName: "Assistant"}
+	objective := usemapping.ObjectiveResult{
+		ObjectiveResult: reconciliation.ObjectiveResult{
+			ObjectiveID: "control", Title: "Human review gate",
+			Requirement: reconciliation.RequirementNotCurrentlyIndicated,
+			Mapping:     reconciliation.MappingNotCurrentlyIndicated,
+		},
+		AIReview: &usemapping.CodeReview{Verdict: providers.RepositoryVerdictNotImplemented},
+	}
+	if action, include := developerUseObjectiveAction(use, association, objective); include {
+		t.Fatalf("non-indicated safeguard became an implementation action: %#v", action)
+	}
+
+	objective.Requirement = reconciliation.RequirementRecommended
+	objective.Mapping = reconciliation.MappingRecommendedWithEvidence
+	action, include := developerUseObjectiveAction(use, association, objective)
+	if !include || action.priority != "Review" || !strings.Contains(action.why, "voluntary framework") {
+		t.Fatalf("recommended safeguard action = %#v, %v", action, include)
+	}
+
+	objective.Requirement = reconciliation.RequirementLikelyRequired
+	action, include = developerUseObjectiveAction(use, association, objective)
+	if !include || action.priority != "High" {
+		t.Fatalf("likely-required safeguard action = %#v, %v", action, include)
+	}
+
+	objective.Mapping = reconciliation.MappingUnableToEvaluate
+	objective.AIReview.Verdict = providers.RepositoryVerdictImplemented
+	if action, include = developerUseObjectiveAction(use, association, objective); include {
+		t.Fatalf("implemented use-scoped review was overridden by deterministic coverage warning: %#v", action)
+	}
+	objective.AIReview = nil
+	if action, include = developerUseObjectiveAction(use, association, objective); !include || action.priority != "Review" {
+		t.Fatalf("unreviewed unsupported code did not remain visible: %#v, %v", action, include)
+	}
+
+	objective.Mapping = reconciliation.MappingRequirementWithoutEvidence
+	objective.EvidenceOutsideUse = []usemapping.EvidenceLocation{{Path: "shared/review.go", Line: 9}}
+	action, include = developerUseObjectiveAction(use, association, objective)
+	if !include || !strings.Contains(action.why, "elsewhere in the repository") || !strings.Contains(action.next, "add that path") || !strings.Contains(action.evidence, "Outside saved paths: shared/review.go:9") {
+		t.Fatalf("outside-scope safeguard action = %#v, %v", action, include)
+	}
+
+	objective.EvidenceOutsideUse = nil
+	objective.Mapping = reconciliation.MappingRequirementWithEvidence
+	objective.Investigation = &reconciliation.ObjectiveInvestigation{Conclusion: providers.ConclusionSubstantiated, Assurance: providers.AssuranceAISubstantiated}
+	if action, include = developerUseObjectiveAction(use, association, objective); include {
+		t.Fatalf("substantiated bounded investigation became an action: %#v", action)
+	}
+	if result := developerUseCodeResult(objective); !strings.Contains(result, "substantiated by the bounded AI evidence review") {
+		t.Fatalf("bounded investigation result = %q", result)
+	}
+	objective.Investigation.Conclusion = providers.ConclusionNotFoundAfterInvestigation
+	action, include = developerUseObjectiveAction(use, association, objective)
+	if !include || action.priority != "High" || !strings.Contains(action.why, "No implementation was found") {
+		t.Fatalf("negative bounded investigation action = %#v, %v", action, include)
+	}
+
+	value := Report{AIUseMappings: &usemapping.Report{Uses: []usemapping.UseResult{{
+		UseID: "assistant", Frameworks: []usemapping.FrameworkResult{{ID: "eu-ai-act", Contexts: []usemapping.ContextResult{{Objectives: []usemapping.ObjectiveResult{objective}}}}},
+	}}}}
+	implemented, partial, notImplemented, unclear := developerTechnicalVerdictCounts(value)
+	if implemented != 0 || partial != 0 || notImplemented != 1 || unclear != 0 {
+		t.Fatalf("bounded verdict counts = %d/%d/%d/%d", implemented, partial, notImplemented, unclear)
 	}
 }
 

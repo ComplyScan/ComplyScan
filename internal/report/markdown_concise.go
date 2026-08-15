@@ -11,6 +11,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
+	"github.com/ComplyScan/ComplyScan/internal/usemapping"
 	"github.com/ComplyScan/ComplyScan/internal/verification"
 )
 
@@ -18,6 +19,7 @@ const (
 	maxDeveloperActions   = 8
 	maxDeveloperEvidence  = 5
 	maxDeveloperQuestions = 5
+	maxDeveloperUseChecks = 8
 )
 
 type developerAction struct {
@@ -59,6 +61,7 @@ type developerReportView struct {
 	cannotDetermine    int
 	referenceDetails   []string
 	evidenceBundle     string
+	hasPerUseMappings  bool
 }
 
 func writeDeveloperReportMarkdown(writer io.Writer, value Report, evidenceBundle string) error {
@@ -70,6 +73,9 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report, evidenceBundle
 		return err
 	}
 	if err := writeDeveloperAIUsesMarkdown(writer, value, view); err != nil {
+		return err
+	}
+	if err := writeDeveloperAIUseMappingsMarkdown(writer, value, view.evidenceBundle); err != nil {
 		return err
 	}
 	if err := writeDeveloperEvidenceMarkdown(writer, view); err != nil {
@@ -110,7 +116,7 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 	view := developerReportView{
 		sourceFilesSeen: counts.SourceFilesSeen, filesIndexed: counts.FilesIndexed,
 		unsupportedFiles: counts.UnsupportedFiles, repositoryAnalysis: developerRepositoryAnalysisLabel(value),
-		evidenceBundle: evidenceBundle,
+		evidenceBundle: evidenceBundle, hasPerUseMappings: value.AIUseMappings != nil,
 	}
 	if value.RepositoryAnalysis != nil {
 		if view.sourceFilesSeen == 0 {
@@ -191,6 +197,43 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 			})
 		}
 	}
+	coveredSystemObjectives := make(map[string]struct{})
+	coveredRepositoryObservations := make(map[string]struct{})
+	if value.AIUseMappings != nil {
+		for _, use := range value.AIUseMappings.Uses {
+			for _, frameworkResult := range use.Frameworks {
+				for _, context := range frameworkResult.Contexts {
+					if developerUseContextNeedsAssociation(context) {
+						switch context.Association.Status {
+						case usemapping.AssociationNone:
+							addAction("ai-use-context/"+use.UseID, developerAction{
+								priority: "Review", issue: "AI use has no configured system context: " + use.UseName,
+								why:  "Code evidence can be scoped to this use, but ComplyScan cannot screen the context-dependent requirements without a linked system profile.",
+								next: "Associate this use with the relevant configured system in the AI-use register.", evidence: aiuse.DefaultPath,
+							})
+						case usemapping.AssociationMissing:
+							addAction("ai-use-context/"+use.UseID+"/"+context.Association.SystemID, developerAction{
+								priority: "Review", issue: "AI use references a missing configured system: " + use.UseName,
+								why:  "The saved system ID " + context.Association.SystemID + " is not present in the active configuration, so context-dependent applicability cannot be screened reliably.",
+								next: "Correct the system association or restore the configured system before relying on this mapping.", evidence: aiuse.DefaultPath,
+							})
+						}
+					}
+					for _, objective := range context.Objectives {
+						if context.Association.Status == usemapping.AssociationConfigured {
+							coveredSystemObjectives[context.Association.SystemID+"\x00"+objective.ObjectiveID] = struct{}{}
+						}
+						if action, include := developerUseObjectiveAction(use, context.Association, objective); include {
+							addAction("ai-use-objective/"+use.UseID+"/"+frameworkResult.ID+"/"+context.Association.SystemID+"/"+objective.ObjectiveID, action)
+						}
+						if objective.AIReview != nil {
+							coveredRepositoryObservations[objective.AIReview.SystemID+"\x00"+objective.AIReview.RepositoryObjectiveID] = struct{}{}
+						}
+					}
+				}
+			}
+		}
+	}
 
 	for _, finding := range value.Findings {
 		if rules.SeverityRank(finding.Severity) < rules.SeverityRank(rules.SeverityMedium) {
@@ -210,6 +253,9 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 
 	for _, system := range developerSystemResults(value) {
 		for _, objective := range system.Objectives {
+			if _, covered := coveredSystemObjectives[system.SystemID+"\x00"+objective.ObjectiveID]; covered {
+				continue
+			}
 			action, include := developerObjectiveAction(objective)
 			if !include {
 				continue
@@ -225,6 +271,9 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 	if value.RepositoryAnalysis != nil {
 		for _, observation := range value.RepositoryAnalysis.Result.ObjectiveObservations {
 			rawID := developerRawObjectiveID(observation.ObjectiveID)
+			if _, covered := coveredRepositoryObservations[observation.SystemID+"\x00"+observation.ObjectiveID]; covered {
+				continue
+			}
 			verdict := observation.DerivedTechnicalVerdict()
 			if verdict == providers.RepositoryVerdictImplemented {
 				continue
@@ -311,8 +360,12 @@ func writeDeveloperOutcomeMarkdown(writer io.Writer, value Report, view develope
 	} else if value.RepositoryAnalysis != nil {
 		suggested = len(value.RepositoryAnalysis.Result.AIUses)
 	}
-	_, err := fmt.Fprintf(writer, "\n## Overall result\n\n**%s**\n\n- Saved AI uses: **%d confirmed, %d draft, %d retired**\n- New model suggestions: **%d**\n- Ungrouped technical signals: **%d**\n- Important code problems: **%d**\n- Safeguards needing code changes or more evidence: **%d**\n- AI-reviewed code safeguards: **%d implemented, %d partial, %d not demonstrated, %d unclear**\n- Questions only a person can answer: **%d**\n",
-		view.outcome, confirmed, draft, retired, suggested, ungrouped, view.importantRisks, view.controlsToReview, view.implemented, view.partial, view.notImplemented, view.cannotDetermine, view.questionTotal)
+	reviewedLabel := "AI-reviewed code safeguards"
+	if value.AIUseMappings != nil {
+		reviewedLabel = "AI-reviewed safeguards within confirmed-use scopes"
+	}
+	_, err := fmt.Fprintf(writer, "\n## Overall result\n\n**%s**\n\n- Saved AI uses: **%d confirmed, %d draft, %d retired**\n- New model suggestions: **%d**\n- Ungrouped technical signals: **%d**\n- Important code problems: **%d**\n- Safeguards needing code changes or more evidence: **%d**\n- %s: **%d implemented, %d partial, %d not demonstrated, %d unclear**\n- Questions only a person can answer: **%d**\n",
+		view.outcome, confirmed, draft, retired, suggested, ungrouped, view.importantRisks, view.controlsToReview, reviewedLabel, view.implemented, view.partial, view.notImplemented, view.cannotDetermine, view.questionTotal)
 	return err
 }
 
@@ -407,6 +460,334 @@ func writeDeveloperSavedAIUsesMarkdown(writer io.Writer, title string, values []
 	return nil
 }
 
+type developerUseCheck struct {
+	framework   string
+	context     string
+	title       string
+	requirement string
+	codeResult  string
+	evidence    string
+	priority    int
+}
+
+func writeDeveloperAIUseMappingsMarkdown(writer io.Writer, value Report, evidenceBundle string) error {
+	if value.AIUseMappings == nil || len(value.AIUseMappings.Uses) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintln(writer, "\n### Requirements and code evidence by confirmed AI use\n\nEach use is checked only against code inside its saved repository paths. Applicability comes from its associated configured system and remains a screening result, not a legal conclusion."); err != nil {
+		return err
+	}
+	for _, use := range value.AIUseMappings.Uses {
+		if _, err := fmt.Fprintf(writer, "\n#### %s\n\n- Stable use ID: %s\n- Repository scope: %s\n", markdownText(use.UseName), inlineCode(use.UseID), markdownText(strings.Join(use.Paths, ", "))); err != nil {
+			return err
+		}
+		checks := developerUseChecks(use)
+		if len(checks) == 0 {
+			if _, err := fmt.Fprintln(writer, "- No currently indicated or unresolved code objective was produced for this use."); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := fmt.Fprintln(writer, "\n| Framework and context | Code check | What may apply | Result for this use | Where |\n|---|---|---|---|---|"); err != nil {
+			return err
+		}
+		visible := checks
+		if len(visible) > maxDeveloperUseChecks {
+			visible = visible[:maxDeveloperUseChecks]
+		}
+		for _, check := range visible {
+			if _, err := fmt.Fprintf(writer, "| %s — %s | %s | %s | %s | %s |\n",
+				markdownTableText(check.framework), markdownTableText(check.context), markdownTableText(check.title),
+				markdownTableText(check.requirement), markdownTableText(check.codeResult), markdownTableText(check.evidence)); err != nil {
+				return err
+			}
+		}
+		if remaining := len(checks) - len(visible); remaining > 0 {
+			if _, err := fmt.Fprintf(writer, "\n%d more per-use check(s) are available in %s.\n", remaining, inlineCode(evidenceBundle)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func developerUseChecks(use usemapping.UseResult) []developerUseCheck {
+	result := make([]developerUseCheck, 0)
+	for _, frameworkResult := range use.Frameworks {
+		frameworkName := frameworkResult.Name
+		if frameworkName == "" {
+			frameworkName = frameworkResult.ID
+		}
+		for _, context := range frameworkResult.Contexts {
+			contextName := developerUseContextLabel(context.Association)
+			for _, objective := range context.Objectives {
+				if objective.Requirement == reconciliation.RequirementNotCurrentlyIndicated && objective.Evidence != framework.ObjectiveCandidate && objective.AIReview == nil {
+					continue
+				}
+				result = append(result, developerUseCheck{
+					framework: frameworkName, context: contextName, title: objective.Title,
+					requirement: developerUseRequirementLabel(objective.Requirement),
+					codeResult:  developerUseCodeResult(objective), evidence: developerUseEvidence(objective),
+					priority: developerUseCheckPriority(objective),
+				})
+			}
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].priority != result[j].priority {
+			return result[i].priority < result[j].priority
+		}
+		if result[i].framework != result[j].framework {
+			return result[i].framework < result[j].framework
+		}
+		if result[i].context != result[j].context {
+			return result[i].context < result[j].context
+		}
+		return result[i].title < result[j].title
+	})
+	return result
+}
+
+func developerUseContextLabel(value usemapping.Association) string {
+	switch value.Status {
+	case usemapping.AssociationConfigured:
+		if value.SystemName != "" {
+			return value.SystemName + " (" + value.SystemID + ")"
+		}
+		return value.SystemID
+	case usemapping.AssociationMissing:
+		return "Missing configured system " + value.SystemID
+	default:
+		return "No configured system association"
+	}
+}
+
+func developerUseContextNeedsAssociation(value usemapping.ContextResult) bool {
+	if value.Association.Status == usemapping.AssociationConfigured {
+		return false
+	}
+	for _, objective := range value.Objectives {
+		if objective.Requirement == reconciliation.RequirementUnresolved || objective.Requirement == reconciliation.RequirementContextDependent {
+			return true
+		}
+	}
+	return false
+}
+
+func developerUseRequirementLabel(value reconciliation.RequirementStatus) string {
+	switch value {
+	case reconciliation.RequirementLikelyRequired:
+		return "Likely required from declared context"
+	case reconciliation.RequirementRecommended:
+		return "Recommended practice"
+	case reconciliation.RequirementContextDependent:
+		return "Applicability needs review"
+	case reconciliation.RequirementUnresolved:
+		return "Cannot determine from saved context"
+	default:
+		return "Not currently indicated"
+	}
+}
+
+func developerUseCodeResult(value usemapping.ObjectiveResult) string {
+	if value.AIReview != nil {
+		return developerVerdictLabel(value.AIReview.Verdict)
+	}
+	if value.Investigation != nil {
+		switch value.Investigation.Conclusion {
+		case providers.ConclusionSubstantiated:
+			return "Implementation substantiated by the bounded AI evidence review"
+		case providers.ConclusionPartial:
+			return "Only a partial implementation was substantiated by the bounded AI evidence review"
+		case providers.ConclusionTestOnly:
+			return "Implementation evidence was found only in test code"
+		case providers.ConclusionUnreachable:
+			return "The matching implementation appears unreachable from production code"
+		case providers.ConclusionNotSubstantiated:
+			return "The bounded AI evidence review did not substantiate the implementation"
+		case providers.ConclusionNotFoundAfterInvestigation:
+			return "No implementation was found in the bounded AI evidence search"
+		default:
+			return "The bounded AI evidence review could not determine the implementation state"
+		}
+	}
+	switch value.Evidence {
+	case framework.ObjectiveCandidate:
+		return "Matching code signal found; run an AI review for a code-level implementation decision"
+	case framework.ObjectiveNotEvaluated:
+		return "Could not fully evaluate this use's code scope"
+	default:
+		if len(value.EvidenceOutsideUse) > 0 {
+			return "No matching code signal inside the saved paths; related signal found elsewhere in the repository"
+		}
+		return "No matching code signal found in this use's saved paths"
+	}
+}
+
+func developerUseEvidence(value usemapping.ObjectiveResult) string {
+	if value.AIReview != nil {
+		citations := append(append([]providers.RepositoryCitation(nil), value.AIReview.SupportingEvidence...), value.AIReview.ContradictoryEvidence...)
+		if result := developerCitationText(citations); result != "" {
+			return result
+		}
+	}
+	if len(value.EvidenceReferences) == 0 && len(value.EvidenceOutsideUse) > 0 {
+		return "Outside saved paths: " + developerOutsideUseEvidenceText(value.EvidenceOutsideUse)
+	}
+	return developerEvidenceReferenceText(value.EvidenceReferences)
+}
+
+func developerUseCheckPriority(value usemapping.ObjectiveResult) int {
+	if value.Requirement == reconciliation.RequirementLikelyRequired {
+		verdict, reviewed := developerUseReviewedVerdict(value)
+		if reviewed && verdict == providers.RepositoryVerdictNotImplemented {
+			return 0
+		}
+		if value.Mapping == reconciliation.MappingRequirementWithoutEvidence {
+			return 1
+		}
+		if reviewed && verdict != providers.RepositoryVerdictImplemented {
+			return 2
+		}
+		return 4
+	}
+	if value.Requirement == reconciliation.RequirementUnresolved || value.Requirement == reconciliation.RequirementContextDependent {
+		return 3
+	}
+	if value.Requirement == reconciliation.RequirementRecommended {
+		verdict, reviewed := developerUseReviewedVerdict(value)
+		if value.Mapping == reconciliation.MappingRecommendedWithoutEvidence || (reviewed && verdict != providers.RepositoryVerdictImplemented) {
+			return 5
+		}
+	}
+	if value.Mapping == reconciliation.MappingRecommendedWithoutEvidence {
+		return 5
+	}
+	return 6
+}
+
+func developerUseObjectiveAction(use usemapping.UseResult, association usemapping.Association, objective usemapping.ObjectiveResult) (developerAction, bool) {
+	if association.Status != usemapping.AssociationConfigured {
+		return developerAction{}, false
+	}
+	evidence := developerUseEvidence(objective)
+	context := use.UseName + " under " + developerUseContextLabel(association)
+	if objective.Mapping == reconciliation.MappingEvidenceMismatch {
+		return developerAction{
+			priority: "Review", issue: context + ": check the declared context for " + objective.Title,
+			why:  "Related code was found inside this AI use, but its declared system context does not currently indicate the safeguard.",
+			next: "Confirm the AI-use association and the configured system facts before deciding whether this safeguard applies.", evidence: evidence, control: true,
+		}, true
+	}
+	if objective.Requirement != reconciliation.RequirementLikelyRequired && objective.Requirement != reconciliation.RequirementRecommended {
+		return developerAction{}, false
+	}
+	if objective.AIReview != nil {
+		switch objective.AIReview.Verdict {
+		case providers.RepositoryVerdictImplemented:
+			return developerAction{}, false
+		case providers.RepositoryVerdictNotImplemented:
+			if objective.Requirement == reconciliation.RequirementRecommended {
+				return developerAction{
+					priority: "Review", issue: context + ": " + objective.Title,
+					why:  "The selected voluntary framework recommends this safeguard, but the code review did not demonstrate it inside the confirmed AI-use paths.",
+					next: "Decide whether to implement the practice for this AI use and document that decision.", evidence: evidence, control: true,
+				}, true
+			}
+			return developerAction{
+				priority: "High", issue: context + ": " + objective.Title,
+				why:  "The code review did not demonstrate this safeguard inside the confirmed AI-use paths.",
+				next: "Implement the safeguard for this AI use or correct its saved path scope, then rerun `complyscan review`.", evidence: evidence, control: true,
+			}, true
+		case providers.RepositoryVerdictPartial:
+			why := "The code review found only a partial implementation inside this AI use."
+			if objective.Requirement == reconciliation.RequirementRecommended {
+				why = "The selected voluntary framework recommends this safeguard, and the code review found only a partial implementation inside this AI use."
+			}
+			return developerAction{
+				priority: "Review", issue: context + ": " + objective.Title,
+				why:  why,
+				next: "Address the missing implementation elements recorded in the evidence bundle, then rerun `complyscan review`.", evidence: evidence, control: true,
+			}, true
+		default:
+			why := "The code review could not determine whether this safeguard is implemented for this AI use."
+			if objective.Requirement == reconciliation.RequirementRecommended {
+				why = "The selected voluntary framework recommends this safeguard, but the code review could not determine whether it is implemented for this AI use."
+			}
+			return developerAction{
+				priority: "Review", issue: context + ": " + objective.Title,
+				why:  why,
+				next: "Provide the missing code context or narrow the saved use paths, then rerun `complyscan review`.", evidence: evidence, control: true,
+			}, true
+		}
+	}
+	if objective.Investigation != nil {
+		return developerUseInvestigationAction(context, objective, evidence)
+	}
+	if objective.Mapping == reconciliation.MappingUnableToEvaluate {
+		return developerAction{
+			priority: "Review", issue: context + ": " + objective.Title,
+			why:  "ComplyScan could not fully evaluate code inside this AI use that may be relevant to the safeguard.",
+			next: "Review the unsupported code manually or add analyzer support, then rerun ComplyScan.", evidence: evidence, control: true,
+		}, true
+	}
+	if objective.Mapping == reconciliation.MappingRequirementWithoutEvidence {
+		why := "The declared system context indicates this safeguard is likely required, but no matching signal was found inside this AI use's saved paths."
+		next := "Confirm the use scope and implement the safeguard if applicable; an explicit AI review can then assess the code-level implementation."
+		if len(objective.EvidenceOutsideUse) > 0 {
+			why = "The declared system context indicates this safeguard is likely required. A related signal exists elsewhere in the repository, but not inside this AI use's saved paths."
+			next = "Check whether the outside code is shared by this AI use. If it is, add that path to the use scope; otherwise implement the safeguard for this use."
+		}
+		return developerAction{
+			priority: "High", issue: context + ": " + objective.Title,
+			why:  why,
+			next: next, evidence: evidence, control: true,
+		}, true
+	}
+	if objective.Mapping == reconciliation.MappingRecommendedWithoutEvidence {
+		why := "The selected voluntary framework recommends this safeguard, but no matching signal was found inside this AI use's saved paths."
+		next := "Decide whether to implement the practice for this AI use and document that decision."
+		if len(objective.EvidenceOutsideUse) > 0 {
+			why = "The selected voluntary framework recommends this safeguard. A related signal exists elsewhere in the repository, but not inside this AI use's saved paths."
+			next = "Check whether the outside code is shared by this AI use. If it is, add that path to the use scope; otherwise decide whether to implement the practice here."
+		}
+		return developerAction{
+			priority: "Review", issue: context + ": " + objective.Title,
+			why:  why,
+			next: next, evidence: evidence, control: true,
+		}, true
+	}
+	if objective.Mapping == reconciliation.MappingRequirementWithEvidence || objective.Mapping == reconciliation.MappingRecommendedWithEvidence {
+		return developerAction{
+			priority: "Review", issue: context + ": verify " + objective.Title,
+			why:  "A local code signal was found inside this AI use, but no use-scoped AI implementation decision is available.",
+			next: "Run `complyscan review` and confirm that the detected code implements this safeguard for the saved use.", evidence: evidence, control: true,
+		}, true
+	}
+	return developerAction{}, false
+}
+
+func developerUseInvestigationAction(context string, objective usemapping.ObjectiveResult, evidence string) (developerAction, bool) {
+	conclusion := objective.Investigation.Conclusion
+	if conclusion == providers.ConclusionSubstantiated {
+		return developerAction{}, false
+	}
+	priority := "Review"
+	if objective.Requirement == reconciliation.RequirementLikelyRequired &&
+		(conclusion == providers.ConclusionNotSubstantiated || conclusion == providers.ConclusionNotFoundAfterInvestigation) {
+		priority = "High"
+	}
+	why := developerUseCodeResult(objective) + "."
+	if objective.Requirement == reconciliation.RequirementRecommended {
+		why = "The selected voluntary framework recommends this safeguard. " + why
+	}
+	next := "Review the bounded investigation details in the evidence bundle, address the missing implementation or evidence, and rerun `complyscan review`."
+	return developerAction{
+		priority: priority, issue: context + ": " + objective.Title,
+		why: why, next: next, evidence: evidence, control: true,
+	}, true
+}
+
 func developerAIUseObservationLabel(status aiuse.ObservationStatus, changedScope bool) string {
 	switch status {
 	case aiuse.ObservationModelReviewed:
@@ -465,11 +846,21 @@ func writeDeveloperActionsMarkdown(writer io.Writer, view developerReportView) e
 }
 
 func writeDeveloperEvidenceMarkdown(writer io.Writer, view developerReportView) error {
-	if _, err := fmt.Fprintln(writer, "\n### Code-level safeguard decisions"); err != nil {
+	if len(view.evidence) == 0 {
+		if view.hasPerUseMappings {
+			return nil
+		}
+		if _, err := fmt.Fprintln(writer, "\n### Code-level safeguard decisions"); err != nil {
+			return err
+		}
+		_, err := fmt.Fprintln(writer, "\nComplyScan did not produce a code-level decision for any checked safeguard.")
 		return err
 	}
-	if len(view.evidence) == 0 {
-		_, err := fmt.Fprintln(writer, "\nComplyScan did not produce a code-level decision for any checked safeguard.")
+	heading := "Code-level safeguard decisions"
+	if view.hasPerUseMappings {
+		heading = "Other code-level evidence"
+	}
+	if _, err := fmt.Fprintln(writer, "\n### "+heading); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintln(writer, "\n| Safeguard | Code-level result | Where |\n|---|---|---|"); err != nil {
@@ -596,6 +987,17 @@ func developerObjectiveTitles(value Report) map[string]string {
 			titles[objective.ObjectiveID] = objective.Title
 		}
 	}
+	if value.AIUseMappings != nil {
+		for _, use := range value.AIUseMappings.Uses {
+			for _, frameworkResult := range use.Frameworks {
+				for _, context := range frameworkResult.Contexts {
+					for _, objective := range context.Objectives {
+						titles[objective.ObjectiveID] = objective.Title
+					}
+				}
+			}
+		}
+	}
 	return titles
 }
 
@@ -610,7 +1012,24 @@ func developerSupportingEvidence(value Report, titles map[string]string) ([]deve
 		seen[key] = struct{}{}
 		items = append(items, item)
 	}
-	if value.RepositoryAnalysis != nil {
+	if value.AIUseMappings != nil {
+		if value.RepositoryAnalysis != nil {
+			for _, observation := range value.RepositoryAnalysis.Result.ObjectiveObservations {
+				if developerRepositoryObservationCoveredByUse(value, observation) {
+					continue
+				}
+				verdict := observation.DerivedTechnicalVerdict()
+				if (verdict != providers.RepositoryVerdictImplemented && verdict != providers.RepositoryVerdictPartial) || len(observation.SupportingEvidence) == 0 {
+					continue
+				}
+				rawID := developerRawObjectiveID(observation.ObjectiveID)
+				add("repository-level/"+observation.SystemID+"/"+observation.ObjectiveID, developerEvidence{
+					title:      "Repository-level, not assigned to one confirmed AI use: " + developerObjectiveTitle(rawID, titles),
+					assessment: developerVerdictAssessment(observation), evidence: developerCitationText(observation.SupportingEvidence), verdict: verdict,
+				})
+			}
+		}
+	} else if value.RepositoryAnalysis != nil {
 		for _, observation := range value.RepositoryAnalysis.Result.ObjectiveObservations {
 			rawID := developerRawObjectiveID(observation.ObjectiveID)
 			observations[rawID] = observation
@@ -653,11 +1072,13 @@ func developerSupportingEvidence(value Report, titles map[string]string) ([]deve
 			add(objective.ID, item)
 		}
 	}
-	for _, result := range value.Frameworks {
-		addDeterministic(result.TechnicalEvidence)
-	}
-	if len(value.Frameworks) == 0 && value.TechnicalEvidence != nil {
-		addDeterministic(*value.TechnicalEvidence)
+	if value.AIUseMappings == nil {
+		for _, result := range value.Frameworks {
+			addDeterministic(result.TechnicalEvidence)
+		}
+		if len(value.Frameworks) == 0 && value.TechnicalEvidence != nil {
+			addDeterministic(*value.TechnicalEvidence)
+		}
 	}
 	for _, result := range value.ExecutionVerifications {
 		if result.Status != verification.StatusPassed {
@@ -677,6 +1098,43 @@ func developerSupportingEvidence(value Report, titles map[string]string) ([]deve
 }
 
 func developerTechnicalVerdictCounts(value Report) (implemented, partial, notImplemented, cannotDetermine int) {
+	if value.AIUseMappings != nil {
+		seen := make(map[string]struct{})
+		for _, use := range value.AIUseMappings.Uses {
+			for _, frameworkResult := range use.Frameworks {
+				for _, context := range frameworkResult.Contexts {
+					for _, objective := range context.Objectives {
+						verdict, reviewed := developerUseReviewedVerdict(objective)
+						if !reviewed {
+							continue
+						}
+						objectiveKey := objective.ObjectiveID
+						if objective.AIReview != nil && objective.AIReview.RepositoryObjectiveID != "" {
+							objectiveKey = objective.AIReview.RepositoryObjectiveID
+						} else if frameworkResult.ID != "" {
+							objectiveKey = frameworkResult.ID + "/" + objective.ObjectiveID
+						}
+						key := use.UseID + "\x00" + objectiveKey
+						if _, exists := seen[key]; exists {
+							continue
+						}
+						seen[key] = struct{}{}
+						switch verdict {
+						case providers.RepositoryVerdictImplemented:
+							implemented++
+						case providers.RepositoryVerdictPartial:
+							partial++
+						case providers.RepositoryVerdictNotImplemented:
+							notImplemented++
+						default:
+							cannotDetermine++
+						}
+					}
+				}
+			}
+		}
+		return
+	}
 	if value.RepositoryAnalysis == nil {
 		return 0, 0, 0, 0
 	}
@@ -693,6 +1151,25 @@ func developerTechnicalVerdictCounts(value Report) (implemented, partial, notImp
 		}
 	}
 	return implemented, partial, notImplemented, cannotDetermine
+}
+
+func developerUseReviewedVerdict(objective usemapping.ObjectiveResult) (providers.RepositoryTechnicalVerdict, bool) {
+	if objective.AIReview != nil {
+		return objective.AIReview.Verdict, true
+	}
+	if objective.Investigation == nil {
+		return "", false
+	}
+	switch objective.Investigation.Conclusion {
+	case providers.ConclusionSubstantiated:
+		return providers.RepositoryVerdictImplemented, true
+	case providers.ConclusionPartial, providers.ConclusionTestOnly, providers.ConclusionUnreachable:
+		return providers.RepositoryVerdictPartial, true
+	case providers.ConclusionNotSubstantiated, providers.ConclusionNotFoundAfterInvestigation:
+		return providers.RepositoryVerdictNotImplemented, true
+	default:
+		return providers.RepositoryVerdictCannotDetermine, true
+	}
 }
 
 func developerVerdictAssessment(observation providers.RepositoryObjectiveObservation) string {
@@ -731,6 +1208,30 @@ func developerQuestions(value Report) ([]string, int) {
 		seen[key] = struct{}{}
 		questions = append(questions, question)
 	}
+	if value.AIUseMappings != nil {
+		for _, use := range value.AIUseMappings.Uses {
+			for _, frameworkResult := range use.Frameworks {
+				for _, context := range frameworkResult.Contexts {
+					if developerUseContextNeedsAssociation(context) {
+						switch context.Association.Status {
+						case usemapping.AssociationNone:
+							add("Which configured system contains the AI use " + use.UseName + "?")
+						case usemapping.AssociationMissing:
+							add("Which current configured system replaces " + context.Association.SystemID + " for the AI use " + use.UseName + "?")
+						}
+					}
+					for _, objective := range context.Objectives {
+						if objective.AIReview == nil {
+							continue
+						}
+						for _, question := range objective.AIReview.UnresolvedQuestions {
+							add(use.UseName + ": " + question)
+						}
+					}
+				}
+			}
+		}
+	}
 	if len(value.Frameworks) > 0 {
 		for _, result := range value.Frameworks {
 			if result.Applicability == nil {
@@ -756,6 +1257,9 @@ func developerQuestions(value Report) ([]string, int) {
 			}
 		}
 		for _, observation := range value.RepositoryAnalysis.Result.ObjectiveObservations {
+			if developerRepositoryObservationCoveredByUse(value, observation) {
+				continue
+			}
 			for _, question := range observation.UnresolvedQuestions {
 				add(question)
 			}
@@ -772,6 +1276,24 @@ func developerQuestions(value Report) ([]string, int) {
 		questions = questions[:maxDeveloperQuestions]
 	}
 	return questions, total
+}
+
+func developerRepositoryObservationCoveredByUse(value Report, observation providers.RepositoryObjectiveObservation) bool {
+	if value.AIUseMappings == nil {
+		return false
+	}
+	for _, use := range value.AIUseMappings.Uses {
+		for _, frameworkResult := range use.Frameworks {
+			for _, context := range frameworkResult.Contexts {
+				for _, objective := range context.Objectives {
+					if objective.AIReview != nil && objective.AIReview.RepositoryObjectiveID == observation.ObjectiveID && objective.AIReview.SystemID == observation.SystemID {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 func developerIntegrationSignals(value Report) []string {
@@ -883,6 +1405,20 @@ func developerCitationText(citations []providers.RepositoryCitation) string {
 }
 
 func developerEvidenceReferenceText(references []reconciliation.EvidenceReference) string {
+	locations := make([]string, 0, 2)
+	for index, reference := range references {
+		if index == 2 {
+			break
+		}
+		locations = append(locations, locationText(reference.Path, reference.Line))
+	}
+	if len(locations) == 0 {
+		return "No matching code location found"
+	}
+	return strings.Join(locations, ", ")
+}
+
+func developerOutsideUseEvidenceText(references []usemapping.EvidenceLocation) string {
 	locations := make([]string, 0, 2)
 	for index, reference := range references {
 		if index == 2 {
