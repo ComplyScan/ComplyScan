@@ -2,7 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- A strict, human-owned version-1 AI-use register at `.complyscan/ai-uses.yml`, plus `complyscan ai-uses show` and the explicit `complyscan ai-uses setup` workflow for confirming, merging, dismissing, or deferring repository-analysis suggestions. Stable IDs are generated locally, model-authored IDs never become durable project identity, and path overlap alone cannot silently merge distinct AI uses.
+
 ### Changed
+
+- Plain scans and explicit reviews now load the AI-use register locally without mutating it, exclude the exact manifest from discovery and model context, and report confirmed, draft, retired, suggested, and ungrouped observations separately. Changed-since observations cannot delete or retire saved uses, and confirmation remains a repository grouping rather than a compliance conclusion.
+- Scan evidence bundles now use schema version 7 with a top-level `ai_use_inventory` overlay and explicit `repository_analysis_run` lifecycle; this does not change deterministic findings or CI gating.
 
 - Explicit AI review now reuses exact-match repository-analysis results from a private cache that omits submitted source-context records and credentials. Active review-scope content, framework evidence, profiles, ownership, provider endpoint, model, prompt, strategy, or budget changes invalidate reuse; full reviews bind the full discovered repository, while `review --changed-since` binds its changed-plus-connected model scope. `--refresh-review` forces fresh inference, reports identify cache hits, and cached model summaries or citations remain potentially sensitive.
 - `complyscan scan` is now guaranteed local and deterministic even when provider settings are saved. The new explicit `complyscan review` command runs the same deterministic foundation before activating the configured or one-run provider, preserves reports when AI is unavailable, and supports `--require-ai-review` for automation that requires a complete model layer.

@@ -4,13 +4,13 @@
 
 ## Default pipeline
 
-1. ComplyScan loads its active configuration locally and excludes that exact file from discovery and model context.
+1. ComplyScan loads its active configuration and optional `.complyscan/ai-uses.yml` register locally, then excludes both exact files from discovery and model context.
 2. Discovery applies the existing `.gitignore`, exclusion, size, count, binary, symlink, dependency-directory, generated-output, and nested-repository boundaries.
 3. Local code classifies files, redacts recognised credential formats, inventories likely AI integrations, applies technical evidence rules, and builds the Go, Python, JavaScript, and TypeScript repository graph.
 4. The selector ranks implementation files using AI inventory signals, technical-objective matches, production entry points, imports, callers, and bounded graph relationships. Documentation is not used as the primary proof of an implementation.
 5. The provider receives the selected redacted excerpts, relevant graph context, versioned code objectives, and typed declared system facts in one structured request.
 6. The model may request one follow-up containing at most three literal search terms and optional repository-relative path hints. Trusted local code—not the model—searches only eligible discovered files and returns at most three bounded excerpts. If useful excerpts are found, ComplyScan makes one final structured request. If the initial model response instead exhausts its output allowance, ComplyScan uses that same sole second-call budget for a terse no-follow-up recovery. There are no further rounds.
-7. Trusted code validates objective IDs, configured system IDs, AI-use IDs, classifications, paths, line citations, and ownership boundaries. Invalid output rejects the model pass.
+7. Trusted code validates objective IDs, configured system IDs, transient model AI-use IDs, classifications, paths, line citations, and ownership boundaries. Invalid output rejects the model pass. The transient IDs bind one model response only and never become durable project identity.
 8. The advisory result is saved separately from deterministic findings and does not change the scan's CI threshold.
 
 The normal explicit-review path therefore uses one model call, or at most two when a useful follow-up is requested. It does not create one request per directory or per objective.
@@ -22,6 +22,8 @@ The normal explicit-review path therefore uses one model call, or at most two wh
 The same in-memory changed-plus-connected repository is the hard boundary for targeted selection, broad review modes, per-objective technical investigations, eligible-file manifests, and model-requested follow-up searches. Consequently, choosing `deep`, `full`, or `hierarchical` together with `--changed-since` can broaden analysis only inside that bounded change context; it cannot restore whole-repository model access. Deterministic inventory, framework evidence, reconciliation, documentation checks, and risk-file checks still use the complete local snapshot as documented by their own scan scopes.
 
 Terminal, Markdown, and JSON coverage distinguish the full locally checked repository from the model boundary. They record the `changed-plus-connected` review scope, changed files included, connected files included, files available to local context selection, and excerpts actually submitted. Files outside that boundary were not reviewed by the model, so an absent model observation is never evidence that an unchanged implementation is missing.
+
+The saved AI-use register remains repository-wide human-owned state during this scoped run. ComplyScan may overlay changed technical observations and suggestions, but a missing observation from changed-plus-connected context cannot delete or retire a saved use.
 
 ## Modes
 
@@ -49,7 +51,7 @@ The JSON evidence bundle records the actual mode as `targeted-evidence`, `full-r
 
 Targeted analysis may send selected excerpts from source code, dependency manifests, configuration, CI, GitHub Actions, Docker, Terraform, and environment templates. Selection is grounded in scanner matches and code structure. It does not send every eligible file, and it does not treat an unselected file as evidence that an implementation is absent.
 
-The raw active ComplyScan configuration—normally `.complyscan.yml`, or the exact file passed with `--config`—is never part of the discovered snapshot or a model request. ComplyScan separately constructs typed system facts from that configuration and supplies only fields needed to interpret technical objectives. Other YAML files, including `.github/workflows/*.yml`, remain eligible because they can implement CI, permissions, tests, deployment, or safeguards.
+The raw active ComplyScan configuration—normally `.complyscan.yml`, or the exact file passed with `--config`—and the human-owned `.complyscan/ai-uses.yml` register are never part of the discovered snapshot or a model request. ComplyScan separately constructs typed system facts from the configuration and uses the AI-use register only for local report overlays. Other YAML files, including `.github/workflows/*.yml`, remain eligible because they can implement CI, permissions, tests, deployment, or safeguards.
 
 Generated outputs, dependency trees, build directories, caches, binaries, symlinks, ignored paths, nested repositories unless explicitly enabled, files over the discovery limit, and credentials matching maintained secret patterns are not sent. Secret redaction is defence in depth, not a guarantee that arbitrary proprietary or personal data has been removed. A hosted provider remains an external source-code processing boundary.
 
@@ -63,7 +65,9 @@ Deep modes retain adaptive splitting, incomplete-response recovery, hierarchical
 
 ## What the result means
 
-An AI-use entry is a review candidate supported by submitted repository citations. An objective observation says how strongly the submitted evidence supports a code objective. An unmapped observation records detected AI activity that does not fit a supplied objective. None establishes legal applicability, an organisation's statutory role, actual deployment, complete runtime behaviour, human practice, operational effectiveness, or compliance.
+The raw technical inventory reports integrations and signals. A model AI-use entry is a transient grouping suggestion supported by submitted repository citations. A developer-confirmed AI use is a human-owned grouping in `.complyscan/ai-uses.yml`; confirmation means that the named paths belong together as a product use, not that the use is legally classified or compliant. An objective observation says how strongly the submitted evidence supports a code objective. An unmapped observation records detected AI activity that does not fit a supplied objective. None establishes legal applicability, an organisation's statutory role, actual deployment, complete runtime behaviour, human practice, operational effectiveness, or compliance.
+
+`complyscan review` records suggestions in schema-version 7 reports but never writes the register. `complyscan ai-uses setup` is the only guided writer: it reads a completed report and asks a developer to confirm a new grouping, merge it into an existing grouping, dismiss the unchanged suggestion, or decide later. Stable IDs are generated locally, so a different model or future run cannot silently rename durable uses.
 
 No AI use identified is not proof that a repository has no AI. `not_supported` is not proof that a mechanism is absent. A checked citation proves only that the referenced discovered path and line exist; a reviewer must still decide whether the model's interpretation is correct.
 
