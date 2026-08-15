@@ -39,6 +39,7 @@ func newAIUsesCommand(stdout io.Writer) *cobra.Command {
 	}
 	command.AddCommand(newAIUsesShowCommand(stdout))
 	command.AddCommand(newAIUsesSetupCommand(stdout))
+	command.AddCommand(newAIUsesEditCommand(stdout))
 	return command
 }
 
@@ -157,6 +158,208 @@ func newAIUsesSetupCommand(stdout io.Writer) *cobra.Command {
 	return command
 }
 
+func newAIUsesEditCommand(stdout io.Writer) *cobra.Command {
+	var configPath, manifestOverride string
+	var forceInteractive bool
+	command := &cobra.Command{
+		Use:   "edit [path]",
+		Short: "Edit a developer-confirmed AI use",
+		Long: "Interactively edit one human-owned AI-use record without scanning the repository or contacting a model. " +
+			"The stable AI-use ID and its reviewed suggestion links are preserved.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target := optionalTarget(args)
+			cfg, resolvedConfig, err := config.Resolve(target, configPath)
+			if err != nil {
+				return err
+			}
+			if resolvedConfig == "" {
+				return fmt.Errorf("no %s found for %q; run `complyscan setup` first or provide --config", config.FileName, target)
+			}
+			if !forceInteractive && !isInteractiveReader(cmd.InOrStdin()) {
+				return errors.New("AI-use editing requires a terminal; run this command in an interactive terminal (or use --interactive when deliberately piping answers)")
+			}
+
+			manifestPath := resolveAIUseFile(target, manifestOverride, aiuse.DefaultPath)
+			manifest, exists, err := aiuse.LoadOptional(manifestPath)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				return fmt.Errorf("no AI-use register found at %q; run `complyscan ai-uses setup` first", manifestPath)
+			}
+			if len(manifest.Uses) == 0 {
+				return fmt.Errorf("AI-use register %q has no saved AI uses to edit", manifestPath)
+			}
+
+			prompt := newPromptSession(cmd.InOrStdin(), stdout)
+			if err := editSavedAIUse(prompt, &manifest, cfg.Systems, time.Now()); err != nil {
+				return err
+			}
+			if err := aiuse.Write(manifestPath, manifest); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(stdout, "Saved AI-use changes in %s\n", manifestPath)
+			return err
+		},
+	}
+	command.Flags().StringVar(&configPath, "config", "", "configuration file (defaults to <path>/.complyscan.yml)")
+	command.Flags().StringVar(&manifestOverride, "manifest", "", "AI-use manifest to edit (defaults to <path>/.complyscan/ai-uses.yml)")
+	command.Flags().BoolVar(&forceInteractive, "interactive", false, "edit even when input is redirected")
+	return command
+}
+
+func editSavedAIUse(prompt promptSession, manifest *aiuse.Manifest, systems []profile.System, now time.Time) error {
+	ids := make([]string, 0, len(manifest.Uses))
+	prompt.guidance.choiceDescriptions = make(map[string]string, len(manifest.Uses))
+	for _, use := range manifest.Uses {
+		ids = append(ids, use.ID)
+		prompt.guidance.choiceDescriptions[use.ID] = fmt.Sprintf("%s — %s", use.Name, use.Status)
+	}
+	sort.Strings(ids)
+	id, err := promptRequiredChoice(prompt, "AI use to edit", ids...)
+	if err != nil {
+		return err
+	}
+
+	index := -1
+	for candidate := range manifest.Uses {
+		if manifest.Uses[candidate].ID == id {
+			index = candidate
+			break
+		}
+	}
+	if index < 0 {
+		return fmt.Errorf("saved AI use %q no longer exists", id)
+	}
+
+	updated := manifest.Uses[index]
+	if _, err := fmt.Fprintf(prompt.output, "  Stable ID: %s (cannot be changed)\n", updated.ID); err != nil {
+		return err
+	}
+	updated.Name, err = prompt.text("Name", updated.Name)
+	if err != nil {
+		return err
+	}
+	updated.Description, err = prompt.text("Description", updated.Description)
+	if err != nil {
+		return err
+	}
+	updated.Paths, err = prompt.textList("Positive repository paths", updated.Paths)
+	if err != nil {
+		return err
+	}
+	updated.SystemIDs, err = chooseAIUseSystemsForEdit(prompt, systems, updated.SystemIDs)
+	if err != nil {
+		return err
+	}
+	prompt.guidance.choiceDescriptions = map[string]string{
+		string(aiuse.StatusActive):  "included in current per-use requirement mapping",
+		string(aiuse.StatusRetired): "kept for history but excluded from current requirement mapping",
+	}
+	updated.Status, err = promptChoice(prompt, "Use status", updated.Status, aiuse.StatusActive, aiuse.StatusRetired)
+	if err != nil {
+		return err
+	}
+	updated.Review, err = editAIUseReview(prompt, updated.Review, now)
+	if err != nil {
+		return err
+	}
+
+	// Validate the complete record before replacing it in memory. aiuse.Write
+	// validates the full manifest again immediately before its atomic rename.
+	if err := updated.Validate(); err != nil {
+		return fmt.Errorf("invalid AI-use changes: %w", err)
+	}
+	manifest.Uses[index] = updated
+	return nil
+}
+
+func chooseAIUseSystemsForEdit(prompt promptSession, systems []profile.System, current []string) ([]string, error) {
+	configured := make(map[string]struct{}, len(systems))
+	for _, system := range systems {
+		configured[system.ID] = struct{}{}
+	}
+	missing := make([]string, 0)
+	for _, id := range current {
+		if _, exists := configured[id]; !exists {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 {
+		if _, err := fmt.Fprintf(prompt.output, "  Current system association(s) are no longer configured and cannot be retained: %s\n", strings.Join(missing, ", ")); err != nil {
+			return nil, err
+		}
+	}
+	if len(systems) == 0 {
+		if _, err := fmt.Fprintln(prompt.output, "  No declared system is configured; this AI use will remain unassociated."); err != nil {
+			return nil, err
+		}
+		return []string{}, nil
+	}
+
+	defaults := make([]string, 0, len(current))
+	for _, id := range current {
+		if _, exists := configured[id]; exists {
+			defaults = append(defaults, id)
+		}
+	}
+	associate, err := prompt.confirm("Associate this AI use with one or more declared systems?", len(defaults) > 0)
+	if err != nil {
+		return nil, err
+	}
+	if !associate {
+		return []string{}, nil
+	}
+
+	ids := make([]string, 0, len(systems))
+	prompt.guidance.choiceDescriptions = make(map[string]string, len(systems))
+	for _, system := range systems {
+		ids = append(ids, system.ID)
+		prompt.guidance.choiceDescriptions[system.ID] = system.Name
+	}
+	sort.Strings(ids)
+	if len(ids) == 1 {
+		if _, err := fmt.Fprintf(prompt.output, "  Associated system: %s (%s)\n", prompt.guidance.choiceDescriptions[ids[0]], ids[0]); err != nil {
+			return nil, err
+		}
+		return ids, nil
+	}
+	if len(defaults) == 0 {
+		return promptRequiredChoices(prompt, "Associated systems", ids...)
+	}
+	return promptChoices(prompt, "Associated systems", defaults, ids...)
+}
+
+func editAIUseReview(prompt promptSession, current profile.ProfileReview, now time.Time) (profile.ProfileReview, error) {
+	prompt.guidance.choiceDescriptions = map[string]string{
+		string(profile.ReviewDraft):     "saved for further developer review and excluded from current per-use mapping",
+		string(profile.ReviewConfirmed): "developer-approved grouping included in current per-use mapping",
+	}
+	status, err := promptChoice(prompt, "Developer review status", current.Status, profile.ReviewDraft, profile.ReviewConfirmed)
+	if err != nil {
+		return profile.ProfileReview{}, err
+	}
+	if status == profile.ReviewDraft {
+		if _, err := fmt.Fprintln(prompt.output, "  Draft status clears the previous reviewer and review date."); err != nil {
+			return profile.ProfileReview{}, err
+		}
+		return profile.ProfileReview{Status: profile.ReviewDraft}, nil
+	}
+	reviewer, err := prompt.text("Reviewer", current.ReviewedBy)
+	if err != nil {
+		return profile.ProfileReview{}, err
+	}
+	reviewedAt, err := prompt.text("Review date (YYYY-MM-DD)", now.UTC().Format(time.DateOnly))
+	if err != nil {
+		return profile.ProfileReview{}, err
+	}
+	if _, err := time.Parse(time.DateOnly, reviewedAt); err != nil {
+		return profile.ProfileReview{}, fmt.Errorf("invalid review date %q (want YYYY-MM-DD)", reviewedAt)
+	}
+	return profile.ProfileReview{Status: profile.ReviewConfirmed, ReviewedBy: reviewer, ReviewedAt: reviewedAt}, nil
+}
+
 func optionalTarget(args []string) string {
 	if len(args) == 1 {
 		return args[0]
@@ -202,8 +405,8 @@ func loadAIUseReport(path string) (reportpkg.Report, error) {
 		}
 		return reportpkg.Report{}, fmt.Errorf("parse ComplyScan report %q: %w", path, err)
 	}
-	if value.SchemaVersion != 6 && value.SchemaVersion != 7 && value.SchemaVersion != 8 {
-		return reportpkg.Report{}, fmt.Errorf("ComplyScan report %q uses unsupported schema version %d (want 6, 7, or 8)", path, value.SchemaVersion)
+	if value.SchemaVersion != 6 && value.SchemaVersion != 7 && value.SchemaVersion != 8 && value.SchemaVersion != 9 {
+		return reportpkg.Report{}, fmt.Errorf("ComplyScan report %q uses unsupported schema version %d (want 6, 7, 8, or 9)", path, value.SchemaVersion)
 	}
 	// Schema versions before 7 did not serialize the repository-analysis
 	// lifecycle. A present validated result was necessarily a completed pass,

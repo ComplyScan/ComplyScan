@@ -340,6 +340,255 @@ func TestAIUsesShowSupportsTerminalAndJSON(t *testing.T) {
 	}
 }
 
+func TestAIUsesEditUpdatesHumanOwnedFieldsAndPreservesStableIdentity(t *testing.T) {
+	target := t.TempDir()
+	configPath := filepath.Join(target, "custom-config.yml")
+	cfg := config.Default()
+	cfg.Systems = []profile.System{
+		profile.NewDraftSystem("support", "Support assistant"),
+		profile.NewDraftSystem("ranking", "Candidate ranking"),
+	}
+	if err := config.Write(configPath, cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(target, "custom-ai-uses.yml")
+	fingerprint := strings.Repeat("a", 64)
+	manifest := aiuse.NewManifest()
+	manifest.Uses = []aiuse.Use{
+		{
+			ID: "support-drafter", Name: "Support drafter", Description: "Drafts support replies",
+			SystemIDs: []string{"support"}, Paths: []string{"internal/support/**"}, SuggestionFingerprints: []string{fingerprint},
+			Status: aiuse.StatusActive, Review: profile.ProfileReview{Status: profile.ReviewConfirmed, ReviewedBy: "Old reviewer", ReviewedAt: "2026-08-01"},
+		},
+		{
+			ID: "unchanged-use", Name: "Unchanged", Description: "Must remain unchanged", Paths: []string{"other/**"},
+			Status: aiuse.StatusActive, Review: profile.ProfileReview{Status: profile.ReviewDraft},
+		},
+	}
+	manifest.Dismissals = []aiuse.Dismissal{{Fingerprint: strings.Repeat("b", 64), Reason: "Not a product use"}}
+	if err := aiuse.Write(manifestPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	// Uses are sorted by stable ID, so support-drafter is the first choice.
+	input := strings.NewReader("1\nSupport copilot\nDrafts responses for agents\ninternal/support/**,shared/ai/client.go\ny\n1,2\n2\n2\nNew reviewer\n2026-08-15\n")
+	var stdout, stderr bytes.Buffer
+	code := executeWithInput([]string{"ai-uses", "edit", "--interactive", "--config", configPath, "--manifest", manifestPath, target}, input, &stdout, &stderr, testBuild)
+	if code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	loaded, exists, err := aiuse.LoadOptional(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exists || len(loaded.Uses) != 2 {
+		t.Fatalf("manifest exists=%t uses=%#v", exists, loaded.Uses)
+	}
+	var edited, unchanged aiuse.Use
+	for _, use := range loaded.Uses {
+		switch use.ID {
+		case "support-drafter":
+			edited = use
+		case "unchanged-use":
+			unchanged = use
+		}
+	}
+	if edited.Name != "Support copilot" || edited.Description != "Drafts responses for agents" || edited.Status != aiuse.StatusRetired {
+		t.Fatalf("edited use = %#v", edited)
+	}
+	if got := strings.Join(edited.Paths, ","); got != "internal/support/**,shared/ai/client.go" {
+		t.Fatalf("paths = %q", got)
+	}
+	if got := strings.Join(edited.SystemIDs, ","); got != "ranking,support" {
+		t.Fatalf("system IDs = %q", got)
+	}
+	if edited.Review.Status != profile.ReviewConfirmed || edited.Review.ReviewedBy != "New reviewer" || edited.Review.ReviewedAt != "2026-08-15" {
+		t.Fatalf("review = %#v", edited.Review)
+	}
+	if !reflect.DeepEqual(edited.SuggestionFingerprints, []string{fingerprint}) {
+		t.Fatalf("stable suggestion links changed: %#v", edited.SuggestionFingerprints)
+	}
+	if unchanged.Name != "Unchanged" || len(loaded.Dismissals) != 1 {
+		t.Fatalf("unrelated manifest data changed: use=%#v dismissals=%#v", unchanged, loaded.Dismissals)
+	}
+	for _, expected := range []string{
+		"Stable ID: support-drafter (cannot be changed)",
+		"included in current per-use requirement mapping",
+		"developer-approved grouping included in current per-use mapping",
+		"Saved AI-use changes",
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("output missing %q:\n%s", expected, stdout.String())
+		}
+	}
+}
+
+func TestAIUsesEditAllowsNoSystemAssociationAndDraftClearsReview(t *testing.T) {
+	target := t.TempDir()
+	writeAIUseTestConfig(t, target, profile.NewDraftSystem("support", "Support"))
+	manifestPath := filepath.Join(target, aiuse.DefaultPath)
+	manifest := aiuse.NewManifest()
+	manifest.Uses = []aiuse.Use{{
+		ID: "support", Name: "Support", Description: "Support replies", SystemIDs: []string{"support"}, Paths: []string{"support/**"},
+		Status: aiuse.StatusActive, Review: profile.ProfileReview{Status: profile.ReviewConfirmed, ReviewedBy: "Reviewer", ReviewedAt: "2026-08-01"},
+	}}
+	if err := aiuse.Write(manifestPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	input := strings.NewReader("1\n\n\n\nn\n1\n1\n")
+	var stdout, stderr bytes.Buffer
+	if code := executeWithInput([]string{"ai-uses", "edit", "--interactive", target}, input, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	loaded, _, err := aiuse.LoadOptional(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Uses[0].SystemIDs) != 0 {
+		t.Fatalf("system association was not cleared: %#v", loaded.Uses[0].SystemIDs)
+	}
+	if loaded.Uses[0].Review != (profile.ProfileReview{Status: profile.ReviewDraft}) {
+		t.Fatalf("draft review retained stale confirmation: %#v", loaded.Uses[0].Review)
+	}
+	if !strings.Contains(stdout.String(), "Draft status clears the previous reviewer and review date") {
+		t.Fatalf("review reset was not explained:\n%s", stdout.String())
+	}
+}
+
+func TestAIUsesEditRemovesAssociationMissingFromCurrentConfig(t *testing.T) {
+	target := t.TempDir()
+	writeAIUseTestConfig(t, target, profile.NewDraftSystem("current", "Current system"))
+	manifestPath := filepath.Join(target, aiuse.DefaultPath)
+	manifest := aiuse.NewManifest()
+	manifest.Uses = []aiuse.Use{{
+		ID: "legacy", Name: "Legacy", Description: "Legacy workflow", SystemIDs: []string{"removed-system"}, Paths: []string{"legacy/**"},
+		Status: aiuse.StatusRetired, Review: profile.ProfileReview{Status: profile.ReviewDraft},
+	}}
+	if err := aiuse.Write(manifestPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	input := strings.NewReader("1\n\n\n\nn\n2\n1\n")
+	var stdout, stderr bytes.Buffer
+	if code := executeWithInput([]string{"ai-uses", "edit", "--interactive", target}, input, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	loaded, _, err := aiuse.LoadOptional(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Uses[0].SystemIDs) != 0 {
+		t.Fatalf("stale system association survived edit: %#v", loaded.Uses[0].SystemIDs)
+	}
+	if !strings.Contains(stdout.String(), "no longer configured and cannot be retained: removed-system") {
+		t.Fatalf("stale association was not explained:\n%s", stdout.String())
+	}
+}
+
+func TestAIUsesEditRejectsNonTerminalWithoutChangingManifest(t *testing.T) {
+	target := t.TempDir()
+	writeAIUseTestConfig(t, target)
+	manifestPath := filepath.Join(target, aiuse.DefaultPath)
+	manifest := aiuse.NewManifest()
+	manifest.Uses = []aiuse.Use{{
+		ID: "use", Name: "Use", Description: "Description", Paths: []string{"app/**"}, Status: aiuse.StatusActive,
+		Review: profile.ProfileReview{Status: profile.ReviewDraft},
+	}}
+	if err := aiuse.Write(manifestPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := executeWithInput([]string{"ai-uses", "edit", target}, strings.NewReader(""), &stdout, &stderr, testBuild); code != 2 {
+		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "requires a terminal") || !strings.Contains(stderr.String(), "--interactive") {
+		t.Fatalf("non-terminal error is not actionable: %q", stderr.String())
+	}
+	after, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("non-terminal edit changed the manifest")
+	}
+}
+
+func TestAIUsesEditValidationFailureLeavesOriginalManifestUntouched(t *testing.T) {
+	target := t.TempDir()
+	writeAIUseTestConfig(t, target)
+	manifestPath := filepath.Join(target, aiuse.DefaultPath)
+	manifest := aiuse.NewManifest()
+	manifest.Uses = []aiuse.Use{{
+		ID: "use", Name: "Use", Description: "Description", Paths: []string{"app/**"}, Status: aiuse.StatusActive,
+		Review: profile.ProfileReview{Status: profile.ReviewDraft},
+	}}
+	if err := aiuse.Write(manifestPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	input := strings.NewReader("1\n\n\n../outside\n1\n1\n")
+	var stdout, stderr bytes.Buffer
+	if code := executeWithInput([]string{"ai-uses", "edit", "--interactive", target}, input, &stdout, &stderr, testBuild); code != 2 {
+		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "unsafe path segment") {
+		t.Fatalf("validation error = %q", stderr.String())
+	}
+	after, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("failed edit changed the manifest")
+	}
+}
+
+func TestAIUsesEditRequiresExistingManifestAndConfig(t *testing.T) {
+	t.Run("manifest", func(t *testing.T) {
+		target := t.TempDir()
+		writeAIUseTestConfig(t, target)
+		var stdout, stderr bytes.Buffer
+		if code := executeWithInput([]string{"ai-uses", "edit", "--interactive", target}, strings.NewReader(""), &stdout, &stderr, testBuild); code != 2 {
+			t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "run `complyscan ai-uses setup` first") {
+			t.Fatalf("missing manifest error = %q", stderr.String())
+		}
+	})
+	t.Run("config", func(t *testing.T) {
+		target := t.TempDir()
+		var stdout, stderr bytes.Buffer
+		if code := executeWithInput([]string{"ai-uses", "edit", "--interactive", target}, strings.NewReader(""), &stdout, &stderr, testBuild); code != 2 {
+			t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "run `complyscan setup` first or provide --config") {
+			t.Fatalf("missing config error = %q", stderr.String())
+		}
+	})
+}
+
+func TestAIUsesEditHelpStatesNoModelBoundary(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := executeWithInput([]string{"ai-uses", "edit", "--help"}, strings.NewReader(""), &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
+	}
+	for _, expected := range []string{"without scanning", "contacting a model", "stable AI-use ID", "--manifest", "--config"} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("edit help missing %q:\n%s", expected, stdout.String())
+		}
+	}
+}
+
 func TestAIUsesHelpStatesTheModelAndComplianceBoundaries(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := executeWithInput([]string{"ai-uses", "setup", "--help"}, strings.NewReader(""), &stdout, &stderr, testBuild); code != 0 {
@@ -379,8 +628,8 @@ func TestLoadAIUseReportRejectsUnsupportedSchemaAndLifecycleMismatch(t *testing.
 		value   report.Report
 		wantErr string
 	}{
-		{name: "future schema", value: report.Report{SchemaVersion: 9, RepositoryAnalysisRun: report.RepositoryAnalysisCompleted, RepositoryAnalysis: &providers.RepositoryAnalysisResult{}}, wantErr: "unsupported schema version 9"},
-		{name: "missing completed result", value: report.Report{SchemaVersion: 8, RepositoryAnalysisRun: report.RepositoryAnalysisCompleted}, wantErr: "has no result"},
+		{name: "future schema", value: report.Report{SchemaVersion: 10, RepositoryAnalysisRun: report.RepositoryAnalysisCompleted, RepositoryAnalysis: &providers.RepositoryAnalysisResult{}}, wantErr: "unsupported schema version 10"},
+		{name: "missing completed result", value: report.Report{SchemaVersion: 9, RepositoryAnalysisRun: report.RepositoryAnalysisCompleted}, wantErr: "has no result"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "report.json")
