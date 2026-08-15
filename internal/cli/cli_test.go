@@ -263,6 +263,9 @@ func TestChangedScanKeepsSavedAIUsesAndFullDeterministicSignals(t *testing.T) {
 	if len(snapshot.Confirmed[0].TechnicalSignals) != 1 || snapshot.Confirmed[0].TechnicalSignals[0].Path != "stable.py" {
 		t.Fatalf("changed scan did not use full deterministic inventory: %#v", snapshot.Confirmed[0])
 	}
+	if decoded.AIUseMappings == nil || len(decoded.AIUseMappings.Uses) != 1 || decoded.AIUseMappings.Uses[0].UseID != "stable-generation" || decoded.AIUseMappings.Summary.UnassociatedUses != 1 {
+		t.Fatalf("changed scan lost the per-use mapping or guessed system context: %#v", decoded.AIUseMappings)
+	}
 }
 
 func writeTestAIUseManifest(t *testing.T, target string, uses ...aiuse.Use) {
@@ -480,8 +483,74 @@ func TestScanJSONOutputAndSeverityFilter(t *testing.T) {
 	if decoded.Summary.High == 0 || decoded.Summary.Medium != 0 || decoded.Summary.Info != 0 {
 		t.Fatalf("severity filter not reflected in summary: %#v", decoded.Summary)
 	}
-	if decoded.SchemaVersion != 7 || decoded.Tool.Commit != "test" || decoded.Scan.ID == "" || decoded.Scan.Scope.Findings != "full-repository" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
+	if decoded.SchemaVersion != 8 || decoded.Tool.Commit != "test" || decoded.Scan.ID == "" || decoded.Scan.Scope.Findings != "full-repository" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
 		t.Fatalf("missing evidence-bundle metadata: %#v", decoded)
+	}
+}
+
+func TestScanMapsConfirmedAIUseToSystemRequirementsAndScopedEvidence(t *testing.T) {
+	target := t.TempDir()
+	source := "from openai import OpenAI\n\ndef approve_human_review_decision(request):\n    return {'status': 'approved', 'decision': request.pending_decision, 'review': 'human review approval'}\n"
+	if err := os.MkdirAll(filepath.Join(target, "review"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "review", "approval.py"), []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	system := profile.NewDraftSystem("support", "Support")
+	system.OperatingRegions = []profile.OperatingRegion{profile.RegionEU}
+	system.UseCaseDomains = []profile.UseCaseDomain{profile.DomainEmployment}
+	system.AIActivities = []profile.AIActivity{profile.ActivityInference}
+	system.ProfileReview = profile.ProfileReview{Status: profile.ReviewConfirmed, ReviewedBy: "reviewer", ReviewedAt: "2026-08-15"}
+	cfg.Systems = []profile.System{system}
+	for id := range cfg.Rules {
+		cfg.Rules[id] = config.RuleConfig{Enabled: false}
+	}
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	manifest := aiuse.NewManifest()
+	manifest.Uses = []aiuse.Use{{
+		ID: "support-replies", Name: "Support reply drafting", Description: "Drafts replies for human approval.",
+		SystemIDs: []string{"support"}, Paths: []string{"review/**"}, Status: aiuse.StatusActive,
+		Review: profile.ProfileReview{Status: profile.ReviewConfirmed, ReviewedBy: "reviewer", ReviewedAt: "2026-08-15"},
+	}}
+	if err := aiuse.Write(filepath.Join(target, aiuse.DefaultPath), manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
+	}
+	var decoded report.Report
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.SchemaVersion != 8 || decoded.AIUseMappings == nil || len(decoded.AIUseMappings.Uses) != 1 {
+		t.Fatalf("per-use mapping missing: %#v", decoded.AIUseMappings)
+	}
+	use := decoded.AIUseMappings.Uses[0]
+	if use.UseID != "support-replies" || len(use.Frameworks) == 0 || len(use.Frameworks[0].Contexts) != 1 {
+		t.Fatalf("use mapping = %#v", use)
+	}
+	context := use.Frameworks[0].Contexts[0]
+	if context.Association.SystemID != "support" || context.Association.Status != "configured-system" {
+		t.Fatalf("association = %#v", context.Association)
+	}
+	found := false
+	for _, objective := range context.Objectives {
+		if objective.ObjectiveID != "eu-aia-14-human-review-gate" {
+			continue
+		}
+		found = objective.Requirement == "likely-required" && objective.Evidence == framework.ObjectiveCandidate && len(objective.EvidenceReferences) > 0 && objective.EvidenceReferences[0].Path == "review/approval.py"
+	}
+	if !found {
+		t.Fatalf("scoped Article 14 mapping not found: %#v", context.Objectives)
+	}
+	if decoded.RepositoryAnalysis != nil || decoded.RepositoryAnalysisRun != report.RepositoryAnalysisNotRequested {
+		t.Fatalf("plain scan unexpectedly used AI review: %#v", decoded.RepositoryAnalysis)
 	}
 }
 
@@ -1674,7 +1743,7 @@ func TestScanMapsSharedEvidenceAcrossEUAndNISTFrameworks(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 7 || len(decoded.Frameworks) != 2 {
+	if decoded.SchemaVersion != 8 || len(decoded.Frameworks) != 2 {
 		t.Fatalf("multi-framework contract missing: %#v", decoded.Frameworks)
 	}
 	var fingerprints []string

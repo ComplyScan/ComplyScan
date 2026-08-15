@@ -16,6 +16,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
+	"github.com/ComplyScan/ComplyScan/internal/usemapping"
 	"github.com/ComplyScan/ComplyScan/internal/verification"
 )
 
@@ -79,6 +80,7 @@ type Report struct {
 	TechnicalEvidence      *framework.TechnicalEvidenceReport  `json:"technical_evidence,omitempty"`
 	AIInventory            *inventory.Report                   `json:"ai_inventory,omitempty"`
 	AIUseInventory         *aiuse.Snapshot                     `json:"ai_use_inventory,omitempty"`
+	AIUseMappings          *usemapping.Report                  `json:"ai_use_mappings,omitempty"`
 	Reconciliation         *reconciliation.Report              `json:"reconciliation,omitempty"`
 	Review                 *providers.ReviewResult             `json:"review,omitempty"`
 	RepositoryAnalysis     *providers.RepositoryAnalysisResult `json:"repository_analysis,omitempty"`
@@ -130,7 +132,7 @@ func NewWithMetadata(target string, tool Tool, scope ScanScope, createdAt time.T
 	created := createdAt.UTC().Format(time.RFC3339Nano)
 	identifier := sha256.Sum256([]byte(strings.Join([]string{target, tool.Version, tool.Commit, created}, "\x00")))
 	return Report{
-		SchemaVersion:         7,
+		SchemaVersion:         8,
 		RepositoryAnalysisRun: RepositoryAnalysisNotRequested,
 		Tool:                  tool,
 		Scan: ScanMetadata{
@@ -213,6 +215,11 @@ func WriteTerminal(w io.Writer, report Report, options TerminalOptions) error {
 	}
 	if report.AIUseInventory != nil {
 		if err := writeAIUseInventoryTerminal(w, *report.AIUseInventory); err != nil {
+			return err
+		}
+	}
+	if report.AIUseMappings != nil {
+		if err := writeAIUseMappingsTerminal(w, *report.AIUseMappings); err != nil {
 			return err
 		}
 	}
@@ -362,6 +369,11 @@ func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
 			return err
 		}
 	}
+	if value.AIUseMappings != nil {
+		if err := writeAIUseMappingsTerminal(w, *value.AIUseMappings); err != nil {
+			return err
+		}
+	}
 	if err := writeConciseApplicabilityReadiness(w, value); err != nil {
 		return err
 	}
@@ -411,7 +423,11 @@ func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
 			return err
 		}
 		implemented, partial, notImplemented, cannotDetermine := developerTechnicalVerdictCounts(value)
-		if _, err := fmt.Fprintf(w, "Code-level AI verdicts: %d implemented, %d partial, %d not demonstrated, %d unclear\n",
+		verdictLabel := "Code-level AI verdicts"
+		if value.AIUseMappings != nil {
+			verdictLabel = "Use-scoped AI verdicts"
+		}
+		if _, err := fmt.Fprintf(w, "%s: %d implemented, %d partial, %d not demonstrated, %d unclear\n", verdictLabel,
 			implemented, partial, notImplemented, cannotDetermine); err != nil {
 			return err
 		}
@@ -425,6 +441,33 @@ func writeAIUseInventoryTerminal(w io.Writer, value aiuse.Snapshot) error {
 	_, err := fmt.Fprintf(w, "AI uses: %d confirmed, %d draft, %d retired; %d model-suggested; %d ungrouped technical signal(s)\n",
 		summary.Confirmed, summary.Draft, summary.Retired, summary.Suggested, summary.UngroupedSignals)
 	return err
+}
+
+func writeAIUseMappingsTerminal(w io.Writer, value usemapping.Report) error {
+	if len(value.Uses) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintf(w, "Per-use requirement mapping: %d confirmed AI use(s), %d framework/system context(s)\n", len(value.Uses), value.Summary.FrameworkSystemContexts); err != nil {
+		return err
+	}
+	for _, use := range value.Uses {
+		contextNote := ""
+		if use.Summary.UnassociatedUses > 0 {
+			contextNote = "; no system association"
+			if use.Summary.Unresolved+use.Summary.ContextDependent > 0 {
+				contextNote += " (context needed)"
+			}
+		} else if use.Summary.MissingSystemReferences > 0 {
+			contextNote = fmt.Sprintf("; %d missing system reference(s)", use.Summary.MissingSystemReferences)
+		}
+		if _, err := fmt.Fprintf(w, "  %s: %d likely-required check(s), %d recommended check(s), %d check(s) with matching code signals, %d with signals only outside the saved paths, %d likely-required and %d recommended check(s) without detected in-scope signals, %d unresolved%s\n",
+			use.UseName, use.Summary.LikelyRequired, use.Summary.Recommended, use.Summary.WithInScopeCodeEvidence,
+			use.Summary.ObjectivesWithEvidenceOutsideUse, use.Summary.LikelyRequiredWithoutInScopeEvidence, use.Summary.RecommendedWithoutInScopeEvidence,
+			use.Summary.Unresolved+use.Summary.ContextDependent, contextNote); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // WriteTerminalRepositoryAnalysis renders repository reasoning and its bounded

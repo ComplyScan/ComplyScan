@@ -28,6 +28,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/rules"
 	"github.com/ComplyScan/ComplyScan/internal/scanner"
 	"github.com/ComplyScan/ComplyScan/internal/technicalreview"
+	"github.com/ComplyScan/ComplyScan/internal/usemapping"
 	"github.com/ComplyScan/ComplyScan/internal/verification"
 	"github.com/spf13/cobra"
 )
@@ -597,6 +598,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 				})
 			}
 			reportValue.Frameworks = frameworkResults
+			reportValue.AIUseMappings = buildAIUseMappings(aiUseManifest, cfg.Systems, frameworkResults, aiInventory, nil)
 			if cfg.RuleEnabled(policy.TechnicalGapRuleID) {
 				for _, frameworkResult := range frameworkResults {
 					for _, finding := range policy.TechnicalGapFindings(frameworkResult.ID, config.FileName, cfg.Systems, frameworkResult.Reconciliation) {
@@ -768,6 +770,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisCompleted
 						aiUseInventory = aiuse.BuildSnapshot(aiUseManifest, aiInventory, &repositoryReview, changedSince != "")
 						reportValue.AIUseInventory = &aiUseInventory
+						reportValue.AIUseMappings = buildAIUseMappings(aiUseManifest, cfg.Systems, frameworkResults, aiInventory, &repositoryReview)
 						completionDetail := fmt.Sprintf("%d file excerpt(s)", repositoryReview.Coverage.FilesSubmitted)
 						if repositoryReview.CacheHit {
 							completionDetail += ", private cache hit, no model call"
@@ -854,6 +857,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						reportValue.TechnicalReview = &technicalReview
 					}
 					reportValue.Frameworks = frameworkResults
+					reportValue.AIUseMappings = buildAIUseMappings(aiUseManifest, cfg.Systems, frameworkResults, aiInventory, reportValue.RepositoryAnalysis)
 					syncLegacyFrameworkFields(&reportValue)
 					if resolvedReportDirectory != "" {
 						artifacts, err = report.WriteLatestArtifacts(resolvedReportDirectory, reportValue)
@@ -864,6 +868,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 				}
 			}
 			reportValue.Frameworks = frameworkResults
+			reportValue.AIUseMappings = buildAIUseMappings(aiUseManifest, cfg.Systems, frameworkResults, aiInventory, reportValue.RepositoryAnalysis)
 			syncLegacyFrameworkFields(&reportValue)
 			if resolvedReportDirectory != "" {
 				artifacts, err = report.WriteArtifacts(resolvedReportDirectory, reportValue)
@@ -996,6 +1001,22 @@ func combinedFrameworkEvidence(results []report.FrameworkResult) framework.Techn
 		combined.Objectives = append(combined.Objectives, result.TechnicalEvidence.Objectives...)
 	}
 	return combined
+}
+
+func buildAIUseMappings(manifest aiuse.Manifest, systems []profile.System, results []report.FrameworkResult, components inventory.Report, analysis *providers.RepositoryAnalysisResult) *usemapping.Report {
+	inputs := make([]usemapping.FrameworkInput, 0, len(results))
+	for index := range results {
+		result := &results[index]
+		inputs = append(inputs, usemapping.FrameworkInput{
+			ID: result.ID, Name: result.Name, Nature: result.Nature, Applicability: result.Applicability,
+			TechnicalEvidence: result.TechnicalEvidence, TechnicalReview: result.TechnicalReview,
+		})
+	}
+	value := usemapping.Build(manifest, systems, inputs, components, analysis)
+	if len(value.Uses) == 0 {
+		return nil
+	}
+	return &value
 }
 
 func syncLegacyFrameworkFields(value *report.Report) {
