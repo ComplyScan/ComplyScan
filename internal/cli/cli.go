@@ -521,19 +521,37 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			if err != nil {
 				return fmt.Errorf("scan %q: %w", target, err)
 			}
+			aiReviewRepository := result.FullRepository
+			var changedReviewScope *repositoryanalysis.ChangedReviewScope
+			if reviewConfiguredProvider && changedSince != "" {
+				scoped, scope := repositoryanalysis.ScopeChangedReview(result.FullRepository, result.Repository)
+				aiReviewRepository = scoped
+				changedReviewScope = &scope
+			}
 			visible := report.FilterByMinimum(result.Findings, minimumSeverity)
+			aiReviewFindings := visible
+			if changedReviewScope != nil {
+				aiReviewFindings = findingsWithinReviewRepository(visible, aiReviewRepository)
+			}
 			findingsScope := "full-repository"
 			if changedSince != "" {
 				findingsScope = "changed-files"
 			}
+			scanScope := report.ScanScope{
+				Findings: findingsScope, TechnicalEvidence: "full-repository", AIInventory: "full-repository", Reconciliation: "full-repository", ChangedSince: changedSince,
+				TrackedOnly:               cfg.Scan.TrackedOnly || trackedOnly,
+				IncludeNestedRepositories: cfg.Scan.IncludeNestedRepositories || includeNestedRepositories,
+			}
+			if changedReviewScope != nil {
+				scanScope.AIReview = string(providers.RepositoryReviewScopeChanged)
+				scanScope.AIReviewFiles = changedReviewScope.IncludedFiles
+				scanScope.AIReviewChangedFiles = changedReviewScope.ChangedFilesIncluded
+				scanScope.AIReviewConnectedFiles = changedReviewScope.ConnectedFilesIncluded
+			}
 			reportValue := report.NewWithMetadata(
 				target,
 				report.Tool{Name: "ComplyScan", Version: build.Version, Commit: build.Commit, BuiltAt: build.BuildDate},
-				report.ScanScope{
-					Findings: findingsScope, TechnicalEvidence: "full-repository", AIInventory: "full-repository", Reconciliation: "full-repository", ChangedSince: changedSince,
-					TrackedOnly:               cfg.Scan.TrackedOnly || trackedOnly,
-					IncludeNestedRepositories: cfg.Scan.IncludeNestedRepositories || includeNestedRepositories,
-				},
+				scanScope,
 				time.Now(),
 				visible,
 				result.Warnings,
@@ -617,7 +635,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			}
 			reportValue.Frameworks = frameworkResults
 			syncLegacyFrameworkFields(&reportValue)
-			repositoryAnalysisRequested := cfg.AI.Provider != "none" && cfg.AI.RepositoryAnalysis.Mode != "bounded-only" && len(result.FullRepository.Files) > 0
+			repositoryAnalysisRequested := cfg.AI.Provider != "none" && cfg.AI.RepositoryAnalysis.Mode != "bounded-only" && len(aiReviewRepository.Files) > 0
 			if repositoryAnalysisRequested {
 				reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisPending
 			} else {
@@ -642,7 +660,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 				investigationRequests := make([]providers.TechnicalReviewRequest, len(frameworkResults))
 				if boundedReviewRequested {
 					for index := range frameworkResults {
-						investigationRequests[index] = reviewcontext.BuildInvestigations(frameworkResults[index].TechnicalEvidence, result.FullRepository, frameworkResults[index].Reconciliation)
+						investigationRequests[index] = reviewcontext.BuildInvestigations(frameworkResults[index].TechnicalEvidence, aiReviewRepository, frameworkResults[index].Reconciliation)
 						investigationRequests[index] = reviewcontext.AttachVerifications(investigationRequests[index], verificationResults)
 						candidateCount += len(investigationRequests[index].Candidates)
 					}
@@ -652,7 +670,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 					progressWriter = cmd.ErrOrStderr()
 				}
 				modelQualified := true
-				if len(visible) > 0 || candidateCount > 0 || repositoryAnalysisRequested {
+				if len(aiReviewFindings) > 0 || candidateCount > 0 || repositoryAnalysisRequested {
 					if _, err := fmt.Fprintf(progressWriter, "Checking model compatibility before repository review...\n"); err != nil {
 						return fmt.Errorf("write model qualification progress: %w", err)
 					}
@@ -691,8 +709,14 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 					} else if !repositoryAnalysisRequested {
 						repositoryReasoning = "no repository-level reasoning"
 					}
-					if _, err := fmt.Fprintf(stdout, "%s advisory review requested for %s, %d finding(s), and %d legacy bounded target(s) with %s...\n\n", reviewProviderLabel(cfg.AI.Provider), repositoryReasoning, len(visible), candidateCount, configuredReviewModel(cfg.AI)); err != nil {
+					if _, err := fmt.Fprintf(stdout, "%s advisory review requested for %s, %d finding(s), and %d legacy bounded target(s) with %s...\n\n", reviewProviderLabel(cfg.AI.Provider), repositoryReasoning, len(aiReviewFindings), candidateCount, configuredReviewModel(cfg.AI)); err != nil {
 						return fmt.Errorf("write terminal report: %w", err)
+					}
+					if changedReviewScope != nil {
+						if _, err := fmt.Fprintf(stdout, "AI code context is limited to %d changed eligible file(s) plus %d connected file(s) (maximum %d); repository-wide governance checks remain local.\n",
+							changedReviewScope.ChangedFilesIncluded, changedReviewScope.ConnectedFilesIncluded, repositoryanalysis.ChangedReviewConnectedFileLimit); err != nil {
+							return fmt.Errorf("write changed review scope: %w", err)
+						}
 					}
 					if isRemoteReviewProvider(cfg.AI.Provider) {
 						disclosure := "Remote review sends a compact, structurally selected and redacted code-evidence package, plus bounded finding records, to the selected provider; usage may incur cost."
@@ -716,7 +740,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						return fmt.Errorf("write repository analysis progress: %w", err)
 					}
 					repositoryReview, reviewErr := reviewRepositoryWithProvider(
-						cmd.Context(), cfg.AI, result.FullRepository, frameworkEvidenceReports(frameworkResults), cfg.Systems, cfg.Ownership, progressWriter,
+						cmd.Context(), cfg.AI, aiReviewRepository, frameworkEvidenceReports(frameworkResults), cfg.Systems, cfg.Ownership, progressWriter,
 					)
 					if reviewErr != nil {
 						aiReviewIncomplete = true
@@ -727,6 +751,9 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 							return fmt.Errorf("write repository analysis warning: %w", err)
 						}
 					} else {
+						if changedReviewScope != nil {
+							changedReviewScope.Apply(&repositoryReview)
+						}
 						reportValue.RepositoryAnalysis = &repositoryReview
 						reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisCompleted
 						completionDetail := fmt.Sprintf("%d file excerpt(s)", repositoryReview.Coverage.FilesSubmitted)
@@ -758,12 +785,12 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 					var technicalReview providers.TechnicalReviewResult
 					if index == 0 {
 						findingReviewStarted := time.Now()
-						if len(visible) > 0 {
-							if _, err := fmt.Fprintf(progressWriter, "Finding review: %d item(s) with %s %q...\n", len(visible), reviewProviderLabel(cfg.AI.Provider), configuredReviewModel(cfg.AI)); err != nil {
+						if len(aiReviewFindings) > 0 {
+							if _, err := fmt.Fprintf(progressWriter, "Finding review: %d item(s) with %s %q...\n", len(aiReviewFindings), reviewProviderLabel(cfg.AI.Provider), configuredReviewModel(cfg.AI)); err != nil {
 								return fmt.Errorf("write finding review progress: %w", err)
 							}
 						}
-						review, reviewErr := reviewFindingsWithProvider(cmd.Context(), progressWriter, cfg.AI, target, visible)
+						review, reviewErr := reviewFindingsWithProvider(cmd.Context(), progressWriter, cfg.AI, target, aiReviewFindings)
 						if reviewErr != nil {
 							aiReviewIncomplete = true
 							warning := fmt.Sprintf("%s finding review was incomplete after %s: %v. Deterministic findings remain unchanged.", reviewProviderLabel(cfg.AI.Provider), formatElapsed(time.Since(findingReviewStarted)), reviewErr)
@@ -773,7 +800,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 							}
 						} else {
 							reportValue.Review = &review
-							if len(visible) > 0 {
+							if len(aiReviewFindings) > 0 {
 								if _, err := fmt.Fprintf(progressWriter, "Finding review completed in %s.\n", formatElapsed(time.Since(findingReviewStarted))); err != nil {
 									return fmt.Errorf("write finding review completion: %w", err)
 								}
@@ -790,7 +817,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						}
 					}
 					technicalReview, reviewErr := reviewTechnicalWithProvider(
-						cmd.Context(), cfg.AI, frameworkResults[index].TechnicalEvidence, investigationRequests[index], result.FullRepository,
+						cmd.Context(), cfg.AI, frameworkResults[index].TechnicalEvidence, investigationRequests[index], aiReviewRepository,
 						refreshReview, progressWriter, technicalReviewProgress(progressWriter, cfg.AI.Provider, technicalReviewStarted, time.Now),
 					)
 					if reviewErr != nil {
@@ -911,6 +938,20 @@ func sameScanTarget(left, right string) bool {
 	leftPath, leftErr := filepath.Abs(left)
 	rightPath, rightErr := filepath.Abs(right)
 	return leftErr == nil && rightErr == nil && filepath.Clean(leftPath) == filepath.Clean(rightPath)
+}
+
+func findingsWithinReviewRepository(findings []rules.Finding, repository discovery.Repository) []rules.Finding {
+	paths := make(map[string]struct{}, len(repository.Files))
+	for _, file := range repository.Files {
+		paths[file.Path] = struct{}{}
+	}
+	result := make([]rules.Finding, 0, len(findings))
+	for _, finding := range findings {
+		if _, included := paths[finding.Path]; included {
+			result = append(result, finding)
+		}
+	}
+	return result
 }
 
 func configuredVerificationOptions(target string, recipes []config.VerificationRecipe) []verification.Options {

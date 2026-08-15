@@ -59,6 +59,36 @@ func TestBuildInvestigationsUsesOnlyOwnedCandidatesInMultiSystemRepository(t *te
 	}
 }
 
+func TestBuildInvestigationsDoesNotCarryEvidenceOutsideReviewRepository(t *testing.T) {
+	evidence := framework.TechnicalEvidenceReport{Objectives: []framework.ObjectiveAssessment{{
+		ID: "objective", Status: framework.ObjectiveCandidate, EligibleFileKinds: []string{"source"}, InvestigationTerms: []string{"approve"},
+		Matches: []framework.EvidenceMatch{{Fingerprint: "outside", Path: "unrelated/approval.go", StartLine: 2}},
+	}}}
+	mapping := reconciliation.Report{Systems: []reconciliation.SystemResult{{
+		SystemID: "system", SystemName: "System", Objectives: []reconciliation.ObjectiveResult{{
+			ObjectiveID: "objective", Requirement: reconciliation.RequirementLikelyRequired,
+			EvidenceReferences: []reconciliation.EvidenceReference{{Fingerprint: "outside", Path: "unrelated/approval.go"}},
+		}},
+	}}}
+	scoped := discovery.Repository{Files: []discovery.File{{
+		Path: "changed/handler.go", Kind: discovery.KindSource, Content: []byte("package changed\nfunc handler() {}\n"),
+	}}}
+
+	request := BuildInvestigations(evidence, scoped, mapping)
+	if len(request.Candidates) != 1 {
+		t.Fatalf("scoped investigation count = %d: %#v", len(request.Candidates), request.Candidates)
+	}
+	candidate := request.Candidates[0]
+	if candidate.Path != "(system-owned repository)" || candidate.InvestigationMode != investigationModeSearch {
+		t.Fatalf("outside candidate metadata entered scoped investigation: %#v", candidate)
+	}
+	for _, context := range candidate.SourceContexts {
+		if strings.Contains(context.Path, "unrelated/") || strings.Contains(context.Source, "unrelated/") {
+			t.Fatalf("outside path entered scoped context: %#v", candidate.SourceContexts)
+		}
+	}
+}
+
 func TestBuildInvestigationsScopesMissingEvidenceSearchPerSystem(t *testing.T) {
 	repository := discovery.Repository{Files: []discovery.File{
 		{Path: "ranking/control.go", Kind: discovery.KindSource, Content: []byte("package ranking\nfunc approveRanking() bool { return true }")},

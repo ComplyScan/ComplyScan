@@ -827,6 +827,9 @@ func repositoryAnalysisModeLabel(mode providers.RepositoryAnalysisMode) string {
 
 func developerRepositoryAnalysisLabel(value Report) string {
 	if value.RepositoryAnalysis != nil {
+		if value.RepositoryAnalysis.Coverage.ReviewScope == providers.RepositoryReviewScopeChanged {
+			return fmt.Sprintf("completed for %d changed and %d connected code file(s)", value.RepositoryAnalysis.Coverage.ChangedFiles, value.RepositoryAnalysis.Coverage.ConnectedFiles)
+		}
 		return fmt.Sprintf("completed using %s", repositoryAnalysisModeLabel(value.RepositoryAnalysis.Coverage.Mode))
 	}
 	switch value.RepositoryAnalysisRun {

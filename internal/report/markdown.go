@@ -74,6 +74,20 @@ func WriteDetailedMarkdown(writer io.Writer, report Report) error {
 			return err
 		}
 	}
+	if report.Scan.Scope.AIReview != "" {
+		if _, err := fmt.Fprintf(writer, "- AI review scope: %s", markdownText(report.Scan.Scope.AIReview)); err != nil {
+			return err
+		}
+		if report.Scan.Scope.AIReview == string(providers.RepositoryReviewScopeChanged) {
+			if _, err := fmt.Fprintf(writer, " — %d changed eligible file(s) plus %d connected file(s), %d file(s) available to local model-context selection",
+				report.Scan.Scope.AIReviewChangedFiles, report.Scan.Scope.AIReviewConnectedFiles, report.Scan.Scope.AIReviewFiles); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintln(writer); err != nil {
+			return err
+		}
+	}
 
 	if _, err := fmt.Fprintln(writer, "\n### Deterministic rule findings"); err != nil {
 		return err
@@ -260,6 +274,12 @@ func writeRepositoryAnalysisMarkdown(writer io.Writer, analysis providers.Reposi
 		inlineCode(string(analysis.Provider)), inlineCode(analysis.Model), markdownText(string(analysis.Coverage.Mode)), analysis.Coverage.RepositoryFiles,
 		analysis.Coverage.RepositoryBytes); err != nil {
 		return err
+	}
+	if analysis.Coverage.ReviewScope == providers.RepositoryReviewScopeChanged {
+		if _, err := fmt.Fprintf(writer, "- Changed-code review boundary: %d changed eligible file(s) plus %d connected file(s); %d file(s) entered local model-context selection\n",
+			analysis.Coverage.ChangedFiles, analysis.Coverage.ConnectedFiles, analysis.Coverage.ScopeFiles); err != nil {
+			return err
+		}
 	}
 	if analysis.Coverage.Mode == providers.RepositoryAnalysisTargeted {
 		if _, err := fmt.Fprintf(writer, "- Selected context: %d file excerpt(s), %d byte(s)\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted); err != nil {

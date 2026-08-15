@@ -15,6 +15,14 @@
 
 The normal explicit-review path therefore uses one model call, or at most two when a useful follow-up is requested. It does not create one request per directory or per objective.
 
+## Pull-request review scope
+
+`complyscan review --changed-since <git-ref>` keeps the repository-wide governance layer local while narrowing every source-bearing model request to the change. ComplyScan includes every changed model-eligible source, manifest, configuration, CI, container, infrastructure, or environment-template file. It then uses the complete repository graph locally to add at most eight unchanged source files connected within two call, route, authorization, persistence, logging, configuration, test, or import hops. Unrelated files are never added merely because they contain an AI or compliance keyword.
+
+The same in-memory changed-plus-connected repository is the hard boundary for targeted selection, broad review modes, per-objective technical investigations, eligible-file manifests, and model-requested follow-up searches. Consequently, choosing `deep`, `full`, or `hierarchical` together with `--changed-since` can broaden analysis only inside that bounded change context; it cannot restore whole-repository model access. Deterministic inventory, framework evidence, reconciliation, documentation checks, and risk-file checks still use the complete local snapshot as documented by their own scan scopes.
+
+Terminal, Markdown, and JSON coverage distinguish the full locally checked repository from the model boundary. They record the `changed-plus-connected` review scope, changed files included, connected files included, files available to local context selection, and excerpts actually submitted. Files outside that boundary were not reviewed by the model, so an absent model observation is never evidence that an unchanged implementation is missing.
+
 ## Modes
 
 Configure the strategy under `ai.repository-analysis`:

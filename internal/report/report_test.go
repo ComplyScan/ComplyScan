@@ -117,6 +117,41 @@ func TestRepositoryAnalysisIsRenderedAsAdvisoryEvidence(t *testing.T) {
 	}
 }
 
+func TestChangedReviewCoverageExplainsModelBoundary(t *testing.T) {
+	value := NewWithMetadata(".", Tool{Name: "ComplyScan", Version: "dev"}, ScanScope{
+		Findings: "changed-files", TechnicalEvidence: "full-repository", AIInventory: "full-repository", Reconciliation: "full-repository",
+		ChangedSince: "main", AIReview: string(providers.RepositoryReviewScopeChanged), AIReviewFiles: 3, AIReviewChangedFiles: 1, AIReviewConnectedFiles: 2,
+	}, time.Now(), nil, nil, 0)
+	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{
+		Provider: providers.OpenAI, Model: "test-model",
+		Coverage: providers.RepositoryCoverage{
+			Mode: providers.RepositoryAnalysisTargeted, ReviewScope: providers.RepositoryReviewScopeChanged,
+			RepositoryFiles: 50, ScopeFiles: 3, ChangedFiles: 1, ConnectedFiles: 2, FilesSubmitted: 2,
+		},
+		Result: providers.RepositorySectionResult{AIUses: []providers.RepositoryAIUse{}, ObjectiveObservations: []providers.RepositoryObjectiveObservation{}, UnmappedObservations: []providers.RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{}},
+	}
+
+	var terminal bytes.Buffer
+	if err := WriteTerminalRepositoryAnalysis(&terminal, *value.RepositoryAnalysis); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"2 selected file excerpt(s) from 3 eligible review-scope file(s)", "1 changed eligible + 2 connected file(s)", "full 50-file repository governance remained local"} {
+		if !strings.Contains(terminal.String(), expected) {
+			t.Errorf("terminal changed scope missing %q:\n%s", expected, terminal.String())
+		}
+	}
+
+	var markdown bytes.Buffer
+	if err := WriteDetailedMarkdown(&markdown, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"AI review scope: changed-plus-connected", "1 changed eligible file(s) plus 2 connected file(s)", "Changed-code review boundary"} {
+		if !strings.Contains(markdown.String(), expected) {
+			t.Errorf("Markdown changed scope missing %q:\n%s", expected, markdown.String())
+		}
+	}
+}
+
 func TestExecutionVerificationIsRenderedWithoutComplianceClaim(t *testing.T) {
 	value := New(".", "dev", nil, nil, 0)
 	value.ExecutionVerifications = []verification.Report{{

@@ -36,6 +36,10 @@ type ScanScope struct {
 	TechnicalEvidence         string `json:"technical_evidence"`
 	AIInventory               string `json:"ai_inventory"`
 	Reconciliation            string `json:"reconciliation"`
+	AIReview                  string `json:"ai_review,omitempty"`
+	AIReviewFiles             int    `json:"ai_review_files,omitempty"`
+	AIReviewChangedFiles      int    `json:"ai_review_changed_files,omitempty"`
+	AIReviewConnectedFiles    int    `json:"ai_review_connected_files,omitempty"`
 	ChangedSince              string `json:"changed_since,omitempty"`
 	TrackedOnly               bool   `json:"tracked_only"`
 	IncludeNestedRepositories bool   `json:"include_nested_repositories"`
@@ -403,13 +407,26 @@ func WriteTerminalRepositoryAnalysis(w io.Writer, analysis providers.RepositoryA
 		return err
 	}
 	if analysis.Coverage.Mode == providers.RepositoryAnalysisTargeted {
-		if _, err := fmt.Fprintf(w, "        Context: %d selected file excerpt(s) from %d discovered file(s), %d verified citation(s)\n",
-			analysis.Coverage.FilesSubmitted, analysis.Coverage.RepositoryFiles, analysis.Coverage.CitationsChecked); err != nil {
-			return err
+		if analysis.Coverage.ReviewScope == providers.RepositoryReviewScopeChanged {
+			if _, err := fmt.Fprintf(w, "        Context: %d selected file excerpt(s) from %d eligible review-scope file(s), %d verified citation(s)\n",
+				analysis.Coverage.FilesSubmitted, analysis.Coverage.ScopeFiles, analysis.Coverage.CitationsChecked); err != nil {
+				return err
+			}
+		} else {
+			if _, err := fmt.Fprintf(w, "        Context: %d selected file excerpt(s) from %d discovered file(s), %d verified citation(s)\n",
+				analysis.Coverage.FilesSubmitted, analysis.Coverage.RepositoryFiles, analysis.Coverage.CitationsChecked); err != nil {
+				return err
+			}
 		}
 	} else {
 		if _, err := fmt.Fprintf(w, "        Context: %d/%d eligible file submission(s), %d subsystem(s), %d verified citation(s)\n",
 			analysis.Coverage.FilesSubmitted, analysis.Coverage.RepositoryFiles, analysis.Coverage.Subsystems, analysis.Coverage.CitationsChecked); err != nil {
+			return err
+		}
+	}
+	if analysis.Coverage.ReviewScope == providers.RepositoryReviewScopeChanged {
+		if _, err := fmt.Fprintf(w, "        Changed scope: %d changed eligible + %d connected file(s); full %d-file repository governance remained local\n",
+			analysis.Coverage.ChangedFiles, analysis.Coverage.ConnectedFiles, analysis.Coverage.RepositoryFiles); err != nil {
 			return err
 		}
 	}

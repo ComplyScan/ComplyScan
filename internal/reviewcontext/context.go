@@ -26,9 +26,13 @@ const (
 func Build(evidence framework.TechnicalEvidenceReport, repository discovery.Repository) providers.TechnicalReviewRequest {
 	graph := codegraph.Build(repository)
 	repositoryFingerprint := repositoryDigest(repository)
+	paths := repositoryPathLookup(repository)
 	request := providers.TechnicalReviewRequest{Candidates: []providers.TechnicalCandidate{}}
 	for _, objective := range evidence.Objectives {
 		for _, match := range objective.Matches {
+			if _, included := paths[match.Path]; !included {
+				continue
+			}
 			request.Candidates = append(request.Candidates, buildCandidate(
 				objective, match, repository, graph, match.Context, "", "", "repository-wide", repositoryFingerprint,
 			))
@@ -62,24 +66,30 @@ func BuildInvestigations(evidence framework.TechnicalEvidenceReport, repository 
 		}
 		graph := codegraph.Build(scopedRepository)
 		digest := repositoryDigest(scopedRepository)
+		scopedPaths := repositoryPathLookup(scopedRepository)
 		systemCandidates := make([]providers.TechnicalCandidate, 0)
 		for _, mapped := range system.Objectives {
 			objective, exists := objectiveByID[mapped.ObjectiveID]
 			if !exists {
 				continue
 			}
+			scopedReferences := 0
 			for _, reference := range mapped.EvidenceReferences {
 				match, exists := matchByObjective[mapped.ObjectiveID][reference.Fingerprint]
 				if !exists {
 					continue
 				}
+				if _, included := scopedPaths[match.Path]; !included {
+					continue
+				}
+				scopedReferences++
 				context := graph.ContextForMatch(match.Path, match.StartLine, match.MatchedTerms, 20)
 				systemCandidates = append(systemCandidates, buildCandidate(
 					objective, match, scopedRepository, graph, context,
 					system.SystemID, system.SystemName, scopeMode, digest,
 				))
 			}
-			if !investigationRequirement(mapped.Requirement) || len(mapped.EvidenceReferences) > 0 {
+			if !investigationRequirement(mapped.Requirement) || scopedReferences > 0 {
 				continue
 			}
 			if mapped.Evidence != "" {
@@ -192,6 +202,14 @@ func repositoryPaths(repository discovery.Repository) []string {
 	paths := make([]string, 0, len(repository.Files))
 	for _, file := range repository.Files {
 		paths = append(paths, file.Path)
+	}
+	return paths
+}
+
+func repositoryPathLookup(repository discovery.Repository) map[string]struct{} {
+	paths := make(map[string]struct{}, len(repository.Files))
+	for _, file := range repository.Files {
+		paths[file.Path] = struct{}{}
 	}
 	return paths
 }
