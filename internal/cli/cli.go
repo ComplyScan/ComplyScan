@@ -84,6 +84,7 @@ func newRootCommand(stdout, stderr io.Writer, build BuildInfo) *cobra.Command {
 		return runDefaultSubcommand(cmd, newSetupCommand(stdout, build))
 	}
 	root.AddCommand(newScanCommand(stdout, build))
+	root.AddCommand(newReviewCommand(stdout, build))
 	root.AddCommand(newInventoryCommand(stdout, build))
 	root.AddCommand(newGenerateCommand(stdout, build))
 	root.AddCommand(newBaselineCommand(stdout))
@@ -252,12 +253,20 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 	return newScanCommandWithDiscovery(stdout, build, nil)
 }
 
+func newReviewCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
+	return newRepositoryCommandWithDiscovery(stdout, build, nil, true)
+}
+
 type scanDiscoverySeed struct {
 	Target    string
 	Discovery discovery.Result
 }
 
 func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDiscoverySeed) *cobra.Command {
+	return newRepositoryCommandWithDiscovery(stdout, build, seed, false)
+}
+
+func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDiscoverySeed, reviewConfiguredProvider bool) *cobra.Command {
 	var (
 		format                    string
 		minimum                   string
@@ -292,10 +301,17 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 		quickScan                 bool
 		deepScan                  bool
 		verbose                   bool
+		requireAIReview           bool
 	)
+	use := "scan [path]"
+	short := "Run a local deterministic repository scan"
+	if reviewConfiguredProvider {
+		use = "review [path]"
+		short = "Run an explicit AI-assisted repository review"
+	}
 	command := &cobra.Command{
-		Use:   "scan [path]",
-		Short: "Scan a repository (defaults to the current directory)",
+		Use:   use,
+		Short: short,
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := "."
@@ -314,20 +330,26 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 			if err != nil {
 				return err
 			}
-			if quickScan && deepScan {
-				return errors.New("--quick and --deep cannot be used together")
+			providerChanged := cmd.Flags().Changed("provider") || cmd.Flags().Changed("review")
+			if cmd.Flags().Changed("provider") && cmd.Flags().Changed("review") {
+				return errors.New("--provider and the legacy --review flag cannot be used together")
 			}
-			// A normal scan uses the analysis provider saved by `complyscan setup`.
-			// The legacy --quick flag remains as a hidden compatibility escape hatch
-			// for existing automation that explicitly requested model-free analysis.
-			if quickScan {
+			aiOptionOnScan := providerChanged || deepScan || cmd.Flags().Changed("ollama-model") || cmd.Flags().Changed("ollama-endpoint") ||
+				cmd.Flags().Changed("model") || cmd.Flags().Changed("api-key-env") || cmd.Flags().Changed("provider-name") ||
+				cmd.Flags().Changed("base-url") || refreshReview || requireAIReview
+			if !reviewConfiguredProvider && aiOptionOnScan {
+				return errors.New("AI options are not accepted by the local `complyscan scan` command; use `complyscan review` instead")
+			}
+			if reviewConfiguredProvider && quickScan {
+				return errors.New("--quick is not accepted by `complyscan review`; use `complyscan scan` for local deterministic analysis")
+			}
+			// `scan` is always local and deterministic. `review` deliberately opts in
+			// to the provider saved by setup.
+			if !reviewConfiguredProvider {
 				cfg.AI.Provider = "none"
 			}
-			if deepScan && cfg.AI.Provider == "none" && !cmd.Flags().Changed("review") {
-				return errors.New("--deep requires an AI review provider; run complyscan setup or pass --review")
-			}
 			previousReviewProvider := cfg.AI.Provider
-			if cmd.Flags().Changed("review") {
+			if providerChanged {
 				cfg.AI.Provider = strings.ToLower(strings.TrimSpace(reviewProvider))
 				if isRemoteReviewProvider(cfg.AI.Provider) && previousReviewProvider != cfg.AI.Provider {
 					profile, _ := hostedProviderProfileFor(cfg.AI.Provider)
@@ -337,6 +359,9 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 						TimeoutSeconds: 360, MaxFindings: 20,
 					}
 				}
+			}
+			if reviewConfiguredProvider && cfg.AI.Provider == "none" {
+				return errors.New("AI review is not configured; run `complyscan setup` or pass `--provider <provider>` (use `complyscan scan` for local deterministic analysis)")
 			}
 			if cmd.Flags().Changed("ollama-model") {
 				cfg.AI.Ollama.Model = strings.TrimSpace(ollamaModel)
@@ -370,11 +395,6 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 			}
 			if err := cfg.Validate(); err != nil {
 				return fmt.Errorf("validate review configuration: %w", err)
-			}
-			if cfg.AI.Provider != "none" {
-				if _, _, _, _, _, err := configuredReviewer(cfg.AI); err != nil {
-					return fmt.Errorf("configure %s review: %w", reviewProviderLabel(cfg.AI.Provider), err)
-				}
 			}
 			if cmd.Flags().Changed("max-files") && maxFiles <= 0 {
 				return errors.New("--max-files must be greater than zero")
@@ -612,6 +632,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 					}
 				}
 			}
+			aiReviewIncomplete := false
 			if cfg.AI.Provider != "none" {
 				boundedReviewRequested := cfg.AI.RepositoryAnalysis.Mode == "bounded-only"
 				candidateCount := 0
@@ -636,6 +657,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 					outcome, qualificationErr := qualifyConfiguredModel(cmd.Context(), cfg.AI, false)
 					activity.Finish(qualificationErr)
 					if qualificationErr != nil {
+						aiReviewIncomplete = true
 						modelQualified = false
 						if repositoryAnalysisRequested {
 							reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisIncomplete
@@ -694,6 +716,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 						cmd.Context(), cfg.AI, result.FullRepository, frameworkEvidenceReports(frameworkResults), cfg.Systems, cfg.Ownership, progressWriter,
 					)
 					if reviewErr != nil {
+						aiReviewIncomplete = true
 						reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisIncomplete
 						warning := fmt.Sprintf("%s repository analysis was incomplete after %s: %v. Deterministic findings and technical evidence remain available.", reviewProviderLabel(cfg.AI.Provider), formatElapsed(time.Since(repositoryReviewStarted)), reviewErr)
 						reportValue.Warnings = append(reportValue.Warnings, warning)
@@ -739,6 +762,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 						}
 						review, reviewErr := reviewFindingsWithProvider(cmd.Context(), progressWriter, cfg.AI, target, visible)
 						if reviewErr != nil {
+							aiReviewIncomplete = true
 							warning := fmt.Sprintf("%s finding review was incomplete after %s: %v. Deterministic findings remain unchanged.", reviewProviderLabel(cfg.AI.Provider), formatElapsed(time.Since(findingReviewStarted)), reviewErr)
 							reportValue.Warnings = append(reportValue.Warnings, warning)
 							if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
@@ -767,6 +791,7 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 						refreshReview, progressWriter, technicalReviewProgress(progressWriter, cfg.AI.Provider, technicalReviewStarted, time.Now),
 					)
 					if reviewErr != nil {
+						aiReviewIncomplete = true
 						warning := fmt.Sprintf("%s technical evidence review for %s was incomplete after %s: %v. Deterministic evidence remains available.", reviewProviderLabel(cfg.AI.Provider), frameworkResults[index].Name, formatElapsed(time.Since(technicalReviewStarted)), reviewErr)
 						reportValue.Warnings = append(reportValue.Warnings, warning)
 						if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
@@ -824,6 +849,9 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 					}
 				}
 			}
+			if requireAIReview && aiReviewIncomplete {
+				return &exitError{code: 2}
+			}
 			if report.MeetsThreshold(gateFindings, cfg.FailOn) {
 				return &exitError{code: 1}
 			}
@@ -842,7 +870,8 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 	command.Flags().StringVar(&baselinePath, "baseline", "", "baseline file (relative to the scan target)")
 	command.Flags().BoolVar(&noBaseline, "no-baseline", false, "do not apply a configured baseline")
 	command.Flags().StringVar(&changedSince, "changed-since", "", "scan code files changed since a Git reference; governance checks remain repository-wide")
-	command.Flags().StringVar(&reviewProvider, "review", "", "advisory review provider: none, ollama, openai, anthropic, gemini, xai, groq, mistral, openrouter, or openai-compatible")
+	command.Flags().StringVar(&reviewProvider, "provider", "", "AI review provider override: ollama, openai, anthropic, gemini, xai, groq, mistral, openrouter, or openai-compatible")
+	command.Flags().StringVar(&reviewProvider, "review", "", "legacy alias for --provider")
 	command.Flags().StringVar(&ollamaModel, "ollama-model", "", "Ollama model name (overrides ai.ollama.model)")
 	command.Flags().StringVar(&ollamaEndpoint, "ollama-endpoint", "", "local Ollama base URL (overrides ai.ollama.endpoint)")
 	command.Flags().StringVar(&remoteModel, "model", "", "remote-provider model name (overrides ai.remote.model)")
@@ -852,10 +881,17 @@ func newScanCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *scanDi
 	command.Flags().StringVar(&reportDirectory, "report-dir", report.DefaultDirectory, "directory for immutable report history and latest snapshots (relative to the scan target)")
 	command.Flags().BoolVar(&noReport, "no-report", false, "do not save local Markdown and JSON reports")
 	command.Flags().BoolVar(&refreshReview, "refresh-review", false, "ignore cached technical observations and run the configured provider again")
+	command.Flags().BoolVar(&requireAIReview, "require-ai-review", false, "return exit code 2 when any requested AI review layer is incomplete")
 	command.Flags().BoolVar(&quickScan, "quick", false, "run deterministic discovery and checks without AI review")
 	command.Flags().BoolVar(&deepScan, "deep", false, "require the configured AI review provider for a deep scan")
 	_ = command.Flags().MarkHidden("quick")
 	_ = command.Flags().MarkHidden("deep")
+	_ = command.Flags().MarkHidden("review")
+	if !reviewConfiguredProvider {
+		for _, name := range []string{"provider", "ollama-model", "ollama-endpoint", "model", "api-key-env", "provider-name", "base-url", "refresh-review", "require-ai-review"} {
+			_ = command.Flags().MarkHidden(name)
+		}
+	}
 	command.Flags().BoolVarP(&verbose, "verbose", "v", false, "print full framework, evidence, and advisory-review details in the terminal")
 	command.Flags().BoolVar(&verifyConfigured, "verify", false, "run verification recipes from .complyscan.yml in isolated containers")
 	command.Flags().StringVar(&verifyRuntime, "verify-runtime", "docker", "local container runtime for opt-in execution: docker or podman")
