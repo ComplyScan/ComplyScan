@@ -36,7 +36,7 @@ inputs:
     required: false
     default: "true"
   changed-since:
-    description: Optional Git reference used to limit code findings to changed files; requires the reference to be available in the checkout.
+    description: Optional Git reference used to limit code findings to changed files and explicit AI review context to changed eligible files plus bounded connected files; requires the reference to be available in the checkout.
     required: false
     default: ""
   review:
@@ -74,7 +74,7 @@ inputs:
 
 outputs:
   exit-code:
-    description: ComplyScan exit code (0 for clear, 1 for threshold findings).
+    description: ComplyScan exit code (0 for clear, 1 for threshold findings, 2 for an operational/configuration error or incomplete required AI review).
     value: ${{ steps.scan.outputs.exit-code }}
   sarif-file:
     description: Absolute path to the generated SARIF file.
@@ -122,7 +122,7 @@ runs:
         go -C "$GITHUB_ACTION_PATH" build -o "$binary" ./cmd/complyscan
 
         command_name=scan
-        review_value="${INPUT_REVIEW,,}"
+        review_value=$(printf '%s' "$INPUT_REVIEW" | tr '[:upper:]' '[:lower:]')
         if [[ -n "$review_value" && "$review_value" != "none" ]]; then
           command_name=review
         fi
@@ -174,18 +174,28 @@ runs:
 
         echo "exit-code=$status" >> "$GITHUB_OUTPUT"
         echo "sarif-file=$sarif_file" >> "$GITHUB_OUTPUT"
-        if [[ $status -gt 1 ]]; then
-          echo "completed=false" >> "$GITHUB_OUTPUT"
-          exit "$status"
+        if [[ -s "$sarif_file" ]]; then
+          echo "sarif-ready=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "sarif-ready=false" >> "$GITHUB_OUTPUT"
         fi
-        echo "completed=true" >> "$GITHUB_OUTPUT"
 
     - name: Upload SARIF
-      if: ${{ always() && inputs.upload-results == 'true' && steps.scan.outputs.completed == 'true' }}
+      if: ${{ always() && inputs.upload-results == 'true' && steps.scan.outputs.sarif-ready == 'true' }}
       uses: github/codeql-action/upload-sarif@v4
       with:
         sarif_file: ${{ steps.scan.outputs.sarif-file }}
         category: ${{ inputs.category }}
+
+    - name: Enforce scan completion
+      if: ${{ always() && steps.scan.outputs.exit-code != '' }}
+      shell: bash
+      env:
+        COMPLYSCAN_EXIT_CODE: ${{ steps.scan.outputs.exit-code }}
+      run: |
+        if [[ "$COMPLYSCAN_EXIT_CODE" -gt 1 ]]; then
+          exit "$COMPLYSCAN_EXIT_CODE"
+        fi
 
     - name: Enforce finding threshold
       if: ${{ always() && inputs.fail-on-findings == 'true' && steps.scan.outputs.exit-code == '1' }}

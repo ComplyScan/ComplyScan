@@ -35,3 +35,46 @@ jobs:
           sh -n scripts/evaluate-technical-evidence.sh
           sh -n scripts/validate-profile-draft.sh
           sh -n scripts/validate-ollama.sh
+
+  action-contract-macos:
+    name: Composite Action on macOS Bash
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run deterministic Action contract
+        id: deterministic
+        uses: ./
+        with:
+          path: testdata/non-ai-repository
+          sarif-file: deterministic.sarif
+          upload-results: "false"
+      - name: Check deterministic Action outputs
+        shell: bash
+        env:
+          COMPLYSCAN_EXIT_CODE: ${{ steps.deterministic.outputs.exit-code }}
+          COMPLYSCAN_SARIF_FILE: ${{ steps.deterministic.outputs.sarif-file }}
+        run: |
+          test "$COMPLYSCAN_EXIT_CODE" = "0"
+          test -s "$COMPLYSCAN_SARIF_FILE"
+      - name: Run required review without a credential
+        id: required_review
+        continue-on-error: true
+        uses: ./
+        with:
+          path: testdata/non-ai-repository
+          sarif-file: required-review.sarif
+          upload-results: "false"
+          review: openai
+          api-key-env: COMPLYSCAN_ACTION_TEST_MISSING_KEY
+          require-ai-review: "true"
+      - name: Check required-review failure outputs
+        if: ${{ always() }}
+        shell: bash
+        env:
+          ACTION_OUTCOME: ${{ steps.required_review.outcome }}
+          COMPLYSCAN_EXIT_CODE: ${{ steps.required_review.outputs.exit-code }}
+          COMPLYSCAN_SARIF_FILE: ${{ steps.required_review.outputs.sarif-file }}
+        run: |
+          test "$ACTION_OUTCOME" = "failure"
+          test "$COMPLYSCAN_EXIT_CODE" = "2"
+          test -s "$COMPLYSCAN_SARIF_FILE"
