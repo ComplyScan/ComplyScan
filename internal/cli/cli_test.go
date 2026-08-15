@@ -483,7 +483,7 @@ func TestScanJSONOutputAndSeverityFilter(t *testing.T) {
 	if decoded.Summary.High == 0 || decoded.Summary.Medium != 0 || decoded.Summary.Info != 0 {
 		t.Fatalf("severity filter not reflected in summary: %#v", decoded.Summary)
 	}
-	if decoded.SchemaVersion != 8 || decoded.Tool.Commit != "test" || decoded.Scan.ID == "" || decoded.Scan.Scope.Findings != "full-repository" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
+	if decoded.SchemaVersion != 9 || decoded.Tool.Commit != "test" || decoded.Scan.ID == "" || decoded.Scan.Scope.Findings != "full-repository" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
 		t.Fatalf("missing evidence-bundle metadata: %#v", decoded)
 	}
 }
@@ -528,7 +528,7 @@ func TestScanMapsConfirmedAIUseToSystemRequirementsAndScopedEvidence(t *testing.
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 8 || decoded.AIUseMappings == nil || len(decoded.AIUseMappings.Uses) != 1 {
+	if decoded.SchemaVersion != 9 || decoded.AIUseMappings == nil || len(decoded.AIUseMappings.Uses) != 1 {
 		t.Fatalf("per-use mapping missing: %#v", decoded.AIUseMappings)
 	}
 	use := decoded.AIUseMappings.Uses[0]
@@ -1743,7 +1743,7 @@ func TestScanMapsSharedEvidenceAcrossEUAndNISTFrameworks(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 8 || len(decoded.Frameworks) != 2 {
+	if decoded.SchemaVersion != 9 || len(decoded.Frameworks) != 2 {
 		t.Fatalf("multi-framework contract missing: %#v", decoded.Frameworks)
 	}
 	var fingerprints []string

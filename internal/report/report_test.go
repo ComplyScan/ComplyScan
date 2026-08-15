@@ -49,6 +49,13 @@ func TestWriteJSON(t *testing.T) {
 		Uses: 1, FrameworkSystemContexts: 1, WithInScopeCodeEvidence: 1, ObjectivesWithEvidenceOutsideUse: 1,
 		LikelyRequiredWithoutInScopeEvidence: 1, RecommendedWithoutInScopeEvidence: 1,
 	}, Uses: []usemapping.UseResult{{UseID: "assistant", UseName: "Assistant"}}}
+	value.RepositoryAnalysisRun = RepositoryAnalysisCompleted
+	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{Result: providers.RepositorySectionResult{
+		ObjectiveObservations: []providers.RepositoryObjectiveObservation{{
+			ObjectiveID: "pack/human-review", AIUseID: "assistant", SystemID: "assistant",
+			Strength: providers.StrengthPartial, Confidence: "high", Rationale: "A review path is present but incomplete.",
+		}},
+	}}
 	var output bytes.Buffer
 	if err := WriteJSON(&output, value); err != nil {
 		t.Fatal(err)
@@ -57,10 +64,10 @@ func TestWriteJSON(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 8 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
+	if decoded.SchemaVersion != 9 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
 		t.Fatalf("unexpected tool: %#v", decoded.Tool)
 	}
-	if decoded.RepositoryAnalysisRun != RepositoryAnalysisNotRequested {
+	if decoded.RepositoryAnalysisRun != RepositoryAnalysisCompleted {
 		t.Fatalf("repository analysis run = %q", decoded.RepositoryAnalysisRun)
 	}
 	if decoded.AIUseInventory == nil || decoded.AIUseInventory.Summary.Confirmed != 1 {
@@ -68,6 +75,13 @@ func TestWriteJSON(t *testing.T) {
 	}
 	if decoded.AIUseMappings == nil || decoded.AIUseMappings.SchemaVersion != 1 || decoded.AIUseMappings.Summary.Uses != 1 {
 		t.Fatalf("AI-use mappings were not serialized: %#v", decoded.AIUseMappings)
+	}
+	if decoded.RepositoryAnalysis == nil || len(decoded.RepositoryAnalysis.Result.ObjectiveObservations) != 1 ||
+		decoded.RepositoryAnalysis.Result.ObjectiveObservations[0].AIUseID != "assistant" {
+		t.Fatalf("use-scoped repository observation was not serialized: %#v", decoded.RepositoryAnalysis)
+	}
+	if !strings.Contains(output.String(), `"ai_use_id": "assistant"`) {
+		t.Fatalf("schema-version 9 AI-use attribution is missing:\n%s", output.String())
 	}
 	if !strings.Contains(output.String(), `"framework_system_contexts": 1`) ||
 		!strings.Contains(output.String(), `"with_in_scope_code_evidence": 1`) ||
@@ -121,7 +135,7 @@ func TestWriteJSONUsesCurrentEvidenceInvestigationContract(t *testing.T) {
 	if err := WriteJSON(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), `"schema_version": 8`) || !strings.Contains(output.String(), `"repository_analysis_run": "not-requested"`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
+	if !strings.Contains(output.String(), `"schema_version": 9`) || !strings.Contains(output.String(), `"repository_analysis_run": "not-requested"`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
 		t.Fatalf("unexpected current-schema investigation JSON:\n%s", output.String())
 	}
 }
@@ -273,6 +287,32 @@ func TestConciseMarkdownAndTerminalMapRequirementsPerConfirmedAIUse(t *testing.T
 		!strings.Contains(terminal.String(), "Unlinked classifier: 0 likely-required check(s)") ||
 		!strings.Contains(terminal.String(), "no system association (context needed)") {
 		t.Fatalf("per-use terminal summary missing:\n%s", terminal.String())
+	}
+}
+
+func TestDeveloperQuestionsKeepDirectUseObservationsSeparate(t *testing.T) {
+	value := Report{
+		AIUseMappings: &usemapping.Report{Uses: []usemapping.UseResult{{
+			UseID: "summarization", UseName: "Summarization",
+			Frameworks: []usemapping.FrameworkResult{{Contexts: []usemapping.ContextResult{{Objectives: []usemapping.ObjectiveResult{{
+				AIReview: &usemapping.CodeReview{
+					RepositoryObjectiveID: "pack/review", SystemID: "assistant", Attribution: usemapping.ReviewAttributionExplicitUse,
+					UnresolvedQuestions: []string{"Can operators bypass the gate?"},
+				},
+			}}}}}},
+		}}},
+		RepositoryAnalysis: &providers.RepositoryAnalysisResult{Result: providers.RepositorySectionResult{ObjectiveObservations: []providers.RepositoryObjectiveObservation{
+			{ObjectiveID: "pack/review", AIUseID: "summarization", SystemID: "assistant", UnresolvedQuestions: []string{"Can operators bypass the gate?"}},
+			{ObjectiveID: "pack/review", AIUseID: "classification", SystemID: "assistant", UnresolvedQuestions: []string{"Does classification use the same gate?"}},
+		}}},
+	}
+	questions, _ := developerQuestions(value)
+	joined := strings.Join(questions, "\n")
+	if strings.Count(joined, "Can operators bypass the gate?") != 1 || !strings.Contains(joined, "Summarization: Can operators bypass the gate?") {
+		t.Fatalf("covered use question was not deduplicated correctly: %q", joined)
+	}
+	if !strings.Contains(joined, "Does classification use the same gate?") {
+		t.Fatalf("different direct-use observation was hidden: %q", joined)
 	}
 }
 

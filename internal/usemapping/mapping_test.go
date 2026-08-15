@@ -150,6 +150,56 @@ func TestBuildAllowsTwoConfirmedUsesToShareOneImplementationPath(t *testing.T) {
 	}
 }
 
+func TestBuildUsesExplicitStableUseIDForOverlappingScopedReview(t *testing.T) {
+	system := mappingTestSystem("assistant", "Assistant", profile.RegionEU, profile.DomainEmployment)
+	input := mappingTestFramework("eu-ai-act", framework.NatureLegislation, framework.ApplicabilityHighRiskSystem, mappingTestMatch("shared", "gateway/model.go"))
+	assessment := profile.AssessEUAIAct([]profile.System{system})
+	input.Applicability = &assessment
+	manifest := aiuse.NewManifest()
+	manifest.Uses = []aiuse.Use{
+		mappingTestUse("summarization", profile.ReviewConfirmed, aiuse.StatusActive, []string{"assistant"}, "gateway/**"),
+		mappingTestUse("classification", profile.ReviewConfirmed, aiuse.StatusActive, []string{"assistant"}, "gateway/**"),
+	}
+	analysis := &providers.RepositoryAnalysisResult{Result: providers.RepositorySectionResult{ObjectiveObservations: []providers.RepositoryObjectiveObservation{{
+		ObjectiveID: "eu-ai-act-pack/objective", AIUseID: "summarization", SystemID: "assistant",
+		Strength: providers.StrengthStrong, Confidence: "high", Rationale: "Explicitly reviewed for summarization",
+		SupportingEvidence: []providers.RepositoryCitation{{Path: "gateway/model.go", Line: 1}},
+	}}}}
+
+	result := Build(manifest, []profile.System{system}, []FrameworkInput{input}, inventory.Report{}, analysis)
+	for _, use := range result.Uses {
+		review := use.Frameworks[0].Contexts[0].Objectives[0].AIReview
+		if use.UseID == "summarization" {
+			if review == nil || review.Attribution != ReviewAttributionExplicitUse {
+				t.Fatalf("explicit use review = %#v", review)
+			}
+			continue
+		}
+		if review != nil {
+			t.Fatalf("explicit review leaked to %s: %#v", use.UseID, review)
+		}
+	}
+}
+
+func TestBuildRetainsExplicitUncertainUseReviewWithoutCitations(t *testing.T) {
+	system := mappingTestSystem("assistant", "Assistant", profile.RegionEU, profile.DomainEmployment)
+	input := mappingTestFramework("eu-ai-act", framework.NatureLegislation, framework.ApplicabilityHighRiskSystem, mappingTestMatch("shared", "assistant/model.go"))
+	assessment := profile.AssessEUAIAct([]profile.System{system})
+	input.Applicability = &assessment
+	manifest := aiuse.NewManifest()
+	manifest.Uses = []aiuse.Use{mappingTestUse("summarization", profile.ReviewConfirmed, aiuse.StatusActive, []string{"assistant"}, "assistant/**")}
+	analysis := &providers.RepositoryAnalysisResult{Result: providers.RepositorySectionResult{ObjectiveObservations: []providers.RepositoryObjectiveObservation{{
+		ObjectiveID: "eu-ai-act-pack/objective", AIUseID: "summarization", SystemID: "assistant",
+		Strength: providers.StrengthUncertain, Confidence: "medium", Rationale: "The bounded package cannot decide this objective.",
+	}}}}
+
+	result := Build(manifest, []profile.System{system}, []FrameworkInput{input}, inventory.Report{}, analysis)
+	review := result.Uses[0].Frameworks[0].Contexts[0].Objectives[0].AIReview
+	if review == nil || review.Attribution != ReviewAttributionExplicitUse || review.Verdict != providers.RepositoryVerdictCannotDetermine {
+		t.Fatalf("explicit uncertain use review = %#v", review)
+	}
+}
+
 func TestBuildAttributesRepositoryReviewOnlyWithFullyScopedCitations(t *testing.T) {
 	system := mappingTestSystem("support", "Support", profile.RegionEU, profile.DomainEmployment)
 	input := mappingTestFramework("eu-ai-act", framework.NatureLegislation, framework.ApplicabilityHighRiskSystem,

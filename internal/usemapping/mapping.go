@@ -26,7 +26,10 @@ const (
 
 type ReviewAttribution string
 
-const ReviewAttributionMatchingCitations ReviewAttribution = "all-citations-within-ai-use"
+const (
+	ReviewAttributionMatchingCitations ReviewAttribution = "all-citations-within-ai-use"
+	ReviewAttributionExplicitUse       ReviewAttribution = "explicit-ai-use-id-with-scoped-citations"
+)
 
 // FrameworkInput keeps the builder independent from the public report
 // package, which embeds the resulting mapping.
@@ -110,8 +113,9 @@ type EvidenceLocation struct {
 }
 
 // CodeReview is included only when every returned citation belongs to the
-// confirmed AI use. Repository-wide negative conclusions without citations
-// are deliberately not attributed to one use.
+// confirmed AI use. A directly bound uncertain result may be retained without
+// citations, but repository-wide negative conclusions without citations are
+// deliberately not attributed to one use.
 type CodeReview struct {
 	RepositoryObjectiveID string                               `json:"repository_objective_id"`
 	SystemID              string                               `json:"system_id,omitempty"`
@@ -137,7 +141,7 @@ func Build(manifest aiuse.Manifest, systems []profile.System, frameworks []Frame
 			"Each mapping uses human-confirmed AI-use paths for code scope and an associated configured system for declared applicability context.",
 			"Likely-required and recommended statuses are conservative screening results, not legal conclusions.",
 			"Code evidence and AI review verdicts do not establish production enablement, operational effectiveness, or compliance.",
-			"A repository AI verdict is use-scoped only when its citations identify exactly one confirmed AI use; overlapping path scopes remain ambiguous.",
+			"A direct repository AI verdict requires a validated stable use/objective/system binding; definite decisions require citations inside that use's submitted files, while generic observations still require citations that identify exactly one confirmed use.",
 		},
 	}
 	systemsByID := make(map[string]profile.System, len(systems))
@@ -453,6 +457,9 @@ func attributableRepositoryReview(definition aiuse.Use, confirmedUses []aiuse.Us
 		if observation.ObjectiveID != repositoryObjectiveID {
 			continue
 		}
+		if observation.AIUseID != "" && observation.AIUseID != definition.ID {
+			continue
+		}
 		if association.Status == AssociationConfigured {
 			if observation.SystemID != "" && observation.SystemID != association.SystemID {
 				continue
@@ -461,20 +468,28 @@ func attributableRepositoryReview(definition aiuse.Use, confirmedUses []aiuse.Us
 			continue
 		}
 		citations := append(append([]providers.RepositoryCitation(nil), observation.SupportingEvidence...), observation.ContradictoryEvidence...)
-		if len(citations) == 0 || !allRepositoryCitationsWithinUse(definition, citations) {
+		explicitUse := observation.AIUseID != ""
+		if len(citations) > 0 && !allRepositoryCitationsWithinUse(definition, citations) {
 			continue
 		}
-		matches := 0
-		matchedID := ""
-		for _, candidate := range confirmedUses {
-			if !repositoryObservationCanBelongToUse(candidate, observation.SystemID) || !allRepositoryCitationsWithinUse(candidate, citations) {
+		if len(citations) == 0 && (!explicitUse || observation.Strength != providers.StrengthUncertain || observation.DerivedTechnicalVerdict() != providers.RepositoryVerdictCannotDetermine) {
+			continue
+		}
+		attribution := ReviewAttributionExplicitUse
+		if !explicitUse {
+			matches := 0
+			matchedID := ""
+			for _, candidate := range confirmedUses {
+				if !repositoryObservationCanBelongToUse(candidate, observation.SystemID) || !allRepositoryCitationsWithinUse(candidate, citations) {
+					continue
+				}
+				matches++
+				matchedID = candidate.ID
+			}
+			if matches != 1 || matchedID != definition.ID {
 				continue
 			}
-			matches++
-			matchedID = candidate.ID
-		}
-		if matches != 1 || matchedID != definition.ID {
-			continue
+			attribution = ReviewAttributionMatchingCitations
 		}
 		review := CodeReview{
 			RepositoryObjectiveID: observation.ObjectiveID, SystemID: observation.SystemID,
@@ -482,7 +497,7 @@ func attributableRepositoryReview(definition aiuse.Use, confirmedUses []aiuse.Us
 			Rationale: observation.Rationale, SupportingEvidence: append([]providers.RepositoryCitation(nil), observation.SupportingEvidence...),
 			ContradictoryEvidence: append([]providers.RepositoryCitation(nil), observation.ContradictoryEvidence...),
 			MissingEvidence:       append([]string(nil), observation.MissingEvidence...), UnresolvedQuestions: append([]string(nil), observation.UnresolvedQuestions...),
-			Attribution: ReviewAttributionMatchingCitations,
+			Attribution: attribution,
 		}
 		if association.Status == AssociationConfigured && observation.SystemID == association.SystemID {
 			exact = append(exact, review)

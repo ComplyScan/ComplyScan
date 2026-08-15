@@ -227,7 +227,11 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 							addAction("ai-use-objective/"+use.UseID+"/"+frameworkResult.ID+"/"+context.Association.SystemID+"/"+objective.ObjectiveID, action)
 						}
 						if objective.AIReview != nil {
-							coveredRepositoryObservations[objective.AIReview.SystemID+"\x00"+objective.AIReview.RepositoryObjectiveID] = struct{}{}
+							aiUseID := ""
+							if objective.AIReview.Attribution == usemapping.ReviewAttributionExplicitUse {
+								aiUseID = use.UseID
+							}
+							coveredRepositoryObservations[aiUseID+"\x00"+objective.AIReview.SystemID+"\x00"+objective.AIReview.RepositoryObjectiveID] = struct{}{}
 						}
 					}
 				}
@@ -271,7 +275,7 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 	if value.RepositoryAnalysis != nil {
 		for _, observation := range value.RepositoryAnalysis.Result.ObjectiveObservations {
 			rawID := developerRawObjectiveID(observation.ObjectiveID)
-			if _, covered := coveredRepositoryObservations[observation.SystemID+"\x00"+observation.ObjectiveID]; covered {
+			if _, covered := coveredRepositoryObservations[observation.AIUseID+"\x00"+observation.SystemID+"\x00"+observation.ObjectiveID]; covered {
 				continue
 			}
 			verdict := observation.DerivedTechnicalVerdict()
@@ -1286,7 +1290,16 @@ func developerRepositoryObservationCoveredByUse(value Report, observation provid
 		for _, frameworkResult := range use.Frameworks {
 			for _, context := range frameworkResult.Contexts {
 				for _, objective := range context.Objectives {
-					if objective.AIReview != nil && objective.AIReview.RepositoryObjectiveID == observation.ObjectiveID && objective.AIReview.SystemID == observation.SystemID {
+					if objective.AIReview == nil || objective.AIReview.RepositoryObjectiveID != observation.ObjectiveID || objective.AIReview.SystemID != observation.SystemID {
+						continue
+					}
+					if observation.AIUseID != "" {
+						if objective.AIReview.Attribution == usemapping.ReviewAttributionExplicitUse && use.UseID == observation.AIUseID {
+							return true
+						}
+						continue
+					}
+					if objective.AIReview.Attribution == usemapping.ReviewAttributionMatchingCitations {
 						return true
 					}
 				}
