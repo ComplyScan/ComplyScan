@@ -14,10 +14,14 @@ import (
 // WriteMarkdown renders a concise, human-readable decision report. Exhaustive
 // scanner data remains available in the JSON evidence bundle.
 func WriteMarkdown(writer io.Writer, report Report) error {
+	return writeMarkdown(writer, report, "latest.json")
+}
+
+func writeMarkdown(writer io.Writer, report Report, evidenceBundle string) error {
 	if _, err := fmt.Fprintln(writer, "# ComplyScan report"); err != nil {
 		return err
 	}
-	return writeDeveloperReportMarkdown(writer, report)
+	return writeDeveloperReportMarkdown(writer, report, evidenceBundle)
 }
 
 // WriteDetailedMarkdown retains the exhaustive human-readable scanner trace

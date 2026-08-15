@@ -57,10 +57,11 @@ type developerReportView struct {
 	notImplemented     int
 	cannotDetermine    int
 	referenceDetails   []string
+	evidenceBundle     string
 }
 
-func writeDeveloperReportMarkdown(writer io.Writer, value Report) error {
-	view := buildDeveloperReportView(value)
+func writeDeveloperReportMarkdown(writer io.Writer, value Report, evidenceBundle string) error {
+	view := buildDeveloperReportView(value, evidenceBundle)
 	if _, err := fmt.Fprintln(writer, "\n> A developer-focused review of code found in this repository. ComplyScan cannot decide on its own whether your product complies with a law."); err != nil {
 		return err
 	}
@@ -91,7 +92,7 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report) error {
 		}
 	}
 	if _, err := fmt.Fprintf(writer, "\n- AI code review: **%s**\n- Parts of the scan that need attention: **%d**\n- Scan ID: %s\n- Full technical results: %s\n",
-		markdownText(view.repositoryAnalysis), len(value.Warnings), inlineCode(value.Scan.ID), inlineCode("latest.json")); err != nil {
+		markdownText(view.repositoryAnalysis), len(value.Warnings), inlineCode(value.Scan.ID), inlineCode(view.evidenceBundle)); err != nil {
 		return err
 	}
 	if view.verificationPassed+view.verificationFailed > 0 {
@@ -103,11 +104,12 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report) error {
 	return err
 }
 
-func buildDeveloperReportView(value Report) developerReportView {
+func buildDeveloperReportView(value Report, evidenceBundle string) developerReportView {
 	counts := markdownCounts(value)
 	view := developerReportView{
 		sourceFilesSeen: counts.SourceFilesSeen, filesIndexed: counts.FilesIndexed,
 		unsupportedFiles: counts.UnsupportedFiles, repositoryAnalysis: developerRepositoryAnalysisLabel(value),
+		evidenceBundle: evidenceBundle,
 	}
 	if value.RepositoryAnalysis != nil {
 		if view.sourceFilesSeen == 0 {
@@ -181,9 +183,9 @@ func buildDeveloperReportView(value Report) developerReportView {
 			why := developerVerdictLabel(verdict) + ". " + compactMarkdownText(observation.Rationale, 150)
 			next := "Add the missing implementation, then rerun ComplyScan."
 			if verdict == providers.RepositoryVerdictPartial {
-				next = "Complete the missing implementation elements listed in latest.json, then rerun ComplyScan."
+				next = fmt.Sprintf("Complete the missing implementation elements listed in %s, then rerun ComplyScan.", view.evidenceBundle)
 			} else if verdict == providers.RepositoryVerdictCannotDetermine {
-				next = "Provide the missing code context or ownership information listed in latest.json, then rerun ComplyScan."
+				next = fmt.Sprintf("Provide the missing code context or ownership information listed in %s, then rerun ComplyScan.", view.evidenceBundle)
 			}
 			addAction("objective/"+observation.SystemID+"/"+rawID, developerAction{
 				priority: "Review", issue: developerObjectiveTitle(rawID, objectiveTitles),
@@ -213,13 +215,13 @@ func buildDeveloperReportView(value Report) developerReportView {
 		addAction("verification/"+result.RecipeID, developerAction{
 			priority: "High", issue: "Execution check failed: " + result.RecipeID,
 			why:  fmt.Sprintf("The isolated check exited with status %d.", result.ExitCode),
-			next: "Inspect the check output in latest.json, fix the failure, and rerun the scan.", evidence: result.RecipeID,
+			next: fmt.Sprintf("Inspect the check output in %s, fix the failure, and rerun the scan.", view.evidenceBundle), evidence: result.RecipeID,
 		})
 	}
 	if len(value.Warnings) > 0 {
 		warningSummary := compactMarkdownText(value.Warnings[0], 160)
 		if len(value.Warnings) > 1 {
-			warningSummary += fmt.Sprintf(" (%d additional warning(s) are in latest.json.)", len(value.Warnings)-1)
+			warningSummary += fmt.Sprintf(" (%d additional warning(s) are in %s.)", len(value.Warnings)-1, view.evidenceBundle)
 		}
 		addAction("scan-warnings", developerAction{
 			priority: "Review", issue: "Scan incomplete or uncertain",
@@ -321,7 +323,7 @@ func writeDeveloperActionsMarkdown(writer io.Writer, view developerReportView) e
 		}
 	}
 	if remaining := view.actionTotal - len(view.actions); remaining > 0 {
-		_, err := fmt.Fprintf(writer, "\n%d more item(s) are available in %s.\n", remaining, inlineCode("latest.json"))
+		_, err := fmt.Fprintf(writer, "\n%d more item(s) are available in %s.\n", remaining, inlineCode(view.evidenceBundle))
 		return err
 	}
 	return nil
@@ -345,7 +347,7 @@ func writeDeveloperEvidenceMarkdown(writer io.Writer, view developerReportView) 
 		}
 	}
 	if remaining := view.evidenceTotal - len(view.evidence); remaining > 0 {
-		_, err := fmt.Fprintf(writer, "\n%d more code-level safeguard decision(s) are available in %s.\n", remaining, inlineCode("latest.json"))
+		_, err := fmt.Fprintf(writer, "\n%d more code-level safeguard decision(s) are available in %s.\n", remaining, inlineCode(view.evidenceBundle))
 		return err
 	}
 	return nil
@@ -365,7 +367,7 @@ func writeDeveloperQuestionsMarkdown(writer io.Writer, view developerReportView)
 		}
 	}
 	if remaining := view.questionTotal - len(view.questions); remaining > 0 {
-		if _, err := fmt.Fprintf(writer, "\n- %d more question(s) are available in %s.", remaining, inlineCode("latest.json")); err != nil {
+		if _, err := fmt.Fprintf(writer, "\n- %d more question(s) are available in %s.", remaining, inlineCode(view.evidenceBundle)); err != nil {
 			return err
 		}
 	}
@@ -385,7 +387,7 @@ func writeDeveloperReferenceDetailsMarkdown(writer io.Writer, view developerRepo
 			return err
 		}
 	}
-	_, err := fmt.Fprintln(writer, "\n\nRequirement IDs, raw model output, and complete scanner results are available in `latest.json`.\n\n</details>")
+	_, err := fmt.Fprintf(writer, "\n\nRequirement IDs, raw model output, and complete scanner results are available in %s.\n\n</details>\n", inlineCode(view.evidenceBundle))
 	return err
 }
 

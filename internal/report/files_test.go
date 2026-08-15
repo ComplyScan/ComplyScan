@@ -27,6 +27,9 @@ func TestWriteArtifactsCreatesMatchingMarkdownAndJSON(t *testing.T) {
 	if !strings.Contains(string(markdown), value.Scan.ID) {
 		t.Fatalf("Markdown does not identify scan %q:\n%s", value.Scan.ID, markdown)
 	}
+	if !strings.Contains(string(markdown), "`latest.json`") || strings.Contains(string(markdown), "`report.json`") {
+		t.Fatalf("latest Markdown does not reference its paired JSON bundle:\n%s", markdown)
+	}
 	var decoded Report
 	if err := json.Unmarshal(jsonData, &decoded); err != nil {
 		t.Fatal(err)
@@ -48,6 +51,13 @@ func TestWriteArtifactsCreatesMatchingMarkdownAndJSON(t *testing.T) {
 	}
 	if string(historicalJSON) != string(jsonData) {
 		t.Fatal("latest and historical JSON do not describe the same completed scan")
+	}
+	historicalMarkdown, err := os.ReadFile(artifacts.HistoryMarkdown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(historicalMarkdown), "`report.json`") || strings.Contains(string(historicalMarkdown), "latest.json") {
+		t.Fatalf("historical Markdown does not reference its paired JSON bundle:\n%s", historicalMarkdown)
 	}
 
 	second := New(".", "0.2.1", nil, nil, 0)

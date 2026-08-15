@@ -36,17 +36,25 @@ func WriteArtifacts(directory string, value Report) (Artifacts, error) {
 	if err := ensureReportDirectory(directory); err != nil {
 		return Artifacts{}, err
 	}
-	markdown, jsonData, err := renderArtifacts(value)
+	latestMarkdown, err := renderMarkdownArtifact(value, "latest.json")
 	if err != nil {
 		return Artifacts{}, err
 	}
-	history, err := writeHistoryBundle(directory, value, markdown, jsonData)
+	historyMarkdown, err := renderMarkdownArtifact(value, "report.json")
+	if err != nil {
+		return Artifacts{}, err
+	}
+	jsonData, err := renderJSONArtifact(value)
+	if err != nil {
+		return Artifacts{}, err
+	}
+	history, err := writeHistoryBundle(directory, value, historyMarkdown, jsonData)
 	if err != nil {
 		return Artifacts{}, err
 	}
 	artifacts.HistoryMarkdown = history.Markdown
 	artifacts.HistoryJSON = history.JSON
-	if err := writeLatestArtifacts(artifacts, markdown, jsonData); err != nil {
+	if err := writeLatestArtifacts(artifacts, latestMarkdown, jsonData); err != nil {
 		return Artifacts{}, err
 	}
 	return artifacts, nil
@@ -59,7 +67,11 @@ func WriteLatestArtifacts(directory string, value Report) (Artifacts, error) {
 	if err := ensureReportDirectory(directory); err != nil {
 		return Artifacts{}, err
 	}
-	markdown, jsonData, err := renderArtifacts(value)
+	markdown, err := renderMarkdownArtifact(value, "latest.json")
+	if err != nil {
+		return Artifacts{}, err
+	}
+	jsonData, err := renderJSONArtifact(value)
 	if err != nil {
 		return Artifacts{}, err
 	}
@@ -73,15 +85,20 @@ func latestArtifacts(directory string) Artifacts {
 	return Artifacts{Markdown: filepath.Join(directory, "latest.md"), JSON: filepath.Join(directory, "latest.json")}
 }
 
-func renderArtifacts(value Report) ([]byte, []byte, error) {
-	var markdown, jsonData bytes.Buffer
-	if err := WriteMarkdown(&markdown, value); err != nil {
-		return nil, nil, fmt.Errorf("render Markdown report: %w", err)
+func renderMarkdownArtifact(value Report, evidenceBundle string) ([]byte, error) {
+	var markdown bytes.Buffer
+	if err := writeMarkdown(&markdown, value, evidenceBundle); err != nil {
+		return nil, fmt.Errorf("render Markdown report: %w", err)
 	}
+	return markdown.Bytes(), nil
+}
+
+func renderJSONArtifact(value Report) ([]byte, error) {
+	var jsonData bytes.Buffer
 	if err := WriteJSON(&jsonData, value); err != nil {
-		return nil, nil, fmt.Errorf("render JSON evidence bundle: %w", err)
+		return nil, fmt.Errorf("render JSON evidence bundle: %w", err)
 	}
-	return markdown.Bytes(), jsonData.Bytes(), nil
+	return jsonData.Bytes(), nil
 }
 
 func writeLatestArtifacts(artifacts Artifacts, markdown, jsonData []byte) error {
