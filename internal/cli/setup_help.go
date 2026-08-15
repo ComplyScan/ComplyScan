@@ -204,7 +204,7 @@ var setupQuestionHelp = map[string][]string{
 	},
 	"remote-disclosure": {
 		"Explicit cloud review sends selected source excerpts, configuration, manifests, infrastructure, and CI evidence after recognised-secret redaction. Selection uses local inventory signals, technical-objective matches, production entry points, and their bounded code-graph neighborhood. Ignored, generated, dependency, binary, oversized, and excluded files remain outside this context.",
-		"Redaction is defence in depth, not a guarantee that arbitrary proprietary or personal data has been removed. Use model-free analysis when external processing is not permitted. The explicit deep modes transfer substantially more repository content.",
+		"Redaction is defence in depth, not a guarantee that arbitrary proprietary or personal data has been removed. Use the local deterministic scan when external processing is not permitted. The explicit deep review modes transfer substantially more repository content.",
 		"The provider may charge for usage and processes data under your account settings and its terms. Confirm only if your organisation permits this external processing.",
 	},
 	"remote-provider-name": {

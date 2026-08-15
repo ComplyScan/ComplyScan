@@ -1,5 +1,5 @@
 name: ComplyScan
-description: Scan a repository for potential AI compliance engineering risks and upload SARIF results.
+description: Discover AI implementations and code-level governance safeguards, then optionally upload SARIF results.
 author: ComplyScan contributors
 
 branding:

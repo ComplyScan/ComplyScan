@@ -201,6 +201,9 @@ func TestScanHelpPresentsOneScanWorkflow(t *testing.T) {
 	if code := Execute([]string{"scan", "--help"}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("scan help code=%d stderr=%q", code, stderr.String())
 	}
+	if !strings.Contains(stdout.String(), "never contacts a model") {
+		t.Fatalf("scan help does not state the local boundary:\n%s", stdout.String())
+	}
 	for _, flag := range []string{"--quick", "--deep", "--provider", "--model", "--api-key-env", "--refresh-review", "--require-ai-review"} {
 		if strings.Contains(stdout.String(), flag) {
 			t.Fatalf("scan help exposes AI option %s:\n%s", flag, stdout.String())
@@ -210,6 +213,9 @@ func TestScanHelpPresentsOneScanWorkflow(t *testing.T) {
 	stderr.Reset()
 	if code := Execute([]string{"review", "--help"}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("review help code=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "send selected repository context") {
+		t.Fatalf("review help does not disclose external processing:\n%s", stdout.String())
 	}
 	for _, flag := range []string{"--provider", "--model", "--api-key-env", "--refresh-review", "--require-ai-review"} {
 		if !strings.Contains(stdout.String(), flag) {

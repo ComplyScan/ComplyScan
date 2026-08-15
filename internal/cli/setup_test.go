@@ -179,7 +179,7 @@ func TestPromptAnalysisProviderGroupsHostedProviders(t *testing.T) {
 			calls++
 			switch calls {
 			case 1:
-				if label != "Analysis mode" || defaultValue != "Cloud AI assistance — setup suggestions and explicit reviews using your API key" || len(options) != 3 || !strings.Contains(options[1].Label, "Experimental local AI assistance") || !strings.Contains(options[2].Label, "do not reason about safeguards") {
+				if label != "Optional AI assistance" || defaultValue != "Cloud AI assistance — setup suggestions and explicit reviews using your API key" || len(options) != 3 || !strings.Contains(options[1].Label, "Experimental local AI assistance") || !strings.Contains(options[2].Label, "do not reason about safeguards") {
 					t.Fatalf("analysis selector: label=%q default=%q options=%#v", label, defaultValue, options)
 				}
 				return options[0].Value, nil

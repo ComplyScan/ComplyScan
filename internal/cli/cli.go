@@ -65,7 +65,7 @@ func executeWithInput(args []string, stdin io.Reader, stdout, stderr io.Writer, 
 func newRootCommand(stdout, stderr io.Writer, build BuildInfo) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "complyscan",
-		Short:         "Scan repositories for potential AI compliance engineering risks",
+		Short:         "Discover AI implementations and code-level governance safeguards",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Args:          cobra.NoArgs,
@@ -305,13 +305,16 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 	)
 	use := "scan [path]"
 	short := "Run a local deterministic repository scan"
+	long := "Run local deterministic discovery, technical checks, and framework mapping. This command never contacts a model or reads a provider API key."
 	if reviewConfiguredProvider {
 		use = "review [path]"
 		short = "Run an explicit AI-assisted repository review"
+		long = "Run the deterministic repository scan, then explicitly activate the configured AI provider for advisory code reasoning. Remote review may send selected repository context and incur provider cost."
 	}
 	command := &cobra.Command{
 		Use:   use,
 		Short: short,
+		Long:  long,
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := "."

@@ -756,7 +756,7 @@ func promptAnalysisProvider(prompt promptSession, current string) (string, error
 		defaultMode = localOption
 	}
 	for {
-		selected, err := promptChoice(prompt, "Analysis mode", defaultMode, hostedOption, localOption, fastOption)
+		selected, err := promptChoice(prompt, "Optional AI assistance", defaultMode, hostedOption, localOption, fastOption)
 		if err != nil {
 			return "", err
 		}
