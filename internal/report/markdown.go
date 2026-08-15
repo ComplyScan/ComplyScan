@@ -396,7 +396,7 @@ func writeReportOverviewMarkdown(writer io.Writer, report Report) error {
 	if len(report.Warnings) > 0 {
 		status = "Completed with warnings"
 	}
-	review := "Not performed — quick technical scan"
+	review := "Not performed — local deterministic scan"
 	if hasModelReview(report) {
 		review = "Performed — advisory AI evidence review included"
 	}
@@ -642,7 +642,7 @@ func writeRecommendedActionsMarkdown(writer io.Writer, report Report) error {
 		actions = append(actions, fmt.Sprintf("Manually review the unsupported files identified for the %d objective(s) that could not be fully assessed.", counts.NotEvaluated))
 	}
 	if !hasModelReview(report) && counts.CandidateEvidence > 0 {
-		actions = append(actions, "Configure an AI reviewer in `complyscan setup`, then rerun `complyscan scan` to add advisory semantic review of the candidate evidence.")
+		actions = append(actions, "Configure an AI reviewer in `complyscan setup`, then run `complyscan review` to add advisory semantic review of the candidate evidence.")
 	}
 	if len(actions) == 0 {
 		actions = append(actions, "Review the detailed evidence and preserve the JSON bundle for future comparison.")

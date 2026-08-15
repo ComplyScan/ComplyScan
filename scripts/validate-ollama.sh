@@ -63,10 +63,10 @@ for fixture_name in $fixture_names; do
 	printf '\n=== %s fixture ===\n' "$fixture_name" >>"$metrics_path"
 	case "$(uname -s)" in
 		Darwin)
-			/usr/bin/time -l "$binary" scan "$fixture" --review ollama --ollama-model "$model" --refresh-review --format json --no-report >"$result_path" 2>>"$metrics_path"
+			/usr/bin/time -l "$binary" review "$fixture" --provider ollama --ollama-model "$model" --refresh-review --format json --no-report >"$result_path" 2>>"$metrics_path"
 			;;
 		Linux)
-			/usr/bin/time -v "$binary" scan "$fixture" --review ollama --ollama-model "$model" --refresh-review --format json --no-report >"$result_path" 2>>"$metrics_path"
+			/usr/bin/time -v "$binary" review "$fixture" --provider ollama --ollama-model "$model" --refresh-review --format json --no-report >"$result_path" 2>>"$metrics_path"
 			;;
 		*)
 			printf 'Error: live resource validation is not implemented for %s.\n' "$(uname -s)" >&2

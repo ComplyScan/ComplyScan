@@ -272,7 +272,7 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 			return err
 		}
 	} else if value.RepositoryAnalysis == nil {
-		if _, err := fmt.Fprintln(writer, "\nThe AI code review was not run, so ComplyScan could not identify specific AI features from the way the code works."); err != nil {
+		if _, err := fmt.Fprintln(writer, "\nThis local scan did not run AI code review. Run `complyscan review` when you want ComplyScan to reason about specific AI features from the selected code evidence."); err != nil {
 			return err
 		}
 	} else if len(value.RepositoryAnalysis.Result.AIUses) == 0 {
@@ -511,7 +511,7 @@ func developerSupportingEvidence(value Report, titles map[string]string) ([]deve
 				item.assessment = "The deterministic scanner found a code match, but the AI review did not evaluate this safeguard"
 			} else {
 				item.verdict = providers.RepositoryVerdictCannotDetermine
-				item.assessment = "A code match was found; run AI code review for a technical implementation decision"
+				item.assessment = "A code match was found; run `complyscan review` for an AI-assisted technical implementation decision"
 			}
 			add(objective.ID, item)
 		}

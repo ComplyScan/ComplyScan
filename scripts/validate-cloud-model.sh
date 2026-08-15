@@ -101,8 +101,8 @@ for fixture_name in $fixture_names; do
 	fixture=${repository_root}/testdata/technical-context-${fixture_name}
 	result_path=${run_directory}/${fixture_name}-report.json
 	printf 'Running technical-review gate for %s/%s against %s...\n' "$provider" "$model" "$fixture_name"
-	"$complyscan_binary" scan "$fixture" \
-		--review "$provider" \
+	"$complyscan_binary" review "$fixture" \
+		--provider "$provider" \
 		--model "$model" \
 		--api-key-env "$api_key_env" \
 		--refresh-review \

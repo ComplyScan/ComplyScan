@@ -382,7 +382,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 				cfg.AI.Remote.BaseURL = strings.TrimSpace(remoteBaseURL)
 			}
 			if (cmd.Flags().Changed("ollama-model") || cmd.Flags().Changed("ollama-endpoint")) && cfg.AI.Provider != "ollama" {
-				return errors.New("--ollama-model and --ollama-endpoint require --review ollama or ai.provider: ollama")
+				return errors.New("--ollama-model and --ollama-endpoint require `complyscan review --provider ollama` or ai.provider: ollama")
 			}
 			if (cmd.Flags().Changed("model") || cmd.Flags().Changed("api-key-env") || cmd.Flags().Changed("provider-name") || cmd.Flags().Changed("base-url")) && !isRemoteReviewProvider(cfg.AI.Provider) {
 				return errors.New("--model, --api-key-env, --provider-name, and --base-url require a hosted review provider")

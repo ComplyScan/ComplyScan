@@ -29,6 +29,6 @@ mkdir -p "$output_directory"
 printf 'Building current ComplyScan source...\n'
 (cd "$repository_root" && go build -trimpath -o "$binary" ./cmd/complyscan)
 printf 'Running two-target Ollama evidence smoke test with %s...\n' "$model"
-"$binary" scan "$fixture" --review ollama --ollama-model "$model" --refresh-review --format json --no-report >"$result_path"
+"$binary" review "$fixture" --provider ollama --ollama-model "$model" --refresh-review --format json --no-report >"$result_path"
 (cd "$repository_root" && go run ./scripts/validate-ollama-smoke "$result_path")
 printf 'Saved smoke report: %s\n' "$result_path"
