@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestWriteArtifactsCreatesMatchingMarkdownAndJSON(t *testing.T) {
@@ -37,8 +38,8 @@ func TestWriteArtifactsCreatesMatchingMarkdownAndJSON(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("historical artifact %q was not written: %v", path, err)
 		}
-		if !strings.Contains(path, value.Scan.ID) {
-			t.Fatalf("historical path %q does not contain scan ID %q", path, value.Scan.ID)
+		if strings.Contains(path, value.Scan.ID) {
+			t.Fatalf("historical path %q unexpectedly contains scan ID %q", path, value.Scan.ID)
 		}
 	}
 	historicalJSON, err := os.ReadFile(artifacts.HistoryJSON)
@@ -81,6 +82,29 @@ func TestWriteArtifactsCreatesMatchingMarkdownAndJSON(t *testing.T) {
 	second.Tool.Version = "changed-after-scan"
 	if _, err := WriteArtifacts(directory, second); err == nil || !strings.Contains(err.Error(), "immutable report history") {
 		t.Fatalf("mutable history write error = %v", err)
+	}
+}
+
+func TestWriteArtifactsAddsNumericSuffixForSameSecond(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "reports")
+	createdAt := time.Date(2026, time.August, 14, 16, 56, 29, 0, time.UTC)
+	scope := ScanScope{Findings: "full-repository", TechnicalEvidence: "full-repository"}
+	first := NewWithMetadata(".", Tool{Name: "ComplyScan", Version: "one"}, scope, createdAt, nil, nil, 0)
+	second := NewWithMetadata(".", Tool{Name: "ComplyScan", Version: "two"}, scope, createdAt, nil, nil, 0)
+
+	firstArtifacts, err := WriteArtifacts(directory, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondArtifacts, err := WriteArtifacts(directory, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := filepath.Base(filepath.Dir(firstArtifacts.HistoryJSON)), "2026-08-14_16-56-29Z"; got != want {
+		t.Fatalf("first history directory = %q, want %q", got, want)
+	}
+	if got, want := filepath.Base(filepath.Dir(secondArtifacts.HistoryJSON)), "2026-08-14_16-56-29Z-2"; got != want {
+		t.Fatalf("second history directory = %q, want %q", got, want)
 	}
 }
 

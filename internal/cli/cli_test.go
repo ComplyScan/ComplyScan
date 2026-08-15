@@ -380,8 +380,11 @@ func TestScanAutomaticallySavesHumanAndMachineReports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(historyEntries) != 1 || !historyEntries[0].IsDir() || !strings.Contains(historyEntries[0].Name(), decoded.Scan.ID) {
+	if len(historyEntries) != 1 || !historyEntries[0].IsDir() || strings.Contains(historyEntries[0].Name(), decoded.Scan.ID) {
 		t.Fatalf("unexpected report history entries: %#v", historyEntries)
+	}
+	if _, err := time.Parse("2006-01-02_15-04-05Z", historyEntries[0].Name()); err != nil {
+		t.Fatalf("history directory %q is not a readable UTC date and time: %v", historyEntries[0].Name(), err)
 	}
 	historicalJSON := filepath.Join(reportDirectory, "history", historyEntries[0].Name(), "report.json")
 	historicalData, err := os.ReadFile(historicalJSON)
