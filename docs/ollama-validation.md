@@ -14,6 +14,8 @@ For the faster two-target evidence-investigation and follow-up-retrieval contrac
 ./scripts/smoke-ollama-investigation.sh
 ```
 
+The smoke fixture explicitly pins `ai.repository-analysis.mode: bounded-only`. This keeps it on the per-objective evidence-investigation path it is designed to validate, independently of the normal repository-review default.
+
 The harness builds the current source, confirms the configured model appears in `ollama list`, and scans the Go, Python, and TypeScript fixtures under `testdata/technical-context-*`. Each fixture selects both the EU AI Act and NIST AI RMF packs so the same repository mechanism is reviewed under separate source objectives. The fixtures contain:
 
 - a production-routed override handler connected to configuration, authorization, persistence, and audit calls;

@@ -2,6 +2,8 @@ version: 1
 
 ai:
   provider: none
+  repository-analysis:
+    mode: bounded-only
   ollama:
     endpoint: http://127.0.0.1:11434
     model: qwen3:8b
