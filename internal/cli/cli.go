@@ -890,6 +890,12 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			return nil
 		},
 	}
+	changedSinceHelp := "scan code files changed since a Git reference; governance checks remain repository-wide"
+	verboseHelp := "print full framework and evidence details in the terminal"
+	if reviewConfiguredProvider {
+		changedSinceHelp = "scan code files changed since a Git reference and limit AI context to changed eligible files plus up to eight connected files; governance checks remain repository-wide"
+		verboseHelp = "print full framework, evidence, and advisory-review details in the terminal"
+	}
 	command.Flags().StringVarP(&format, "format", "f", "terminal", "output format: terminal, json, or sarif")
 	command.Flags().StringVar(&minimum, "severity", "info", "minimum severity to include in output")
 	command.Flags().StringVar(&configPath, "config", "", "configuration file (defaults to <path>/.complyscan.yml)")
@@ -901,7 +907,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 	command.Flags().Int64Var(&maxTotalBytes, "max-total-bytes", 0, "maximum total bytes of text content to read")
 	command.Flags().StringVar(&baselinePath, "baseline", "", "baseline file (relative to the scan target)")
 	command.Flags().BoolVar(&noBaseline, "no-baseline", false, "do not apply a configured baseline")
-	command.Flags().StringVar(&changedSince, "changed-since", "", "scan code files changed since a Git reference; governance checks remain repository-wide")
+	command.Flags().StringVar(&changedSince, "changed-since", "", changedSinceHelp)
 	command.Flags().StringVar(&reviewProvider, "provider", "", "AI review provider override: ollama, openai, anthropic, gemini, xai, groq, mistral, openrouter, or openai-compatible")
 	command.Flags().StringVar(&reviewProvider, "review", "", "legacy alias for --provider")
 	command.Flags().StringVar(&ollamaModel, "ollama-model", "", "Ollama model name (overrides ai.ollama.model)")
@@ -924,7 +930,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			_ = command.Flags().MarkHidden(name)
 		}
 	}
-	command.Flags().BoolVarP(&verbose, "verbose", "v", false, "print full framework, evidence, and advisory-review details in the terminal")
+	command.Flags().BoolVarP(&verbose, "verbose", "v", false, verboseHelp)
 	command.Flags().BoolVar(&verifyConfigured, "verify", false, "run verification recipes from .complyscan.yml in isolated containers")
 	command.Flags().StringVar(&verifyRuntime, "verify-runtime", "docker", "local container runtime for opt-in execution: docker or podman")
 	command.Flags().StringVar(&verifyImage, "verify-image", "", "preloaded local container image for opt-in execution")

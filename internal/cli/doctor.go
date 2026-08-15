@@ -110,14 +110,11 @@ func runDoctor(ctx context.Context, stdout io.Writer, build BuildInfo, target, c
 		return err
 	}
 
+	reviewPrerequisitesReady := true
+	qualificationLookupReady := true
 	ollamaPath, ollamaErr := exec.LookPath("ollama")
-	providerRequired := configErr == nil && cfg.AI.Provider == "ollama"
 	if ollamaErr != nil {
-		status := "WARN"
-		if providerRequired {
-			status = "FAIL"
-		}
-		if err := output.write(status, "ollama executable", "not found on PATH"); err != nil {
+		if err := output.write("WARN", "ollama executable", "not found on PATH; deterministic scans and an already-running Ollama service remain available"); err != nil {
 			return err
 		}
 	} else if err := output.write("PASS", "ollama executable", ollamaPath); err != nil {
@@ -139,7 +136,17 @@ func runDoctor(ctx context.Context, stdout io.Writer, build BuildInfo, target, c
 	} else {
 		models, serviceErr := fetchOllamaModels(ctx, cfg.AI.Ollama.Endpoint)
 		if serviceErr != nil {
-			if err := output.write("FAIL", "ollama service", serviceErr.Error()); err != nil {
+			reviewPrerequisitesReady = false
+			qualificationLookupReady = false
+			status := "WARN"
+			if probeReview {
+				status = "FAIL"
+			}
+			detail := serviceErr.Error() + "; deterministic scans remain available"
+			if probeReview {
+				detail = serviceErr.Error() + "; the requested review probe cannot run"
+			}
+			if err := output.write(status, "ollama service", detail); err != nil {
 				return err
 			}
 			if err := output.write("SKIP", "ollama model", "service is unavailable"); err != nil {
@@ -153,8 +160,20 @@ func runDoctor(ctx context.Context, stdout io.Writer, build BuildInfo, target, c
 				if err := output.write("PASS", "ollama model", cfg.AI.Ollama.Model); err != nil {
 					return err
 				}
-			} else if err := output.write("FAIL", "ollama model", fmt.Sprintf("%s is not installed; run: ollama pull %s", cfg.AI.Ollama.Model, shellQuote(cfg.AI.Ollama.Model))); err != nil {
-				return err
+			} else {
+				reviewPrerequisitesReady = false
+				qualificationLookupReady = false
+				status := "WARN"
+				if probeReview {
+					status = "FAIL"
+				}
+				detail := fmt.Sprintf("%s is not installed; run: ollama pull %s; deterministic scans remain available", cfg.AI.Ollama.Model, shellQuote(cfg.AI.Ollama.Model))
+				if probeReview {
+					detail = fmt.Sprintf("%s is not installed; run: ollama pull %s; the requested review probe cannot run", cfg.AI.Ollama.Model, shellQuote(cfg.AI.Ollama.Model))
+				}
+				if err := output.write(status, "ollama model", detail); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -170,7 +189,14 @@ func runDoctor(ctx context.Context, stdout io.Writer, build BuildInfo, target, c
 	} else {
 		value, exists := os.LookupEnv(cfg.AI.Remote.APIKeyEnv)
 		if !exists || strings.TrimSpace(value) == "" {
-			if err := output.write("FAIL", "remote credential", cfg.AI.Remote.APIKeyEnv+" is not set"); err != nil {
+			reviewPrerequisitesReady = false
+			status := "WARN"
+			detail := cfg.AI.Remote.APIKeyEnv + " is not set; deterministic scans and matching cached reviews remain available"
+			if probeReview {
+				status = "FAIL"
+				detail = cfg.AI.Remote.APIKeyEnv + " is not set; the requested review probe cannot run"
+			}
+			if err := output.write(status, "remote credential", detail); err != nil {
 				return err
 			}
 		} else if err := output.write("PASS", "remote credential", cfg.AI.Remote.APIKeyEnv+" is set (value hidden)"); err != nil {
@@ -190,6 +216,10 @@ func runDoctor(ctx context.Context, stdout io.Writer, build BuildInfo, target, c
 			if err := output.write("FAIL", "review compatibility", "no advisory review provider is configured"); err != nil {
 				return err
 			}
+		} else if !reviewPrerequisitesReady {
+			if err := output.write("SKIP", "review compatibility", "a required review dependency is unavailable; resolve the failure above and rerun doctor --probe-review"); err != nil {
+				return err
+			}
 		} else {
 			activity := startConfiguredLLMActivity(stdout, cfg.AI, "check compatibility", "Compatibility response received", "Compatibility request failed")
 			outcome, qualificationErr := qualifyConfiguredModel(ctx, cfg.AI, true)
@@ -206,6 +236,10 @@ func runDoctor(ctx context.Context, stdout io.Writer, build BuildInfo, target, c
 					return err
 				}
 			}
+		}
+	} else if configErr == nil && cfg.AI.Provider != "none" && !qualificationLookupReady {
+		if err := output.write("WARN", "review compatibility", "cached status unavailable until the configured Ollama service and model are reachable"); err != nil {
+			return err
 		}
 	} else if configErr == nil && cfg.AI.Provider != "none" {
 		outcome, found, lookupErr := lookupConfiguredQualification(ctx, cfg.AI)

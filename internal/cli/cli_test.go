@@ -3,6 +3,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -204,6 +205,9 @@ func TestScanHelpPresentsOneScanWorkflow(t *testing.T) {
 	if !strings.Contains(stdout.String(), "never contacts a model") {
 		t.Fatalf("scan help does not state the local boundary:\n%s", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "governance checks remain repository-wide") || strings.Contains(stdout.String(), "limit AI context") || strings.Contains(stdout.String(), "advisory-review details") {
+		t.Fatalf("scan help does not describe the deterministic changed-file and verbose boundaries:\n%s", stdout.String())
+	}
 	for _, flag := range []string{"--quick", "--deep", "--provider", "--model", "--api-key-env", "--refresh-review", "--require-ai-review"} {
 		if strings.Contains(stdout.String(), flag) {
 			t.Fatalf("scan help exposes AI option %s:\n%s", flag, stdout.String())
@@ -216,6 +220,9 @@ func TestScanHelpPresentsOneScanWorkflow(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "send selected repository context") {
 		t.Fatalf("review help does not disclose external processing:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "limit AI context to changed eligible files plus up to eight connected files") || !strings.Contains(stdout.String(), "advisory-review details") {
+		t.Fatalf("review help does not describe the changed-file model boundary and review detail:\n%s", stdout.String())
 	}
 	for _, flag := range []string{"--provider", "--model", "--api-key-env", "--refresh-review", "--require-ai-review"} {
 		if !strings.Contains(stdout.String(), flag) {
@@ -982,7 +989,7 @@ func TestDoctorChecksConfiguredOllamaModel(t *testing.T) {
 	}
 }
 
-func TestDoctorFailsWhenConfiguredOllamaModelIsMissing(t *testing.T) {
+func TestDoctorWarnsWhenOptionalOllamaModelIsMissing(t *testing.T) {
 	target := t.TempDir()
 	useDoctorHTTPTransport(t, func(*http.Request) (*http.Response, error) {
 		return doctorHTTPResponse(http.StatusOK, `{"models":[]}`), nil
@@ -1000,11 +1007,116 @@ func TestDoctorFailsWhenConfiguredOllamaModelIsMissing(t *testing.T) {
 	t.Setenv("PATH", commandDirectory+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"doctor", target}, &stdout, &stderr, testBuild); code != 1 {
-		t.Fatalf("exit code = %d, want 1; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	if code := Execute([]string{"doctor", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "[FAIL] ollama model: qwen3.5:9b is not installed") {
+	if !strings.Contains(stdout.String(), "[WARN] ollama model: qwen3.5:9b is not installed") ||
+		!strings.Contains(stdout.String(), "deterministic scans remain available") {
 		t.Fatalf("missing model was not reported:\n%s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Execute([]string{"doctor", "--probe-review", target}, &stdout, &stderr, testBuild); code != 1 {
+		t.Fatalf("missing model probe exit code = %d, want 1; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "[FAIL] ollama model: qwen3.5:9b is not installed") ||
+		!strings.Contains(stdout.String(), "[SKIP] review compatibility: a required review dependency is unavailable") ||
+		!strings.Contains(stdout.String(), "Doctor found 1 blocking issue(s).") {
+		t.Fatalf("missing model probe output:\n%s", stdout.String())
+	}
+}
+
+func TestDoctorTreatsUnavailableOptionalOllamaServiceAsBlockingOnlyForProbe(t *testing.T) {
+	target := t.TempDir()
+	requests := 0
+	useDoctorHTTPTransport(t, func(*http.Request) (*http.Response, error) {
+		requests++
+		return nil, io.ErrUnexpectedEOF
+	})
+
+	cfg := config.Default()
+	cfg.AI.Provider = "ollama"
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	commandDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(commandDirectory, "ollama"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", commandDirectory+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"doctor", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("ordinary doctor exit code = %d, want 0; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if requests != 1 {
+		t.Fatalf("ordinary doctor service requests = %d, want 1", requests)
+	}
+	if !strings.Contains(stdout.String(), "[WARN] ollama service:") ||
+		!strings.Contains(stdout.String(), "deterministic scans remain available") ||
+		!strings.Contains(stdout.String(), "[WARN] review compatibility: cached status unavailable") ||
+		!strings.Contains(stdout.String(), "Doctor found no blocking issues.") {
+		t.Fatalf("ordinary doctor output:\n%s", stdout.String())
+	}
+
+	requests = 0
+	stdout.Reset()
+	stderr.Reset()
+	if code := Execute([]string{"doctor", "--probe-review", target}, &stdout, &stderr, testBuild); code != 1 {
+		t.Fatalf("probe exit code = %d, want 1; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if requests != 1 {
+		t.Fatalf("probe service requests = %d, want 1", requests)
+	}
+	if !strings.Contains(stdout.String(), "[FAIL] ollama service:") ||
+		!strings.Contains(stdout.String(), "[SKIP] review compatibility: a required review dependency is unavailable") ||
+		!strings.Contains(stdout.String(), "Doctor found 1 blocking issue(s).") {
+		t.Fatalf("probe output:\n%s", stdout.String())
+	}
+}
+
+func TestDoctorProbeUsesHealthyOllamaServiceWithoutExecutable(t *testing.T) {
+	target := t.TempDir()
+	useDoctorHTTPTransport(t, func(*http.Request) (*http.Response, error) {
+		return doctorHTTPResponse(http.StatusOK, `{"models":[{"name":"qwen3.5:9b","model":"qwen3.5:9b"}]}`), nil
+	})
+
+	cfg := config.Default()
+	cfg.AI.Provider = "ollama"
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+
+	qualificationCalls := 0
+	previous := qualifyConfiguredModel
+	qualifyConfiguredModel = func(_ context.Context, _ config.AIConfig, refresh bool) (modelQualificationOutcome, error) {
+		qualificationCalls++
+		if !refresh {
+			t.Fatal("doctor probe did not request a refreshed qualification")
+		}
+		return modelQualificationOutcome{}, nil
+	}
+	t.Cleanup(func() { qualifyConfiguredModel = previous })
+
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"doctor", "--probe-review", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if qualificationCalls != 1 {
+		t.Fatalf("qualification calls = %d, want 1", qualificationCalls)
+	}
+	for _, expected := range []string{
+		"[WARN] ollama executable: not found on PATH",
+		"[PASS] ollama service:",
+		"[PASS] ollama model: qwen3.5:9b",
+		"[PASS] review compatibility:",
+		"Doctor found no blocking issues.",
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("doctor output missing %q:\n%s", expected, stdout.String())
+		}
 	}
 }
 
@@ -1030,11 +1142,24 @@ func TestDoctorChecksRemoteCredentialWithoutPrintingValue(t *testing.T) {
 	t.Setenv("COMPLYSCAN_TEST_ANTHROPIC_KEY", "")
 	stdout.Reset()
 	stderr.Reset()
-	if code := Execute([]string{"doctor", target}, &stdout, &stderr, testBuild); code != 1 {
+	if code := Execute([]string{"doctor", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("missing credential exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "[FAIL] remote credential: COMPLYSCAN_TEST_ANTHROPIC_KEY is not set") {
+	if !strings.Contains(stdout.String(), "[WARN] remote credential: COMPLYSCAN_TEST_ANTHROPIC_KEY is not set") ||
+		!strings.Contains(stdout.String(), "deterministic scans and matching cached reviews remain available") {
 		t.Fatalf("missing credential output:\n%s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Execute([]string{"doctor", "--probe-review", target}, &stdout, &stderr, testBuild); code != 1 {
+		t.Fatalf("missing credential probe exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "[FAIL] remote credential: COMPLYSCAN_TEST_ANTHROPIC_KEY is not set") ||
+		!strings.Contains(stdout.String(), "the requested review probe cannot run") ||
+		!strings.Contains(stdout.String(), "[SKIP] review compatibility: a required review dependency is unavailable") ||
+		!strings.Contains(stdout.String(), "Doctor found 1 blocking issue(s).") {
+		t.Fatalf("missing credential probe output:\n%s", stdout.String())
 	}
 }
 

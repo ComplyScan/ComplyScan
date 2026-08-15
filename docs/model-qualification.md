@@ -26,6 +26,8 @@ Force a fresh check with:
 complyscan doctor --probe-review .
 ```
 
+An ordinary `doctor` run treats a missing optional API key, Ollama service, or Ollama model as a warning because deterministic scans remain available and a matching private review cache may still be reusable. `--probe-review` explicitly requires a live provider dependency; if one is missing, `doctor` reports a blocking failure and skips the compatibility request rather than attempting a call that cannot succeed.
+
 If qualification fails during setup, setup continues with deterministic suggestions and human questions. If it fails during an explicit review, ComplyScan preserves the deterministic report and skips repository submission to that model. `--require-ai-review` makes that incomplete review return exit code 2 after the report is saved.
 
 ## Compatibility is not validation
