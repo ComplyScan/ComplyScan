@@ -179,7 +179,7 @@ func TestPromptAnalysisProviderGroupsHostedProviders(t *testing.T) {
 			calls++
 			switch calls {
 			case 1:
-				if label != "Analysis mode" || defaultValue != "Cloud AI review — recommended; selected models using your API key" || len(options) != 3 || !strings.Contains(options[1].Label, "Experimental local AI") || !strings.Contains(options[2].Label, "cannot judge whether requirements are satisfied") {
+				if label != "Analysis mode" || defaultValue != "Cloud AI assistance — setup suggestions and explicit reviews using your API key" || len(options) != 3 || !strings.Contains(options[1].Label, "Experimental local AI assistance") || !strings.Contains(options[2].Label, "do not reason about safeguards") {
 					t.Fatalf("analysis selector: label=%q default=%q options=%#v", label, defaultValue, options)
 				}
 				return options[0].Value, nil
@@ -558,12 +558,12 @@ func TestInteractiveSetupCreatesRepositoryProfileAndSelectsExperimentalLocalRevi
 	if cfg.Systems[0].LifecycleStage != profile.LifecycleUnknown {
 		t.Fatalf("lifecycle answer = %q", cfg.Systems[0].LifecycleStage)
 	}
-	for _, expected := range []string{"ComplyScan setup", "Step 1 of 5 — Repository inspection", "Step 2 of 5 — Analysis, privacy, and model", "Step 3 of 5 — Repository-assisted system context", "Step 4 of 5 — Technical mappings and applicability", "Step 5 of 5 — Review, save, and first scan", "Repository inspected", "No model is used in this step", "Experimental local model setup", "System questionnaire", "Save without scanning", "Saved", "Next: complyscan scan"} {
+	for _, expected := range []string{"ComplyScan setup", "Step 1 of 5 — Repository inspection", "Step 2 of 5 — Optional AI assistance and privacy", "Step 3 of 5 — Repository-assisted system context", "Step 4 of 5 — Technical mappings and applicability", "Step 5 of 5 — Confirm, save, and local scan", "Repository inspected", "No model is used in this step", "Experimental local model setup", "System questionnaire", "Save configuration only", "Saved", "Next: complyscan scan", "Optional AI review: complyscan review"} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("output missing %q:\n%s", expected, stdout.String())
 		}
 	}
-	for _, expected := range []string{"source code cannot reliably establish", "Experimental local AI — advanced Ollama setup", "no local model is currently approved"} {
+	for _, expected := range []string{"source code cannot reliably establish", "Experimental local AI assistance — Ollama", "no local model is currently approved"} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("short setup output missing explanation %q:\n%s", expected, stdout.String())
 		}
@@ -1171,7 +1171,7 @@ func TestWriteSetupReviewSummaryShowsDecisionsBeforeSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"Review setup", "[READY] Analysis: OpenAI cloud — gpt-test", "EU AI Act technical evidence",
+		"Review setup", "[READY] Optional AI assistance: OpenAI cloud — gpt-test", "EU AI Act technical evidence",
 		"NIST AI RMF technical evidence", "Checkout assistant (checkout-ai)",
 		"all repository evidence maps to the single report target",
 	} {
@@ -1260,11 +1260,11 @@ func TestReviewSetupChoosesFirstRunActionWhileConfirming(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !save || mode != setupScanDeep {
+	if !save || mode != setupScanQuick {
 		t.Fatalf("save=%t mode=%q", save, mode)
 	}
-	if !strings.Contains(output.String(), "configured AI analysis when relevant") {
-		t.Fatalf("automatic analysis disclosure missing:\n%s", output.String())
+	if !strings.Contains(output.String(), "first scan stays local") || !strings.Contains(output.String(), "complyscan review") {
+		t.Fatalf("local scan boundary missing:\n%s", output.String())
 	}
 }
 

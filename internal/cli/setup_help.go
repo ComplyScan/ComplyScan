@@ -187,8 +187,8 @@ var setupQuestionHelp = map[string][]string{
 		"Choose no if you only wanted to inspect the rules; use `complyscan ownership show` to review them without changing configuration.",
 	},
 	"review-provider": {
-		"The recommended AI path uses your OpenAI, Anthropic, or Gemini account with a small ComplyScan model shortlist. Fast technical analysis uses no model, while local Ollama review remains an advanced experimental option.",
-		"This choice is made before model-assisted repository analysis so no model receives context before its privacy boundary is clear. By default, cloud scans send a compact redacted evidence package selected locally from code structure and scanner signals; every result remains advisory and requires confirmation.",
+		"Every `complyscan scan` is local and model-free. You can optionally configure OpenAI, Anthropic, Gemini, or experimental local Ollama for editable setup suggestions and later explicit `complyscan review` runs.",
+		"This choice is made before any model can receive repository context. Cloud assistance sends selected context only during setup after confirmation or an explicit review command; model results remain advisory.",
 	},
 	"ollama-model": {
 		"Ollama is retained as an advanced experimental path for users who cannot send repository context to a cloud provider. No local model is currently approved as ComplyScan's standard reviewer.",
@@ -203,7 +203,7 @@ var setupQuestionHelp = map[string][]string{
 		"Choose no to save the configuration without downloading; the exact manual command will be printed.",
 	},
 	"remote-disclosure": {
-		"Default remote scans send selected source excerpts, configuration, manifests, infrastructure, and CI evidence after recognised-secret redaction. Selection uses local inventory signals, technical-objective matches, production entry points, and their bounded code-graph neighborhood. Ignored, generated, dependency, binary, oversized, and excluded files remain outside this context.",
+		"Explicit cloud review sends selected source excerpts, configuration, manifests, infrastructure, and CI evidence after recognised-secret redaction. Selection uses local inventory signals, technical-objective matches, production entry points, and their bounded code-graph neighborhood. Ignored, generated, dependency, binary, oversized, and excluded files remain outside this context.",
 		"Redaction is defence in depth, not a guarantee that arbitrary proprietary or personal data has been removed. Use model-free analysis when external processing is not permitted. The explicit deep modes transfer substantially more repository content.",
 		"The provider may charge for usage and processes data under your account settings and its terms. Confirm only if your organisation permits this external processing.",
 	},
@@ -224,12 +224,12 @@ var setupQuestionHelp = map[string][]string{
 		"The variable name is safe to save in .complyscan.yml; the secret value stays in the shell or CI secret store and is never written to reports.",
 	},
 	"first-scan": {
-		"The first scan reads eligible repository files locally, prints findings, and writes local Markdown and JSON reports under .complyscan/reports.",
+		"The first scan reads eligible repository files locally, never invokes a model, prints findings, and writes local Markdown and JSON reports under .complyscan/reports.",
 		"Choose no if you want to review .complyscan.yml or commit the setup configuration before scanning.",
 	},
 	"scan-mode": {
-		"ComplyScan always creates the local AI inventory, deterministic findings, and technical mapping. When an AI provider is configured, the same scan also investigates ambiguous evidence.",
-		"Choose whether to run the first scan now or save the configuration first. Later scans use the same `complyscan scan` command locally and in CI.",
+		"`complyscan scan` creates the local AI inventory, deterministic findings, and technical mapping without contacting a model. Configuring a provider does not activate it during a scan.",
+		"Choose whether to run the local scan now or save first. Use `complyscan review` later when you explicitly want AI-assisted code reasoning.",
 	},
 }
 

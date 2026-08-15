@@ -40,9 +40,13 @@ inputs:
     required: false
     default: ""
   review:
-    description: Optional advisory review provider; leave empty to use repository configuration.
+    description: Explicit AI review provider; empty or none runs a deterministic scan, configured uses repository configuration, and a provider name overrides it.
     required: false
     default: ""
+  require-ai-review:
+    description: Return exit code 2 if an explicitly requested AI review is incomplete.
+    required: false
+    default: "false"
   ollama-model:
     description: Optional Ollama model override.
     required: false
@@ -99,6 +103,7 @@ runs:
         INPUT_PATH: ${{ inputs.path }}
         INPUT_PROVIDER_NAME: ${{ inputs.provider-name }}
         INPUT_REVIEW: ${{ inputs.review }}
+        INPUT_REQUIRE_AI_REVIEW: ${{ inputs.require-ai-review }}
         INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
         INPUT_SEVERITY: ${{ inputs.severity }}
       run: |
@@ -116,12 +121,25 @@ runs:
         binary="$RUNNER_TEMP/complyscan-action"
         go -C "$GITHUB_ACTION_PATH" build -o "$binary" ./cmd/complyscan
 
-        arguments=(scan "$target" --format sarif --severity "$INPUT_SEVERITY")
+        command_name=scan
+        review_value="${INPUT_REVIEW,,}"
+        if [[ -n "$review_value" && "$review_value" != "none" ]]; then
+          command_name=review
+        fi
+        if [[ "$command_name" == "scan" && ( -n "$INPUT_MODEL" || -n "$INPUT_API_KEY_ENV" || -n "$INPUT_PROVIDER_NAME" || -n "$INPUT_BASE_URL" || -n "$INPUT_OLLAMA_MODEL" || -n "$INPUT_OLLAMA_ENDPOINT" || "$INPUT_REQUIRE_AI_REVIEW" == "true" ) ]]; then
+          echo "AI-specific Action inputs require review: configured or an explicit review provider." >&2
+          exit 2
+        fi
+
+        arguments=("$command_name" "$target" --format sarif --severity "$INPUT_SEVERITY")
         if [[ -n "$INPUT_CHANGED_SINCE" ]]; then
           arguments+=(--changed-since "$INPUT_CHANGED_SINCE")
         fi
-        if [[ -n "$INPUT_REVIEW" ]]; then
-          arguments+=(--review "$INPUT_REVIEW")
+        if [[ "$command_name" == "review" && "$review_value" != "configured" ]]; then
+          arguments+=(--provider "$INPUT_REVIEW")
+        fi
+        if [[ "$command_name" == "review" && "$INPUT_REQUIRE_AI_REVIEW" == "true" ]]; then
+          arguments+=(--require-ai-review)
         fi
         if [[ -n "$INPUT_OLLAMA_MODEL" ]]; then
           arguments+=(--ollama-model "$INPUT_OLLAMA_MODEL")
