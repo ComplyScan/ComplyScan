@@ -55,6 +55,52 @@ ai:
 	}
 }
 
+func TestReviewOnScanRequiresPersistedOptIn(t *testing.T) {
+	legacyPath := filepath.Join(t.TempDir(), FileName)
+	legacy := `version: 1
+frameworks:
+  - eu-ai-act-technical-evidence
+fail-on: high
+ai:
+  provider: openai
+  remote:
+    model: gpt-test
+    api-key-env: COMPLYSCAN_TEST_KEY
+    timeout-seconds: 60
+    max-findings: 20
+`
+	if err := os.WriteFile(legacyPath, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.AI.ReviewOnScan {
+		t.Fatal("legacy configuration unexpectedly enabled automatic AI review")
+	}
+
+	loaded.AI.ReviewOnScan = true
+	optedInPath := filepath.Join(t.TempDir(), FileName)
+	if err := Write(optedInPath, loaded, false); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(optedInPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "review-on-scan: true") {
+		t.Fatalf("persisted configuration is missing review-on-scan opt-in:\n%s", data)
+	}
+	reloaded, err := Load(optedInPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reloaded.AI.ReviewOnScan {
+		t.Fatal("persisted automatic-review opt-in was not loaded")
+	}
+}
+
 func TestRepositoryAnalysisConfigValidation(t *testing.T) {
 	for _, mode := range []string{"auto", "targeted", "deep", "full", "hierarchical", "bounded-only"} {
 		cfg := Default()

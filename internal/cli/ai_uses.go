@@ -87,7 +87,7 @@ func newAIUsesSetupCommand(stdout io.Writer) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "setup [path]",
 		Short: "Review AI-use suggestions from an existing ComplyScan report",
-		Long: "Review AI-use suggestions from a completed `complyscan review` report. This command makes no model request. " +
+		Long: "Review AI-use suggestions from a completed AI-assisted `complyscan scan` report. This command makes no model request. " +
 			"It writes the human-owned register only after explicit confirm, merge, or dismiss decisions; confirmation is not a compliance conclusion.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -114,7 +114,7 @@ func newAIUsesSetupCommand(stdout io.Writer) *cobra.Command {
 				return err
 			}
 			if scanReport.RepositoryAnalysis == nil || scanReport.RepositoryAnalysisRun != reportpkg.RepositoryAnalysisCompleted {
-				return fmt.Errorf("report %q has no completed repository AI review; run `complyscan review` first", reportPath)
+				return fmt.Errorf("report %q has no completed repository AI review; configure AI assistance and run `complyscan scan` first", reportPath)
 			}
 			changedScope := scanReport.Scan.Scope.AIReview == "changed-plus-connected"
 			if scanReport.AIUseInventory != nil {

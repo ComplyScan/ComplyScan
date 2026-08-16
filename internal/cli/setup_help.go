@@ -187,8 +187,8 @@ var setupQuestionHelp = map[string][]string{
 		"Choose no if you only wanted to inspect the rules; use `complyscan ownership show` to review them without changing configuration.",
 	},
 	"review-provider": {
-		"Every `complyscan scan` is local and model-free. You can optionally configure OpenAI, Anthropic, Gemini, or experimental local Ollama for editable setup suggestions and later explicit `complyscan review` runs.",
-		"This choice is made before any model can receive repository context. Cloud assistance sends selected context only during setup after confirmation or an explicit review command; model results remain advisory.",
+		"`complyscan scan` always runs deterministic checks and also uses the provider saved here when one is configured. Choose no AI for deterministic-only operation, or use `complyscan scan --deterministic-only` for a one-run local override.",
+		"This choice is made before any model can receive repository context. Cloud assistance sends selected context only after confirmation; later scans reuse that saved processing choice without asking again. Model results remain advisory.",
 	},
 	"ollama-model": {
 		"Ollama is retained as an advanced experimental path for users who cannot send repository context to a cloud provider. No local model is currently approved as ComplyScan's standard reviewer.",
@@ -203,9 +203,9 @@ var setupQuestionHelp = map[string][]string{
 		"Choose no to save the configuration without downloading; the exact manual command will be printed.",
 	},
 	"remote-disclosure": {
-		"Explicit cloud review sends selected source excerpts, configuration, manifests, infrastructure, and CI evidence after recognised-secret redaction. Selection uses local inventory signals, technical-objective matches, production entry points, and their bounded code-graph neighborhood. Ignored, generated, dependency, binary, oversized, and excluded files remain outside this context.",
-		"Redaction is defence in depth, not a guarantee that arbitrary proprietary or personal data has been removed. Use the local deterministic scan when external processing is not permitted. The explicit deep review modes transfer substantially more repository content.",
-		"The provider may charge for usage and processes data under your account settings and its terms. Confirm only if your organisation permits this external processing.",
+		"Cloud-assisted setup and later `complyscan scan` runs send selected source excerpts, configuration, manifests, infrastructure, and CI evidence after recognised-secret redaction. Selection uses local inventory signals, technical-objective matches, production entry points, and their bounded code-graph neighborhood. Ignored, generated, dependency, binary, oversized, and excluded files remain outside this context.",
+		"Redaction is defence in depth, not a guarantee that arbitrary proprietary or personal data has been removed. Use `complyscan scan --deterministic-only` when external processing is not permitted. Explicit deep modes transfer substantially more repository content.",
+		"The provider may charge for usage and processes data under your account settings and its terms. Confirm only if your organisation permits this external processing on future scans without another prompt; rerun setup to change the saved choice.",
 	},
 	"remote-provider-name": {
 		"Enter a short name that will identify this custom API in setup, diagnostics, and reports.",
@@ -224,12 +224,12 @@ var setupQuestionHelp = map[string][]string{
 		"The variable name is safe to save in .complyscan.yml; the secret value stays in the shell or CI secret store and is never written to reports.",
 	},
 	"first-scan": {
-		"The first scan reads eligible repository files locally, never invokes a model, prints findings, and writes local Markdown and JSON reports under .complyscan/reports.",
+		"The first scan always runs local deterministic checks. When a provider is configured, it also runs the bounded advisory AI review selected above and records an honest limitation if that layer is unavailable.",
 		"Choose no if you want to review .complyscan.yml or commit the setup configuration before scanning.",
 	},
 	"scan-mode": {
-		"`complyscan scan` creates the local AI inventory, deterministic findings, and technical mapping without contacting a model. Configuring a provider does not activate it during a scan.",
-		"Choose whether to run the local scan now or save first. Use `complyscan review` later when you explicitly want AI-assisted code reasoning.",
+		"`complyscan scan` is the complete workflow: local inventory and deterministic checks first, followed by the configured advisory AI review when available.",
+		"Choose whether to run it now or save first. Use `complyscan scan --deterministic-only` whenever external processing or model cost is not appropriate for a particular run.",
 	},
 }
 

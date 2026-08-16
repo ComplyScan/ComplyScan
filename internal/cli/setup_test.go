@@ -179,7 +179,7 @@ func TestPromptAnalysisProviderGroupsHostedProviders(t *testing.T) {
 			calls++
 			switch calls {
 			case 1:
-				if label != "Optional AI assistance" || defaultValue != "Cloud AI assistance — setup suggestions and explicit reviews using your API key" || len(options) != 3 || !strings.Contains(options[1].Label, "Experimental local AI assistance") || !strings.Contains(options[2].Label, "do not reason about safeguards") {
+				if label != "Optional AI assistance" || defaultValue != "Cloud AI assistance — setup suggestions and configured scans using your API key" || len(options) != 3 || !strings.Contains(options[1].Label, "Experimental local AI assistance") || !strings.Contains(options[2].Label, "do not reason about safeguards") {
 					t.Fatalf("analysis selector: label=%q default=%q options=%#v", label, defaultValue, options)
 				}
 				return options[0].Value, nil
@@ -552,13 +552,13 @@ func TestInteractiveSetupCreatesRepositoryProfileAndSelectsExperimentalLocalRevi
 	if len(cfg.Systems) != 1 {
 		t.Fatalf("systems = %#v", cfg.Systems)
 	}
-	if cfg.AI.Provider != "ollama" || cfg.AI.Ollama.Model != defaultSetupModel {
+	if cfg.AI.Provider != "ollama" || cfg.AI.Ollama.Model != defaultSetupModel || !cfg.AI.ReviewOnScan {
 		t.Fatalf("AI configuration = %#v", cfg.AI)
 	}
 	if cfg.Systems[0].LifecycleStage != profile.LifecycleUnknown {
 		t.Fatalf("lifecycle answer = %q", cfg.Systems[0].LifecycleStage)
 	}
-	for _, expected := range []string{"ComplyScan setup", "Step 1 of 5 — Repository inspection", "Step 2 of 5 — Optional AI assistance and privacy", "Step 3 of 5 — Repository-assisted system context", "Step 4 of 5 — Technical mappings and applicability", "Step 5 of 5 — Confirm, save, and local scan", "Repository inspected", "No model is used in this step", "Experimental local model setup", "System questionnaire", "Save configuration only", "Saved", "Next: complyscan scan", "Optional AI review: complyscan review"} {
+	for _, expected := range []string{"ComplyScan setup", "Step 1 of 5 — Repository inspection", "Step 2 of 5 — Optional AI assistance and privacy", "Step 3 of 5 — Repository-assisted system context", "Step 4 of 5 — Technical mappings and applicability", "Step 5 of 5 — Confirm, save, and scan", "Repository inspected", "No model is used in this step", "Experimental local model setup", "System questionnaire", "Save configuration only", "Saved", "Next: complyscan scan"} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Errorf("output missing %q:\n%s", expected, stdout.String())
 		}
@@ -616,7 +616,7 @@ func TestFastSetupUsesDeterministicDraftWithoutModel(t *testing.T) {
 	if len(cfg.Systems) != 1 || len(cfg.Systems[0].AIActivities) != 1 || cfg.Systems[0].AIActivities[0] != profile.ActivityInference {
 		t.Fatalf("systems = %#v", cfg.Systems)
 	}
-	if cfg.AI.Provider != "none" || !strings.Contains(stdout.String(), "Prepared 1 repository-evident setup suggestion") || strings.Contains(stdout.String(), "Drafting setup answers") {
+	if cfg.AI.Provider != "none" || cfg.AI.ReviewOnScan || !strings.Contains(stdout.String(), "Prepared 1 repository-evident setup suggestion") || strings.Contains(stdout.String(), "Drafting setup answers") {
 		t.Fatalf("fast setup output:\n%s", stdout.String())
 	}
 }
@@ -1263,8 +1263,8 @@ func TestReviewSetupChoosesFirstRunActionWhileConfirming(t *testing.T) {
 	if !save || mode != setupScanQuick {
 		t.Fatalf("save=%t mode=%q", save, mode)
 	}
-	if !strings.Contains(output.String(), "first scan stays local") || !strings.Contains(output.String(), "complyscan review") {
-		t.Fatalf("local scan boundary missing:\n%s", output.String())
+	if !strings.Contains(output.String(), "first scan will run deterministic checks and the configured advisory AI review") || !strings.Contains(output.String(), "deterministic report will still finish") {
+		t.Fatalf("unified first-scan behavior missing:\n%s", output.String())
 	}
 }
 
@@ -1286,6 +1286,15 @@ func TestEverySetupQuestionHasDeveloperGuidance(t *testing.T) {
 	}
 	if len(setupQuestionHelp) != len(keys) {
 		t.Fatalf("guidance catalog has %d entries, want %d; update the completeness test when adding a setup question", len(setupQuestionHelp), len(keys))
+	}
+}
+
+func TestRemoteDisclosureExplainsPersistentScanConsent(t *testing.T) {
+	disclosure := strings.Join(setupQuestionHelp["remote-disclosure"], " ")
+	for _, expected := range []string{"later `complyscan scan` runs", "future scans without another prompt", "--deterministic-only"} {
+		if !strings.Contains(disclosure, expected) {
+			t.Fatalf("remote disclosure is missing %q: %s", expected, disclosure)
+		}
 	}
 }
 
@@ -1426,7 +1435,7 @@ func TestNonInteractiveSetupUpdatesReviewWithoutInventingProfile(t *testing.T) {
 	if len(cfg.Systems) != 0 {
 		t.Fatalf("non-interactive setup invented systems: %#v", cfg.Systems)
 	}
-	if cfg.AI.Provider != "ollama" || cfg.AI.Ollama.Model != "local-test-model" {
+	if cfg.AI.Provider != "ollama" || cfg.AI.Ollama.Model != "local-test-model" || !cfg.AI.ReviewOnScan {
 		t.Fatalf("AI configuration = %#v", cfg.AI)
 	}
 }
@@ -1454,8 +1463,45 @@ func TestNonInteractiveSetupConfiguresRemoteReviewWithoutSavingCredential(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AI.Provider != "openai" || cfg.AI.Remote.Model != "gpt-test" {
+	if cfg.AI.Provider != "openai" || cfg.AI.Remote.Model != "gpt-test" || !cfg.AI.ReviewOnScan {
 		t.Fatalf("AI configuration = %#v", cfg.AI)
+	}
+	authorized, err := automaticReviewAuthorized(target, filepath.Join(target, config.FileName), cfg.AI)
+	if err != nil || !authorized {
+		t.Fatalf("setup did not persist matching machine-local consent: authorized=%t err=%v", authorized, err)
+	}
+}
+
+func TestSetupWithNoProviderRevokesMachineLocalConsent(t *testing.T) {
+	target := t.TempDir()
+	t.Setenv("COMPLYSCAN_REVOKE_TEST_KEY", "test-secret-value")
+	var stdout, stderr bytes.Buffer
+	arguments := []string{
+		"setup", "--non-interactive", "--review", "openai", "--allow-remote-review",
+		"--model", "gpt-test", "--api-key-env", "COMPLYSCAN_REVOKE_TEST_KEY", "--skip-scan", target,
+	}
+	if code := executeWithInput(arguments, strings.NewReader(""), &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("enable setup code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	configured, err := config.Load(filepath.Join(target, config.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if authorized, err := automaticReviewAuthorized(target, filepath.Join(target, config.FileName), configured.AI); err != nil || !authorized {
+		t.Fatalf("authorization before revoke = %t, %v", authorized, err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := executeWithInput([]string{"setup", "--non-interactive", "--review", "none", "--skip-scan", target}, strings.NewReader(""), &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("disable setup code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	store, err := defaultReviewConsentStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if authorized, err := store.Authorized(target, filepath.Join(target, config.FileName), configured.AI); err != nil || authorized {
+		t.Fatalf("authorization after provider none = %t, %v", authorized, err)
 	}
 }
 
@@ -1475,7 +1521,7 @@ func TestNonInteractiveSetupConfiguresCustomCompatibleProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AI.Provider != customCompatibleProvider || cfg.AI.Remote.ProviderName != "Acme model gateway" || cfg.AI.Remote.BaseURL != "https://models.example.com/v1" || cfg.AI.Remote.Model != "acme-review-v2" {
+	if cfg.AI.Provider != customCompatibleProvider || cfg.AI.Remote.ProviderName != "Acme model gateway" || cfg.AI.Remote.BaseURL != "https://models.example.com/v1" || cfg.AI.Remote.Model != "acme-review-v2" || !cfg.AI.ReviewOnScan {
 		t.Fatalf("AI configuration = %#v", cfg.AI)
 	}
 	data, err := os.ReadFile(filepath.Join(target, config.FileName))

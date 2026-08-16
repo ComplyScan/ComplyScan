@@ -275,7 +275,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		}
 	}
 	if interactive {
-		if err := setupStepTitle(prompt, 5, 5, "Confirm, save, and local scan", true); err != nil {
+		if err := setupStepTitle(prompt, 5, 5, "Confirm, save, and scan", true); err != nil {
 			return err
 		}
 	}
@@ -305,6 +305,9 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	if err := config.Write(path, cfg, existed); err != nil {
 		return err
 	}
+	if err := syncAutomaticReviewConsent(target, path, cfg.AI); err != nil {
+		return automaticReviewConsentSaveError(path, err)
+	}
 	if draftPath != "" {
 		if removeErr := removeSetupDraft(draftPath); removeErr != nil {
 			_ = prompt.status(setupStatusReview, "Configuration was saved, but its recovery draft could not be removed: "+removeErr.Error())
@@ -332,17 +335,9 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		if _, err := fmt.Fprintf(stdout, "Next: complyscan scan %s\n", shellQuote(target)); err != nil {
 			return err
 		}
-		if cfg.AI.Provider != "none" {
-			_, err := fmt.Fprintf(stdout, "Optional AI review: complyscan review %s\n", shellQuote(target))
-			return err
-		}
 		return nil
 	}
 	if err := runFirstScan(cmd, stdout, build, target, scanMode, repositorySummary.Discovery); err != nil {
-		return err
-	}
-	if cfg.AI.Provider != "none" {
-		_, err := fmt.Fprintf(stdout, "\nOptional AI review: complyscan review %s\n", shellQuote(target))
 		return err
 	}
 	return nil
@@ -402,7 +397,7 @@ func collectRepositoryAssistedSetupContext(prompt promptSession, target string, 
 type setupReviewAction string
 
 const (
-	setupReviewRunScan  setupReviewAction = "Save and run local technical scan"
+	setupReviewRunScan  setupReviewAction = "Save and run ComplyScan"
 	setupReviewSaveOnly setupReviewAction = "Save configuration only"
 )
 
@@ -457,7 +452,7 @@ func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.
 		case setupReviewRunScan:
 			*scanMode = setupScanQuick
 			if cfg.AI.Provider != "none" {
-				if _, err := fmt.Fprintln(stdout, "\nThe first scan stays local and does not contact the configured model. Run `complyscan review` afterwards when you want explicit AI assistance."); err != nil {
+				if _, err := fmt.Fprintln(stdout, "\nThe first scan will run deterministic checks and the configured advisory AI review. If the model is unavailable, the deterministic report will still finish and explain the limitation."); err != nil {
 					return false, err
 				}
 			}
@@ -486,7 +481,7 @@ func writeSetupReviewSummary(prompt promptSession, cfg config.Config, modelReady
 	if err := prompt.sectionTitle("Review setup", true); err != nil {
 		return err
 	}
-	analysis := "Not configured (local scans remain available)"
+	analysis := "Not configured (scans remain deterministic-only)"
 	if cfg.AI.Provider == "ollama" {
 		analysis = fmt.Sprintf("Experimental local Ollama — %s", cfg.AI.Ollama.Model)
 	} else if cfg.AI.Provider != "none" {
@@ -625,6 +620,7 @@ func configureSetupReviewOnce(ctx context.Context, prompt promptSession, stdout 
 	}
 	cfg.AI.Provider = provider
 	if provider == "none" {
+		cfg.AI.ReviewOnScan = false
 		if _, err := fmt.Fprintln(stdout, "AI-assisted analysis disabled. Fast deterministic scanning remains available."); err != nil {
 			return false, err
 		}
@@ -633,6 +629,7 @@ func configureSetupReviewOnce(ctx context.Context, prompt promptSession, stdout 
 	if isRemoteReviewProvider(provider) {
 		return configureRemoteReview(ctx, prompt, stdout, cfg, interactive, options)
 	}
+	cfg.AI.ReviewOnScan = true
 
 	ollamaPath, _ := exec.LookPath("ollama")
 	model := strings.TrimSpace(options.ollamaModel)
@@ -747,7 +744,7 @@ func configureSetupReviewOnce(ctx context.Context, prompt promptSession, stdout 
 
 func promptAnalysisProvider(prompt promptSession, current string) (string, error) {
 	const (
-		hostedOption = "Cloud AI assistance — setup suggestions and explicit reviews using your API key"
+		hostedOption = "Cloud AI assistance — setup suggestions and configured scans using your API key"
 		fastOption   = "No AI assistance — local scans find known code signals but do not reason about safeguards"
 		localOption  = "Experimental local AI assistance — Ollama; review quality is not assured"
 	)
@@ -911,11 +908,13 @@ func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.
 			return false, errors.New("remote review requires --allow-remote-review in non-interactive setup")
 		}
 		cfg.AI.Provider = "none"
+		cfg.AI.ReviewOnScan = false
 		if _, err := fmt.Fprintln(stdout, "Remote review not enabled. Deterministic local scanning remains available."); err != nil {
 			return false, err
 		}
 		return true, nil
 	}
+	cfg.AI.ReviewOnScan = true
 	cfg.AI.Remote = config.RemoteConfig{
 		ProviderName: providerName, BaseURL: baseURL, Model: model, APIKeyEnv: keyEnvironment, TimeoutSeconds: 360, MaxFindings: 20,
 	}
@@ -925,7 +924,7 @@ func configureRemoteReview(ctx context.Context, prompt promptSession, stdout io.
 	key, keyAvailable := os.LookupEnv(keyEnvironment)
 	keyAvailable = keyAvailable && strings.TrimSpace(key) != ""
 	if !keyAvailable {
-		if _, err := fmt.Fprintf(stdout, "%s is not currently set. Add it to your shell or CI secret store before `complyscan review`; local `complyscan scan` does not require it. The key itself is never written to .complyscan.yml.\n", keyEnvironment); err != nil {
+		if _, err := fmt.Fprintf(stdout, "%s is not currently set. Add it to your shell or CI secret store before `complyscan scan`; `complyscan scan --deterministic-only` does not require it. The key itself is never written to .complyscan.yml.\n", keyEnvironment); err != nil {
 			return false, err
 		}
 		return false, nil
@@ -1594,7 +1593,7 @@ func systemIndex(systems []profile.System, id string) int {
 }
 
 func runFirstScan(parent *cobra.Command, stdout io.Writer, build BuildInfo, target string, mode setupScanMode, discovered discovery.Result) error {
-	if _, err := fmt.Fprintln(stdout, "\nStarting first local ComplyScan scan..."); err != nil {
+	if _, err := fmt.Fprintln(stdout, "\nStarting first ComplyScan scan..."); err != nil {
 		return err
 	}
 	command := newScanCommandWithDiscovery(stdout, build, &scanDiscoverySeed{Target: target, Discovery: discovered})

@@ -257,7 +257,9 @@ func newScanCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 }
 
 func newReviewCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
-	return newRepositoryCommandWithDiscovery(stdout, build, nil, true)
+	command := newRepositoryCommandWithDiscovery(stdout, build, nil, true)
+	command.Hidden = true
+	return command
 }
 
 type scanDiscoverySeed struct {
@@ -303,16 +305,19 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 		verifySystems             []string
 		quickScan                 bool
 		deepScan                  bool
+		deterministicOnly         bool
 		verbose                   bool
 		requireAIReview           bool
 	)
 	use := "scan [path]"
-	short := "Run a local deterministic repository scan"
-	long := "Run local deterministic discovery, technical checks, and framework mapping. This command never contacts a model or reads a provider API key."
+	short := "Run deterministic checks and the configured AI review"
+	long := "Run deterministic discovery, technical checks, framework mapping, and the configured advisory AI review in one workflow. " +
+		"When no provider is configured or AI is unavailable, deterministic results still finish with an honest limitation in the report. " +
+		"Remote providers may receive selected repository context and incur cost. Use --deterministic-only to guarantee that no model is contacted and no provider credential is read."
 	if reviewConfiguredProvider {
 		use = "review [path]"
-		short = "Run an explicit AI-assisted repository review"
-		long = "Run the deterministic repository scan, then explicitly activate the configured AI provider for advisory code reasoning. Remote review may send selected repository context and incur provider cost."
+		short = "Run the configured AI-assisted workflow"
+		long = "Compatibility command for explicitly requiring an enabled AI provider. It runs the same deterministic foundation and advisory review as `complyscan scan`; remote review may send selected repository context and incur provider cost."
 	}
 	command := &cobra.Command{
 		Use:   use,
@@ -336,28 +341,34 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			if err != nil {
 				return err
 			}
+			configuredReviewDeferred := ""
+			configuredReviewDeferredForConsent := false
+			var configuredReviewConsentError error
 			providerChanged := cmd.Flags().Changed("provider") || cmd.Flags().Changed("review")
 			if cmd.Flags().Changed("provider") && cmd.Flags().Changed("review") {
 				return errors.New("--provider and the legacy --review flag cannot be used together")
 			}
-			aiOptionOnScan := providerChanged || deepScan || cmd.Flags().Changed("ollama-model") || cmd.Flags().Changed("ollama-endpoint") ||
+			explicitAIActivation := providerChanged || deepScan || cmd.Flags().Changed("ollama-model") || cmd.Flags().Changed("ollama-endpoint") ||
 				cmd.Flags().Changed("model") || cmd.Flags().Changed("api-key-env") || cmd.Flags().Changed("provider-name") ||
-				cmd.Flags().Changed("base-url") || refreshReview || requireAIReview
-			if !reviewConfiguredProvider && aiOptionOnScan {
-				return errors.New("AI options are not accepted by the local `complyscan scan` command; use `complyscan review` instead")
+				cmd.Flags().Changed("base-url") || refreshReview
+			if quickScan {
+				deterministicOnly = true
 			}
-			if reviewConfiguredProvider && quickScan {
-				return errors.New("--quick is not accepted by `complyscan review`; use `complyscan scan` for local deterministic analysis")
+			if reviewConfiguredProvider && deterministicOnly {
+				return errors.New("--deterministic-only is not accepted by `complyscan review`; use `complyscan scan --deterministic-only`")
 			}
-			// `scan` is always local and deterministic. `review` deliberately opts in
-			// to the provider saved by setup.
-			if !reviewConfiguredProvider {
+			if deterministicOnly && explicitAIActivation {
+				return errors.New("--deterministic-only cannot be combined with AI provider, model, refresh, or deep options")
+			}
+			if deterministicOnly {
 				cfg.AI.Provider = "none"
-			}
-			previousReviewProvider := cfg.AI.Provider
-			if providerChanged {
+			} else if providerChanged {
 				cfg.AI.Provider = strings.ToLower(strings.TrimSpace(reviewProvider))
-				if isRemoteReviewProvider(cfg.AI.Provider) && previousReviewProvider != cfg.AI.Provider {
+				if isRemoteReviewProvider(cfg.AI.Provider) {
+					// A repository configuration is untrusted input. An explicit
+					// provider selection must start from ComplyScan's known routing
+					// and credential name even when the repository already names the
+					// same provider; explicit one-run flags below may then override it.
 					profile, _ := hostedProviderProfileFor(cfg.AI.Provider)
 					cfg.AI.Remote = config.RemoteConfig{
 						ProviderName: profile.Label, BaseURL: profile.BaseURL,
@@ -365,9 +376,31 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						TimeoutSeconds: 360, MaxFindings: 20,
 					}
 				}
+			} else if !reviewConfiguredProvider && !explicitAIActivation && cfg.AI.Provider != "none" {
+				if !cfg.AI.ReviewOnScan {
+					// Configurations written before unified scans deliberately opted in to
+					// explicit `review` calls, not automatic model use. Preserve that
+					// processing boundary until setup records the new durable choice.
+					configuredReviewDeferred = cfg.AI.Provider
+					cfg.AI.Provider = "none"
+				} else {
+					authorized, consentErr := automaticReviewAuthorized(target, resolvedConfigPath, cfg.AI)
+					if !authorized {
+						// Repository configuration expresses intent, but it is untrusted
+						// input. Only setup can persist the separate machine-local consent
+						// needed for an automatic model or credential access.
+						configuredReviewDeferred = cfg.AI.Provider
+						configuredReviewDeferredForConsent = true
+						configuredReviewConsentError = consentErr
+						cfg.AI.Provider = "none"
+					}
+				}
 			}
 			if reviewConfiguredProvider && cfg.AI.Provider == "none" {
-				return errors.New("AI review is not configured; run `complyscan setup` or pass `--provider <provider>` (use `complyscan scan` for local deterministic analysis)")
+				return errors.New("AI review is not configured; run `complyscan setup` or pass `--provider <provider>` (use `complyscan scan --deterministic-only` for local analysis)")
+			}
+			if deepScan && cfg.AI.Provider == "none" {
+				return errors.New("--deep requires an enabled advisory review provider; run `complyscan setup` or pass `--provider <provider>`")
 			}
 			if cmd.Flags().Changed("ollama-model") {
 				cfg.AI.Ollama.Model = strings.TrimSpace(ollamaModel)
@@ -388,7 +421,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 				cfg.AI.Remote.BaseURL = strings.TrimSpace(remoteBaseURL)
 			}
 			if (cmd.Flags().Changed("ollama-model") || cmd.Flags().Changed("ollama-endpoint")) && cfg.AI.Provider != "ollama" {
-				return errors.New("--ollama-model and --ollama-endpoint require `complyscan review --provider ollama` or ai.provider: ollama")
+				return errors.New("--ollama-model and --ollama-endpoint require `complyscan scan --provider ollama` or ai.provider: ollama")
 			}
 			if (cmd.Flags().Changed("model") || cmd.Flags().Changed("api-key-env") || cmd.Flags().Changed("provider-name") || cmd.Flags().Changed("base-url")) && !isRemoteReviewProvider(cfg.AI.Provider) {
 				return errors.New("--model, --api-key-env, --provider-name, and --base-url require a hosted review provider")
@@ -401,6 +434,22 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			}
 			if err := cfg.Validate(); err != nil {
 				return fmt.Errorf("validate review configuration: %w", err)
+			}
+			if configuredReviewDeferred != "" {
+				noticeWriter := io.Writer(stdout)
+				if outputFormat != "terminal" {
+					noticeWriter = cmd.ErrOrStderr()
+				}
+				notice := fmt.Sprintf("Note: %s is configured, but automatic AI review is not enabled for `complyscan scan`. Running deterministic checks only; rerun `complyscan setup` to opt in. %s", reviewProviderLabel(configuredReviewDeferred), oneRunReviewGuidance(configuredReviewDeferred))
+				if configuredReviewDeferredForConsent {
+					notice = fmt.Sprintf("Note: Automatic %s review is requested by repository configuration, but this machine has not approved the current provider, model, and destination. Running deterministic checks only; run `complyscan setup` on this machine to approve it. %s", reviewProviderLabel(configuredReviewDeferred), oneRunReviewGuidance(configuredReviewDeferred))
+				}
+				if configuredReviewConsentError != nil {
+					notice = fmt.Sprintf("Note: Automatic %s review is requested by repository configuration, but private machine approval could not be verified: %v. Running deterministic checks only; repair the local consent-store issue and rerun `complyscan setup`.", reviewProviderLabel(configuredReviewDeferred), configuredReviewConsentError)
+				}
+				if _, err := fmt.Fprintln(noticeWriter, notice); err != nil {
+					return fmt.Errorf("write automatic-review migration note: %w", err)
+				}
 			}
 			if cmd.Flags().Changed("max-files") && maxFiles <= 0 {
 				return errors.New("--max-files must be greater than zero")
@@ -532,7 +581,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			}
 			aiReviewRepository := result.FullRepository
 			var changedReviewScope *repositoryanalysis.ChangedReviewScope
-			if reviewConfiguredProvider && changedSince != "" {
+			if cfg.AI.Provider != "none" && changedSince != "" {
 				scoped, scope := repositoryanalysis.ScopeChangedReview(result.FullRepository, result.Repository)
 				aiReviewRepository = scoped
 				changedReviewScope = &scope
@@ -649,10 +698,29 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			reportValue.Frameworks = frameworkResults
 			syncLegacyFrameworkFields(&reportValue)
 			repositoryAnalysisRequested := cfg.AI.Provider != "none" && cfg.AI.RepositoryAnalysis.Mode != "bounded-only" && len(aiReviewRepository.Files) > 0
+			requiredAIUnavailable := requireAIReview && cfg.AI.Provider == "none"
 			if repositoryAnalysisRequested {
 				reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisPending
+			} else if requiredAIUnavailable {
+				reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisIncomplete
 			} else {
 				reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisNotRequested
+			}
+			if requiredAIUnavailable {
+				warning := "AI review was required, but no advisory provider is configured. Deterministic findings and evidence remain available; configure a provider in `complyscan setup` and rerun the scan."
+				if configuredReviewDeferredForConsent {
+					warning = "AI review was required, but this machine has not approved the repository's current provider, model, and destination. Deterministic findings and evidence remain available; run `complyscan setup` on this machine and rerun the scan."
+				} else if configuredReviewDeferred != "" {
+					warning = "AI review was required, but automatic review has not been enabled for this configured provider. Deterministic findings and evidence remain available; run `complyscan setup` to opt in and rerun the scan."
+				}
+				reportValue.Warnings = append(reportValue.Warnings, warning)
+				warningWriter := io.Writer(stdout)
+				if outputFormat != "terminal" {
+					warningWriter = cmd.ErrOrStderr()
+				}
+				if _, err := fmt.Fprintln(warningWriter, "Warning:", warning); err != nil {
+					return fmt.Errorf("write required-review warning: %w", err)
+				}
 			}
 			var artifacts report.Artifacts
 			if resolvedReportDirectory != "" && cfg.AI.Provider != "none" {
@@ -666,7 +734,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 					}
 				}
 			}
-			aiReviewIncomplete := false
+			aiReviewIncomplete := requiredAIUnavailable
 			if cfg.AI.Provider != "none" {
 				boundedReviewRequested := cfg.AI.RepositoryAnalysis.Mode == "bounded-only"
 				candidateCount := 0
@@ -909,12 +977,8 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			return nil
 		},
 	}
-	changedSinceHelp := "scan code files changed since a Git reference; governance checks remain repository-wide"
-	verboseHelp := "print full framework and evidence details in the terminal"
-	if reviewConfiguredProvider {
-		changedSinceHelp = "scan code files changed since a Git reference and limit AI context to changed eligible files plus up to eight connected files; governance checks remain repository-wide"
-		verboseHelp = "print full framework, evidence, and advisory-review details in the terminal"
-	}
+	changedSinceHelp := "scan code files changed since a Git reference and, when AI is configured, limit model context to changed eligible files plus up to eight connected files; governance checks remain repository-wide"
+	verboseHelp := "print full framework, evidence, and advisory-review details in the terminal"
 	command.Flags().StringVarP(&format, "format", "f", "terminal", "output format: terminal, json, or sarif")
 	command.Flags().StringVar(&minimum, "severity", "info", "minimum severity to include in output")
 	command.Flags().StringVar(&configPath, "config", "", "configuration file (defaults to <path>/.complyscan.yml)")
@@ -939,15 +1003,14 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 	command.Flags().BoolVar(&noReport, "no-report", false, "do not save local Markdown and JSON reports")
 	command.Flags().BoolVar(&refreshReview, "refresh-review", false, "ignore cached repository and technical observations and run the configured provider again")
 	command.Flags().BoolVar(&requireAIReview, "require-ai-review", false, "return exit code 2 when any requested AI review layer is incomplete")
+	command.Flags().BoolVar(&deterministicOnly, "deterministic-only", false, "run local deterministic checks without contacting a model or reading a provider credential")
 	command.Flags().BoolVar(&quickScan, "quick", false, "run deterministic discovery and checks without AI review")
 	command.Flags().BoolVar(&deepScan, "deep", false, "require the configured AI review provider for a deep scan")
 	_ = command.Flags().MarkHidden("quick")
 	_ = command.Flags().MarkHidden("deep")
 	_ = command.Flags().MarkHidden("review")
-	if !reviewConfiguredProvider {
-		for _, name := range []string{"provider", "ollama-model", "ollama-endpoint", "model", "api-key-env", "provider-name", "base-url", "refresh-review", "require-ai-review"} {
-			_ = command.Flags().MarkHidden(name)
-		}
+	if reviewConfiguredProvider {
+		_ = command.Flags().MarkHidden("deterministic-only")
 	}
 	command.Flags().BoolVarP(&verbose, "verbose", "v", false, verboseHelp)
 	command.Flags().BoolVar(&verifyConfigured, "verify", false, "run verification recipes from .complyscan.yml in isolated containers")
@@ -959,6 +1022,13 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 	command.Flags().StringArrayVar(&verifySystems, "verify-system", nil, "configured system the test supports (repeatable; required when multiple systems exist)")
 	command.Flags().DurationVar(&verifyTimeout, "verify-timeout", 5*time.Minute, "timeout for opt-in isolated execution (maximum 30m)")
 	return command
+}
+
+func oneRunReviewGuidance(provider string) string {
+	if provider == customCompatibleProvider {
+		return "For a one-run custom review, pass `--provider openai-compatible` together with explicit `--base-url`, `--provider-name`, `--model`, and `--api-key-env` values."
+	}
+	return fmt.Sprintf("Alternatively, pass `--provider %s` for a one-run review.", provider)
 }
 
 func sameScanTarget(left, right string) bool {

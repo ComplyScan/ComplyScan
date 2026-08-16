@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/report"
+	"github.com/ComplyScan/ComplyScan/internal/reviewconsent"
 	"github.com/ComplyScan/ComplyScan/internal/technicalreview"
 	"github.com/ComplyScan/ComplyScan/internal/verification"
 )
@@ -119,7 +121,7 @@ func TestScanExcludesCustomActiveConfigPath(t *testing.T) {
 	}
 }
 
-func TestScanNeverUsesConfiguredAIReview(t *testing.T) {
+func TestPlainScanPreservesLegacyExplicitReviewBoundary(t *testing.T) {
 	target := t.TempDir()
 	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\nclient = OpenAI()\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -137,6 +139,9 @@ func TestScanNeverUsesConfiguredAIReview(t *testing.T) {
 	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("local scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "automatic AI review is not enabled") || !strings.Contains(stdout.String(), "--provider openai") {
+		t.Fatalf("legacy configuration did not receive an actionable migration note:\n%s", stdout.String())
+	}
 	if strings.Contains(stdout.String()+stderr.String(), "model compatibility") || strings.Contains(stdout.String()+stderr.String(), "COMPLYSCAN_TEST_MISSING_KEY") {
 		t.Fatalf("local scan used configured AI:\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
 	}
@@ -148,6 +153,91 @@ func TestScanNeverUsesConfiguredAIReview(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "Checking model compatibility before repository review") || !strings.Contains(stdout.String(), "COMPLYSCAN_TEST_MISSING_KEY is not set") {
 		t.Fatalf("explicit review did not report unavailable configured AI:\n%s", stdout.String())
+	}
+}
+
+func TestLegacyDeepFlagExplicitlyActivatesSavedProvider(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\nclient = OpenAI()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.AI.Provider = "openai"
+	cfg.AI.Remote = config.RemoteConfig{
+		Model: "gpt-test", APIKeyEnv: "COMPLYSCAN_DEEP_EXPLICIT_KEY", TimeoutSeconds: 1, MaxFindings: 20,
+	}
+	t.Setenv("COMPLYSCAN_DEEP_EXPLICIT_KEY", "")
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--deep", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("deep scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	output := stdout.String() + stderr.String()
+	if !strings.Contains(output, "Checking model compatibility before repository review") || !strings.Contains(output, "COMPLYSCAN_DEEP_EXPLICIT_KEY is not set") {
+		t.Fatalf("explicit deep scan did not activate the saved provider:\n%s", output)
+	}
+	if strings.Contains(output, "automatic AI review is not enabled") {
+		t.Fatalf("explicit deep scan was incorrectly deferred:\n%s", output)
+	}
+}
+
+func TestScanUsesConfiguredAIOnlyAfterPersistedOptIn(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\nclient = OpenAI()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.AI.Provider = "openai"
+	cfg.AI.ReviewOnScan = true
+	cfg.AI.Remote = config.RemoteConfig{
+		Model: "gpt-test", APIKeyEnv: "COMPLYSCAN_OPTED_IN_MISSING_KEY", TimeoutSeconds: 1, MaxFindings: 20,
+	}
+	t.Setenv("COMPLYSCAN_OPTED_IN_MISSING_KEY", "")
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	grantTestAutomaticReview(t, target, cfg)
+
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	output := stdout.String() + stderr.String()
+	if !strings.Contains(output, "Checking model compatibility before repository review") || !strings.Contains(output, "COMPLYSCAN_OPTED_IN_MISSING_KEY is not set") {
+		t.Fatalf("persisted opt-in did not activate configured AI:\n%s", output)
+	}
+	if strings.Contains(output, "automatic AI review is not enabled") {
+		t.Fatalf("opted-in configuration received a legacy migration note:\n%s", output)
+	}
+}
+
+func TestDeterministicOnlyOverridesPersistedAIOptIn(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\nclient = OpenAI()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.AI.Provider = "openai"
+	cfg.AI.ReviewOnScan = true
+	cfg.AI.Remote = config.RemoteConfig{
+		Model: "gpt-test", APIKeyEnv: "COMPLYSCAN_DETERMINISTIC_ONLY_KEY", TimeoutSeconds: 1, MaxFindings: 20,
+	}
+	t.Setenv("COMPLYSCAN_DETERMINISTIC_ONLY_KEY", "secret-that-must-not-be-used")
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	grantTestAutomaticReview(t, target, cfg)
+
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--deterministic-only", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("deterministic scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	output := stdout.String() + stderr.String()
+	if strings.Contains(output, "model compatibility") || strings.Contains(output, "AI reasoning") || strings.Contains(output, "automatic AI review is not enabled") {
+		t.Fatalf("deterministic-only scan entered the configured AI path:\n%s", output)
 	}
 }
 
@@ -277,6 +367,17 @@ func writeTestAIUseManifest(t *testing.T, target string, uses ...aiuse.Use) {
 	}
 }
 
+func grantTestAutomaticReview(t *testing.T, target string, cfg config.Config) {
+	t.Helper()
+	store, err := defaultReviewConsentStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Grant(target, filepath.Join(target, config.FileName), cfg.AI); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func runTestGit(t *testing.T, target string, arguments ...string) {
 	t.Helper()
 	command := exec.Command("git", append([]string{"-C", target}, arguments...)...)
@@ -317,6 +418,210 @@ func TestReviewRequireAIReviewFailsAfterSavingDeterministicReport(t *testing.T) 
 	}
 }
 
+func TestScanRequireAIReviewWithoutProviderWritesDeterministicReport(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\nlogger.info(model_output)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Write(filepath.Join(target, config.FileName), config.Default(), false); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Execute([]string{"scan", "--require-ai-review", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild)
+	if code != 2 {
+		t.Fatalf("scan code=%d, want 2; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	var decoded report.Report
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("deterministic report was not written before strict failure: %v\n%s", err, stdout.String())
+	}
+	if decoded.RepositoryAnalysisRun != report.RepositoryAnalysisIncomplete || len(decoded.Findings) == 0 || !strings.Contains(strings.Join(decoded.Warnings, "\n"), "no advisory provider is configured") {
+		t.Fatalf("strict missing-provider report is incomplete: %#v", decoded)
+	}
+	if !strings.Contains(stderr.String(), "Deterministic findings and evidence remain available") {
+		t.Fatalf("strict missing-provider failure was not explained: %s", stderr.String())
+	}
+}
+
+func TestDeterministicOnlyWithRequiredReviewWritesReportThenFailsPolicy(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\nlogger.info(model_output)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.AI.Provider = "openai"
+	cfg.AI.ReviewOnScan = true
+	cfg.AI.Remote = config.RemoteConfig{
+		Model: "gpt-test", APIKeyEnv: "COMPLYSCAN_DETERMINISTIC_STRICT_KEY", TimeoutSeconds: 1, MaxFindings: 20,
+	}
+	t.Setenv("COMPLYSCAN_DETERMINISTIC_STRICT_KEY", "secret-that-must-not-be-read")
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	grantTestAutomaticReview(t, target, cfg)
+
+	var stdout, stderr bytes.Buffer
+	code := Execute([]string{"scan", "--deterministic-only", "--require-ai-review", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild)
+	if code != 2 {
+		t.Fatalf("scan code=%d, want 2; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	var decoded report.Report
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("deterministic report was not written: %v\n%s", err, stdout.String())
+	}
+	output := stdout.String() + stderr.String()
+	if decoded.RepositoryAnalysisRun != report.RepositoryAnalysisIncomplete || strings.Contains(output, "Checking model compatibility") || strings.Contains(output, "COMPLYSCAN_DETERMINISTIC_STRICT_KEY") {
+		t.Fatalf("deterministic strict scan crossed the AI boundary: %#v\n%s", decoded, output)
+	}
+}
+
+func TestRequireAIReviewDoesNotGrantConsentToLegacyConfiguredProvider(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\nclient = OpenAI()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.AI.Provider = "openai"
+	cfg.AI.Remote = config.RemoteConfig{
+		Model: "gpt-test", APIKeyEnv: "COMPLYSCAN_LEGACY_REQUIRED_KEY", TimeoutSeconds: 1, MaxFindings: 20,
+	}
+	t.Setenv("COMPLYSCAN_LEGACY_REQUIRED_KEY", "")
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Execute([]string{"scan", "--require-ai-review", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild)
+	if code != 2 {
+		t.Fatalf("scan code=%d, want 2; stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	var decoded report.Report
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("strict deterministic report was not written: %v\n%s", err, stdout.String())
+	}
+	output := stdout.String() + stderr.String()
+	if strings.Contains(output, "Checking model compatibility") || strings.Contains(output, "COMPLYSCAN_LEGACY_REQUIRED_KEY is not set") {
+		t.Fatalf("strict policy flag was incorrectly treated as model consent:\n%s", output)
+	}
+	if decoded.RepositoryAnalysisRun != report.RepositoryAnalysisIncomplete || !strings.Contains(strings.Join(decoded.Warnings, "\n"), "automatic review has not been enabled") {
+		t.Fatalf("strict deterministic result did not explain unavailable AI: %#v", decoded)
+	}
+}
+
+func TestPlainScanDoesNotTrustRepositoryConfiguredRemoteDestination(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\nclient = OpenAI()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.AI.Provider = customCompatibleProvider
+	cfg.AI.ReviewOnScan = true
+	cfg.AI.Remote = config.RemoteConfig{
+		ProviderName: "Attacker-controlled gateway", BaseURL: "https://attacker.example/v1",
+		Model: "exfiltrate", APIKeyEnv: "COMPLYSCAN_ATTACKER_TEST_KEY", TimeoutSeconds: 1, MaxFindings: 20,
+	}
+	t.Setenv("COMPLYSCAN_ATTACKER_TEST_KEY", "existing-secret-that-must-not-be-read")
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	qualificationCalls := 0
+	httpRequests := 0
+	previousTransport := http.DefaultTransport
+	http.DefaultTransport = doctorRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		httpRequests++
+		return nil, errors.New("network path must not be entered")
+	})
+	t.Cleanup(func() { http.DefaultTransport = previousTransport })
+	previous := qualifyConfiguredModel
+	qualifyConfiguredModel = func(context.Context, config.AIConfig, bool) (modelQualificationOutcome, error) {
+		qualificationCalls++
+		return modelQualificationOutcome{}, errors.New("model path must not be entered")
+	}
+	t.Cleanup(func() { qualifyConfiguredModel = previous })
+
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if qualificationCalls != 0 {
+		t.Fatalf("untrusted repository configuration entered the model path %d time(s)", qualificationCalls)
+	}
+	if httpRequests != 0 {
+		t.Fatalf("untrusted repository configuration triggered %d HTTP request(s)", httpRequests)
+	}
+	output := stdout.String() + stderr.String()
+	if !strings.Contains(output, "this machine has not approved") || !strings.Contains(output, "--base-url") || strings.Contains(output, "existing-secret") {
+		t.Fatalf("fail-closed automatic-review note is missing or leaked a credential:\n%s", output)
+	}
+}
+
+func TestPlainScanSurfacesUnreadablePrivateConsent(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\nclient = OpenAI()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.AI.Provider = "openai"
+	cfg.AI.ReviewOnScan = true
+	cfg.AI.Remote = config.RemoteConfig{
+		Model: "gpt-test", APIKeyEnv: "COMPLYSCAN_CORRUPT_CONSENT_KEY", TimeoutSeconds: 1, MaxFindings: 20,
+	}
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	store := reviewconsent.NewStore(filepath.Join(t.TempDir(), "review-consent"))
+	previousStore := defaultReviewConsentStore
+	defaultReviewConsentStore = func() (reviewconsent.Store, error) { return store, nil }
+	t.Cleanup(func() { defaultReviewConsentStore = previousStore })
+	if err := store.Grant(target, filepath.Join(target, config.FileName), cfg.AI); err != nil {
+		t.Fatal(err)
+	}
+	records, err := os.ReadDir(store.Directory)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("consent records = %d, %v", len(records), err)
+	}
+	if err := os.WriteFile(filepath.Join(store.Directory, records[0].Name()), []byte("{\"unexpected\":true}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	output := stdout.String() + stderr.String()
+	if !strings.Contains(output, "private machine approval could not be verified") || !strings.Contains(output, "unknown field") || strings.Contains(output, "Checking model compatibility") {
+		t.Fatalf("consent-store failure was not surfaced safely:\n%s", output)
+	}
+}
+
+func TestExplicitProviderDoesNotInheritRepositoryCredentialRouting(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\nclient = OpenAI()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.AI.Provider = "openai"
+	cfg.AI.Remote = config.RemoteConfig{
+		ProviderName: "Untrusted repository setting", BaseURL: "https://attacker.example/v1",
+		Model: "untrusted-model", APIKeyEnv: "COMPLYSCAN_UNTRUSTED_ROUTING_KEY", TimeoutSeconds: 1, MaxFindings: 20,
+	}
+	t.Setenv("COMPLYSCAN_UNTRUSTED_ROUTING_KEY", "credential-that-must-not-be-read")
+	t.Setenv("OPENAI_API_KEY", "")
+	if err := config.Write(filepath.Join(target, config.FileName), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"scan", "--provider", "openai", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	output := stdout.String() + stderr.String()
+	if !strings.Contains(output, "OPENAI_API_KEY is not set") || strings.Contains(output, "COMPLYSCAN_UNTRUSTED_ROUTING_KEY") || strings.Contains(output, "credential-that-must-not-be-read") {
+		t.Fatalf("explicit provider inherited untrusted repository credential routing:\n%s", output)
+	}
+}
+
 func TestReviewRequiresConfiguredProvider(t *testing.T) {
 	target := t.TempDir()
 	if err := config.Write(filepath.Join(target, config.FileName), config.Default(), false); err != nil {
@@ -338,15 +643,20 @@ func TestScanHelpPresentsOneScanWorkflow(t *testing.T) {
 	if code := Execute([]string{"scan", "--help"}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("scan help code=%d stderr=%q", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "never contacts a model") {
-		t.Fatalf("scan help does not state the local boundary:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), "configured advisory AI review") || !strings.Contains(stdout.String(), "--deterministic-only") || !strings.Contains(stdout.String(), "no provider is configured or AI is unavailable") {
+		t.Fatalf("scan help does not explain the unified workflow and safe override:\n%s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "governance checks remain repository-wide") || strings.Contains(stdout.String(), "limit AI context") || strings.Contains(stdout.String(), "advisory-review details") {
-		t.Fatalf("scan help does not describe the deterministic changed-file and verbose boundaries:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), "limit model context to changed eligible files plus up to eight connected files") || !strings.Contains(stdout.String(), "advisory-review details") {
+		t.Fatalf("scan help does not describe the changed-file model boundary and review detail:\n%s", stdout.String())
 	}
-	for _, flag := range []string{"--quick", "--deep", "--provider", "--model", "--api-key-env", "--refresh-review", "--require-ai-review"} {
-		if strings.Contains(stdout.String(), flag) {
-			t.Fatalf("scan help exposes AI option %s:\n%s", flag, stdout.String())
+	for _, flag := range []string{"--provider", "--model", "--api-key-env", "--refresh-review", "--require-ai-review", "--deterministic-only"} {
+		if !strings.Contains(stdout.String(), flag) {
+			t.Fatalf("scan help is missing %s:\n%s", flag, stdout.String())
+		}
+	}
+	for _, hidden := range []string{"--quick", "--deep", "--review"} {
+		if strings.Contains(stdout.String(), hidden) {
+			t.Fatalf("scan help exposes compatibility flag %s:\n%s", hidden, stdout.String())
 		}
 	}
 	stdout.Reset()
@@ -357,13 +667,32 @@ func TestScanHelpPresentsOneScanWorkflow(t *testing.T) {
 	if !strings.Contains(stdout.String(), "send selected repository context") {
 		t.Fatalf("review help does not disclose external processing:\n%s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "limit AI context to changed eligible files plus up to eight connected files") || !strings.Contains(stdout.String(), "advisory-review details") {
+	if !strings.Contains(stdout.String(), "limit model context to changed eligible files plus up to eight connected files") || !strings.Contains(stdout.String(), "advisory-review details") {
 		t.Fatalf("review help does not describe the changed-file model boundary and review detail:\n%s", stdout.String())
 	}
 	for _, flag := range []string{"--provider", "--model", "--api-key-env", "--refresh-review", "--require-ai-review"} {
 		if !strings.Contains(stdout.String(), flag) {
 			t.Fatalf("review help is missing %s:\n%s", flag, stdout.String())
 		}
+	}
+}
+
+func TestRootHelpHidesReviewCompatibilityCommand(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{"--help"}, &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("root help code=%d stderr=%q", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "\n  review ") {
+		t.Fatalf("root help exposes the compatibility command:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "\n  scan ") {
+		t.Fatalf("root help does not present scan as the public workflow:\n%s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Execute([]string{"review", "--help"}, &stdout, &stderr, testBuild); code != 0 || !strings.Contains(stdout.String(), "Compatibility command") {
+		t.Fatalf("review compatibility command is not directly invokable: code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 }
 
@@ -429,6 +758,9 @@ func TestRootCommandScansConfiguredCurrentRepository(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "ComplyScan scanning .") || !strings.Contains(stdout.String(), "Reports saved:") {
 		t.Fatalf("default command did not scan configured repository:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "automatic AI review is not enabled") {
+		t.Fatalf("default command did not preserve the legacy processing boundary:\n%s", stdout.String())
 	}
 	if strings.Contains(stdout.String()+stderr.String(), "model compatibility") || strings.Contains(stdout.String()+stderr.String(), "COMPLYSCAN_ROOT_MISSING_KEY") {
 		t.Fatalf("default command used configured AI:\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
@@ -879,13 +1211,13 @@ func TestScanPreservesGraphCoverageWarnings(t *testing.T) {
 
 func TestScanRejectsUnsafeOrInactiveOllamaOverrides(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
+	target := t.TempDir()
 	for _, arguments := range [][]string{
-		{"scan", "--review", "openai"},
-		{"scan", "--ollama-model", "gemma3"},
-		{"scan", "--model", "gpt-test"},
-		{"scan", "--api-key-env", "OPENAI_API_KEY"},
-		{"scan", "--refresh-review"},
-		{"scan", "--review", "ollama", "--ollama-endpoint", "https://example.com"},
+		{"scan", "--ollama-model", "gemma3", target},
+		{"scan", "--model", "gpt-test", target},
+		{"scan", "--api-key-env", "OPENAI_API_KEY", target},
+		{"scan", "--refresh-review", target},
+		{"scan", "--review", "ollama", "--ollama-endpoint", "https://example.com", target},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := Execute(arguments, &stdout, &stderr, testBuild); code != 2 {

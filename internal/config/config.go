@@ -58,6 +58,7 @@ type RuleConfig struct {
 
 type AIConfig struct {
 	Provider           string                   `yaml:"provider"`
+	ReviewOnScan       bool                     `yaml:"review-on-scan,omitempty"`
 	RepositoryAnalysis RepositoryAnalysisConfig `yaml:"repository-analysis"`
 	Ollama             OllamaConfig             `yaml:"ollama"`
 	Remote             RemoteConfig             `yaml:"remote,omitempty"`
