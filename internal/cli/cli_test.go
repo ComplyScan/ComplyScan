@@ -815,7 +815,7 @@ func TestScanJSONOutputAndSeverityFilter(t *testing.T) {
 	if decoded.Summary.High == 0 || decoded.Summary.Medium != 0 || decoded.Summary.Info != 0 {
 		t.Fatalf("severity filter not reflected in summary: %#v", decoded.Summary)
 	}
-	if decoded.SchemaVersion != 9 || decoded.Tool.Commit != "test" || decoded.Scan.ID == "" || decoded.Scan.Scope.Findings != "full-repository" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
+	if decoded.SchemaVersion != 10 || decoded.Tool.Commit != "test" || decoded.Scan.ID == "" || decoded.Scan.Scope.Findings != "full-repository" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
 		t.Fatalf("missing evidence-bundle metadata: %#v", decoded)
 	}
 }
@@ -860,8 +860,22 @@ func TestScanMapsConfirmedAIUseToSystemRequirementsAndScopedEvidence(t *testing.
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 9 || decoded.AIUseMappings == nil || len(decoded.AIUseMappings.Uses) != 1 {
+	if decoded.SchemaVersion != 10 || decoded.AIUseMappings == nil || len(decoded.AIUseMappings.Uses) != 1 {
 		t.Fatalf("per-use mapping missing: %#v", decoded.AIUseMappings)
+	}
+	if decoded.AIUseInventory == nil || len(decoded.AIUseInventory.Confirmed) != 1 ||
+		decoded.AIUseInventory.Confirmed[0].RepositoryFacts == nil {
+		t.Fatalf("deterministic per-use facts missing: %#v", decoded.AIUseInventory)
+	}
+	facts := decoded.AIUseInventory.Confirmed[0].RepositoryFacts
+	if len(facts.ModelProviders) != 1 || facts.ModelProviders[0].Name != "OpenAI" ||
+		facts.ModelProviders[0].Source != aiuse.FactSourceDeterministic || facts.ModelProviders[0].Coverage != aiuse.FactCoverageFullRepository {
+		t.Fatalf("runtime provider signal was not retained as a scoped provider observation: %#v", facts)
+	}
+	for _, fact := range facts.Facts {
+		if fact.Field == profile.CodeFactAIActivities {
+			t.Fatalf("a provider import was incorrectly promoted to an AI activity: %#v", facts)
+		}
 	}
 	use := decoded.AIUseMappings.Uses[0]
 	if use.UseID != "support-replies" || len(use.Frameworks) == 0 || len(use.Frameworks[0].Contexts) != 1 {
@@ -2075,7 +2089,7 @@ func TestScanMapsSharedEvidenceAcrossEUAndNISTFrameworks(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 9 || len(decoded.Frameworks) != 2 {
+	if decoded.SchemaVersion != 10 || len(decoded.Frameworks) != 2 {
 		t.Fatalf("multi-framework contract missing: %#v", decoded.Frameworks)
 	}
 	var fingerprints []string

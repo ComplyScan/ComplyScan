@@ -20,6 +20,7 @@ const (
 	maxDeveloperEvidence  = 5
 	maxDeveloperQuestions = 5
 	maxDeveloperUseChecks = 8
+	maxDeveloperUseFacts  = 8
 )
 
 type developerAction struct {
@@ -377,6 +378,11 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 					return err
 				}
 			}
+			for _, suggestion := range value.AIUseInventory.Suggested {
+				if err := writeDeveloperAIFactDetails(writer, suggestion.Name, suggestion.RepositoryFacts, suggestion.RoleCandidates); err != nil {
+					return err
+				}
+			}
 		}
 		if len(value.AIUseInventory.UngroupedSignals) > 0 {
 			if _, err := fmt.Fprintf(writer, "\n**Other AI-related code signals (%d):** %s. They remain part of the scan even though they are not assigned to a saved AI-use scope.\n",
@@ -386,6 +392,20 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 		}
 		if value.AIUseInventory.Summary.Confirmed == 0 && value.AIUseInventory.Summary.Draft == 0 && value.AIUseInventory.Summary.Suggested == 0 && value.AIUseInventory.Summary.UngroupedSignals == 0 {
 			if _, err := fmt.Fprintln(writer, "\nNo saved AI uses, model suggestions, or ungrouped technical signals were recorded."); err != nil {
+				return err
+			}
+		}
+		if len(value.AIUseInventory.OrganizationUnknowns) > 0 &&
+			(value.AIUseInventory.Summary.Confirmed > 0 || value.AIUseInventory.Summary.Draft > 0 || value.AIUseInventory.Summary.Suggested > 0 || value.AIUseInventory.Summary.UngroupedSignals > 0) {
+			if _, err := fmt.Fprint(writer, "\n<details>\n<summary>Organisation context that repository code cannot establish</summary>\n\n"); err != nil {
+				return err
+			}
+			for _, unknown := range value.AIUseInventory.OrganizationUnknowns {
+				if _, err := fmt.Fprintf(writer, "- %s\n", markdownText(unknown)); err != nil {
+					return err
+				}
+			}
+			if _, err := fmt.Fprint(writer, "\nThese unknowns are report context only. They do not create a setup task or block the code scan.\n\n</details>\n"); err != nil {
 				return err
 			}
 		}
@@ -440,7 +460,140 @@ func writeDeveloperSavedAIUsesMarkdown(writer io.Writer, title string, values []
 			return err
 		}
 	}
+	for _, observed := range values {
+		if err := writeDeveloperAIFactDetails(writer, observed.Use.Name, observed.RepositoryFacts, observed.RoleCandidates); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func writeDeveloperAIFactDetails(writer io.Writer, name string, review *aiuse.FactReview, roles []aiuse.RoleCandidate) error {
+	if review == nil && len(roles) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintf(writer, "\n##### What code indicates for %s\n", markdownText(name)); err != nil {
+		return err
+	}
+	if review != nil && len(review.Facts) == 0 && len(review.ModelProviders) == 0 {
+		if _, err := fmt.Fprintln(writer, "\nThe reviewed code supported no positive per-use facts. This does not establish that a fact is false or that an implementation is absent."); err != nil {
+			return err
+		}
+	}
+	if review != nil && (len(review.Facts) > 0 || len(review.ModelProviders) > 0) {
+		if _, err := fmt.Fprintln(writer, "\n| Code observation | Inferred value | Basis | Where |\n|---|---|---|---|"); err != nil {
+			return err
+		}
+		written := 0
+		for _, provider := range review.ModelProviders {
+			if written == maxDeveloperUseFacts {
+				break
+			}
+			if _, err := fmt.Fprintf(writer, "| Model provider integration | %s | %s | %s |\n",
+				markdownTableText(provider.Name), markdownTableText(developerFactBasis(provider.Source, provider.Coverage)),
+				markdownTableText(developerCitationText(provider.Evidence))); err != nil {
+				return err
+			}
+			written++
+		}
+		for _, fact := range review.Facts {
+			if written == maxDeveloperUseFacts {
+				break
+			}
+			values := strings.Join(fact.Values, ", ")
+			if fact.Confidence != "" {
+				values += " (" + fact.Confidence + " confidence)"
+			}
+			basis := developerFactBasis(fact.Source, fact.Coverage)
+			if strings.TrimSpace(fact.Rationale) != "" {
+				basis = developerPlainLanguage(fact.Rationale) + " — " + basis
+			}
+			if _, err := fmt.Fprintf(writer, "| %s | %s | %s | %s |\n",
+				markdownTableText(developerCodeFactLabel(string(fact.Field))), markdownTableText(developerPlainLanguage(values)),
+				markdownTableText(basis), markdownTableText(developerCitationText(fact.Evidence))); err != nil {
+				return err
+			}
+			written++
+		}
+		if remaining := len(review.ModelProviders) + len(review.Facts) - written; remaining > 0 {
+			if _, err := fmt.Fprintf(writer, "\n%d more code observation(s) are available in the JSON evidence bundle.\n", remaining); err != nil {
+				return err
+			}
+		}
+	}
+	if len(roles) > 0 {
+		if _, err := fmt.Fprintln(writer, "\n**Possible roles indicated by the repository**\n\n| Possible role | Why it is possible | What code cannot establish |\n|---|---|---|"); err != nil {
+			return err
+		}
+		for _, role := range roles {
+			missing := strings.Join(role.MissingOrganizationFacts, "; ")
+			if _, err := fmt.Fprintf(writer, "| %s | %s | %s |\n",
+				markdownTableText(developerRoleLabel(string(role.Role))), markdownTableText(developerPlainLanguage(role.Rationale)),
+				markdownTableText(developerPlainLanguage(missing))); err != nil {
+				return err
+			}
+		}
+	}
+	if review != nil && len(review.UnresolvedQuestions) > 0 {
+		if _, err := fmt.Fprintf(writer, "\n**Not resolved from the reviewed code:** %s\n", markdownText(strings.Join(review.UnresolvedQuestions, "; "))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func developerFactBasis(source aiuse.FactSource, coverage aiuse.FactCoverage) string {
+	if source == aiuse.FactSourceModel {
+		if coverage == aiuse.FactCoverageChangedAndConnected {
+			return "AI review of changed and connected code"
+		}
+		return "AI review with checked code citations"
+	}
+	return "Local repository evidence"
+}
+
+func developerCodeFactLabel(field string) string {
+	switch field {
+	case "intended-purpose":
+		return "Intended purpose"
+	case "lifecycle-stage":
+		return "Lifecycle indication"
+	case "use-case-domains":
+		return "Use-case domain"
+	case "decision-impact":
+		return "Output impact"
+	case "human-oversight":
+		return "Human control"
+	case "ai-activities":
+		return "AI activity"
+	case "deployment-models":
+		return "Deployment mechanism"
+	case "users":
+		return "Possible users"
+	case "affected-groups":
+		return "Possibly affected groups"
+	case "personal-data":
+		return "Personal-data handling"
+	case "special-category-data":
+		return "Sensitive-data handling"
+	case "children-data":
+		return "Children's-data handling"
+	default:
+		return field
+	}
+}
+
+func developerRoleLabel(role string) string {
+	switch role {
+	case "downstream-provider":
+		return "Downstream provider"
+	case "provider":
+		return "Provider"
+	case "deployer":
+		return "Deployer"
+	default:
+		return role
+	}
 }
 
 type developerUseCheck struct {

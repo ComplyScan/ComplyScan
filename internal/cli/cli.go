@@ -617,7 +617,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			)
 			aiInventory := inventory.NewReport(target, build.Version, inventory.Analyze(result.FullRepository), result.Warnings)
 			reportValue.AIInventory = &aiInventory
-			aiUseInventory := aiuse.BuildSnapshot(aiUseManifest, aiInventory, nil, changedSince != "")
+			aiUseInventory := aiuse.BuildSnapshotWithRepository(aiUseManifest, aiInventory, result.FullRepository, nil, changedSince != "")
 			reportValue.AIUseInventory = &aiUseInventory
 			gateFindings := append([]rules.Finding(nil), result.Findings...)
 			frameworkResults := make([]report.FrameworkResult, 0, len(cfg.Frameworks))
@@ -838,7 +838,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						}
 						reportValue.RepositoryAnalysis = &repositoryReview
 						reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisCompleted
-						aiUseInventory = aiuse.BuildSnapshot(aiUseManifest, aiInventory, &repositoryReview, changedSince != "")
+						aiUseInventory = aiuse.BuildSnapshotWithRepository(aiUseManifest, aiInventory, result.FullRepository, &repositoryReview, changedSince != "")
 						reportValue.AIUseInventory = &aiUseInventory
 						reportValue.AIUseMappings = buildAIUseMappings(aiUseManifest, cfg.Systems, frameworkResults, aiInventory, &repositoryReview)
 						completionDetail := fmt.Sprintf("%d file excerpt(s)", repositoryReview.Coverage.FilesSubmitted)

@@ -44,7 +44,20 @@ func TestWriteJSON(t *testing.T) {
 	}, time.Date(2026, 8, 3, 10, 30, 0, 0, time.FixedZone("test", 2*60*60)), []rules.Finding{{
 		RuleID: "AI-DOC-001", Title: "Missing docs", Severity: rules.SeverityMedium,
 	}}, nil, 2)
-	value.AIUseInventory = &aiuse.Snapshot{Summary: aiuse.SnapshotSummary{Confirmed: 1}}
+	value.AIUseInventory = &aiuse.Snapshot{
+		Summary: aiuse.SnapshotSummary{Confirmed: 1},
+		Confirmed: []aiuse.ObservedUse{{
+			Use: aiuse.Use{ID: "assistant", Name: "Assistant"},
+			RepositoryFacts: &aiuse.FactReview{
+				Status: aiuse.FactReviewModelReviewed, ModelCoverage: aiuse.FactCoverageFullRepository,
+				Facts: []aiuse.Fact{{
+					Field: profile.CodeFactAIActivities, Values: []string{"inference"}, Confidence: "high",
+					Source: aiuse.FactSourceModel, Coverage: aiuse.FactCoverageFullRepository, Strength: aiuse.FactStrengthModelReasoned,
+					Rationale: "The handler invokes a model.", Evidence: []providers.RepositoryCitation{{Path: "assistant.go", Line: 12, Summary: "Model invocation"}},
+				}},
+			},
+		}},
+	}
 	value.AIUseMappings = &usemapping.Report{SchemaVersion: 1, Summary: usemapping.Summary{
 		Uses: 1, FrameworkSystemContexts: 1, WithInScopeCodeEvidence: 1, ObjectivesWithEvidenceOutsideUse: 1,
 		LikelyRequiredWithoutInScopeEvidence: 1, RecommendedWithoutInScopeEvidence: 1,
@@ -64,7 +77,7 @@ func TestWriteJSON(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 9 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
+	if decoded.SchemaVersion != 10 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
 		t.Fatalf("unexpected tool: %#v", decoded.Tool)
 	}
 	if decoded.RepositoryAnalysisRun != RepositoryAnalysisCompleted {
@@ -72,6 +85,11 @@ func TestWriteJSON(t *testing.T) {
 	}
 	if decoded.AIUseInventory == nil || decoded.AIUseInventory.Summary.Confirmed != 1 {
 		t.Fatalf("AI-use inventory was not serialized: %#v", decoded.AIUseInventory)
+	}
+	if len(decoded.AIUseInventory.Confirmed) != 1 || decoded.AIUseInventory.Confirmed[0].RepositoryFacts == nil ||
+		len(decoded.AIUseInventory.Confirmed[0].RepositoryFacts.Facts) != 1 ||
+		decoded.AIUseInventory.Confirmed[0].RepositoryFacts.Facts[0].Field != profile.CodeFactAIActivities {
+		t.Fatalf("per-use repository facts were not serialized: %#v", decoded.AIUseInventory.Confirmed)
 	}
 	if decoded.AIUseMappings == nil || decoded.AIUseMappings.SchemaVersion != 1 || decoded.AIUseMappings.Summary.Uses != 1 {
 		t.Fatalf("AI-use mappings were not serialized: %#v", decoded.AIUseMappings)
@@ -81,7 +99,7 @@ func TestWriteJSON(t *testing.T) {
 		t.Fatalf("use-scoped repository observation was not serialized: %#v", decoded.RepositoryAnalysis)
 	}
 	if !strings.Contains(output.String(), `"ai_use_id": "assistant"`) {
-		t.Fatalf("schema-version 9 AI-use attribution is missing:\n%s", output.String())
+		t.Fatalf("schema-version 10 AI-use attribution is missing:\n%s", output.String())
 	}
 	if !strings.Contains(output.String(), `"framework_system_contexts": 1`) ||
 		!strings.Contains(output.String(), `"with_in_scope_code_evidence": 1`) ||
@@ -135,7 +153,7 @@ func TestWriteJSONUsesCurrentEvidenceInvestigationContract(t *testing.T) {
 	if err := WriteJSON(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), `"schema_version": 9`) || !strings.Contains(output.String(), `"repository_analysis_run": "not-requested"`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
+	if !strings.Contains(output.String(), `"schema_version": 10`) || !strings.Contains(output.String(), `"repository_analysis_run": "not-requested"`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
 		t.Fatalf("unexpected current-schema investigation JSON:\n%s", output.String())
 	}
 }
@@ -144,9 +162,30 @@ func TestConciseMarkdownSeparatesSavedSuggestedAndUngroupedAIUses(t *testing.T) 
 	value := New(".", "dev", nil, nil, 0)
 	value.AIUseInventory = &aiuse.Snapshot{
 		Summary: aiuse.SnapshotSummary{Confirmed: 1, Draft: 1, Retired: 1, Suggested: 1, UngroupedSignals: 1},
-		Confirmed: []aiuse.ObservedUse{{Use: aiuse.Use{
-			ID: "confirmed", Name: "Confirmed generation", Description: "Generates summaries.", Paths: []string{"runtime/**"},
-		}}},
+		Confirmed: []aiuse.ObservedUse{{
+			Use: aiuse.Use{
+				ID: "confirmed", Name: "Confirmed generation", Description: "Generates summaries.", Paths: []string{"runtime/**"},
+			},
+			RepositoryFacts: &aiuse.FactReview{
+				Status: aiuse.FactReviewModelReviewed, DeterministicCoverage: aiuse.FactCoverageFullRepository, ModelCoverage: aiuse.FactCoverageChangedAndConnected,
+				ModelProviders: []aiuse.ModelProviderObservation{{
+					Name: "OpenAI", Confidence: "high", Source: aiuse.FactSourceDeterministic, Coverage: aiuse.FactCoverageFullRepository,
+					Strength: aiuse.FactStrengthDirectSignal, Evidence: []providers.RepositoryCitation{{Path: "runtime/client.go", Line: 4, Summary: "OpenAI client"}},
+				}},
+				Facts: []aiuse.Fact{{
+					Field: profile.CodeFactHumanOversight, Values: []string{"required"}, Confidence: "high",
+					Source: aiuse.FactSourceModel, Coverage: aiuse.FactCoverageChangedAndConnected, Strength: aiuse.FactStrengthModelReasoned,
+					Rationale: "The route calls an approval gate.", Evidence: []providers.RepositoryCitation{{Path: "runtime/review.go", Line: 15, Summary: "Approval gate"}},
+				}},
+				UnresolvedQuestions: []string{"Whether every route uses the approval gate"},
+			},
+			RoleCandidates: []aiuse.RoleCandidate{{
+				Role: aiuse.TechnicalRoleDeployer, Status: aiuse.RoleCandidatePossible, Confidence: "medium",
+				Source: aiuse.FactSourceDeterministic, Coverage: aiuse.FactCoverageFullRepository, Strength: aiuse.FactStrengthDirectSignal,
+				Rationale:                "Runtime code connects to a third-party model provider.",
+				MissingOrganizationFacts: []string{"Whether the organisation actually operates this system"},
+			}},
+		}},
 		Draft: []aiuse.ObservedUse{{Use: aiuse.Use{
 			ID: "draft", Name: "Draft ranking", Description: "Ranks candidates.", Paths: []string{"ranking/**"},
 		}}},
@@ -160,6 +199,7 @@ func TestConciseMarkdownSeparatesSavedSuggestedAndUngroupedAIUses(t *testing.T) 
 		UngroupedSignals: []aiuse.SignalLocation{{
 			Component: "OpenAI", Kind: inventory.KindProvider, Path: "unowned.py", Line: 4, Scope: inventory.ScopeRuntime,
 		}},
+		OrganizationUnknowns: []string{"Actual operating regions cannot be established from repository code."},
 	}
 
 	var output bytes.Buffer
@@ -171,6 +211,10 @@ func TestConciseMarkdownSeparatesSavedSuggestedAndUngroupedAIUses(t *testing.T) 
 		"#### Confirmed AI-use scopes", "Confirmed generation", "#### Draft AI-use scopes (optional)", "Draft ranking",
 		"#### Retired AI uses", "Retired classifier", "Current signals match retired AI use", "Matching local technical signal found", "No matching signal was observed in this scan",
 		"#### Likely AI uses found by the code review", "Suggested assistant", "**Other AI-related code signals (1):** OpenAI at unowned.py:4",
+		"##### What code indicates for Confirmed generation", "Model provider integration", "Human control", "required (high confidence)",
+		"The route calls an approval gate.",
+		"Possible roles indicated by the repository", "Deployer", "Organisation context that repository code cannot establish",
+		"These unknowns are report context only. They do not create a setup task or block the code scan.",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("concise Markdown missing %q:\n%s", expected, output.String())
@@ -183,6 +227,27 @@ func TestConciseMarkdownSeparatesSavedSuggestedAndUngroupedAIUses(t *testing.T) 
 		if strings.Contains(output.String(), unwanted) {
 			t.Fatalf("optional AI-use enrichment was presented as required work %q:\n%s", unwanted, output.String())
 		}
+	}
+}
+
+func TestConciseMarkdownExplainsEmptyPerUseFactReview(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	value.AIUseInventory = &aiuse.Snapshot{
+		Summary: aiuse.SnapshotSummary{Confirmed: 1},
+		Confirmed: []aiuse.ObservedUse{{
+			Use: aiuse.Use{ID: "assistant", Name: "Assistant", Paths: []string{"assistant/**"}},
+			RepositoryFacts: &aiuse.FactReview{
+				Status: aiuse.FactReviewModelReviewed, ModelCoverage: aiuse.FactCoverageChangedAndConnected, Facts: []aiuse.Fact{},
+			},
+		}},
+	}
+	var output bytes.Buffer
+	if err := WriteMarkdown(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "The reviewed code supported no positive per-use facts") ||
+		!strings.Contains(output.String(), "does not establish that a fact is false") {
+		t.Fatalf("empty fact review was not explained honestly:\n%s", output.String())
 	}
 }
 
