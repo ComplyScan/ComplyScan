@@ -167,11 +167,10 @@ func TestConciseMarkdownSeparatesSavedSuggestedAndUngroupedAIUses(t *testing.T) 
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"Saved AI uses: **1 confirmed, 1 draft, 1 retired**", "New model suggestions: **1**", "Ungrouped technical signals: **1**",
-		"#### Developer-confirmed AI uses", "Confirmed generation", "#### Draft AI uses", "Draft ranking",
+		"Organising code into confirmed AI uses is optional", "you can act on this report without doing it",
+		"#### Confirmed AI-use scopes", "Confirmed generation", "#### Draft AI-use scopes (optional)", "Draft ranking",
 		"#### Retired AI uses", "Retired classifier", "Current signals match retired AI use", "Matching local technical signal found", "No matching signal was observed in this scan",
-		"#### Model-suggested AI uses", "Suggested assistant", "**Ungrouped technical signals (1):** OpenAI at unowned.py:4",
-		"1 draft AI-use record still needs confirmation", "Run `complyscan ai-uses setup` to confirm, merge, dismiss, or defer each suggestion.",
+		"#### Likely AI uses found by the code review", "Suggested assistant", "**Other AI-related code signals (1):** OpenAI at unowned.py:4",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("concise Markdown missing %q:\n%s", expected, output.String())
@@ -179,6 +178,47 @@ func TestConciseMarkdownSeparatesSavedSuggestedAndUngroupedAIUses(t *testing.T) 
 	}
 	if strings.Contains(output.String(), "AI features found") {
 		t.Fatalf("concise Markdown retained misleading feature count:\n%s", output.String())
+	}
+	for _, unwanted := range []string{"draft AI-use record still needs confirmation", "AI-use suggestion needs a developer decision", "Run `complyscan ai-uses setup`"} {
+		if strings.Contains(output.String(), unwanted) {
+			t.Fatalf("optional AI-use enrichment was presented as required work %q:\n%s", unwanted, output.String())
+		}
+	}
+}
+
+func TestConciseMarkdownOptionalAIUseGroupingDoesNotChangeCleanOutcome(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	value.RepositoryAnalysisRun = RepositoryAnalysisCompleted
+	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{
+		Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted},
+		Result: providers.RepositorySectionResult{AIUses: []providers.RepositoryAIUse{{
+			ID: "suggested", Name: "Suggested assistant", Purpose: "Drafts replies.",
+			Evidence: []providers.RepositoryCitation{{Path: "assistant.go", Line: 12}},
+		}}},
+	}
+	value.AIUseInventory = &aiuse.Snapshot{
+		Summary: aiuse.SnapshotSummary{Draft: 1, Suggested: 1, UngroupedSignals: 1},
+		Draft: []aiuse.ObservedUse{{Use: aiuse.Use{
+			ID: "draft", Name: "Draft assistant", Paths: []string{"assistant/**"},
+		}}},
+		Suggested: []aiuse.Suggestion{{
+			Name: "Suggested assistant", Purpose: "Drafts replies.", Evidence: []providers.RepositoryCitation{{Path: "assistant.go", Line: 12}},
+		}},
+		UngroupedSignals: []aiuse.SignalLocation{{Component: "OpenAI", Path: "client.go", Line: 4}},
+	}
+
+	var output bytes.Buffer
+	if err := WriteMarkdown(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "**No urgent code problems found**") {
+		t.Fatalf("optional AI-use organization changed the scan outcome:\n%s", output.String())
+	}
+	if !strings.Contains(output.String(), "AI-reviewed safeguards: **no code-level decisions returned**") {
+		t.Fatalf("empty completed review was not described honestly:\n%s", output.String())
+	}
+	if strings.Contains(output.String(), "| **Review** |") {
+		t.Fatalf("optional AI-use organization produced a required action:\n%s", output.String())
 	}
 }
 
@@ -282,7 +322,8 @@ func TestConciseMarkdownAndTerminalMapRequirementsPerConfirmedAIUse(t *testing.T
 	if err := WriteTerminalConciseCompletion(&terminal, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(terminal.String(), "Per-use requirement mapping: 2 confirmed AI use(s), 2 framework/system context(s)") ||
+	if !strings.Contains(terminal.String(), "Per-use safeguard detail (optional scope refinement): 2 confirmed AI use(s), 2 framework/system context(s)") ||
+		!strings.Contains(terminal.String(), "Analysis: deterministic checks + completed AI code review") ||
 		!strings.Contains(terminal.String(), "Support answer generation: 1 likely-required check(s)") ||
 		!strings.Contains(terminal.String(), "Unlinked classifier: 0 likely-required check(s)") ||
 		!strings.Contains(terminal.String(), "no system association (context needed)") {
@@ -433,7 +474,7 @@ func TestRepositoryAnalysisIsRenderedAsAdvisoryEvidence(t *testing.T) {
 	if err := WriteMarkdown(&markdown, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(markdown.String(), "## 1. What ComplyScan found") || !strings.Contains(markdown.String(), "Summary generation") || !strings.Contains(markdown.String(), "cannot decide on its own whether your product complies with a law") {
+	if !strings.Contains(markdown.String(), "## 2. What ComplyScan found") || !strings.Contains(markdown.String(), "Summary generation") || !strings.Contains(markdown.String(), "cannot decide on its own whether your product complies with a law") {
 		t.Fatalf("repository analysis boundary missing from Markdown:\n%s", markdown.String())
 	}
 }
@@ -625,7 +666,7 @@ func TestWriteTerminalConciseCompletionSummarizesWithoutEvidenceDump(t *testing.
 	if err := WriteTerminalConciseCompletion(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"Scan complete: 1 potential issue", "AI inventory: 3 component", "AI uses: 1 confirmed, 2 draft, 0 retired; 3 model-suggested; 4 ungrouped technical signal", "Applicability context: Example — incomplete", "unresolved fact(s); requirement mapping is provisional", "Technical objectives: 7 total", "Requirement mapping: 5 likely required", "3/4 technical target", "Use --verbose"} {
+	for _, expected := range []string{"Scan complete: 1 potential issue", "Analysis: deterministic checks + bounded AI safeguard review", "AI inventory: 3 component", "AI-use organization (optional): 1 confirmed, 2 draft, 0 retired; 3 model-suggested; 4 other AI-related code signal", "Applicability context: Example — incomplete", "unresolved fact(s); requirement mapping is provisional", "Code safeguards checked: 7 total", "Requirement screening: 5 likely required", "3/4 technical target", "Use --verbose"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("concise completion missing %q:\n%s", expected, output.String())
 		}

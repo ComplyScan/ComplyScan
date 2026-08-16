@@ -671,7 +671,7 @@ func writeRecommendedActionsMarkdown(writer io.Writer, report Report) error {
 		actions = append(actions, fmt.Sprintf("Manually review the unsupported files identified for the %d objective(s) that could not be fully assessed.", counts.NotEvaluated))
 	}
 	if !hasModelReview(report) && counts.CandidateEvidence > 0 {
-		actions = append(actions, "Configure an AI reviewer in `complyscan setup`, then run `complyscan review` to add advisory semantic review of the candidate evidence.")
+		actions = append(actions, "Configure an AI reviewer in `complyscan setup`, then rerun `complyscan scan` to add advisory semantic review of the candidate evidence.")
 	}
 	if len(actions) == 0 {
 		actions = append(actions, "Review the detailed evidence and preserve the JSON bundle for future comparison.")

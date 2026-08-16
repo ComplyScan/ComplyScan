@@ -132,7 +132,9 @@ func TestWriteMarkdownExplainsTestOnlyComponentsAndQuickScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"AI code review: **not requested**",
+		"Analysis performed: **deterministic checks only**",
+		"Repository AI review: **not run — deterministic checks only**",
+		"This scan used deterministic checks only",
 		"**AI libraries or configuration found:** OpenAI",
 		"not that they are active in the deployed product",
 	} {
@@ -154,16 +156,17 @@ func TestWriteMarkdownDistinguishesIncompleteRepositoryReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"AI code review started but did not finish",
-		"AI code review: **attempted but incomplete**",
+		"deterministic scan completed, but the AI code review did not finish",
+		"Analysis performed: **deterministic checks complete; AI code review incomplete**",
+		"Repository AI review: **incomplete; deterministic results are available**",
 		"Scan incomplete or uncertain",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
 		}
 	}
-	if strings.Contains(output.String(), "AI code review: **not requested**") {
-		t.Fatalf("incomplete review was presented as not requested:\n%s", output.String())
+	if strings.Contains(output.String(), "Repository AI review: **not run") {
+		t.Fatalf("incomplete review was presented as deterministic-only:\n%s", output.String())
 	}
 }
 
@@ -223,8 +226,8 @@ func TestWriteMarkdownPrioritizesDeveloperDecisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"## Overall result", "**Action required**", "## 1. What ComplyScan found", "Answer generation",
-		"## 2. What to do next", "Possible secret exposure", "Human oversight",
+		"## Overall result", "**Action required**", "## 1. What to do next", "Possible secret exposure", "Human oversight",
+		"## 2. What ComplyScan found", "Answer generation",
 		"### Code-level safeguard decisions", "Implemented in the reviewed code", "audit.go:11",
 		"## 3. What ComplyScan could not determine", "Where will this AI feature be offered or used?",
 		"<summary>Legal and technical details</summary>", "Article 12",
@@ -233,6 +236,9 @@ func TestWriteMarkdownPrioritizesDeveloperDecisions(t *testing.T) {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
 		}
+	}
+	if actionIndex, findingsIndex := strings.Index(output.String(), "## 1. What to do next"), strings.Index(output.String(), "## 2. What ComplyScan found"); actionIndex < 0 || findingsIndex < 0 || actionIndex > findingsIndex {
+		t.Fatalf("actionable next steps did not precede supporting scan detail:\n%s", output.String())
 	}
 	for _, excluded := range []string{"## Technical checklist", "## AI advisory review", "No evidence detected for", "not-substantiated", "Candidate evidence", "technical objective", "| high |", "a person still needs to check it"} {
 		if strings.Contains(output.String(), excluded) {

@@ -359,6 +359,9 @@ func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
 	if err := writeTerminalSummary(w, value); err != nil {
 		return err
 	}
+	if _, err := fmt.Fprintf(w, "Analysis: %s\n", developerAnalysisSummaryLabel(value)); err != nil {
+		return err
+	}
 	if value.AIInventory != nil {
 		if _, err := fmt.Fprintf(w, "AI inventory: %d component(s), %d technical signal(s)\n", value.AIInventory.Summary.Components, value.AIInventory.Summary.Signals); err != nil {
 			return err
@@ -396,11 +399,11 @@ func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
 		}
 	}
 	if objectives.Total > 0 {
-		if _, err := fmt.Fprintf(w, "Technical objectives: %d total; %d candidate evidence; %d not detected; %d not evaluated\n",
+		if _, err := fmt.Fprintf(w, "Code safeguards checked: %d total; %d with matching code signals; %d without matching signals; %d not fully checked\n",
 			objectives.Total, objectives.CandidateEvidence, objectives.NotDetected, objectives.NotEvaluated); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(w, "Requirement mapping: %d likely required; %d voluntary recommendations; %d with candidate evidence; %d without detected evidence; %d unresolved\n",
+		if _, err := fmt.Fprintf(w, "Requirement screening: %d likely required; %d voluntary recommendations; %d with matching code; %d without matching code; %d unresolved\n",
 			required, recommended, withEvidence, withoutEvidence, unresolved); err != nil {
 			return err
 		}
@@ -418,7 +421,7 @@ func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
 	}
 	if value.RepositoryAnalysis != nil {
 		analysis := value.RepositoryAnalysis
-		if _, err := fmt.Fprintf(w, "Repository AI analysis: %s; %d AI use(s), %d objective observation(s), %d unmapped observation(s); %d citation(s) checked\n",
+		if _, err := fmt.Fprintf(w, "AI code review detail: %s; %d likely AI use(s), %d safeguard decision(s), %d other observation(s); %d citation(s) checked\n",
 			analysis.Coverage.Mode, len(analysis.Result.AIUses), len(analysis.Result.ObjectiveObservations), len(analysis.Result.UnmappedObservations), analysis.Coverage.CitationsChecked); err != nil {
 			return err
 		}
@@ -427,9 +430,15 @@ func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
 		if value.AIUseMappings != nil {
 			verdictLabel = "Use-scoped AI verdicts"
 		}
-		if _, err := fmt.Fprintf(w, "%s: %d implemented, %d partial, %d not demonstrated, %d unclear\n", verdictLabel,
-			implemented, partial, notImplemented, cannotDetermine); err != nil {
-			return err
+		if implemented+partial+notImplemented+cannotDetermine == 0 {
+			if _, err := fmt.Fprintf(w, "%s: no safeguard decisions returned\n", verdictLabel); err != nil {
+				return err
+			}
+		} else {
+			if _, err := fmt.Fprintf(w, "%s: %d implemented, %d partial, %d not demonstrated, %d unclear\n", verdictLabel,
+				implemented, partial, notImplemented, cannotDetermine); err != nil {
+				return err
+			}
 		}
 	}
 	_, err := fmt.Fprintln(w, "Use --verbose for full terminal evidence.")
@@ -438,7 +447,7 @@ func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
 
 func writeAIUseInventoryTerminal(w io.Writer, value aiuse.Snapshot) error {
 	summary := value.Summary
-	_, err := fmt.Fprintf(w, "AI uses: %d confirmed, %d draft, %d retired; %d model-suggested; %d ungrouped technical signal(s)\n",
+	_, err := fmt.Fprintf(w, "AI-use organization (optional): %d confirmed, %d draft, %d retired; %d model-suggested; %d other AI-related code signal(s)\n",
 		summary.Confirmed, summary.Draft, summary.Retired, summary.Suggested, summary.UngroupedSignals)
 	return err
 }
@@ -447,7 +456,7 @@ func writeAIUseMappingsTerminal(w io.Writer, value usemapping.Report) error {
 	if len(value.Uses) == 0 {
 		return nil
 	}
-	if _, err := fmt.Fprintf(w, "Per-use requirement mapping: %d confirmed AI use(s), %d framework/system context(s)\n", len(value.Uses), value.Summary.FrameworkSystemContexts); err != nil {
+	if _, err := fmt.Fprintf(w, "Per-use safeguard detail (optional scope refinement): %d confirmed AI use(s), %d framework/system context(s)\n", len(value.Uses), value.Summary.FrameworkSystemContexts); err != nil {
 		return err
 	}
 	for _, use := range value.Uses {
