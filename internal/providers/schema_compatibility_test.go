@@ -17,7 +17,7 @@ func TestStructuredSchemasUseSupportedFactUnions(t *testing.T) {
 	}{
 		{
 			name:     "repository analysis",
-			schema:   repositoryAnalysisSchema(RepositoryAnalysisFull, false, 0, 0),
+			schema:   repositoryAnalysisSchema(RepositoryAnalysisRequest{Mode: RepositoryAnalysisFull}, false),
 			variants: repositoryFactSchemaVariants,
 		},
 		{
@@ -33,6 +33,51 @@ func TestStructuredSchemasUseSupportedFactUnions(t *testing.T) {
 			}
 			assertFactSchemaVariants(t, testCase.variants(t, testCase.schema))
 		})
+	}
+}
+
+func TestRepositoryAnalysisSchemaBindsObjectiveObservationIDs(t *testing.T) {
+	schema := repositoryAnalysisSchema(RepositoryAnalysisRequest{
+		Mode:       RepositoryAnalysisTargeted,
+		Objectives: []RepositoryObjective{{ID: "OBJ-A"}},
+		Systems:    []RepositorySystemContext{{ID: "system-a"}},
+		ConfirmedAIUses: []RepositoryConfirmedAIUse{
+			{ID: "zeta-use"},
+			{ID: "alpha-use"},
+		},
+	}, false)
+	properties := schema["properties"].(map[string]any)
+	result := properties["result"].(map[string]any)
+	resultProperties := result["properties"].(map[string]any)
+	observations := resultProperties["objective_observations"].(map[string]any)
+	observationItems := observations["items"].(map[string]any)
+	observationProperties := observationItems["properties"].(map[string]any)
+
+	assertSchemaEnum(t, observationProperties, "objective_id", []string{"OBJ-A"})
+	assertSchemaEnum(t, observationProperties, "ai_use_id", []string{"", "alpha-use", "zeta-use"})
+	assertSchemaEnum(t, observationProperties, "system_id", []string{"", "system-a"})
+
+	withoutConfirmedUses := repositoryAnalysisSchema(RepositoryAnalysisRequest{
+		Mode: RepositoryAnalysisTargeted, Objectives: []RepositoryObjective{{ID: "OBJ-A"}},
+	}, false)
+	properties = withoutConfirmedUses["properties"].(map[string]any)
+	result = properties["result"].(map[string]any)
+	resultProperties = result["properties"].(map[string]any)
+	observations = resultProperties["objective_observations"].(map[string]any)
+	observationItems = observations["items"].(map[string]any)
+	observationProperties = observationItems["properties"].(map[string]any)
+	assertSchemaEnum(t, observationProperties, "ai_use_id", []string{""})
+}
+
+func assertSchemaEnum(t *testing.T, properties map[string]any, field string, want []string) {
+	t.Helper()
+	schema, ok := properties[field].(map[string]any)
+	if !ok {
+		t.Fatalf("%s schema = %#v", field, properties[field])
+	}
+	got, ok := schema["enum"].([]string)
+	if !ok || fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("%s enum = %#v, want %#v", field, schema["enum"], want)
 	}
 }
 

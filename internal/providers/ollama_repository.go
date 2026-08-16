@@ -12,7 +12,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 )
 
-const RepositoryAnalysisPromptVersion = "8"
+const RepositoryAnalysisPromptVersion = "9"
 
 const (
 	maxRepositoryUses         = 100
@@ -75,7 +75,7 @@ func (provider *OllamaProvider) ReviewRepository(ctx context.Context, request Re
 			{Role: "system", Content: repositoryAnalysisSystemPrompt},
 			{Role: "user", Content: userPrompt + "\n\n" + string(promptData)},
 		},
-		Stream: false, Format: repositoryAnalysisSchema(request.Mode, request.AllowFollowUp, repositoryObservationLimit(request), repositoryFactSetLimit(request)), Think: false, KeepAlive: "5m",
+		Stream: false, Format: repositoryAnalysisSchema(request, request.AllowFollowUp), Think: false, KeepAlive: "5m",
 		ReasoningEffort: reasoningEffort, TextVerbosity: textVerbosity,
 		Options: map[string]any{"temperature": 0, "num_predict": maxOutputTokens}, MaxOutputTokens: maxOutputTokens,
 	})
@@ -755,12 +755,32 @@ func validRepositoryConfidence(value string) bool {
 	return value == "low" || value == "medium" || value == "high"
 }
 
-func repositoryAnalysisSchema(mode RepositoryAnalysisMode, allowFollowUp bool, objectiveCount, factSetCount int) map[string]any {
+func repositoryAnalysisSchema(request RepositoryAnalysisRequest, allowFollowUp bool) map[string]any {
+	mode := request.Mode
+	objectiveCount := repositoryObservationLimit(request)
+	factSetCount := repositoryFactSetLimit(request)
 	targeted := mode == RepositoryAnalysisTargeted
 	stringValue := func(limit int) map[string]any {
 		value := map[string]any{"type": "string"}
 		if targeted && limit > 0 {
 			value["maxLength"] = limit
+		}
+		return value
+	}
+	enumStringValue := func(values []string, limit int) map[string]any {
+		value := stringValue(limit)
+		seen := make(map[string]struct{}, len(values))
+		unique := make([]string, 0, len(values))
+		for _, item := range values {
+			if _, exists := seen[item]; exists {
+				continue
+			}
+			seen[item] = struct{}{}
+			unique = append(unique, item)
+		}
+		sort.Strings(unique)
+		if len(unique) > 0 {
+			value["enum"] = unique
 		}
 		return value
 	}
@@ -784,6 +804,18 @@ func repositoryAnalysisSchema(mode RepositoryAnalysisMode, allowFollowUp bool, o
 	}
 	confidence := map[string]any{"type": "string", "enum": []string{"low", "medium", "high"}}
 	strength := map[string]any{"type": "string", "enum": []string{string(StrengthStrong), string(StrengthPartial), string(StrengthWeak), string(StrengthUncertain), string(StrengthNotSupported)}}
+	objectiveIDs := make([]string, 0, len(request.Objectives))
+	for _, objective := range request.Objectives {
+		objectiveIDs = append(objectiveIDs, objective.ID)
+	}
+	confirmedUseIDs := []string{""}
+	for _, use := range request.ConfirmedAIUses {
+		confirmedUseIDs = append(confirmedUseIDs, use.ID)
+	}
+	systemIDs := []string{""}
+	for _, system := range request.Systems {
+		systemIDs = append(systemIDs, system.ID)
+	}
 	factSchemas := make([]any, 0, len(profile.CodeFactFields()))
 	for _, field := range profile.CodeFactFields() {
 		valueItems := map[string]any{"type": "string", "maxLength": profile.CodeFactValueLimit(field)}
@@ -835,7 +867,7 @@ func repositoryAnalysisSchema(mode RepositoryAnalysisMode, allowFollowUp bool, o
 				"ai_use_facts": factSets,
 				"objective_observations": arrayValue(map[string]any{
 					"type": "object", "properties": map[string]any{
-						"objective_id": stringValue(300), "ai_use_id": stringValue(200), "system_id": stringValue(200), "strength": strength,
+						"objective_id": enumStringValue(objectiveIDs, 300), "ai_use_id": enumStringValue(confirmedUseIDs, 200), "system_id": enumStringValue(systemIDs, 200), "strength": strength,
 						"confidence": confidence, "rationale": stringValue(targetedMaximumTextChars), "supporting_evidence": citations(),
 						"contradictory_evidence": citations(), "missing_evidence": stringsArray(), "unresolved_questions": stringsArray(),
 					}, "required": []string{"objective_id", "ai_use_id", "system_id", "strength", "confidence", "rationale", "supporting_evidence", "contradictory_evidence", "missing_evidence", "unresolved_questions"}, "additionalProperties": false,
@@ -884,6 +916,7 @@ Rules:
 - facts are positive repository observations only: omit unknown, no, none, production, retired, and every conclusion based on missing or absent evidence;
 - deployment-models describes a repository-evident technical mechanism only; it never proves that an API, product, package, model, or release is actually deployed, distributed, public, or in production;
 - evaluate each supplied confirmed-use objective separately and return exactly one observation for every supplied AI-use, objective, and system combination, copying its exact id into ai_use_id; use an empty ai_use_id only for additional evidence that cannot safely be assigned to one confirmed use;
+- when confirmed_ai_uses is empty, every objective observation must use an empty ai_use_id; candidate IDs returned under ai_uses never belong in objective_observations.ai_use_id;
 - return no more than one generic observation per objective and system combination;
 - a use-specific observation or fact may cite only files listed in that confirmed use's submitted_files; never infer that the durable path scope was fully reviewed when only a subset was submitted;
 - a candidate fact may cite only paths already cited by that same candidate under ai_uses.evidence; never borrow a sibling candidate's evidence path;
