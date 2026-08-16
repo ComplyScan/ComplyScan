@@ -352,7 +352,7 @@ func profileDraftSchema() map[string]any {
 		"properties": map[string]any{
 			"suggestions": map[string]any{
 				"type": "array", "maxItems": len(fields),
-				"items": map[string]any{"oneOf": suggestionSchemas},
+				"items": map[string]any{"anyOf": suggestionSchemas},
 			},
 		},
 		"required":             []string{"suggestions"},

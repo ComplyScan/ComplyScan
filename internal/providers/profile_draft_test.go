@@ -83,7 +83,7 @@ func TestProfileDraftSchemaConstrainsValuesByField(t *testing.T) {
 	properties := schema["properties"].(map[string]any)
 	suggestions := properties["suggestions"].(map[string]any)
 	items := suggestions["items"].(map[string]any)
-	variants := items["oneOf"].([]any)
+	variants := items["anyOf"].([]any)
 	foundDataField := false
 	for _, rawVariant := range variants {
 		variant := rawVariant.(map[string]any)

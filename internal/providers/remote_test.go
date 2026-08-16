@@ -175,6 +175,9 @@ func TestOpenAITargetedRepositoryReviewUsesCompactReasoningAndSchema(t *testing.
 				if !strings.Contains(string(encoded), `"maxItems":12`) || !strings.Contains(string(encoded), `"maxLength":320`) {
 					t.Fatalf("targeted schema was not bounded: %s", encoded)
 				}
+				if strings.Contains(string(encoded), `"oneOf"`) || !strings.Contains(string(encoded), `"anyOf"`) {
+					t.Fatalf("targeted schema used an unsupported Structured Outputs union: %s", encoded)
+				}
 				result := `{"result":{"scope":".","ai_uses":[],"ai_use_facts":[],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`
 				return testJSONResponse(http.StatusOK, map[string]any{
 					"status": "completed",

@@ -804,7 +804,7 @@ func repositoryAnalysisSchema(mode RepositoryAnalysisMode, allowFollowUp bool, o
 		})
 	}
 	facts := map[string]any{
-		"type": "array", "items": map[string]any{"oneOf": factSchemas},
+		"type": "array", "items": map[string]any{"anyOf": factSchemas},
 		"maxItems": len(profile.CodeFactFields()),
 	}
 	factSets := map[string]any{

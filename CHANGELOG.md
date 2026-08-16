@@ -32,6 +32,10 @@
 - Local model setup now keeps installed and recommended models concise, offers an offline curated catalogue of common exact Ollama tags grouped by purpose with download sizes in GB, and reserves `Exact tag` for every other Ollama model. This avoids noisy community search results and setup-time catalogue requests; cloud-only variants remain excluded from local mode, and every unseen model still has to pass the source-free compatibility check before repository context is sent.
 - The hosted adapter layer supports OpenAI, Anthropic, Google Gemini, xAI, Mistral, GroqCloud, OpenRouter, and custom HTTPS OpenAI-compatible APIs. Standard setup narrows that architecture to the three native providers and their quality-oriented shortlist; the remaining integrations and exact-ID entry are retained for explicit experimental configuration. Credentials remain environment-only, and the source-free compatibility check still runs before repository context is sent.
 
+### Fixed
+
+- OpenAI repository review and setup drafting now express field-specific structured-output variants with the supported nested `anyOf` keyword instead of unsupported `oneOf`. Trusted local validation still enforces the exact fact field/value pairing after every provider response.
+
 ## 0.1.7 - 2026-08-11
 
 ### Changed
