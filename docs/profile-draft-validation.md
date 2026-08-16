@@ -1,6 +1,6 @@
 # Profile-draft quality gate
 
-AI-assisted onboarding proposes editable answers from bounded repository evidence before the human questionnaire. Those suggestions can save time, but they can also omit a fact, over-interpret documentation, or cite the wrong place. The maintained profile-draft gate measures that behavior separately from deterministic scanning and from the later technical-evidence review.
+The profile-draft benchmark measures an experimental compliance-owner assistance capability separately from deterministic scanning and repository review. Ordinary guided setup does not invoke it or present a human questionnaire. Its editable suggestions may be used by a future dashboard or explicit advanced workflow, but they can omit a fact, over-interpret documentation, or cite the wrong place and therefore never become organisation facts automatically.
 
 ## Labelled corpus
 

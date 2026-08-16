@@ -84,11 +84,11 @@ func hostedModelStatus(model hostedModelProfile) string {
 	status := "live quality gates pending"
 	switch {
 	case model.DraftValidated && model.CodeValidated:
-		status = "validated for setup drafting and technical evidence review"
+		status = "validated for experimental profile assistance and technical evidence review"
 	case model.DraftValidated:
-		status = "validated for setup drafting; technical review benchmark pending"
+		status = "validated for experimental profile assistance; technical review benchmark pending"
 	case model.CodeValidated:
-		status = "validated for technical evidence review; setup-draft benchmark pending"
+		status = "validated for technical evidence review; profile-assistance benchmark pending"
 	}
 	return model.Role + "; " + status
 }

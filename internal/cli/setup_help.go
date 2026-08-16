@@ -192,7 +192,7 @@ var setupQuestionHelp = map[string][]string{
 	},
 	"ollama-model": {
 		"Ollama is retained as an advanced experimental path for users who cannot send repository context to a cloud provider. No local model is currently approved as ComplyScan's standard reviewer.",
-		"Setup lists installed models and candidates, but compatibility does not establish review quality. Small local models may miss connected code, overstate evidence, or draft incorrect questionnaire answers.",
+		"Setup lists installed models and candidates, but compatibility does not establish review quality. Small local models may miss connected code or overstate repository evidence.",
 	},
 	"install-ollama": {
 		"Ollama is a separate local runtime needed only for optional model review. Installation downloads third-party software and may change system packages or start a service.",
@@ -203,7 +203,7 @@ var setupQuestionHelp = map[string][]string{
 		"Choose no to save the configuration without downloading; the exact manual command will be printed.",
 	},
 	"remote-disclosure": {
-		"Cloud-assisted setup and later `complyscan scan` runs send every structurally selected candidate file as one or more bounded source requests after recognised-secret redaction, followed by bounded synthesis when multiple requests are needed. Selection uses local inventory signals, technical-objective matches, production entry points, and their bounded code-graph neighborhood. Ignored, generated, dependency, binary, oversized, excluded, and non-candidate files remain outside this context.",
+		"Later cloud-assisted `complyscan scan` runs send every structurally selected candidate file as one or more bounded source requests after recognised-secret redaction, followed by bounded synthesis when multiple requests are needed. Setup itself does not send repository source. Selection uses local inventory signals, technical-objective matches, production entry points, and their bounded code-graph neighborhood. Ignored, generated, dependency, binary, oversized, excluded, and non-candidate files remain outside this context.",
 		"Redaction is defence in depth, not a guarantee that arbitrary proprietary or personal data has been removed. Use `complyscan scan --deterministic-only` when external processing is not permitted. Explicit deep modes transfer substantially more repository content.",
 		"The number of provider requests and the cost grow with the structurally relevant candidate set; there is no one-request whole-repository cap. Confirm only if your organisation permits this external processing and variable cost on future scans without another prompt; rerun setup to change the saved choice.",
 	},
@@ -217,7 +217,7 @@ var setupQuestionHelp = map[string][]string{
 	},
 	"remote-model": {
 		"Choose from ComplyScan's small provider-specific frontier-model shortlist. When the API key is available, setup verifies which shortlisted IDs are available to that account instead of presenting an unrestricted catalogue.",
-		"Shortlisting is not the same as a completed quality benchmark. Setup labels whether the exact model has passed maintained setup-drafting and technical-review evaluations; model output remains advisory even after validation.",
+		"Shortlisting is not the same as a completed quality benchmark. Setup labels whether the exact model has passed maintained repository-review evaluations; model output remains advisory even after validation.",
 	},
 	"api-key-env": {
 		"Enter only the name of the environment variable that contains the API key, such as OPENAI_API_KEY. Do not paste the credential itself.",

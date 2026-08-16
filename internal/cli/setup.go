@@ -172,7 +172,10 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		scanMode = setupScanNone
 	}
 	if interactive {
-		totalSteps := 5
+		totalSteps := 4
+		if options.advanced {
+			totalSteps = 5
+		}
 		if err := setupStepTitle(prompt, 1, totalSteps, "Repository inspection", false); err != nil {
 			return err
 		}
@@ -219,14 +222,13 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 					return err
 				}
 			} else {
-				if err := setupStepTitle(prompt, 3, totalSteps, "Repository-assisted system context", false); err != nil {
+				if err := prompt.sectionTitle("Automatic report target", true); err != nil {
 					return err
 				}
-				draft := draftProfileForSetup(cmd.Context(), stdout, target, cfg, summary, modelReady)
-				if err := collectRepositoryAssistedSetupContext(prompt, target, &cfg, summary, draft); err != nil {
+				if err := ensureRepositoryDraftSystem(prompt, target, &cfg, summary); err != nil {
 					return err
 				}
-				if err := setupStepTitle(prompt, 4, totalSteps, "Technical mappings and applicability", true); err != nil {
+				if err := setupStepTitle(prompt, 3, totalSteps, "Framework selection", true); err != nil {
 					return err
 				}
 				for {
@@ -237,28 +239,17 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 						}
 						break
 					}
-					if err := setupStepTitle(prompt, 3, totalSteps, "Repository-assisted system context", true); err != nil {
+					if err := prompt.sectionTitle("Automatic report target", true); err != nil {
 						return err
 					}
-					if err := collectRepositoryAssistedSetupContext(prompt, target, &cfg, summary, draft); err != nil {
+					if err := ensureRepositoryDraftSystem(prompt, target, &cfg, summary); err != nil {
 						return err
 					}
-					if err := setupStepTitle(prompt, 4, totalSteps, "Technical mappings and applicability", true); err != nil {
+					if err := setupStepTitle(prompt, 3, totalSteps, "Framework selection", true); err != nil {
 						return err
 					}
 				}
 				applyFrameworksToSystems(cfg.Systems, cfg.Frameworks)
-				if len(cfg.Systems) > 0 {
-					index := 0
-					if frameworkEnabled(cfg.Frameworks, framework.EUAIActTechnicalEvidencePackID) {
-						err = collectRelevantEUApplicabilityContext(prompt, &cfg.Systems[index], time.Now(), draft)
-					} else {
-						err = collectNonEUTechnicalContext(prompt, &cfg.Systems[index], draft)
-					}
-					if err != nil {
-						return err
-					}
-				}
 			}
 			draftSaved = checkpointSetupDraft(prompt, draftPath, target, setupDraftContext, cfg, scanMode, modelReady) || draftSaved
 		}
@@ -275,7 +266,11 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 		}
 	}
 	if interactive {
-		if err := setupStepTitle(prompt, 5, 5, "Confirm, save, and scan", true); err != nil {
+		finalStep := 4
+		if options.advanced {
+			finalStep = 5
+		}
+		if err := setupStepTitle(prompt, finalStep, finalStep, "Confirm, save, and scan", true); err != nil {
 			return err
 		}
 	}
@@ -327,7 +322,7 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	if _, err := fmt.Fprintln(stdout); err != nil {
 		return err
 	}
-	if err := prompt.status(setupStatusReady, fmt.Sprintf("Saved %s with %d system profile(s).", path, len(cfg.Systems))); err != nil {
+	if err := prompt.status(setupStatusReady, fmt.Sprintf("Saved %s with %d report target(s).", path, len(cfg.Systems))); err != nil {
 		return err
 	}
 
@@ -525,12 +520,6 @@ func writeSetupReviewSummary(prompt promptSession, cfg config.Config, modelReady
 	systemStatus := setupStatusMissing
 	if len(cfg.Systems) > 0 {
 		systemStatus = setupStatusReady
-		for _, system := range cfg.Systems {
-			if system.ProfileReview.Status != profile.ReviewConfirmed {
-				systemStatus = setupStatusReview
-				break
-			}
-		}
 	}
 	reportTargetLabel := "Report target: "
 	if len(cfg.Systems) > 1 {
@@ -641,7 +630,7 @@ func configureSetupReviewOnce(ctx context.Context, prompt promptSession, stdout 
 		if err := prompt.sectionTitle("Experimental local model setup", true); err != nil {
 			return false, err
 		}
-		if _, err := fmt.Fprintln(stdout, "  Local model review is an advanced experimental path. Small general-purpose models may miss connected code or produce unreliable questionnaire drafts; no local model is currently approved as the standard ComplyScan reviewer."); err != nil {
+		if _, err := fmt.Fprintln(stdout, "  Local model review is an advanced experimental path. Small general-purpose models may miss connected code or overstate repository evidence; no local model is currently approved as the standard ComplyScan reviewer."); err != nil {
 			return false, err
 		}
 		if err := explainSetupQuestion(prompt, "ollama-model"); err != nil {
@@ -744,7 +733,7 @@ func configureSetupReviewOnce(ctx context.Context, prompt promptSession, stdout 
 
 func promptAnalysisProvider(prompt promptSession, current string) (string, error) {
 	const (
-		hostedOption = "Cloud AI assistance — setup suggestions and configured scans using your API key"
+		hostedOption = "Cloud AI review — configured scans using your API key"
 		fastOption   = "No AI assistance — local scans find known code signals but do not reason about safeguards"
 		localOption  = "Experimental local AI assistance — Ollama; review quality is not assured"
 	)

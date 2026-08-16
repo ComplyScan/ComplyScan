@@ -101,21 +101,19 @@ func ensureRepositoryDraftSystem(prompt promptSession, target string, cfg *confi
 		id = "system"
 	}
 	system := profile.NewDraftSystem(id, name)
-	if summary.Inventory.Summary.RuntimeSignals > 0 {
-		system.AIActivities = []profile.AIActivity{profile.ActivityInference}
-	}
 	applyFrameworksToSystem(&system, cfg.Frameworks)
 	if err := system.Validate(); err != nil {
 		return fmt.Errorf("validate repository draft system: %w", err)
 	}
 	cfg.Systems = append(cfg.Systems, system)
-	if err := prompt.status(setupStatusReview, fmt.Sprintf("Report target: %q (created from the repository name).", system.Name)); err != nil {
+	if err := prompt.status(setupStatusReady, fmt.Sprintf("Report target: %q (created from the repository name).", system.Name)); err != nil {
 		return err
 	}
 	_, err = fmt.Fprintln(prompt.output,
-		"  ComplyScan uses this internal draft to attach code evidence to a named system in reports. It does not infer legal applicability.\n"+
-			"  Business, jurisdictional, and legal-applicability facts remain unconfirmed and are not required for this code scan.\n"+
-			"  Use `complyscan profile setup --replace` or rerun `complyscan setup --advanced` when a detailed profile is needed.")
+		"  ComplyScan uses this automatic target to attach code evidence to a named system in reports.\n"+
+			"  The scan infers code-visible facts and records them as evidence-backed report observations, not editable setup drafts.\n"+
+			"  Organisation, market, contractual, and legal-applicability facts remain unknown in the report and never block setup or the code scan.\n"+
+			"  A compliance owner can optionally use `complyscan profile setup --replace` or `complyscan setup --advanced` later.")
 	return err
 }
 
