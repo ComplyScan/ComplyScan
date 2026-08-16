@@ -41,6 +41,36 @@ type recoveryAccountingReviewer struct {
 	incompleteUsage providers.Usage
 }
 
+type compactingSynthesisReviewer struct {
+	requests              []providers.RepositoryAnalysisRequest
+	singleSummaryPasses   int
+	combinedSummaryPasses int
+}
+
+func (reviewer *compactingSynthesisReviewer) ReviewRepository(_ context.Context, request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
+	reviewer.requests = append(reviewer.requests, request)
+	result := providers.RepositorySectionResult{
+		Scope: request.Scope, AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{},
+		ObjectiveObservations: []providers.RepositoryObjectiveObservation{}, UnmappedObservations: []providers.RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{},
+	}
+	if request.Mode != providers.RepositoryAnalysisSynthesis {
+		// Make every source-batch result too large to share a synthesis
+		// request. The first synthesis level must compact these individually
+		// before a later level can combine them.
+		result.UnresolvedQuestions = []string{strings.Repeat("source-batch detail ", 700)}
+	} else if len(request.SubsystemSummaries) == 1 {
+		reviewer.singleSummaryPasses++
+		result.UnresolvedQuestions = []string{"Compacted source-batch summary."}
+	} else {
+		reviewer.combinedSummaryPasses++
+	}
+	return providers.RepositoryAnalysisResult{
+		Provider: providers.OpenAI, Model: "test", Result: result,
+		Coverage: providers.RepositoryCoverage{Mode: request.Mode, FilesSubmitted: len(request.Files), BytesSubmitted: sourceFileBytes(request.Files)},
+		Usage:    providers.Usage{PromptTokens: 10, CompletionTokens: 2},
+	}, nil
+}
+
 func (reviewer *recoveryAccountingReviewer) ReviewRepository(_ context.Context, request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
 	reviewer.requests = append(reviewer.requests, request)
 	if reviewer.primeAdaptive && !reviewer.adaptivePrimed && len(request.Files) > 0 {
@@ -166,6 +196,28 @@ func TestRunTargetedReviewsEveryCandidateAcrossBoundedBatches(t *testing.T) {
 		if size := requestContextBytes(request.Files, request.Graph); size > perRequestBudget {
 			t.Errorf("source request %d contains %d bytes, exceeding per-request budget %d", index+1, size, perRequestBudget)
 		}
+	}
+}
+
+func TestRunTargetedCompactsSingletonSummariesBeforeCombiningThem(t *testing.T) {
+	repository, expectedPaths := exhaustiveCandidateRepository(10)
+	reviewer := &compactingSynthesisReviewer{}
+
+	result, err := Run(context.Background(), reviewer, repository, nil, nil, Options{
+		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertExhaustiveSourceCoverage(t, reviewer.requests, expectedPaths)
+	if reviewer.singleSummaryPasses < 2 {
+		t.Fatalf("singleton synthesis passes = %d, want at least 2 oversized source summaries compacted", reviewer.singleSummaryPasses)
+	}
+	if reviewer.combinedSummaryPasses == 0 {
+		t.Fatal("compacted summaries were never combined by a later synthesis level")
+	}
+	if result.Coverage.SourceBatchesCompleted != result.Coverage.SourceBatchesTotal || result.Coverage.SourceBatchesTotal < 2 {
+		t.Fatalf("completed compacted synthesis coverage = %#v", result.Coverage)
 	}
 }
 

@@ -447,7 +447,16 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			index++
 		}
 		if len(next) >= len(summaries) {
-			return partialFailure(fmt.Sprintf("synthesis level %d", levels), errors.New("repository synthesis could not reduce subsystem summaries within the configured input budget"))
+			// A first synthesis level can legitimately contain one oversized
+			// subsystem summary per request. In that case the number of
+			// summaries does not fall, but each request can compact its summary
+			// enough for the next level to combine several of them. Only stop
+			// when the compacted results still cannot be grouped more tightly;
+			// otherwise a large, fully reviewed repository is incorrectly marked
+			// incomplete immediately after the compaction pass.
+			if len(partitionSummaries(next, budget)) >= len(next) {
+				return partialFailure(fmt.Sprintf("synthesis level %d", levels), errors.New("repository synthesis could not reduce subsystem summaries within the configured input budget"))
+			}
 		}
 		summaries = next
 	}
