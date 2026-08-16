@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ComplyScan/ComplyScan/internal/discovery"
 	"github.com/ComplyScan/ComplyScan/internal/inventory"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
@@ -39,6 +40,8 @@ type ObservedUse struct {
 	Observation      ObservationStatus              `json:"observation"`
 	ReviewEvidence   []providers.RepositoryCitation `json:"review_evidence,omitempty"`
 	TechnicalSignals []SignalLocation               `json:"technical_signals,omitempty"`
+	RepositoryFacts  *FactReview                    `json:"repository_facts,omitempty"`
+	RoleCandidates   []RoleCandidate                `json:"role_candidates,omitempty"`
 }
 
 type Suggestion struct {
@@ -51,6 +54,8 @@ type Suggestion struct {
 	PossibleUseIDs      []string                       `json:"possible_use_ids,omitempty"`
 	Evidence            []providers.RepositoryCitation `json:"evidence"`
 	UnresolvedQuestions []string                       `json:"unresolved_questions,omitempty"`
+	RepositoryFacts     *FactReview                    `json:"repository_facts,omitempty"`
+	RoleCandidates      []RoleCandidate                `json:"role_candidates,omitempty"`
 }
 
 type SnapshotSummary struct {
@@ -64,35 +69,45 @@ type SnapshotSummary struct {
 // Snapshot combines the immutable input manifest with current local signals
 // and optional model suggestions. It never mutates or writes the manifest.
 type Snapshot struct {
-	ManifestPath     string           `json:"manifest_path"`
-	ChangedScope     bool             `json:"changed_scope"`
-	Summary          SnapshotSummary  `json:"summary"`
-	Confirmed        []ObservedUse    `json:"confirmed"`
-	Draft            []ObservedUse    `json:"draft"`
-	Retired          []ObservedUse    `json:"retired"`
-	Suggested        []Suggestion     `json:"suggested"`
-	UngroupedSignals []SignalLocation `json:"ungrouped_signals"`
+	ManifestPath         string           `json:"manifest_path"`
+	ChangedScope         bool             `json:"changed_scope"`
+	Summary              SnapshotSummary  `json:"summary"`
+	Confirmed            []ObservedUse    `json:"confirmed"`
+	Draft                []ObservedUse    `json:"draft"`
+	Retired              []ObservedUse    `json:"retired"`
+	Suggested            []Suggestion     `json:"suggested"`
+	UngroupedSignals     []SignalLocation `json:"ungrouped_signals"`
+	OrganizationUnknowns []string         `json:"organization_unknowns"`
 }
 
 // BuildSnapshot overlays current observations onto every saved use. Absence
 // from any review scope is represented as not-reviewed and can never remove,
 // retire, or otherwise mutate a durable entry.
 func BuildSnapshot(manifest Manifest, technical inventory.Report, analysis *providers.RepositoryAnalysisResult, changedScope bool) Snapshot {
+	return BuildSnapshotWithRepository(manifest, technical, discovery.Repository{}, analysis, changedScope)
+}
+
+// BuildSnapshotWithRepository overlays the current full-repository mechanical
+// facts and optional model facts onto immutable AI-use definitions. The
+// repository is used only to detect executable packaging and CLI artifacts; it
+// is never modified and no derived value is written to the manifest or profile.
+func BuildSnapshotWithRepository(manifest Manifest, technical inventory.Report, repository discovery.Repository, analysis *providers.RepositoryAnalysisResult, changedScope bool) Snapshot {
 	value := Snapshot{
-		ManifestPath:     DefaultPath,
-		ChangedScope:     changedScope,
-		Confirmed:        []ObservedUse{},
-		Draft:            []ObservedUse{},
-		Retired:          []ObservedUse{},
-		Suggested:        []Suggestion{},
-		UngroupedSignals: []SignalLocation{},
+		ManifestPath:         DefaultPath,
+		ChangedScope:         changedScope,
+		Confirmed:            []ObservedUse{},
+		Draft:                []ObservedUse{},
+		Retired:              []ObservedUse{},
+		Suggested:            []Suggestion{},
+		UngroupedSignals:     []SignalLocation{},
+		OrganizationUnknowns: []string{},
 	}
 	observed := make(map[string]*ObservedUse, len(manifest.Uses))
 	for _, definition := range manifest.Uses {
 		copy := definition
 		observed[definition.ID] = &ObservedUse{
 			Use: copy, Observation: ObservationNotReviewed,
-			ReviewEvidence: []providers.RepositoryCitation{}, TechnicalSignals: []SignalLocation{},
+			ReviewEvidence: []providers.RepositoryCitation{}, TechnicalSignals: []SignalLocation{}, RoleCandidates: []RoleCandidate{},
 		}
 	}
 
@@ -117,6 +132,30 @@ func BuildSnapshot(manifest Manifest, technical inventory.Report, analysis *prov
 			if !matched {
 				value.UngroupedSignals = append(value.UngroupedSignals, signal)
 			}
+		}
+	}
+
+	modelFacts := make(map[string]*FactReview)
+	candidateIDs := make(map[string]struct{})
+	if analysis != nil {
+		for _, candidate := range analysis.Result.AIUses {
+			candidateIDs[candidate.ID] = struct{}{}
+		}
+		for _, set := range analysis.Result.AIUseFacts {
+			modelFacts[set.AIUseID] = modelFactReview(set, changedScope)
+		}
+	}
+	for id, entry := range observed {
+		deterministic, distribution := deterministicFactReview(entry.Use, technical, repository)
+		modelReview := modelFacts[id]
+		if _, candidateCollision := candidateIDs[id]; candidateCollision {
+			modelReview = nil
+		}
+		entry.RepositoryFacts = mergeFactReviews(deterministic, modelReview)
+		addDistributionFacts(entry.RepositoryFacts, distribution)
+		entry.RoleCandidates = deriveRoleCandidates(entry.RepositoryFacts, distribution)
+		if modelReview != nil {
+			entry.Observation = ObservationModelReviewed
 		}
 	}
 
@@ -145,11 +184,16 @@ func BuildSnapshot(manifest Manifest, technical inventory.Report, analysis *prov
 			} else if len(matches) > 1 {
 				status = SuggestionAmbiguous
 			}
+			candidateScope := Use{Paths: SuggestionPaths(candidate)}
+			deterministic, distribution := deterministicFactReview(candidateScope, technical, repository)
+			repositoryFacts := mergeFactReviews(deterministic, modelFacts[candidate.ID])
+			addDistributionFacts(repositoryFacts, distribution)
 			value.Suggested = append(value.Suggested, Suggestion{
 				Fingerprint: SuggestionFingerprint(candidate), Name: candidate.Name, Purpose: candidate.Purpose,
 				Lifecycle: candidate.Lifecycle, Confidence: candidate.Confidence, Status: status,
 				PossibleUseIDs: matches, Evidence: append([]providers.RepositoryCitation(nil), candidate.Evidence...),
 				UnresolvedQuestions: append([]string(nil), candidate.UnresolvedQuestions...),
+				RepositoryFacts:     repositoryFacts, RoleCandidates: deriveRoleCandidates(repositoryFacts, distribution),
 			})
 		}
 	}
@@ -187,6 +231,9 @@ func BuildSnapshot(manifest Manifest, technical inventory.Report, analysis *prov
 	value.Summary = SnapshotSummary{
 		Confirmed: len(value.Confirmed), Draft: len(value.Draft), Retired: len(value.Retired),
 		Suggested: len(value.Suggested), UngroupedSignals: len(value.UngroupedSignals),
+	}
+	if value.Summary.Confirmed+value.Summary.Draft+value.Summary.Retired+value.Summary.Suggested+value.Summary.UngroupedSignals > 0 {
+		value.OrganizationUnknowns = append([]string(nil), fixedOrganizationUnknowns...)
 	}
 	return value
 }
