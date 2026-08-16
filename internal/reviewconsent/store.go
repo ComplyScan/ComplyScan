@@ -19,8 +19,9 @@ import (
 )
 
 const (
-	schemaVersion  = 1
-	maxRecordBytes = 64 << 10
+	schemaVersion                = 1
+	maxRecordBytes               = 64 << 10
+	reviewContextContractVersion = "exhaustive-targeted-batches-v1"
 )
 
 // Store persists review approvals outside the scanned repository. Directory
@@ -39,9 +40,10 @@ type record struct {
 }
 
 type normalizedAI struct {
-	Provider string `json:"provider"`
-	Endpoint string `json:"endpoint"`
-	Model    string `json:"model"`
+	Provider        string `json:"provider"`
+	Endpoint        string `json:"endpoint"`
+	Model           string `json:"model"`
+	ContextContract string `json:"context_contract"`
 
 	APIKeyEnvironment string `json:"api_key_environment,omitempty"`
 	ProviderName      string `json:"provider_name,omitempty"`
@@ -227,7 +229,7 @@ func Digest(settings config.AIConfig) (string, error) {
 		mode = "auto"
 	}
 	normalized := normalizedAI{
-		Provider: provider, RepositoryMode: mode,
+		Provider: provider, RepositoryMode: mode, ContextContract: reviewContextContractVersion,
 		RepositoryTokenLimit: settings.RepositoryAnalysis.MaxInputTokens,
 	}
 	if provider == "ollama" {

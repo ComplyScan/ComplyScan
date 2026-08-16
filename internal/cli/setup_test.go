@@ -1291,7 +1291,7 @@ func TestEverySetupQuestionHasDeveloperGuidance(t *testing.T) {
 
 func TestRemoteDisclosureExplainsPersistentScanConsent(t *testing.T) {
 	disclosure := strings.Join(setupQuestionHelp["remote-disclosure"], " ")
-	for _, expected := range []string{"later `complyscan scan` runs", "future scans without another prompt", "--deterministic-only"} {
+	for _, expected := range []string{"later `complyscan scan` runs", "one or more bounded source requests", "variable cost", "future scans without another prompt", "--deterministic-only"} {
 		if !strings.Contains(disclosure, expected) {
 			t.Fatalf("remote disclosure is missing %q: %s", expected, disclosure)
 		}

@@ -203,9 +203,9 @@ var setupQuestionHelp = map[string][]string{
 		"Choose no to save the configuration without downloading; the exact manual command will be printed.",
 	},
 	"remote-disclosure": {
-		"Cloud-assisted setup and later `complyscan scan` runs send selected source excerpts, configuration, manifests, infrastructure, and CI evidence after recognised-secret redaction. Selection uses local inventory signals, technical-objective matches, production entry points, and their bounded code-graph neighborhood. Ignored, generated, dependency, binary, oversized, and excluded files remain outside this context.",
+		"Cloud-assisted setup and later `complyscan scan` runs send every structurally selected candidate file as one or more bounded source requests after recognised-secret redaction, followed by bounded synthesis when multiple requests are needed. Selection uses local inventory signals, technical-objective matches, production entry points, and their bounded code-graph neighborhood. Ignored, generated, dependency, binary, oversized, excluded, and non-candidate files remain outside this context.",
 		"Redaction is defence in depth, not a guarantee that arbitrary proprietary or personal data has been removed. Use `complyscan scan --deterministic-only` when external processing is not permitted. Explicit deep modes transfer substantially more repository content.",
-		"The provider may charge for usage and processes data under your account settings and its terms. Confirm only if your organisation permits this external processing on future scans without another prompt; rerun setup to change the saved choice.",
+		"The number of provider requests and the cost grow with the structurally relevant candidate set; there is no one-request whole-repository cap. Confirm only if your organisation permits this external processing and variable cost on future scans without another prompt; rerun setup to change the saved choice.",
 	},
 	"remote-provider-name": {
 		"Enter a short name that will identify this custom API in setup, diagnostics, and reports.",

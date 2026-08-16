@@ -33,7 +33,7 @@ func TestGitHubActionRunsUnifiedSafeScanWithAutomaticScope(t *testing.T) {
 		t.Fatalf("scope input does not default to automatic PR/full selection: %#v", action.Inputs["scope"])
 	}
 	aiReview := action.Inputs["ai-review"]
-	if aiReview.Default != "none" || !strings.Contains(aiReview.Description, "safe deterministic default") || !strings.Contains(aiReview.Description, "trusts the provider destination") {
+	if aiReview.Default != "none" || !strings.Contains(aiReview.Description, "safe deterministic default") || !strings.Contains(aiReview.Description, "multiple bounded requests") || !strings.Contains(aiReview.Description, "variable runtime and provider cost") || !strings.Contains(aiReview.Description, "trusts the provider destination") {
 		t.Fatalf("ai-review input does not preserve explicit consent and configured trust boundaries: %#v", aiReview)
 	}
 	if legacy := action.Inputs["review"]; legacy.Default != "" || !strings.Contains(strings.ToLower(legacy.Description), "deprecated alias") {

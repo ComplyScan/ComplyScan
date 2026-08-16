@@ -800,7 +800,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						}
 					}
 					if isRemoteReviewProvider(cfg.AI.Provider) {
-						disclosure := "Remote review sends a compact, structurally selected and redacted code-evidence package, plus bounded finding records, to the selected provider; usage may incur cost."
+						disclosure := "Remote review sends every structurally selected candidate file as one or more bounded, redacted code-evidence requests, then may send bounded synthesis and finding records; request count and provider cost grow with the candidate set."
 						if deepRepositoryAnalysis {
 							disclosure = "Remote deep review may send substantially more eligible redacted repository text, plus bounded finding records, to the selected provider; usage may incur cost."
 						} else if !repositoryAnalysisRequested {
@@ -827,6 +827,12 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 					if reviewErr != nil {
 						aiReviewIncomplete = true
 						reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisIncomplete
+						if repositoryReview.Coverage.RepositoryFiles > 0 || repositoryReview.Coverage.FilesSubmitted > 0 || len(repositoryReview.Notes) > 0 {
+							if changedReviewScope != nil {
+								changedReviewScope.Apply(&repositoryReview)
+							}
+							reportValue.RepositoryAnalysis = &repositoryReview
+						}
 						warning := fmt.Sprintf("%s repository analysis was incomplete after %s: %v. Deterministic findings and technical evidence remain available.", reviewProviderLabel(cfg.AI.Provider), formatElapsed(time.Since(repositoryReviewStarted)), reviewErr)
 						reportValue.Warnings = append(reportValue.Warnings, warning)
 						if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
@@ -841,15 +847,15 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						aiUseInventory = aiuse.BuildSnapshotWithRepository(aiUseManifest, aiInventory, result.FullRepository, &repositoryReview, changedSince != "")
 						reportValue.AIUseInventory = &aiUseInventory
 						reportValue.AIUseMappings = buildAIUseMappings(aiUseManifest, cfg.Systems, frameworkResults, aiInventory, &repositoryReview)
-						completionDetail := fmt.Sprintf("%d file excerpt(s)", repositoryReview.Coverage.FilesSubmitted)
-						if repositoryReview.CacheHit {
-							completionDetail += ", private cache hit, no model call"
+						completionDetail := fmt.Sprintf("%d file-excerpt submission(s)", repositoryReview.Coverage.FilesSubmitted)
+						if repositoryReview.Coverage.Mode == providers.RepositoryAnalysisTargeted && repositoryReview.Coverage.FilesSubmitted == 0 {
+							completionDetail = "no structural candidate; no source sent for repository AI review"
+						} else if repositoryReview.CacheHit {
+							completionDetail = fmt.Sprintf("cached evidence coverage: %d original file-excerpt submission(s); current run: 0 model transfers", repositoryReview.Coverage.FilesSubmitted)
+						} else if repositoryReview.Coverage.Subsystems > 0 {
+							completionDetail += fmt.Sprintf(", %d bounded source batch(es) plus synthesis", repositoryReview.Coverage.Subsystems)
 						} else if repositoryReview.Coverage.Mode == providers.RepositoryAnalysisTargeted {
-							calls := 1
-							if repositoryReview.OutputRecoveryUsed || (repositoryReview.FollowUpRequested && repositoryReview.FollowUpExcerpts > 0) {
-								calls = 2
-							}
-							completionDetail += fmt.Sprintf(", %d model call(s)", calls)
+							completionDetail += ", one or more model calls"
 						}
 						if repositoryReview.Usage.PromptTokens > 0 || repositoryReview.Usage.CompletionTokens > 0 {
 							completionDetail += fmt.Sprintf(", %d input / %d output token(s), %d reasoning", repositoryReview.Usage.PromptTokens, repositoryReview.Usage.CompletionTokens, repositoryReview.Usage.ReasoningTokens)
@@ -927,7 +933,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						reportValue.TechnicalReview = &technicalReview
 					}
 					reportValue.Frameworks = frameworkResults
-					reportValue.AIUseMappings = buildAIUseMappings(aiUseManifest, cfg.Systems, frameworkResults, aiInventory, reportValue.RepositoryAnalysis)
+					reportValue.AIUseMappings = buildAIUseMappings(aiUseManifest, cfg.Systems, frameworkResults, aiInventory, completedRepositoryAnalysis(reportValue))
 					syncLegacyFrameworkFields(&reportValue)
 					if resolvedReportDirectory != "" {
 						artifacts, err = report.WriteLatestArtifacts(resolvedReportDirectory, reportValue)
@@ -938,7 +944,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 				}
 			}
 			reportValue.Frameworks = frameworkResults
-			reportValue.AIUseMappings = buildAIUseMappings(aiUseManifest, cfg.Systems, frameworkResults, aiInventory, reportValue.RepositoryAnalysis)
+			reportValue.AIUseMappings = buildAIUseMappings(aiUseManifest, cfg.Systems, frameworkResults, aiInventory, completedRepositoryAnalysis(reportValue))
 			syncLegacyFrameworkFields(&reportValue)
 			if resolvedReportDirectory != "" {
 				artifacts, err = report.WriteArtifacts(resolvedReportDirectory, reportValue)
@@ -1073,6 +1079,13 @@ func combinedFrameworkEvidence(results []report.FrameworkResult) framework.Techn
 		combined.Objectives = append(combined.Objectives, result.TechnicalEvidence.Objectives...)
 	}
 	return combined
+}
+
+func completedRepositoryAnalysis(value report.Report) *providers.RepositoryAnalysisResult {
+	if value.RepositoryAnalysisRun != report.RepositoryAnalysisCompleted {
+		return nil
+	}
+	return value.RepositoryAnalysis
 }
 
 func buildAIUseMappings(manifest aiuse.Manifest, systems []profile.System, results []report.FrameworkResult, components inventory.Report, analysis *providers.RepositoryAnalysisResult) *usemapping.Report {
@@ -1244,6 +1257,21 @@ func reviewRepositoryWithProvider(
 		Ownership: ownershipRules, ConfirmedAIUses: confirmedAIUses,
 		OnProgress: func(progress repositoryanalysis.Progress) error {
 			switch progress.Stage {
+			case "targeted-batch-queue":
+				_, err := fmt.Fprintf(progressWriter, "Local evidence queue prepared: %d bounded AI review batch(es). No candidate file will be dropped to fit one request.\n", progress.Total)
+				return err
+			case "targeted-batch-start":
+				_, err := fmt.Fprintf(progressWriter, "Starting AI evidence batch %d/%d: %s\n", progress.Completed, progress.Total, progress.Scope)
+				return err
+			case "targeted-batch":
+				_, err := fmt.Fprintf(progressWriter, "AI evidence batch %d/%d analyzed: %s\n", progress.Completed, progress.Total, progress.Scope)
+				return err
+			case "adaptive-context-split":
+				_, err := fmt.Fprintf(progressWriter, "Encoded evidence package exceeded the per-request boundary; splitting %s locally (%s).\n", progress.Scope, progress.Detail)
+				return err
+			case "adaptive-limit-retry":
+				_, err := fmt.Fprintf(progressWriter, "Provider limit requires a smaller response; retrying %s without dropping evidence (%s).\n", progress.Scope, progress.Detail)
+				return err
 			case "targeted-selection":
 				_, err := fmt.Fprintf(progressWriter, "Local structural selection complete: %s; %d byte(s) of code and graph context prepared.\n", progress.Detail, progress.InputBytes)
 				return err
@@ -1309,7 +1337,7 @@ func reviewRepositoryWithProvider(
 		},
 	})
 	if err != nil {
-		return providers.RepositoryAnalysisResult{}, err
+		return result, err
 	}
 	if repositoryCache != nil {
 		if storeErr := repositoryCache.Store(identity, inputDigest, result); storeErr != nil {

@@ -421,8 +421,12 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 			}
 		}
 	}
-	if value.RepositoryAnalysis == nil && developerRepositoryAnalysisIncomplete(value) {
-		if _, err := fmt.Fprintln(writer, "\nThe deterministic scan completed, but the AI code review did not finish. Deterministic findings remain valid; model conclusions in this report are incomplete."); err != nil {
+	if developerRepositoryAnalysisIncomplete(value) {
+		detail := "The deterministic scan completed, but the AI code review did not finish. Deterministic findings remain valid; no unsynthesized model conclusions were retained."
+		if value.RepositoryAnalysis != nil && value.RepositoryAnalysis.Coverage.SourceBatchesTotal > 0 {
+			detail = fmt.Sprintf("The deterministic scan completed, but the AI code review did not finish. %d of %d bounded source batch(es) completed; no unsynthesized model conclusions were retained.", value.RepositoryAnalysis.Coverage.SourceBatchesCompleted, value.RepositoryAnalysis.Coverage.SourceBatchesTotal)
+		}
+		if _, err := fmt.Fprintln(writer, "\n"+detail); err != nil {
 			return err
 		}
 	} else if value.RepositoryAnalysis == nil && value.RepositoryAnalysisRun == RepositoryAnalysisPending {
@@ -431,6 +435,10 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 		}
 	} else if value.RepositoryAnalysis == nil {
 		if _, err := fmt.Fprintln(writer, "\nThis scan used deterministic checks only. No model assessed how the matched code works. Configure AI-assisted analysis and rerun `complyscan scan` to add code-level decisions."); err != nil {
+			return err
+		}
+	} else if developerRepositoryAnalysisNoCandidate(value) {
+		if _, err := fmt.Fprintln(writer, "\nLocal selection found no eligible structural AI code candidate, so no repository source was sent for AI code review and no model-derived zero-use conclusion was made."); err != nil {
 			return err
 		}
 	} else if value.AIUseInventory == nil && len(value.RepositoryAnalysis.Result.AIUses) == 0 {
@@ -1638,14 +1646,17 @@ func repositoryAnalysisModeLabel(mode providers.RepositoryAnalysisMode) string {
 }
 
 func developerAnalysisSummaryLabel(value Report) string {
+	if developerRepositoryAnalysisIncomplete(value) {
+		return "deterministic checks complete; AI code review incomplete"
+	}
+	if developerRepositoryAnalysisNoCandidate(value) {
+		return "deterministic checks complete; no structural AI code candidate selected"
+	}
 	if value.RepositoryAnalysis != nil {
 		return "deterministic checks + completed AI code review"
 	}
 	if value.RepositoryAnalysisRun == RepositoryAnalysisPending {
 		return "deterministic checks complete; AI code review still running"
-	}
-	if developerRepositoryAnalysisIncomplete(value) {
-		return "deterministic checks complete; AI code review incomplete"
 	}
 	if developerHasBoundedAIReview(value) {
 		return "deterministic checks + bounded AI safeguard review"
@@ -1666,6 +1677,18 @@ func developerHasBoundedAIReview(value Report) bool {
 }
 
 func developerRepositoryAnalysisLabel(value Report) string {
+	if developerRepositoryAnalysisIncomplete(value) {
+		if value.RepositoryAnalysis != nil && value.RepositoryAnalysis.Coverage.SourceBatchesTotal > 0 {
+			return fmt.Sprintf("incomplete after %d of %d bounded code batch(es); deterministic results are available", value.RepositoryAnalysis.Coverage.SourceBatchesCompleted, value.RepositoryAnalysis.Coverage.SourceBatchesTotal)
+		}
+		if value.RepositoryAnalysis != nil && value.RepositoryAnalysis.Coverage.Subsystems > 0 {
+			return fmt.Sprintf("incomplete after %d bounded code batch(es); deterministic results are available", value.RepositoryAnalysis.Coverage.Subsystems)
+		}
+		return "incomplete; deterministic results are available"
+	}
+	if developerRepositoryAnalysisNoCandidate(value) {
+		return "no source review run — no eligible structural candidate was selected"
+	}
 	if value.RepositoryAnalysis != nil {
 		cacheSuffix := ""
 		if value.RepositoryAnalysis.CacheHit {
@@ -1690,6 +1713,11 @@ func developerRepositoryAnalysisLabel(value Report) string {
 		}
 		return "not run — deterministic checks only"
 	}
+}
+
+func developerRepositoryAnalysisNoCandidate(value Report) bool {
+	return value.RepositoryAnalysisRun == RepositoryAnalysisCompleted && value.RepositoryAnalysis != nil &&
+		value.RepositoryAnalysis.Coverage.Mode == providers.RepositoryAnalysisTargeted && value.RepositoryAnalysis.Coverage.FilesSubmitted == 0
 }
 
 func developerRepositoryAnalysisIncomplete(value Report) bool {

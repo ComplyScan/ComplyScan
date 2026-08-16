@@ -405,8 +405,8 @@ func loadAIUseReport(path string) (reportpkg.Report, error) {
 		}
 		return reportpkg.Report{}, fmt.Errorf("parse ComplyScan report %q: %w", path, err)
 	}
-	if value.SchemaVersion != 6 && value.SchemaVersion != 7 && value.SchemaVersion != 8 && value.SchemaVersion != 9 && value.SchemaVersion != 10 {
-		return reportpkg.Report{}, fmt.Errorf("ComplyScan report %q uses unsupported schema version %d (want 6, 7, 8, 9, or 10)", path, value.SchemaVersion)
+	if value.SchemaVersion != 6 && value.SchemaVersion != 7 && value.SchemaVersion != 8 && value.SchemaVersion != 9 && value.SchemaVersion != 10 && value.SchemaVersion != 11 {
+		return reportpkg.Report{}, fmt.Errorf("ComplyScan report %q uses unsupported schema version %d (want 6, 7, 8, 9, 10, or 11)", path, value.SchemaVersion)
 	}
 	// Schema versions before 7 did not serialize the repository-analysis
 	// lifecycle. A present validated result was necessarily a completed pass,
@@ -423,7 +423,7 @@ func loadAIUseReport(path string) (reportpkg.Report, error) {
 	if value.RepositoryAnalysisRun == reportpkg.RepositoryAnalysisCompleted && value.RepositoryAnalysis == nil {
 		return reportpkg.Report{}, fmt.Errorf("ComplyScan report %q marks repository analysis completed but has no result", path)
 	}
-	if value.RepositoryAnalysis != nil && value.RepositoryAnalysisRun != reportpkg.RepositoryAnalysisCompleted {
+	if value.RepositoryAnalysis != nil && value.RepositoryAnalysisRun != reportpkg.RepositoryAnalysisCompleted && value.RepositoryAnalysisRun != reportpkg.RepositoryAnalysisIncomplete {
 		return reportpkg.Report{}, fmt.Errorf("ComplyScan report %q contains repository analysis with lifecycle %q", path, value.RepositoryAnalysisRun)
 	}
 	return value, nil

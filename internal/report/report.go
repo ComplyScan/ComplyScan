@@ -132,7 +132,7 @@ func NewWithMetadata(target string, tool Tool, scope ScanScope, createdAt time.T
 	created := createdAt.UTC().Format(time.RFC3339Nano)
 	identifier := sha256.Sum256([]byte(strings.Join([]string{target, tool.Version, tool.Commit, created}, "\x00")))
 	return Report{
-		SchemaVersion:         10,
+		SchemaVersion:         11,
 		RepositoryAnalysisRun: RepositoryAnalysisNotRequested,
 		Tool:                  tool,
 		Scan: ScanMetadata{
@@ -421,23 +421,33 @@ func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
 	}
 	if value.RepositoryAnalysis != nil {
 		analysis := value.RepositoryAnalysis
-		if _, err := fmt.Fprintf(w, "AI code review detail: %s; %d likely AI use(s), %d safeguard decision(s), %d other observation(s); %d citation(s) checked\n",
-			analysis.Coverage.Mode, len(analysis.Result.AIUses), len(analysis.Result.ObjectiveObservations), len(analysis.Result.UnmappedObservations), analysis.Coverage.CitationsChecked); err != nil {
-			return err
-		}
-		implemented, partial, notImplemented, cannotDetermine := developerTechnicalVerdictCounts(value)
-		verdictLabel := "Code-level AI verdicts"
-		if value.AIUseMappings != nil {
-			verdictLabel = "Use-scoped AI verdicts"
-		}
-		if implemented+partial+notImplemented+cannotDetermine == 0 {
-			if _, err := fmt.Fprintf(w, "%s: no safeguard decisions returned\n", verdictLabel); err != nil {
+		if value.RepositoryAnalysisRun == RepositoryAnalysisCompleted && analysis.Coverage.Mode == providers.RepositoryAnalysisTargeted && analysis.Coverage.FilesSubmitted == 0 {
+			if _, err := fmt.Fprintln(w, "Repository AI selection: no eligible structural candidate; no source was sent for repository AI review"); err != nil {
 				return err
 			}
 		} else {
-			if _, err := fmt.Fprintf(w, "%s: %d implemented, %d partial, %d not demonstrated, %d unclear\n", verdictLabel,
-				implemented, partial, notImplemented, cannotDetermine); err != nil {
+			detailLabel := "AI code review detail"
+			if value.RepositoryAnalysisRun == RepositoryAnalysisIncomplete {
+				detailLabel = "Partial AI code review detail"
+			}
+			if _, err := fmt.Fprintf(w, "%s: %s; %d likely AI use(s), %d safeguard decision(s), %d other observation(s); %d citation(s) checked\n", detailLabel,
+				analysis.Coverage.Mode, len(analysis.Result.AIUses), len(analysis.Result.ObjectiveObservations), len(analysis.Result.UnmappedObservations), analysis.Coverage.CitationsChecked); err != nil {
 				return err
+			}
+			implemented, partial, notImplemented, cannotDetermine := developerTechnicalVerdictCounts(value)
+			verdictLabel := "Code-level AI verdicts"
+			if value.AIUseMappings != nil {
+				verdictLabel = "Use-scoped AI verdicts"
+			}
+			if implemented+partial+notImplemented+cannotDetermine == 0 {
+				if _, err := fmt.Fprintf(w, "%s: no safeguard decisions returned\n", verdictLabel); err != nil {
+					return err
+				}
+			} else {
+				if _, err := fmt.Fprintf(w, "%s: %d implemented, %d partial, %d not demonstrated, %d unclear\n", verdictLabel,
+					implemented, partial, notImplemented, cannotDetermine); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -490,20 +500,38 @@ func WriteTerminalRepositoryAnalysis(w io.Writer, analysis providers.RepositoryA
 			return err
 		}
 	}
-	if analysis.Coverage.Mode == providers.RepositoryAnalysisTargeted {
-		if analysis.Coverage.ReviewScope == providers.RepositoryReviewScopeChanged {
-			if _, err := fmt.Fprintf(w, "        Context: %d selected file excerpt(s) from %d eligible review-scope file(s), %d verified citation(s)\n",
+	if analysis.CacheHit {
+		if analysis.Coverage.SourceBatchesTotal > 0 {
+			if _, err := fmt.Fprintf(w, "        Cached reviewed context: %d original file-excerpt submission(s), %d/%d bounded source batch(es) completed; current run transferred no source\n",
+				analysis.Coverage.FilesSubmitted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal); err != nil {
+				return err
+			}
+		} else if _, err := fmt.Fprintf(w, "        Cached reviewed context: %d original file-excerpt submission(s); current run transferred no source\n", analysis.Coverage.FilesSubmitted); err != nil {
+			return err
+		}
+	} else if analysis.Coverage.Mode == providers.RepositoryAnalysisTargeted {
+		if analysis.Coverage.FilesSubmitted == 0 {
+			if _, err := fmt.Fprintln(w, "        Context: no eligible structural candidate; no source was sent for repository AI review"); err != nil {
+				return err
+			}
+		} else if analysis.Coverage.SourceBatchesTotal > 0 {
+			if _, err := fmt.Fprintf(w, "        Context: %d file-excerpt transfer(s), %d/%d bounded source batch(es) completed, %d verified citation(s)\n",
+				analysis.Coverage.FilesSubmitted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal, analysis.Coverage.CitationsChecked); err != nil {
+				return err
+			}
+		} else if analysis.Coverage.ReviewScope == providers.RepositoryReviewScopeChanged {
+			if _, err := fmt.Fprintf(w, "        Context: %d file-excerpt submission(s) from %d eligible review-scope file(s), %d verified citation(s)\n",
 				analysis.Coverage.FilesSubmitted, analysis.Coverage.ScopeFiles, analysis.Coverage.CitationsChecked); err != nil {
 				return err
 			}
 		} else {
-			if _, err := fmt.Fprintf(w, "        Context: %d selected file excerpt(s) from %d discovered file(s), %d verified citation(s)\n",
+			if _, err := fmt.Fprintf(w, "        Context: %d file-excerpt submission(s) from %d discovered file(s), %d verified citation(s)\n",
 				analysis.Coverage.FilesSubmitted, analysis.Coverage.RepositoryFiles, analysis.Coverage.CitationsChecked); err != nil {
 				return err
 			}
 		}
 	} else {
-		if _, err := fmt.Fprintf(w, "        Context: %d/%d eligible file submission(s), %d subsystem(s), %d verified citation(s)\n",
+		if _, err := fmt.Fprintf(w, "        Context: %d file-excerpt transfer(s) across a %d-file discovered repository, %d subsystem(s), %d verified citation(s)\n",
 			analysis.Coverage.FilesSubmitted, analysis.Coverage.RepositoryFiles, analysis.Coverage.Subsystems, analysis.Coverage.CitationsChecked); err != nil {
 			return err
 		}

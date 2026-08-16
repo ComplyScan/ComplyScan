@@ -43,7 +43,7 @@ func WriteDetailedMarkdown(writer io.Writer, report Report) error {
 		}
 	}
 	if report.RepositoryAnalysis != nil {
-		if err := writeRepositoryAnalysisMarkdown(writer, *report.RepositoryAnalysis); err != nil {
+		if err := writeRepositoryAnalysisMarkdown(writer, *report.RepositoryAnalysis, report.RepositoryAnalysisRun == RepositoryAnalysisIncomplete); err != nil {
 			return err
 		}
 	}
@@ -269,13 +269,22 @@ func WriteDetailedMarkdown(writer io.Writer, report Report) error {
 	return err
 }
 
-func writeRepositoryAnalysisMarkdown(writer io.Writer, analysis providers.RepositoryAnalysisResult) error {
-	if _, err := fmt.Fprintf(writer, "\n## Repository AI code analysis\n\n- Provider/model: %s / %s\n- Context mode: %s\n- Repository: %d discovered file(s), %d byte(s)\n",
+func writeRepositoryAnalysisMarkdown(writer io.Writer, analysis providers.RepositoryAnalysisResult, incomplete bool) error {
+	heading := "Repository AI code analysis"
+	if incomplete {
+		heading += " (incomplete)"
+	}
+	if _, err := fmt.Fprintf(writer, "\n## %s\n\n- Provider/model: %s / %s\n- Context mode: %s\n- Repository: %d discovered file(s), %d byte(s)\n", heading,
 		inlineCode(string(analysis.Provider)), inlineCode(analysis.Model), markdownText(string(analysis.Coverage.Mode)), analysis.Coverage.RepositoryFiles,
 		analysis.Coverage.RepositoryBytes); err != nil {
 		return err
 	}
-	if analysis.CacheHit {
+	noCandidate := analysis.Coverage.Mode == providers.RepositoryAnalysisTargeted && analysis.Coverage.FilesSubmitted == 0
+	if noCandidate {
+		if _, err := fmt.Fprintln(writer, "- Submitted context: none; local selection found no eligible structural candidate, so no source was sent for repository AI review"); err != nil {
+			return err
+		}
+	} else if analysis.CacheHit {
 		if _, err := fmt.Fprintln(writer, "- Result source: matching private cache entry; no model request was made for this layer"); err != nil {
 			return err
 		}
@@ -286,11 +295,23 @@ func writeRepositoryAnalysisMarkdown(writer io.Writer, analysis providers.Reposi
 			return err
 		}
 	}
-	if analysis.Coverage.Mode == providers.RepositoryAnalysisTargeted {
-		if _, err := fmt.Fprintf(writer, "- Selected context: %d file excerpt(s), %d byte(s)\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted); err != nil {
+	if analysis.CacheHit {
+		if analysis.Coverage.SourceBatchesTotal > 0 {
+			if _, err := fmt.Fprintf(writer, "- Cached reviewed context: %d original file-excerpt submission(s), %d source-content byte(s); %d of %d bounded source batch(es) completed in the cached review; current run transferred no source\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal); err != nil {
+				return err
+			}
+		} else if _, err := fmt.Fprintf(writer, "- Cached reviewed context: %d original file-excerpt submission(s), %d source-content byte(s); current run transferred no source\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted); err != nil {
 			return err
 		}
-	} else if _, err := fmt.Fprintf(writer, "- Submitted context: %d file submission(s), %d byte(s), %d subsystem(s)\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.Subsystems); err != nil {
+	} else if analysis.Coverage.Mode == providers.RepositoryAnalysisTargeted {
+		if analysis.Coverage.SourceBatchesTotal > 0 {
+			if _, err := fmt.Fprintf(writer, "- Submitted candidate context: %d file-excerpt transfer(s), %d source-content byte(s); %d of %d bounded source batch(es) completed\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal); err != nil {
+				return err
+			}
+		} else if _, err := fmt.Fprintf(writer, "- Submitted context: %d file-excerpt submission(s), %d source-content byte(s)\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted); err != nil {
+			return err
+		}
+	} else if _, err := fmt.Fprintf(writer, "- Submitted context: %d file submission(s), %d source-content byte(s), %d subsystem(s)\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.Subsystems); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(writer, "- Deterministically checked citations: %d\n", analysis.Coverage.CitationsChecked); err != nil {
@@ -313,12 +334,20 @@ func writeRepositoryAnalysisMarkdown(writer io.Writer, analysis providers.Reposi
 	}
 	coverageNote := "This is advisory technical reasoning over submitted repository evidence. It does not determine legal applicability or certify compliance."
 	if analysis.Coverage.Mode == providers.RepositoryAnalysisTargeted {
-		coverageNote = "This is advisory technical reasoning over deterministically selected repository evidence. Files outside that package were not reviewed by the model. It does not determine legal applicability or certify compliance."
+		coverageNote = "This is advisory technical reasoning over deterministically selected repository evidence. Files outside the structural candidate set were not reviewed by the model. It does not determine legal applicability or certify compliance."
 	}
 	if _, err := fmt.Fprintln(writer, "\n"+coverageNote); err != nil {
 		return err
 	}
-	if len(analysis.Result.AIUses) == 0 {
+	if incomplete {
+		if _, err := fmt.Fprintln(writer, "\nThe AI code review did not complete. No unsynthesized model conclusions were retained; use the batch counters and scan warning to distinguish unreviewed source from a synthesis failure."); err != nil {
+			return err
+		}
+	} else if noCandidate {
+		if _, err := fmt.Fprintln(writer, "\nNo repository-analysis model pass was run, so this result makes no model-derived zero-use conclusion."); err != nil {
+			return err
+		}
+	} else if len(analysis.Result.AIUses) == 0 {
 		if _, err := fmt.Fprintln(writer, "\nNo AI implementation was identified by this model pass. This is not proof that the repository contains no AI activity."); err != nil {
 			return err
 		}

@@ -1,6 +1,9 @@
 package reviewconsent
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,6 +74,42 @@ func TestConsentMatchesExactIdentityAndAISettings(t *testing.T) {
 	}
 	if authorized, err := store.Authorized(repository, configPath, settings); err != nil || authorized {
 		t.Fatalf("authorization after revoke = %v, %v", authorized, err)
+	}
+}
+
+func TestConsentInvalidatesTheFormerSinglePackageContextContract(t *testing.T) {
+	settings := configuredTestAI()
+	currentDigest, err := Digest(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reconstruct the normalized payload used before targeted review became an
+	// exhaustive queue of bounded requests. Existing approval for the former
+	// one-package boundary must not silently authorize the broader call pattern.
+	legacy := struct {
+		Provider             string `json:"provider"`
+		Endpoint             string `json:"endpoint"`
+		Model                string `json:"model"`
+		APIKeyEnvironment    string `json:"api_key_environment,omitempty"`
+		ProviderName         string `json:"provider_name,omitempty"`
+		RepositoryMode       string `json:"repository_mode"`
+		RepositoryTokenLimit int    `json:"repository_token_limit"`
+		TimeoutSeconds       int    `json:"timeout_seconds"`
+		MaxFindings          int    `json:"max_findings"`
+	}{
+		Provider: "openai-compatible", Endpoint: "https://models.example/v1", Model: "review-model",
+		APIKeyEnvironment: "REVIEW_API_KEY", ProviderName: "Private gateway", RepositoryMode: "auto",
+		RepositoryTokenLimit: settings.RepositoryAnalysis.MaxInputTokens,
+		TimeoutSeconds:       settings.Remote.TimeoutSeconds, MaxFindings: settings.Remote.MaxFindings,
+	}
+	encoded, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacySum := sha256.Sum256(encoded)
+	legacyDigest := hex.EncodeToString(legacySum[:])
+	if currentDigest == legacyDigest {
+		t.Fatal("current exhaustive-review consent digest still matches the former single-package contract")
 	}
 }
 
