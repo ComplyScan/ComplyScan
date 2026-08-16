@@ -137,6 +137,42 @@ func TestRunUsesOneRequestWhenRepositoryFits(t *testing.T) {
 	}
 }
 
+func TestRunReportsNoSourceReviewWhenRepositoryHasNoEligibleFiles(t *testing.T) {
+	reviewer := &recordingReviewer{}
+	repository := discovery.Repository{Files: []discovery.File{{
+		Path: "README.txt", Kind: discovery.KindOtherText, Content: []byte("Documentation only."),
+	}}}
+
+	result, err := Run(context.Background(), reviewer, repository, nil, nil, Options{
+		Mode: ModeAuto, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reviewer.requests) != 0 {
+		t.Fatalf("expected no provider request, got %#v", reviewer.requests)
+	}
+	if result.Coverage.Mode != providers.RepositoryAnalysisTargeted || result.Coverage.FilesSubmitted != 0 {
+		t.Fatalf("expected targeted no-source coverage, got %#v", result.Coverage)
+	}
+	if len(result.Notes) != 1 || !strings.Contains(result.Notes[0], "No eligible text files") {
+		t.Fatalf("expected an explicit no-source note, got %#v", result.Notes)
+	}
+
+	deepResult, err := Run(context.Background(), reviewer, repository, nil, nil, Options{
+		Mode: ModeDeep, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reviewer.requests) != 0 {
+		t.Fatalf("expected no deep-review provider request, got %#v", reviewer.requests)
+	}
+	if deepResult.Coverage.Mode != providers.RepositoryAnalysisTargeted || deepResult.Coverage.FilesSubmitted != 0 {
+		t.Fatalf("expected deep mode to retain the no-source sentinel, got %#v", deepResult.Coverage)
+	}
+}
+
 func TestRunAutoSelectsStructuralAIEvidenceInsteadOfWholeRepository(t *testing.T) {
 	reviewer := &recordingReviewer{}
 	repository := discovery.Repository{Files: []discovery.File{

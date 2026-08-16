@@ -186,6 +186,11 @@ func TestRepositoryAnalysisCacheValidatesTypedAIUseFacts(t *testing.T) {
 		{name: "duplicate candidate", mutate: func(result *providers.RepositoryAnalysisResult) {
 			result.Result.AIUses = append(result.Result.AIUses, result.Result.AIUses[0])
 		}},
+		{name: "impossible batch coverage", mutate: func(result *providers.RepositoryAnalysisResult) {
+			result.Coverage.SourceBatchesCompleted = 1
+			result.Coverage.SourceBatchesTotal = 2
+			result.Coverage.Subsystems = 1
+		}},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -209,7 +214,7 @@ func TestDefaultRepositoryAnalysisCacheUsesCurrentFileVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.Base(path) != "repository-analysis-v3.json" || repositoryCacheContextVersion != "3" || repositoryCacheSchemaVersion != 3 {
+	if filepath.Base(path) != "repository-analysis-v3.json" || repositoryCacheContextVersion != "4" || repositoryCacheSchemaVersion != 3 {
 		t.Fatalf("cache version = path %q context %q schema %d", path, repositoryCacheContextVersion, repositoryCacheSchemaVersion)
 	}
 }

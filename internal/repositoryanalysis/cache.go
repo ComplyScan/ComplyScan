@@ -23,7 +23,7 @@ import (
 
 const (
 	repositoryCacheSchemaVersion  = 3
-	repositoryCacheContextVersion = "3"
+	repositoryCacheContextVersion = "4"
 	repositoryCacheFileName       = "repository-analysis-v3.json"
 	maxRepositoryCacheBytes       = 32 << 20
 	maxRepositoryCacheEntries     = 40
@@ -236,8 +236,8 @@ func validateRepositoryCacheEntry(entry repositoryCacheEntry) error {
 	if !validRepositoryAnalysisMode(result.Coverage.Mode) || result.Coverage.ReviewScope != "" && result.Coverage.ReviewScope != providers.RepositoryReviewScopeChanged {
 		return errors.New("repository analysis result contains an invalid review mode or scope")
 	}
-	if result.Coverage.RepositoryFiles < 0 || result.Coverage.RepositoryBytes < 0 || result.Coverage.FilesSubmitted < 0 || result.Coverage.BytesSubmitted < 0 || result.Coverage.Subsystems < 0 || result.Coverage.CitationsChecked < 0 {
-		return errors.New("repository analysis result contains negative coverage")
+	if result.Coverage.RepositoryFiles < 0 || result.Coverage.RepositoryBytes < 0 || result.Coverage.FilesSubmitted < 0 || result.Coverage.BytesSubmitted < 0 || result.Coverage.Subsystems < 0 || result.Coverage.SourceBatchesCompleted < 0 || result.Coverage.SourceBatchesTotal < 0 || result.Coverage.SourceBatchesCompleted != result.Coverage.SourceBatchesTotal || result.Coverage.SourceBatchesTotal > 0 && result.Coverage.Subsystems != result.Coverage.SourceBatchesTotal || result.Coverage.CitationsChecked < 0 {
+		return errors.New("repository analysis result contains invalid coverage counters")
 	}
 	if len(result.FollowUpQueries) > 3 || result.FollowUpExcerpts < 0 || result.FollowUpExcerpts > 3 || !result.FollowUpRequested && (len(result.FollowUpQueries) > 0 || result.FollowUpExcerpts > 0) {
 		return errors.New("repository analysis result contains invalid follow-up metadata")

@@ -441,18 +441,22 @@ type RepositorySectionResult struct {
 }
 
 type RepositoryCoverage struct {
-	Mode             RepositoryAnalysisMode `json:"mode"`
-	ReviewScope      RepositoryReviewScope  `json:"review_scope,omitempty"`
-	RepositoryFiles  int                    `json:"repository_files"`
-	RepositoryBytes  int64                  `json:"repository_bytes"`
-	ScopeFiles       int                    `json:"scope_files,omitempty"`
-	ScopeBytes       int64                  `json:"scope_bytes,omitempty"`
-	ChangedFiles     int                    `json:"changed_files,omitempty"`
-	ConnectedFiles   int                    `json:"connected_files,omitempty"`
-	FilesSubmitted   int                    `json:"files_submitted"`
-	BytesSubmitted   int64                  `json:"bytes_submitted"`
-	Subsystems       int                    `json:"subsystems,omitempty"`
-	CitationsChecked int                    `json:"citations_checked"`
+	Mode            RepositoryAnalysisMode `json:"mode"`
+	ReviewScope     RepositoryReviewScope  `json:"review_scope,omitempty"`
+	RepositoryFiles int                    `json:"repository_files"`
+	RepositoryBytes int64                  `json:"repository_bytes"`
+	ScopeFiles      int                    `json:"scope_files,omitempty"`
+	ScopeBytes      int64                  `json:"scope_bytes,omitempty"`
+	ChangedFiles    int                    `json:"changed_files,omitempty"`
+	ConnectedFiles  int                    `json:"connected_files,omitempty"`
+	FilesSubmitted  int                    `json:"files_submitted"`
+	// BytesSubmitted is source-content bytes only. It deliberately excludes
+	// paths, JSON escaping, graph metadata, prompts, schemas, and synthesis.
+	BytesSubmitted         int64 `json:"bytes_submitted"`
+	Subsystems             int   `json:"subsystems,omitempty"`
+	SourceBatchesCompleted int   `json:"source_batches_completed,omitempty"`
+	SourceBatchesTotal     int   `json:"source_batches_total,omitempty"`
+	CitationsChecked       int   `json:"citations_checked"`
 }
 
 type RepositoryReviewScope string

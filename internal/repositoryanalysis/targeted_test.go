@@ -40,6 +40,31 @@ func TestTargetedImportedPathsResolvesJavaScriptRelativeToImporter(t *testing.T)
 	}
 }
 
+func TestTargetedImportedPathsDoesNotTreatGoStandardLibraryAsLocalFile(t *testing.T) {
+	files := map[string]discovery.File{
+		"internal/codegraph/context.go": {Path: "internal/codegraph/context.go", Kind: discovery.KindSource},
+		"internal/providers/remote.go":  {Path: "internal/providers/remote.go", Kind: discovery.KindSource},
+	}
+	if matched := targetedImportedPaths("internal/cli/setup.go", "context", files); len(matched) != 0 {
+		t.Fatalf("Go standard-library import matched local source: %#v", matched)
+	}
+}
+
+func TestTargetedCandidateQueueIncludesHelperImportedByProviderIntegration(t *testing.T) {
+	repository := discovery.Repository{Files: []discovery.File{
+		{Path: "app.py", Kind: discovery.KindSource, Content: []byte("from openai import OpenAI\nfrom model_client import generate\nclient = OpenAI()\n")},
+		{Path: "model_client.py", Kind: discovery.KindSource, Content: []byte("def generate(client, prompt):\n    return client.responses.create(model='gpt-test', input=prompt)\n")},
+		{Path: "catalog.py", Kind: discovery.KindSource, Content: []byte("OPENAI_MODELS = ['gpt-test']\n")},
+	}}
+	selected, _ := targetedRepositoryCandidateFiles(repository, codegraph.Build(repository), nil, nil)
+	paths := targetedSourcePathSet(selected)
+	for _, wanted := range []string{"app.py", "model_client.py"} {
+		if !paths[wanted] {
+			t.Fatalf("candidate queue omitted provider-integration path %q: %#v", wanted, targetedSourcePaths(selected))
+		}
+	}
+}
+
 func TestTargetedRepositoryFilesPrioritizesExecutableInvocationOverProviderCatalogue(t *testing.T) {
 	repository := targetedPrecisionRepository()
 	graph := codegraph.Build(repository)
@@ -182,6 +207,17 @@ func generate() { http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bod
 `)}
 	if line := targetedInvocationAnchor(generation, codegraph.Build(discovery.Repository{Files: []discovery.File{generation}})); line != 3 {
 		t.Fatalf("generation transport anchor = %d, want 3", line)
+	}
+}
+
+func TestTargetedInvocationAnchorDoesNotParseControlKeywordAsEndpointName(t *testing.T) {
+	file := discovery.File{Path: "remote.go", Kind: discovery.KindSource, Content: []byte(`package providers
+const endpoint = "https://api.openai.com/v1/responses"
+func unwrap(err error) bool { if !errors.As(err, &target) { return false }; return true }
+func generate() error { if err := postRemoteJSON(ctx, endpoint, body); err != nil { return err }; return nil }
+`)}
+	if line := targetedInvocationAnchor(file, codegraph.Build(discovery.Repository{Files: []discovery.File{file}})); line != 4 {
+		t.Fatalf("generation invocation anchor = %d, want the provider call at line 4 rather than an unrelated if statement", line)
 	}
 }
 

@@ -10,7 +10,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 )
 
-const ProfileDraftPromptVersion = 5
+const ProfileDraftPromptVersion = 6
 
 const (
 	maxProfileDraftContexts     = 24

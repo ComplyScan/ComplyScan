@@ -18,8 +18,7 @@ import (
 )
 
 const (
-	targetedSourceBudgetPercent = 70
-	targetedMaximumFileBytes    = 12_000
+	targetedMaximumFileBytes    = 6_000
 	targetedContextLines        = 60
 	targetedMaxFollowUpExcerpts = 3
 	targetedRemoteInputTokens   = 6_500
@@ -117,7 +116,7 @@ func runTargeted(
 	if targetBudget < budget {
 		budget = targetBudget
 	}
-	selected, considered := targetedRepositoryFiles(repository, graph, evidence, confirmedUses, budget*targetedSourceBudgetPercent/100)
+	selected, considered := targetedRepositoryCandidateFiles(repository, graph, evidence, confirmedUses)
 	if len(selected) == 0 {
 		return providers.RepositoryAnalysisResult{
 			Provider: options.Provider, Model: options.Model,
@@ -136,8 +135,26 @@ func runTargeted(
 			},
 		}, nil
 	}
-	graphContext := repositoryGraphContext(graph, selected)
+	// Source that already exceeds one encoded request can never be made to fit
+	// by trimming optional graph metadata. Enter the bounded batch queue before
+	// constructing the all-candidate graph, avoiding quadratic trimming work on
+	// large repositories.
+	graphContext := providers.RepositoryGraphContext{}
 	inputBytes := requestContextBytes(selected, graphContext)
+	if inputBytes <= budget {
+		graphContext = boundedRepositoryGraphContext(graph, selected, budget)
+		inputBytes = requestContextBytes(selected, graphContext)
+	}
+	if inputBytes > budget {
+		batchOptions := options
+		batchOptions.TargetedBatches = true
+		result, err := runHierarchical(ctx, reviewer, repository, graph, selected, objectives, systems, confirmedUses, budget, batchOptions)
+		result.Notes = append(result.Notes,
+			fmt.Sprintf("Targeted analysis queued all %d structural candidate file excerpt(s) instead of treating one model request as a repository-wide evidence cap.", considered),
+			"Each source batch stayed within the provider request boundary; files outside the deterministic candidate set were not reviewed by the model.",
+		)
+		return result, err
+	}
 	if err := progress(options, Progress{
 		Stage: "targeted-selection", Completed: len(selected), Total: considered, Scope: ".", InputBytes: inputBytes,
 		Detail: fmt.Sprintf("selected %d of %d structural candidate file(s)", len(selected), considered),
@@ -151,40 +168,126 @@ func runTargeted(
 		ConfirmedAIUses: bindConfirmedAIUses(confirmedUses, sourceFilePaths(selected)), Graph: graphContext, AllowFollowUp: true,
 		MaxOutputTokens: targetedOutputTokens(options.Provider),
 	}
+	audit := providers.RepositoryAnalysisResult{
+		Provider: options.Provider, Model: options.Model,
+		Coverage: providers.RepositoryCoverage{
+			Mode: providers.RepositoryAnalysisTargeted, RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository),
+		},
+	}
+	recordResult := func(value providers.RepositoryAnalysisResult) {
+		audit.Coverage.FilesSubmitted += value.Coverage.FilesSubmitted
+		audit.Coverage.BytesSubmitted += value.Coverage.BytesSubmitted
+		addUsage(&audit.Usage, value.Usage)
+		audit.Coverage.CitationsChecked += value.Coverage.CitationsChecked
+	}
+	recordErrorResult := func(value providers.RepositoryAnalysisResult, err error) {
+		audit.Coverage.FilesSubmitted += value.Coverage.FilesSubmitted
+		audit.Coverage.BytesSubmitted += value.Coverage.BytesSubmitted
+		addUsage(&audit.Usage, value.Usage)
+		if incomplete, ok := providers.AsRemoteIncompleteError(err); ok && usageIsZero(value.Usage) {
+			addUsage(&audit.Usage, usageFromIncomplete(incomplete))
+		}
+	}
+	partialFailure := func(stage string, cause error) (providers.RepositoryAnalysisResult, error) {
+		audit.Result = providers.RepositorySectionResult{
+			Scope: ".", AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{},
+			ObjectiveObservations: []providers.RepositoryObjectiveObservation{}, UnmappedObservations: []providers.RepositoryUnmappedObservation{},
+			UnresolvedQuestions: []string{"The targeted AI review did not complete, so no model-authored repository conclusion was retained."},
+		}
+		audit.Notes = []string{"Source-transfer coverage and known token usage include attempted requests; incomplete model answers were discarded."}
+		return audit, fmt.Errorf("%s: %w", stage, cause)
+	}
+	applyAudit := func(value providers.RepositoryAnalysisResult) providers.RepositoryAnalysisResult {
+		value.Provider = options.Provider
+		value.Model = options.Model
+		value.Coverage.Mode = providers.RepositoryAnalysisTargeted
+		value.Coverage.RepositoryFiles = audit.Coverage.RepositoryFiles
+		value.Coverage.RepositoryBytes = audit.Coverage.RepositoryBytes
+		value.Coverage.FilesSubmitted = audit.Coverage.FilesSubmitted
+		value.Coverage.BytesSubmitted = audit.Coverage.BytesSubmitted
+		value.Coverage.CitationsChecked = audit.Coverage.CitationsChecked
+		value.Usage = audit.Usage
+		return value
+	}
+	fallBackToBatches := func(files []providers.RepositorySourceFile, cause error) (providers.RepositoryAnalysisResult, error) {
+		batchOptions := options
+		batchOptions.TargetedBatches = true
+		if progressErr := progress(options, Progress{
+			Stage: "adaptive-split", Scope: ".", InputBytes: requestContextBytes(files, providers.RepositoryGraphContext{}),
+			Detail: "the provider limit still rejects the compact package; switching to bounded source batches",
+		}); progressErr != nil {
+			return partialFailure("prepare bounded targeted batches", progressErr)
+		}
+		batched, batchErr := runHierarchical(ctx, reviewer, repository, graph, files, objectives, systems, confirmedUses, budget, batchOptions)
+		batched.Coverage.FilesSubmitted += audit.Coverage.FilesSubmitted
+		batched.Coverage.BytesSubmitted += audit.Coverage.BytesSubmitted
+		batched.Coverage.CitationsChecked += audit.Coverage.CitationsChecked
+		addUsage(&batched.Usage, audit.Usage)
+		batched.Notes = append(batched.Notes, "The initial compact package exceeded the provider token limit, so ComplyScan continued with bounded source batches instead of dropping selected evidence.")
+		if batchErr != nil {
+			return batched, fmt.Errorf("continue targeted review after compact-package limit (%v): %w", cause, batchErr)
+		}
+		return batched, nil
+	}
 	result, err := reviewRepositoryWithRetry(ctx, reviewer, request, options)
+	if err != nil {
+		recordErrorResult(result, err)
+		if rateLimit, tooLarge := providers.AsRemoteRateLimitError(err); tooLarge && rateLimit.RequestTooLarge {
+			reducedOutput := repositoryOutputTokens(options.Provider, rateLimit.LimitTokens)
+			if reducedOutput < request.MaxOutputTokens {
+				if progressErr := progress(options, Progress{
+					Stage: "adaptive-limit-retry", Scope: ".", InputBytes: inputBytes,
+					Detail: fmt.Sprintf("provider limit %d tokens; reduce output allowance from %d to %d", rateLimit.LimitTokens, request.MaxOutputTokens, reducedOutput),
+				}); progressErr != nil {
+					return partialFailure("prepare targeted provider-limit retry", progressErr)
+				}
+				request.MaxOutputTokens = reducedOutput
+				result, err = reviewRepositoryWithRetry(ctx, reviewer, request, options)
+				if err != nil {
+					recordErrorResult(result, err)
+				}
+			}
+			if err != nil {
+				if repeated, stillTooLarge := providers.AsRemoteRateLimitError(err); stillTooLarge && repeated.RequestTooLarge {
+					return fallBackToBatches(selected, err)
+				}
+			}
+		}
+	}
 	if err != nil {
 		incomplete, canRecover := providers.AsRemoteIncompleteError(err)
 		if !canRecover || incomplete.Reason != "max_output_tokens" {
-			return providers.RepositoryAnalysisResult{}, fmt.Errorf("analyze targeted repository evidence: %w", err)
+			return partialFailure("analyze targeted repository evidence", err)
 		}
 		recoveryOutputTokens := targetedRecoveryOutputTokens(request.MaxOutputTokens, incomplete)
 		if progressErr := progress(options, Progress{
 			Stage: "targeted-output-recovery", Completed: 0, Total: 1, Scope: ".", InputBytes: inputBytes,
 			Detail: fmt.Sprintf("retry compact output with %d token(s) after %d output token(s), including %d reasoning token(s)", recoveryOutputTokens, incomplete.OutputTokens, incomplete.ReasoningTokens),
 		}); progressErr != nil {
-			return providers.RepositoryAnalysisResult{}, progressErr
+			return partialFailure("prepare targeted repository output recovery", progressErr)
 		}
 		request.AllowFollowUp = false
 		request.OutputRecovery = true
 		request.MaxOutputTokens = recoveryOutputTokens
 		result, err = reviewRepositoryWithRetry(ctx, reviewer, request, options)
 		if err != nil {
-			return providers.RepositoryAnalysisResult{}, fmt.Errorf("recover targeted repository output: %w", err)
+			recordErrorResult(result, err)
+			return partialFailure("recover targeted repository output", err)
 		}
+		recordResult(result)
 		result.OutputRecoveryUsed = true
-		addUsage(&result.Usage, providers.Usage{
-			PromptTokens: incomplete.InputTokens, CompletionTokens: incomplete.OutputTokens, ReasoningTokens: incomplete.ReasoningTokens,
-		})
 		result.Notes = append(result.Notes, fmt.Sprintf("The initial targeted response exhausted its output allowance. ComplyScan used its sole second call for a terse no-follow-up recovery response with medium reasoning and an output allowance of %d tokens.", request.MaxOutputTokens))
 		if progressErr := progress(options, Progress{
 			Stage: "targeted-output-recovery", Completed: 1, Total: 1, Scope: ".", InputBytes: inputBytes,
 			Detail: "compact structured result completed",
 		}); progressErr != nil {
-			return providers.RepositoryAnalysisResult{}, progressErr
+			return partialFailure("complete targeted repository output recovery", progressErr)
 		}
+	} else {
+		recordResult(result)
 	}
 	if err := validateSystemAttribution(result.Result, profileSystems, options.Ownership, confirmedUses); err != nil {
-		return providers.RepositoryAnalysisResult{}, err
+		return partialFailure("validate targeted repository attribution", err)
 	}
 	if result.FollowUpPlan.Needed {
 		result.FollowUpRequested = true
@@ -196,7 +299,7 @@ func runTargeted(
 				Stage: "targeted-follow-up", Completed: 0, Total: 1, Scope: ".",
 				InputBytes: sourceFileBytes(followUpFiles), Detail: fmt.Sprintf("retrieved %d bounded excerpt(s)", len(followUpFiles)),
 			}); err != nil {
-				return providers.RepositoryAnalysisResult{}, err
+				return partialFailure("prepare targeted repository follow-up", err)
 			}
 			finalFiles := append(append([]providers.RepositorySourceFile(nil), selected...), followUpFiles...)
 			finalGraph := repositoryGraphContext(graph, finalFiles)
@@ -206,12 +309,60 @@ func runTargeted(
 			request.AllowFollowUp = false
 			final, finalErr := reviewRepositoryWithRetry(ctx, reviewer, request, options)
 			if finalErr != nil {
-				return providers.RepositoryAnalysisResult{}, fmt.Errorf("analyze targeted repository follow-up: %w", finalErr)
+				recordErrorResult(final, finalErr)
+				if rateLimit, tooLarge := providers.AsRemoteRateLimitError(finalErr); tooLarge && rateLimit.RequestTooLarge {
+					reducedOutput := repositoryOutputTokens(options.Provider, rateLimit.LimitTokens)
+					if reducedOutput < request.MaxOutputTokens {
+						if progressErr := progress(options, Progress{
+							Stage: "adaptive-limit-retry", Scope: ".", InputBytes: requestContextBytes(finalFiles, finalGraph),
+							Detail: fmt.Sprintf("follow-up package reached provider limit %d tokens; reduce output allowance from %d to %d", rateLimit.LimitTokens, request.MaxOutputTokens, reducedOutput),
+						}); progressErr != nil {
+							return partialFailure("prepare targeted follow-up provider-limit retry", progressErr)
+						}
+						request.MaxOutputTokens = reducedOutput
+						final, finalErr = reviewRepositoryWithRetry(ctx, reviewer, request, options)
+						if finalErr != nil {
+							recordErrorResult(final, finalErr)
+						}
+					}
+					if finalErr != nil {
+						if repeated, stillTooLarge := providers.AsRemoteRateLimitError(finalErr); stillTooLarge && repeated.RequestTooLarge {
+							return fallBackToBatches(finalFiles, finalErr)
+						}
+					}
+				}
 			}
+			if finalErr != nil {
+				incomplete, canRecover := providers.AsRemoteIncompleteError(finalErr)
+				if !canRecover || incomplete.Reason != "max_output_tokens" {
+					return partialFailure("analyze targeted repository follow-up", finalErr)
+				}
+				recoveryOutput := targetedRecoveryOutputTokens(request.MaxOutputTokens, incomplete)
+				if recoveryOutput <= request.MaxOutputTokens || !outputFitsTokenLimit(incomplete.InputTokens, recoveryOutput, incomplete.TokenLimit) {
+					return fallBackToBatches(finalFiles, finalErr)
+				}
+				if progressErr := progress(options, Progress{
+					Stage: "adaptive-output-retry", Scope: ".", InputBytes: requestContextBytes(finalFiles, finalGraph),
+					Detail: fmt.Sprintf("increase follow-up output allowance from %d to %d tokens", request.MaxOutputTokens, recoveryOutput),
+				}); progressErr != nil {
+					return partialFailure("prepare targeted follow-up output recovery", progressErr)
+				}
+				request.MaxOutputTokens = recoveryOutput
+				request.OutputRecovery = true
+				final, finalErr = reviewRepositoryWithRetry(ctx, reviewer, request, options)
+				if finalErr != nil {
+					recordErrorResult(final, finalErr)
+					if repeated, stillTooLarge := providers.AsRemoteRateLimitError(finalErr); stillTooLarge && repeated.RequestTooLarge {
+						return fallBackToBatches(finalFiles, finalErr)
+					}
+					return partialFailure("recover targeted repository follow-up output", finalErr)
+				}
+				final.OutputRecoveryUsed = true
+			}
+			recordResult(final)
 			if err := validateSystemAttribution(final.Result, profileSystems, options.Ownership, confirmedUses); err != nil {
-				return providers.RepositoryAnalysisResult{}, err
+				return partialFailure("validate targeted repository follow-up attribution", err)
 			}
-			addUsage(&final.Usage, result.Usage)
 			final.FollowUpRequested = true
 			final.FollowUpQueries = result.FollowUpQueries
 			final.FollowUpExcerpts = len(followUpFiles)
@@ -221,7 +372,7 @@ func runTargeted(
 				Stage: "targeted-follow-up", Completed: 1, Total: 1, Scope: ".",
 				InputBytes: requestContextBytes(finalFiles, finalGraph), Detail: fmt.Sprintf("reviewed %d bounded excerpt(s)", len(followUpFiles)),
 			}); err != nil {
-				return providers.RepositoryAnalysisResult{}, err
+				return partialFailure("complete targeted repository follow-up", err)
 			}
 		} else {
 			result.Notes = append(result.Notes, "The model requested a bounded follow-up, but trusted local retrieval found no new eligible excerpt; the initial grounded result was retained.")
@@ -233,8 +384,9 @@ func runTargeted(
 		"Selection prioritized executable AI call paths, their bounded caller and safeguard neighborhood, technical-objective matches, confirmed AI-use paths, and then passive provider references.",
 		"Files outside the evidence package were not reviewed by the model; absence of model evidence is not proof that an implementation is absent.",
 	)
+	result = applyAudit(result)
 	if err := progress(options, Progress{Stage: "targeted-analysis", Completed: 1, Total: 1, Scope: ".", InputBytes: inputBytes}); err != nil {
-		return providers.RepositoryAnalysisResult{}, err
+		return partialFailure("complete targeted repository analysis", err)
 	}
 	return result, nil
 }
@@ -316,7 +468,7 @@ func repositorySearchQueryLabels(queries []providers.TechnicalSearchQuery) []str
 	return result
 }
 
-func targetedRepositoryFiles(repository discovery.Repository, graph codegraph.Graph, reports []framework.TechnicalEvidenceReport, confirmedUses []providers.RepositoryConfirmedAIUse, budget int64) ([]providers.RepositorySourceFile, int) {
+func targetedRepositoryCandidates(repository discovery.Repository, graph codegraph.Graph, reports []framework.TechnicalEvidenceReport, confirmedUses []providers.RepositoryConfirmedAIUse) (map[string]discovery.File, []targetedCandidate) {
 	files := make(map[string]discovery.File, len(repository.Files))
 	for _, file := range repository.Files {
 		files[file.Path] = file
@@ -402,13 +554,13 @@ func targetedRepositoryFiles(repository discovery.Repository, graph codegraph.Gr
 		}
 		for _, imported := range graph.Imports {
 			matchedPaths := targetedImportedPaths(imported.Path, imported.ImportedPath, files)
-			if candidate, exists := known[imported.Path]; exists {
+			if candidate, exists := known[imported.Path]; exists && candidate.tier >= targetedImportCandidate {
 				for _, path := range matchedPaths {
 					add(path, 1, lowerTargetedTier(candidate.tier), candidate.score-20)
 				}
 			}
 			for _, path := range matchedPaths {
-				if candidate, exists := known[path]; exists {
+				if candidate, exists := known[path]; exists && candidate.tier >= targetedImportCandidate {
 					add(imported.Path, 1, lowerTargetedTier(candidate.tier), candidate.score-20)
 				}
 			}
@@ -429,6 +581,39 @@ func targetedRepositoryFiles(repository discovery.Repository, graph codegraph.Gr
 	sort.Slice(ordered, func(i, j int) bool {
 		return targetedCandidateBefore(ordered[i], ordered[j])
 	})
+	return files, ordered
+}
+
+// targetedRepositoryCandidateFiles prepares every structurally selected file.
+// The returned list is not a single-request package: callers must partition it
+// into provider-sized batches. This keeps a per-request safety boundary without
+// turning that boundary into a repository-wide evidence cap.
+func targetedRepositoryCandidateFiles(repository discovery.Repository, graph codegraph.Graph, reports []framework.TechnicalEvidenceReport, confirmedUses []providers.RepositoryConfirmedAIUse) ([]providers.RepositorySourceFile, int) {
+	files, ordered := targetedRepositoryCandidates(repository, graph, reports, confirmedUses)
+	selected := make([]providers.RepositorySourceFile, 0, len(ordered))
+	for _, candidate := range ordered {
+		selected = append(selected, targetedSourceFile(files[candidate.path], []int{candidate.anchor}, targetedCandidateMaximumBytes(candidate.tier)))
+	}
+	return selected, len(ordered)
+}
+
+func targetedCandidateMaximumBytes(tier targetedCandidateTier) int {
+	switch tier {
+	case targetedInvocationCandidate:
+		return targetedMaximumFileBytes
+	case targetedWorkflowCandidate:
+		return 2_500
+	case targetedEvidenceCandidate:
+		return 3_000
+	case targetedImportCandidate:
+		return 1_800
+	default:
+		return 1_200
+	}
+}
+
+func targetedRepositoryFiles(repository discovery.Repository, graph codegraph.Graph, reports []framework.TechnicalEvidenceReport, confirmedUses []providers.RepositoryConfirmedAIUse, budget int64) ([]providers.RepositorySourceFile, int) {
+	files, ordered := targetedRepositoryCandidates(repository, graph, reports, confirmedUses)
 
 	selected := make([]providers.RepositorySourceFile, 0, len(ordered))
 	selectedPaths := make(map[string]struct{}, len(ordered))
@@ -619,6 +804,9 @@ func targetedGenerationEndpointNames(lines []string) []string {
 			continue
 		}
 		fields := strings.Fields(strings.TrimSpace(line[:assignment]))
+		if len(fields) == 0 || targetedControlKeyword(strings.Trim(fields[0], " \t:,")) {
+			continue
+		}
 		for _, field := range fields {
 			name := strings.Trim(field, " \t:,")
 			switch name {
@@ -632,6 +820,15 @@ func targetedGenerationEndpointNames(lines []string) []string {
 		}
 	}
 	return names
+}
+
+func targetedControlKeyword(value string) bool {
+	switch value {
+	case "if", "else", "elif", "for", "while", "switch", "case", "return", "when", "match", "catch", "except":
+		return true
+	default:
+		return false
+	}
 }
 
 func containsTargetedString(values []string, wanted string) bool {
@@ -674,6 +871,15 @@ func importedPathMatchesFile(importedPath, filePath string) bool {
 
 func targetedImportedPaths(importerPath, importedPath string, files map[string]discovery.File) []string {
 	importedPath = targetedResolvedImportPath(importerPath, importedPath)
+	if strings.EqualFold(filepath.Ext(importerPath), ".go") {
+		cleaned := strings.Trim(strings.TrimSpace(strings.ReplaceAll(importedPath, "\\", "/")), `"'`)
+		// Bare Go imports are standard-library or external package names, never a
+		// repository-relative filename. In particular, `context` must not match a
+		// local file such as internal/codegraph/context.go.
+		if !strings.Contains(cleaned, "/") {
+			return nil
+		}
+	}
 	bestScore := 0
 	var result []string
 	for path := range files {
