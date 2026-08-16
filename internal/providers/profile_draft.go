@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
+
+	"github.com/ComplyScan/ComplyScan/internal/profile"
 )
 
-const ProfileDraftPromptVersion = 4
+const ProfileDraftPromptVersion = 5
 
 const (
 	maxProfileDraftContexts     = 24
@@ -194,13 +195,14 @@ func discardUnsupportedProfileSuggestions(values []ProfileSuggestion) ([]Profile
 			discarded++
 			continue
 		}
-		if _, yesOnly := profileDraftPositiveOnlyFields[value.Field]; yesOnly {
+		field, supported := profile.ParseCodeFactField(value.Field)
+		if supported && profile.CodeFactPositiveOnly(field) {
 			if len(value.Values) != 1 || value.Values[0] != "yes" || profileSuggestionReliesOnAbsence(value) {
 				discarded++
 				continue
 			}
 		}
-		if _, positiveRequired := profileDraftPositiveEvidenceFields[value.Field]; positiveRequired && profileSuggestionReliesOnAbsence(value) {
+		if supported && profile.CodeFactRequiresPositiveEvidence(field) && profileSuggestionReliesOnAbsence(value) {
 			discarded++
 			continue
 		}
@@ -210,7 +212,7 @@ func discardUnsupportedProfileSuggestions(values []ProfileSuggestion) ([]Profile
 }
 
 func profileSuggestionReliesOnAbsence(value ProfileSuggestion) bool {
-	parts := []string{value.Rationale}
+	parts := append([]string{value.Rationale}, value.Values...)
 	for _, evidence := range value.Evidence {
 		parts = append(parts, evidence.Summary)
 	}
@@ -269,32 +271,30 @@ func validateProfileSuggestions(values []ProfileSuggestion, request ProfileDraft
 	for _, context := range request.Contexts {
 		allowedPaths[context.Path] = struct{}{}
 	}
-	seenFields := make(map[string]struct{}, len(values))
+	seenFields := make(map[profile.CodeFactField]struct{}, len(values))
 	result := make([]ProfileSuggestion, 0, len(values))
 	for _, value := range values {
-		if _, exists := profileDraftAllowedValues[value.Field]; !exists {
+		field, exists := profile.ParseCodeFactField(value.Field)
+		if !exists {
 			return nil, fmt.Errorf("model structured profile draft returned unsupported field %q", value.Field)
 		}
-		if _, duplicate := seenFields[value.Field]; duplicate {
+		if _, duplicate := seenFields[field]; duplicate {
 			return nil, fmt.Errorf("model structured profile draft returned duplicate field %q", value.Field)
 		}
-		seenFields[value.Field] = struct{}{}
+		seenFields[field] = struct{}{}
 		if value.Confidence != "low" && value.Confidence != "medium" && value.Confidence != "high" {
 			return nil, fmt.Errorf("model structured profile draft returned invalid confidence %q", value.Confidence)
 		}
 		if len(value.Values) == 0 || len(value.Values) > maxProfileDraftValues {
 			return nil, fmt.Errorf("model structured profile draft returned invalid value count for %q", value.Field)
 		}
-		allowed := profileDraftAllowedValues[value.Field]
 		for index := range value.Values {
-			value.Values[index] = cleanReviewText(value.Values[index], profileDraftValueLimit(value.Field))
+			value.Values[index] = cleanReviewText(value.Values[index], profile.CodeFactValueLimit(field))
 			if value.Values[index] == "" {
 				return nil, fmt.Errorf("model structured profile draft returned an empty value for %q", value.Field)
 			}
-			if allowed != nil {
-				if _, exists := allowed[value.Values[index]]; !exists {
-					return nil, fmt.Errorf("model structured profile draft returned unsupported %s value %q", value.Field, value.Values[index])
-				}
+			if !profile.CodeFactAllowsValue(field, value.Values[index]) {
+				return nil, fmt.Errorf("model structured profile draft returned unsupported %s value %q", value.Field, value.Values[index])
 			}
 		}
 		value.Rationale = cleanReviewText(value.Rationale, maxReviewMessageChars)
@@ -326,68 +326,18 @@ func validateProfileSuggestions(values []ProfileSuggestion, request ProfileDraft
 	return result, nil
 }
 
-func profileDraftValueLimit(field string) int {
-	if field == "intended-purpose" {
-		return 1000
-	}
-	if field == "users" || field == "affected-groups" {
-		return 200
-	}
-	return 80
-}
-
-func enumSet(values ...string) map[string]struct{} {
-	result := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		result[value] = struct{}{}
-	}
-	return result
-}
-
-var profileDraftAllowedValues = map[string]map[string]struct{}{
-	"intended-purpose":      nil,
-	"lifecycle-stage":       enumSet("development", "testing"),
-	"use-case-domains":      enumSet("biometrics", "critical-infrastructure", "education", "employment", "essential-services", "law-enforcement", "migration-border-control", "justice-democratic-processes", "healthcare", "software-development", "general-purpose", "other"),
-	"decision-impact":       enumSet("advisory", "low", "significant", "autonomous"),
-	"human-oversight":       enumSet("required", "available", "limited"),
-	"ai-activities":         enumSet("inference", "training", "fine-tuning", "evaluation", "automated-decision", "agent-tool-use", "synthetic-content"),
-	"deployment-models":     enumSet("internal", "private-customer", "public", "open-source", "embedded", "api", "local-cli"),
-	"users":                 nil,
-	"affected-groups":       nil,
-	"personal-data":         enumSet("yes"),
-	"special-category-data": enumSet("yes"),
-	"children-data":         enumSet("yes"),
-}
-
-var profileDraftPositiveOnlyFields = map[string]struct{}{
-	"personal-data": {}, "special-category-data": {}, "children-data": {},
-}
-
-var profileDraftPositiveEvidenceFields = map[string]struct{}{
-	"lifecycle-stage": {}, "decision-impact": {}, "human-oversight": {}, "deployment-models": {},
-}
-
 func profileDraftSchema() map[string]any {
-	fields := make([]string, 0, len(profileDraftAllowedValues))
-	for field := range profileDraftAllowedValues {
-		fields = append(fields, field)
-	}
-	sort.Strings(fields)
+	fields := profile.CodeFactFields()
 	suggestionSchemas := make([]any, 0, len(fields))
 	for _, field := range fields {
 		valueItems := map[string]any{"type": "string"}
-		if allowed := profileDraftAllowedValues[field]; allowed != nil {
-			values := make([]string, 0, len(allowed))
-			for value := range allowed {
-				values = append(values, value)
-			}
-			sort.Strings(values)
-			valueItems["enum"] = values
+		if allowed, _ := profile.CodeFactAllowedValues(field); allowed != nil {
+			valueItems["enum"] = allowed
 		}
 		suggestionSchemas = append(suggestionSchemas, map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"field":      map[string]any{"type": "string", "const": field},
+				"field":      map[string]any{"type": "string", "const": string(field)},
 				"values":     map[string]any{"type": "array", "items": valueItems, "minItems": 1, "maxItems": maxProfileDraftValues},
 				"confidence": map[string]any{"type": "string", "enum": []string{"low", "medium", "high"}},
 				"rationale":  map[string]any{"type": "string", "maxLength": 600},
@@ -439,7 +389,7 @@ You may suggest only these fields:
 - decision-impact: advisory, low, significant, autonomous
 - human-oversight: required, available, limited; never infer none from missing evidence
 - ai-activities: inference, training, fine-tuning, evaluation, automated-decision, agent-tool-use, synthetic-content
-- deployment-models: internal, private-customer, public, open-source, embedded, api, local-cli
+- deployment-models: embedded, api, local-cli
 - users and affected-groups
 - personal-data, special-category-data, and children-data: yes only when positive code or schema evidence exists; never infer no from absence
 
@@ -457,6 +407,6 @@ Interpret the controlled values narrowly:
 - essential-services requires an actual workflow concerning access to an essential public or private service; an ordinary service API or customer-support workflow does not establish it
 - software-development means the AI system assists programming or software-engineering work; the mere fact that the repository contains software does not establish it
 - other is appropriate when the repository positively identifies a domain, such as ordinary customer support, that is outside the named categories
-- api and public may both apply when executable code defines a network endpoint and repository evidence explicitly describes it as public
+- embedded and api may both apply when executable code both integrates the model client and defines a network endpoint
 
 Omit a field unless supplied repository evidence directly supports it. Never return unknown, no, none, or another placeholder: omit that field instead. Never infer operating regions, organisation role, actual production use, contracts, legal applicability, legal risk class, or compliance. A deployment file can support a deployment mechanism but cannot prove that deployment is active. A policy or README claim is weaker than executable code or configuration. Every suggestion must cite the supplied path and actual line that supports the value; describe only what that evidence shows and explain uncertainty. Return only the requested structured object.`

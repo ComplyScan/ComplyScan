@@ -6,6 +6,7 @@ package providers
 import (
 	"context"
 
+	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
 
@@ -346,6 +347,26 @@ type RepositoryCitation struct {
 	Summary string `json:"summary"`
 }
 
+// RepositoryAIUseFactSet binds positive, repository-evident profile facts to
+// one exact model-discovered candidate ID or operator-confirmed AI-use ID.
+// These facts remain advisory drafts and never establish legal applicability,
+// organisation role, geographic operation, or actual production use.
+type RepositoryAIUseFactSet struct {
+	AIUseID             string                `json:"ai_use_id"`
+	Facts               []RepositoryAIUseFact `json:"facts"`
+	UnresolvedQuestions []string              `json:"unresolved_questions,omitempty"`
+}
+
+// RepositoryAIUseFact is one bounded profile field with one or more directly
+// supported values. Every fact must retain checked repository citations.
+type RepositoryAIUseFact struct {
+	Field      profile.CodeFactField `json:"field"`
+	Values     []string              `json:"values"`
+	Confidence string                `json:"confidence"`
+	Rationale  string                `json:"rationale"`
+	Evidence   []RepositoryCitation  `json:"evidence"`
+}
+
 // RepositoryAIUse is a model-discovered implementation or integration. It is
 // an advisory inventory candidate, not a legal classification.
 type RepositoryAIUse struct {
@@ -413,6 +434,7 @@ type RepositoryUnmappedObservation struct {
 type RepositorySectionResult struct {
 	Scope                 string                           `json:"scope"`
 	AIUses                []RepositoryAIUse                `json:"ai_uses"`
+	AIUseFacts            []RepositoryAIUseFactSet         `json:"ai_use_facts"`
 	ObjectiveObservations []RepositoryObjectiveObservation `json:"objective_observations"`
 	UnmappedObservations  []RepositoryUnmappedObservation  `json:"unmapped_observations"`
 	UnresolvedQuestions   []string                         `json:"unresolved_questions"`

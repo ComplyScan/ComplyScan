@@ -19,6 +19,9 @@ func (function reviewFunc) Review(ctx context.Context, request providers.ReviewR
 
 func TestQualifyAcceptsOneBoundStructuredObservation(t *testing.T) {
 	identity := CurrentIdentity(providers.Ollama, "test-model", "digest")
+	if identity.RepositoryPromptVersion != providers.RepositoryAnalysisPromptVersion {
+		t.Fatalf("repository prompt identity = %q, want %q", identity.RepositoryPromptVersion, providers.RepositoryAnalysisPromptVersion)
+	}
 	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
 	result, err := Qualify(context.Background(), reviewFunc(func(_ context.Context, request providers.ReviewRequest) (providers.ReviewResult, error) {
 		finding := request.Findings[0]
@@ -80,9 +83,12 @@ func TestCacheBindsIdentityExpiresAndUsesPrivatePermissions(t *testing.T) {
 		t.Fatalf("lookup result=%#v found=%t err=%v", got, found, err)
 	}
 	changed := identity
-	changed.ProfileDraftPromptVersion++
+	changed.RepositoryPromptVersion = "older-contract"
 	if _, found, err := reopened.Lookup(changed, now.Add(time.Hour)); err != nil || found {
 		t.Fatalf("changed contract found=%t err=%v", found, err)
+	}
+	if cacheSchemaVersion != 3 || cacheFileName != "model-qualification-v3.json" {
+		t.Fatalf("qualification cache contract = schema %d file %q", cacheSchemaVersion, cacheFileName)
 	}
 	if _, found, err := reopened.Lookup(identity, result.ExpiresAt); err != nil || found {
 		t.Fatalf("expired result found=%t err=%v", found, err)

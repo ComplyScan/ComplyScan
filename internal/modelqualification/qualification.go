@@ -25,6 +25,7 @@ type Identity struct {
 	ModelDigest                  string         `json:"model_digest,omitempty"`
 	ReviewPromptVersion          int            `json:"review_prompt_version"`
 	ProfileDraftPromptVersion    int            `json:"profile_draft_prompt_version"`
+	RepositoryPromptVersion      string         `json:"repository_analysis_prompt_version"`
 	TechnicalReviewPromptVersion string         `json:"technical_review_prompt_version"`
 }
 
@@ -42,6 +43,7 @@ func CurrentIdentity(provider providers.Kind, model, digest string) Identity {
 	return Identity{
 		Provider: provider, Model: strings.TrimSpace(model), ModelDigest: strings.TrimSpace(digest),
 		ReviewPromptVersion: providers.ReviewPromptVersion, ProfileDraftPromptVersion: providers.ProfileDraftPromptVersion,
+		RepositoryPromptVersion:      providers.RepositoryAnalysisPromptVersion,
 		TechnicalReviewPromptVersion: providers.TechnicalReviewPromptVersion,
 	}
 }
@@ -85,7 +87,7 @@ func validateIdentity(identity Identity) error {
 	if identity.Provider == providers.None || strings.TrimSpace(string(identity.Provider)) == "" || strings.TrimSpace(identity.Model) == "" {
 		return errors.New("model qualification identity requires a provider and model")
 	}
-	if identity.ReviewPromptVersion <= 0 || identity.ProfileDraftPromptVersion <= 0 || strings.TrimSpace(identity.TechnicalReviewPromptVersion) == "" {
+	if identity.ReviewPromptVersion <= 0 || identity.ProfileDraftPromptVersion <= 0 || strings.TrimSpace(identity.RepositoryPromptVersion) == "" || strings.TrimSpace(identity.TechnicalReviewPromptVersion) == "" {
 		return errors.New("model qualification identity has an incomplete prompt contract")
 	}
 	if strings.ContainsAny(identity.Model, "\r\n\x00") || strings.ContainsAny(identity.ModelDigest, "\r\n\x00") || len(identity.Model) > 300 || len(identity.ModelDigest) > 300 {
