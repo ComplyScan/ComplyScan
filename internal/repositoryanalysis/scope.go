@@ -115,15 +115,14 @@ func ScopeChangedReview(fullRepository, changedRepository discovery.Repository) 
 	// Calls are not always statically resolvable. Direct imports still provide
 	// a bounded, explainable connection in either direction.
 	for _, repositoryImport := range graph.Imports {
+		matchedPaths := targetedImportedPaths(repositoryImport.Path, repositoryImport.ImportedPath, fullFiles)
 		if _, changed := changedPaths[repositoryImport.Path]; changed {
-			for path := range fullFiles {
-				if importedPathMatchesFile(repositoryImport.ImportedPath, path) {
-					addCandidate(path, 1)
-				}
+			for _, path := range matchedPaths {
+				addCandidate(path, 1)
 			}
 		}
-		for changedPath := range changedPaths {
-			if importedPathMatchesFile(repositoryImport.ImportedPath, changedPath) {
+		for _, matchedPath := range matchedPaths {
+			if _, changed := changedPaths[matchedPath]; changed {
 				addCandidate(repositoryImport.Path, 1)
 			}
 		}

@@ -28,9 +28,69 @@ const (
 )
 
 type targetedCandidate struct {
-	path    string
-	score   int
-	anchors []int
+	path        string
+	tier        targetedCandidateTier
+	score       int
+	anchor      int
+	anchorTier  targetedCandidateTier
+	anchorScore int
+}
+
+// targetedCandidateTier keeps executable AI workflows and their structural
+// neighborhood ahead of passive provider catalogues. ScopeRuntime only means
+// that a signal appeared outside a test path; it does not prove execution.
+type targetedCandidateTier int
+
+const (
+	targetedReferenceCandidate targetedCandidateTier = iota + 1
+	targetedImportCandidate
+	targetedEvidenceCandidate
+	targetedWorkflowCandidate
+	targetedInvocationCandidate
+)
+
+var targetedSDKInvocationMarkers = []string{
+	".responses.create",
+	".responses.new",
+	".chat.completions.create",
+	".completions.new",
+	".embeddings.create",
+	".embeddings.new",
+	".messages.create",
+	".messages.new",
+	".generate_content",
+	".generatecontent",
+	".generatetext",
+	".streamtext",
+	"ollama.chat",
+	"ollama.generate",
+	".invoke",
+	".ainvoke",
+	".predict",
+	".apredict",
+	".complete",
+	".acomplete",
+}
+
+var targetedTransportMarkers = []string{
+	"http.newrequest",
+	"http.newrequestwithcontext",
+	"httprequest.newbuilder",
+	"requests.post",
+	"requests.request",
+	"urllib.request",
+	"fetch",
+	"axios.post",
+	"client.do",
+}
+
+var targetedGenerationEndpointMarkers = []string{
+	"/v1/responses",
+	"/v1/messages",
+	"/v1beta/interactions",
+	"/chat/completions",
+	"/api/chat",
+	":generatecontent",
 }
 
 func runTargeted(
@@ -67,7 +127,7 @@ func runTargeted(
 			Result: providers.RepositorySectionResult{
 				Scope: ".", AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{}, ObjectiveObservations: []providers.RepositoryObjectiveObservation{},
 				UnmappedObservations: []providers.RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{
-					"No structurally relevant AI implementation or technical-objective code could be selected for model review.",
+					"No eligible AI implementation or technical-objective candidate could be selected for model review.",
 				},
 			},
 			Notes: []string{
@@ -80,7 +140,7 @@ func runTargeted(
 	inputBytes := requestContextBytes(selected, graphContext)
 	if err := progress(options, Progress{
 		Stage: "targeted-selection", Completed: len(selected), Total: considered, Scope: ".", InputBytes: inputBytes,
-		Detail: fmt.Sprintf("selected %d of %d structurally relevant file(s)", len(selected), considered),
+		Detail: fmt.Sprintf("selected %d of %d structural candidate file(s)", len(selected), considered),
 	}); err != nil {
 		return providers.RepositoryAnalysisResult{}, err
 	}
@@ -169,8 +229,8 @@ func runTargeted(
 	}
 	result.Coverage.Mode = providers.RepositoryAnalysisTargeted
 	result.Notes = append(result.Notes,
-		fmt.Sprintf("Targeted analysis selected %d of %d structurally relevant file(s) from %d discovered repository file(s).", len(selected), considered, len(repository.Files)),
-		"Selection used deterministic AI inventory signals, technical-objective matches, production entry points, and their bounded repository-graph neighborhood.",
+		fmt.Sprintf("Targeted analysis selected %d of %d structural candidate file(s) from %d discovered repository file(s).", len(selected), considered, len(repository.Files)),
+		"Selection prioritized executable AI call paths, their bounded caller and safeguard neighborhood, technical-objective matches, confirmed AI-use paths, and then passive provider references.",
 		"Files outside the evidence package were not reviewed by the model; absence of model evidence is not proof that an implementation is absent.",
 	)
 	if err := progress(options, Progress{Stage: "targeted-analysis", Completed: 1, Total: 1, Scope: ".", InputBytes: inputBytes}); err != nil {
@@ -262,7 +322,7 @@ func targetedRepositoryFiles(repository discovery.Repository, graph codegraph.Gr
 		files[file.Path] = file
 	}
 	candidates := make(map[string]*targetedCandidate)
-	add := func(path string, line, score int) {
+	add := func(path string, line int, tier targetedCandidateTier, score int) {
 		file, exists := files[path]
 		if !exists || !targetedFileKind(file.Kind) {
 			return
@@ -272,22 +332,23 @@ func targetedRepositoryFiles(repository discovery.Repository, graph codegraph.Gr
 			candidate = &targetedCandidate{path: path}
 			candidates[path] = candidate
 		}
-		if score > candidate.score {
-			candidate.score = score
+		if tier > candidate.tier || tier == candidate.tier && score > candidate.score {
+			candidate.tier, candidate.score = tier, score
 		}
-		if line > 0 && !containsInt(candidate.anchors, line) {
-			candidate.anchors = append(candidate.anchors, line)
+		if line > 0 && (candidate.anchor == 0 || tier > candidate.anchorTier ||
+			tier == candidate.anchorTier && (score > candidate.anchorScore || score == candidate.anchorScore && line < candidate.anchor)) {
+			candidate.anchor, candidate.anchorTier, candidate.anchorScore = line, tier, score
 		}
 	}
-	addContext := func(value codegraph.ContextPackage, score int) {
+	addContext := func(value codegraph.ContextPackage, tier targetedCandidateTier, score int) {
 		if value.Anchor != nil {
-			add(value.Anchor.Path, value.Anchor.StartLine, score)
+			add(value.Anchor.Path, value.Anchor.StartLine, tier, score)
 		}
 		for _, related := range value.RelatedSymbols {
-			add(related.Path, related.StartLine, score-10)
+			add(related.Path, related.StartLine, tier, score-10)
 		}
 		for _, relationship := range value.Relationships {
-			add(relationship.Path, relationship.Line, score-15)
+			add(relationship.Path, relationship.Line, tier, score-15)
 		}
 	}
 
@@ -296,23 +357,33 @@ func targetedRepositoryFiles(repository discovery.Repository, graph codegraph.Gr
 		if !exists || !targetedInventoryAnchor(file.Kind, signal) {
 			continue
 		}
-		score := 65
-		switch signal.Scope {
-		case inventory.ScopeRuntime:
-			score = 100
-		case inventory.ScopeTest:
-			score = 55
+		tier, score := targetedReferenceCandidate, 55
+		if signal.EvidenceType == inventory.EvidenceImport {
+			tier, score = targetedImportCandidate, 70
 		}
-		add(signal.Path, signal.Line, score)
-		if file.Kind == discovery.KindSource && signal.Line > 0 {
-			addContext(graph.ContextFor(signal.Path, signal.Line, 30), score-5)
+		if signal.Scope == inventory.ScopeTest {
+			tier, score = targetedReferenceCandidate, 45
+		}
+		anchor := signal.Line
+		if signal.Scope == inventory.ScopeRuntime && file.Kind == discovery.KindSource {
+			if invocationLine := targetedInvocationAnchor(file, graph); invocationLine > 0 {
+				tier, score, anchor = targetedInvocationCandidate, 120, invocationLine
+			}
+		}
+		add(signal.Path, anchor, tier, score)
+		if file.Kind == discovery.KindSource && anchor > 0 {
+			contextTier := tier
+			if tier == targetedInvocationCandidate {
+				contextTier = targetedWorkflowCandidate
+			}
+			addContext(graph.ContextFor(signal.Path, anchor, 30), contextTier, score-5)
 		}
 	}
 	for _, report := range reports {
 		for _, objective := range report.Objectives {
 			for _, match := range objective.Matches {
-				add(match.Path, match.StartLine, 90)
-				addContext(match.Context, 85)
+				add(match.Path, match.StartLine, targetedEvidenceCandidate, 90)
+				addContext(match.Context, targetedEvidenceCandidate, 85)
 			}
 		}
 	}
@@ -320,26 +391,25 @@ func targetedRepositoryFiles(repository discovery.Repository, graph codegraph.Gr
 		definition := aiuse.Use{Paths: append([]string(nil), use.Paths...)}
 		for path, file := range files {
 			if targetedFileKind(file.Kind) && aiuse.UseMatchesPath(definition, path) {
-				add(path, 1, 70)
+				add(path, 1, targetedEvidenceCandidate, 80)
 			}
 		}
 	}
 	for depth := 0; depth < 2; depth++ {
-		known := make(map[string]int, len(candidates))
+		known := make(map[string]targetedCandidate, len(candidates))
 		for path, candidate := range candidates {
-			known[path] = candidate.score
+			known[path] = *candidate
 		}
 		for _, imported := range graph.Imports {
-			if score, exists := known[imported.Path]; exists {
-				for path := range files {
-					if importedPathMatchesFile(imported.ImportedPath, path) {
-						add(path, 1, score-20)
-					}
+			matchedPaths := targetedImportedPaths(imported.Path, imported.ImportedPath, files)
+			if candidate, exists := known[imported.Path]; exists {
+				for _, path := range matchedPaths {
+					add(path, 1, lowerTargetedTier(candidate.tier), candidate.score-20)
 				}
 			}
-			for path, score := range known {
-				if importedPathMatchesFile(imported.ImportedPath, path) {
-					add(imported.Path, 1, score-20)
+			for _, path := range matchedPaths {
+				if candidate, exists := known[path]; exists {
+					add(imported.Path, 1, lowerTargetedTier(candidate.tier), candidate.score-20)
 				}
 			}
 		}
@@ -347,44 +417,81 @@ func targetedRepositoryFiles(repository discovery.Repository, graph codegraph.Gr
 	if len(candidates) == 0 {
 		for _, symbol := range graph.Symbols {
 			if symbol.EntryPoint && symbol.Reachability != codegraph.ReachableTestOnly {
-				add(symbol.Path, symbol.StartLine, 35)
+				add(symbol.Path, symbol.StartLine, targetedReferenceCandidate, 35)
 			}
 		}
 	}
 
 	ordered := make([]targetedCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		sort.Ints(candidate.anchors)
 		ordered = append(ordered, *candidate)
 	}
 	sort.Slice(ordered, func(i, j int) bool {
-		if ordered[i].score != ordered[j].score {
-			return ordered[i].score > ordered[j].score
-		}
-		return ordered[i].path < ordered[j].path
+		return targetedCandidateBefore(ordered[i], ordered[j])
 	})
 
 	selected := make([]providers.RepositorySourceFile, 0, len(ordered))
-	for _, candidate := range ordered {
+	selectedPaths := make(map[string]struct{}, len(ordered))
+	selectCandidate := func(candidate targetedCandidate) {
+		if _, exists := selectedPaths[candidate.path]; exists {
+			return
+		}
 		remaining := budget - requestContextBytes(selected, repositoryGraphContext(graph, selected))
 		if remaining <= 256 {
-			break
+			return
 		}
 		maximum := targetedMaximumFileBytes
 		if int64(maximum) > remaining/2 {
 			maximum = int(remaining / 2)
 		}
 		if maximum < 256 {
-			break
+			return
 		}
-		prepared := targetedSourceFile(files[candidate.path], candidate.anchors, maximum)
+		prepared := targetedSourceFile(files[candidate.path], []int{candidate.anchor}, maximum)
 		trial := append(append([]providers.RepositorySourceFile(nil), selected...), prepared)
 		if requestContextBytes(trial, repositoryGraphContext(graph, trial)) > budget {
-			continue
+			return
 		}
 		selected = trial
+		selectedPaths[candidate.path] = struct{}{}
+	}
+	// A human-confirmed use is stronger scope information than a speculative
+	// graph neighbor. Give each confirmed use one representative before the
+	// global ranked fill so it cannot silently disappear from a tight request.
+	for _, candidate := range targetedConfirmedReservations(ordered, confirmedUses) {
+		selectCandidate(candidate)
+	}
+	for _, candidate := range ordered {
+		selectCandidate(candidate)
 	}
 	return selected, len(ordered)
+}
+
+func targetedCandidateBefore(left, right targetedCandidate) bool {
+	if left.tier != right.tier {
+		return left.tier > right.tier
+	}
+	if left.score != right.score {
+		return left.score > right.score
+	}
+	return left.path < right.path
+}
+
+func targetedConfirmedReservations(ordered []targetedCandidate, confirmedUses []providers.RepositoryConfirmedAIUse) []targetedCandidate {
+	reservedPaths := make(map[string]struct{}, len(confirmedUses))
+	result := make([]targetedCandidate, 0, len(confirmedUses))
+	for _, use := range confirmedUses {
+		definition := aiuse.Use{Paths: append([]string(nil), use.Paths...)}
+		for _, candidate := range ordered {
+			if _, reserved := reservedPaths[candidate.path]; reserved || !aiuse.UseMatchesPath(definition, candidate.path) {
+				continue
+			}
+			result = append(result, candidate)
+			reservedPaths[candidate.path] = struct{}{}
+			break
+		}
+	}
+	return result
 }
 
 func targetedSourceFile(file discovery.File, anchors []int, maximum int) providers.RepositorySourceFile {
@@ -398,26 +505,45 @@ func targetedSourceFile(file discovery.File, anchors []int, maximum int) provide
 	if len(anchors) > 0 && anchors[0] > 0 {
 		anchor = anchors[0]
 	}
-	start := anchor - targetedContextLines
-	if start < 1 {
-		start = 1
+	if anchor > len(lines) {
+		anchor = len(lines)
 	}
-	end := anchor + targetedContextLines
-	if end > len(lines) {
-		end = len(lines)
-	}
-	var selected []string
-	bytes := 0
-	for _, line := range lines[start-1 : end] {
-		lineBytes := len(line) + 1
-		if len(selected) > 0 && bytes+lineBytes > maximum {
-			break
+	anchorIndex := anchor - 1
+	if len(lines[anchorIndex]) > maximum {
+		return providers.RepositorySourceFile{
+			Path: file.Path, Kind: string(file.Kind), LineCount: lineCount, ContentStartLine: anchor,
+			Content: lines[anchorIndex][:maximum],
 		}
-		selected = append(selected, line)
-		bytes += lineBytes
+	}
+	start, end := anchorIndex, anchorIndex+1
+	bytes := len(lines[anchorIndex])
+	beforeBlocked, afterBlocked := false, false
+	for (!beforeBlocked || !afterBlocked) && (anchorIndex-start < targetedContextLines || end-anchorIndex-1 < targetedContextLines) {
+		if !afterBlocked && end-anchorIndex-1 < targetedContextLines && end < len(lines) {
+			lineBytes := len(lines[end]) + 1
+			if bytes+lineBytes <= maximum {
+				bytes += lineBytes
+				end++
+			} else {
+				afterBlocked = true
+			}
+		} else {
+			afterBlocked = true
+		}
+		if !beforeBlocked && anchorIndex-start < targetedContextLines && start > 0 {
+			lineBytes := len(lines[start-1]) + 1
+			if bytes+lineBytes <= maximum {
+				bytes += lineBytes
+				start--
+			} else {
+				beforeBlocked = true
+			}
+		} else {
+			beforeBlocked = true
+		}
 	}
 	return providers.RepositorySourceFile{
-		Path: file.Path, Kind: string(file.Kind), LineCount: lineCount, ContentStartLine: start, Content: strings.Join(selected, "\n"),
+		Path: file.Path, Kind: string(file.Kind), LineCount: lineCount, ContentStartLine: start + 1, Content: strings.Join(lines[start:end], "\n"),
 	}
 }
 
@@ -441,7 +567,74 @@ func targetedInventoryAnchor(kind discovery.FileKind, signal inventory.Signal) b
 	return signal.EvidenceType == inventory.EvidenceDependency || signal.EvidenceType == inventory.EvidenceEnvironment || signal.EvidenceType == inventory.EvidenceEndpoint
 }
 
-func containsInt(values []int, wanted int) bool {
+func targetedInvocationAnchor(file discovery.File, graph codegraph.Graph) int {
+	if file.Kind != discovery.KindSource {
+		return 0
+	}
+	content := strings.ToLower(strings.ReplaceAll(string(file.Content), "\r\n", "\n"))
+	lines := strings.Split(content, "\n")
+	endpointNames := targetedGenerationEndpointNames(lines)
+	semanticTransportLine := 0
+	for _, edge := range graph.Edges {
+		if edge.Path != file.Path {
+			continue
+		}
+		label := strings.ToLower(strings.ReplaceAll(edge.Label, " ", ""))
+		for _, marker := range targetedSDKInvocationMarkers {
+			if strings.HasSuffix(label, marker) {
+				return edge.Line
+			}
+		}
+		if edge.Line > 0 && edge.Line <= len(lines) && (containsAnyTargetedMarker(lines[edge.Line-1], targetedGenerationEndpointMarkers) ||
+			containsAnyTargetedMarker(lines[edge.Line-1], endpointNames)) {
+			return edge.Line
+		}
+		if semanticTransportLine == 0 && containsAnyTargetedMarker(label, targetedTransportMarkers) {
+			context := graph.ContextFor(file.Path, edge.Line, 1)
+			if context.Anchor != nil && targetedGenerationSymbol(context.Anchor.QualifiedName) {
+				semanticTransportLine = edge.Line
+			}
+		}
+	}
+	return semanticTransportLine
+}
+
+func containsAnyTargetedMarker(value string, markers []string) bool {
+	for _, marker := range markers {
+		if strings.Contains(value, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func targetedGenerationEndpointNames(lines []string) []string {
+	var names []string
+	for _, line := range lines {
+		if !containsAnyTargetedMarker(line, targetedGenerationEndpointMarkers) {
+			continue
+		}
+		assignment := strings.Index(line, "=")
+		if assignment < 0 {
+			continue
+		}
+		fields := strings.Fields(strings.TrimSpace(line[:assignment]))
+		for _, field := range fields {
+			name := strings.Trim(field, " \t:,")
+			switch name {
+			case "const", "var", "let", "static", "final", "public", "private", "protected":
+				continue
+			}
+			if targetedIdentifier(name) && !containsTargetedString(names, name) {
+				names = append(names, name)
+				break
+			}
+		}
+	}
+	return names
+}
+
+func containsTargetedString(values []string, wanted string) bool {
 	for _, value := range values {
 		if value == wanted {
 			return true
@@ -450,24 +643,114 @@ func containsInt(values []int, wanted int) bool {
 	return false
 }
 
+func targetedIdentifier(value string) bool {
+	if value == "" {
+		return false
+	}
+	for index, character := range value {
+		if character == '_' || character >= 'a' && character <= 'z' || character >= '0' && character <= '9' && index > 0 {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func targetedGenerationSymbol(value string) bool {
+	value = strings.ToLower(value)
+	return containsAnyTargetedMarker(value, []string{"chat", "completion", "generate", "inference", "interaction", "message", "predict", "response"})
+}
+
+func lowerTargetedTier(tier targetedCandidateTier) targetedCandidateTier {
+	if tier <= targetedReferenceCandidate {
+		return targetedReferenceCandidate
+	}
+	return tier - 1
+}
+
 func importedPathMatchesFile(importedPath, filePath string) bool {
+	return targetedImportedPathMatchScore(importedPath, filePath) > 0
+}
+
+func targetedImportedPaths(importerPath, importedPath string, files map[string]discovery.File) []string {
+	importedPath = targetedResolvedImportPath(importerPath, importedPath)
+	bestScore := 0
+	var result []string
+	for path := range files {
+		score := targetedImportedPathMatchScore(importedPath, path)
+		if score == 0 || score < bestScore {
+			continue
+		}
+		if score > bestScore {
+			bestScore = score
+			result = result[:0]
+		}
+		result = append(result, path)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func targetedResolvedImportPath(importerPath, importedPath string) string {
+	value := strings.Trim(strings.TrimSpace(strings.ReplaceAll(importedPath, "\\", "/")), `"'`)
+	if importerPath == "" || !strings.HasPrefix(value, "./") && !strings.HasPrefix(value, "../") {
+		return value
+	}
+	return filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(filepath.ToSlash(importerPath)), value)))
+}
+
+func targetedImportedPathMatchScore(importedPath, filePath string) int {
 	importedPath = strings.Trim(strings.TrimSpace(strings.ReplaceAll(importedPath, "\\", "/")), `"'`)
-	filePath = strings.TrimSuffix(strings.ReplaceAll(filePath, "\\", "/"), filepathExtension(filePath))
+	filePath = trimTargetedSourceExtension(strings.ReplaceAll(filePath, "\\", "/"))
 	filePath = strings.TrimSuffix(filePath, "/index")
-	importedPath = strings.TrimSuffix(importedPath, filepathExtension(importedPath))
+	importedPath = trimTargetedSourceExtension(importedPath)
 	importedPath = strings.TrimPrefix(importedPath, "./")
 	importedPath = strings.TrimSuffix(importedPath, "/index")
 	if importedPath == "" || filePath == "" {
-		return false
+		return 0
 	}
-	return filePath == importedPath || strings.HasSuffix(filePath, "/"+importedPath) || strings.HasSuffix(importedPath, "/"+filePath)
+	primaryVariants := []string{importedPath}
+	var fallbackVariants []string
+	if !strings.Contains(importedPath, "/") && strings.Contains(strings.TrimLeft(importedPath, "."), ".") {
+		dotted := strings.ReplaceAll(strings.TrimLeft(importedPath, "."), ".", "/")
+		primaryVariants = append(primaryVariants, dotted)
+		if strings.Contains(dotted, "/") {
+			parent := strings.TrimSuffix(dotted, "/"+filepath.Base(dotted))
+			fallbackVariants = append(fallbackVariants, parent)
+		}
+	}
+	for _, variant := range primaryVariants {
+		if score := targetedPathVariantScore(variant, filePath); score > 0 {
+			return score
+		}
+	}
+	for _, variant := range fallbackVariants {
+		if score := targetedPathVariantScore(variant, filePath); score > 1 {
+			return score - 1
+		}
+	}
+	return 0
 }
 
-func filepathExtension(path string) string {
-	lastSlash := strings.LastIndex(path, "/")
-	lastDot := strings.LastIndex(path, ".")
-	if lastDot <= lastSlash {
-		return ""
+func targetedPathVariantScore(importedPath, filePath string) int {
+	switch {
+	case filePath == importedPath:
+		return 4
+	case strings.HasSuffix(filePath, "/"+importedPath):
+		return 3
+	case strings.HasSuffix(importedPath, "/"+filePath):
+		return 2
+	default:
+		return 0
 	}
-	return path[lastDot:]
+}
+
+func trimTargetedSourceExtension(path string) string {
+	lower := strings.ToLower(path)
+	for _, extension := range []string{".py", ".pyi", ".go", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".java", ".kt", ".kts"} {
+		if strings.HasSuffix(lower, extension) {
+			return path[:len(path)-len(extension)]
+		}
+	}
+	return path
 }
