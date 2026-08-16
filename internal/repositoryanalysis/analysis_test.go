@@ -288,6 +288,53 @@ func TestRunUsesSubsystemsAndSynthesisWhenRepositoryExceedsBudget(t *testing.T) 
 	}
 }
 
+func TestNamespaceSubsystemCandidateIDsPreventsCrossSubsystemCollisions(t *testing.T) {
+	base := providers.RepositorySectionResult{
+		Scope: "subsystem",
+		AIUses: []providers.RepositoryAIUse{{
+			ID: "assistant", Name: "Assistant", Purpose: "Draft text", Confidence: "medium",
+			Evidence: []providers.RepositoryCitation{{Path: "app.go", Line: 1, Summary: "Model call."}},
+		}},
+		AIUseFacts: []providers.RepositoryAIUseFactSet{
+			{AIUseID: "assistant", Facts: []providers.RepositoryAIUseFact{}, UnresolvedQuestions: []string{}},
+			{AIUseID: "confirmed-use", Facts: []providers.RepositoryAIUseFact{}, UnresolvedQuestions: []string{}},
+		},
+	}
+	first, err := namespaceSubsystemCandidateIDs(base, 0, "api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := namespaceSubsystemCandidateIDs(base, 1, "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.AIUses[0].ID == second.AIUses[0].ID || first.AIUses[0].ID == "assistant" || second.AIUses[0].ID == "assistant" {
+		t.Fatalf("candidate IDs were not uniquely namespaced: %q, %q", first.AIUses[0].ID, second.AIUses[0].ID)
+	}
+	if first.AIUseFacts[0].AIUseID != first.AIUses[0].ID || second.AIUseFacts[0].AIUseID != second.AIUses[0].ID {
+		t.Fatalf("candidate fact IDs were not rewritten: first=%#v second=%#v", first.AIUseFacts, second.AIUseFacts)
+	}
+	if first.AIUseFacts[1].AIUseID != "confirmed-use" || second.AIUseFacts[1].AIUseID != "confirmed-use" {
+		t.Fatalf("confirmed IDs must remain stable: first=%#v second=%#v", first.AIUseFacts, second.AIUseFacts)
+	}
+}
+
+func TestBindConfirmedAIUsesForSynthesisPreservesReviewedEmptyCoverage(t *testing.T) {
+	uses := []providers.RepositoryConfirmedAIUse{
+		{ID: "support-replies", Name: "Support replies", Paths: []string{"support/**"}},
+		{ID: "ranking", Name: "Ranking", Paths: []string{"ranking/**"}},
+	}
+	summaries := []providers.RepositorySectionResult{{
+		AIUseFacts: []providers.RepositoryAIUseFactSet{{
+			AIUseID: "support-replies", Facts: []providers.RepositoryAIUseFact{}, UnresolvedQuestions: []string{"Runtime use is not established."},
+		}},
+	}}
+	bound := bindConfirmedAIUsesForSynthesis(uses, nil, summaries)
+	if len(bound) != 1 || bound[0].ID != "support-replies" || bound[0].SubmittedFiles == nil || len(bound[0].SubmittedFiles) != 0 {
+		t.Fatalf("reviewed-empty confirmed use was not preserved safely: %#v", bound)
+	}
+}
+
 func TestRunAdaptivelySplitsOversizedSubsystemAndLargeFile(t *testing.T) {
 	reviewer := &adaptiveReviewer{maxSourceBytes: 700}
 	var progressEvents []Progress
@@ -500,5 +547,26 @@ func TestValidateSystemAttributionUsesConfirmedUseScopeWithoutGlobalOwnership(t 
 	result.ObjectiveObservations[0].SupportingEvidence[0].Path = "ranking/review.go"
 	if err := validateSystemAttribution(result, []profile.System{{ID: "support"}, {ID: "ranking"}}, nil, uses); err == nil || !strings.Contains(err.Error(), "outside confirmed AI use") {
 		t.Fatalf("expected confirmed-use scope failure, got %v", err)
+	}
+}
+
+func TestCitedFileIndexIncludesAIUseFactEvidence(t *testing.T) {
+	summaries := []providers.RepositorySectionResult{{
+		AIUseFacts: []providers.RepositoryAIUseFactSet{{
+			AIUseID: "support-replies",
+			Facts: []providers.RepositoryAIUseFact{{
+				Field: profile.CodeFactHumanOversight, Values: []string{"required"}, Confidence: "high",
+				Rationale: "The workflow calls an approval gate.",
+				Evidence:  []providers.RepositoryCitation{{Path: "support/review.go", Line: 2, Summary: "Approval gate."}},
+			}},
+		}},
+	}}
+	files := []providers.RepositorySourceFile{
+		{Path: "support/model.go", Kind: "source", LineCount: 10},
+		{Path: "support/review.go", Kind: "source", LineCount: 20},
+	}
+	index := citedFileIndex(summaries, files)
+	if len(index) != 1 || index[0].Path != "support/review.go" || index[0].LineCount != 20 {
+		t.Fatalf("fact citation index = %#v", index)
 	}
 }

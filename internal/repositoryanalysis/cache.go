@@ -22,9 +22,9 @@ import (
 )
 
 const (
-	repositoryCacheSchemaVersion  = 1
-	repositoryCacheContextVersion = "1"
-	repositoryCacheFileName       = "repository-analysis-v1.json"
+	repositoryCacheSchemaVersion  = 3
+	repositoryCacheContextVersion = "3"
+	repositoryCacheFileName       = "repository-analysis-v3.json"
 	maxRepositoryCacheBytes       = 32 << 20
 	maxRepositoryCacheEntries     = 40
 	maxRepositoryCacheEntryBytes  = 2 << 20
@@ -245,15 +245,81 @@ func validateRepositoryCacheEntry(entry repositoryCacheEntry) error {
 	if result.Usage.PromptTokens < 0 || result.Usage.CompletionTokens < 0 || result.Usage.ReasoningTokens < 0 || result.Usage.TotalDurationNS < 0 {
 		return errors.New("repository analysis result contains negative usage")
 	}
-	if len(result.Result.AIUses) > 100 || len(result.Result.ObjectiveObservations) > 500 || len(result.Result.UnmappedObservations) > 100 || len(result.Result.UnresolvedQuestions) > 100 || len(result.Notes) > 100 {
+	if len(result.Result.AIUses) > 100 || len(result.Result.AIUseFacts) > 600 || len(result.Result.ObjectiveObservations) > 500 || len(result.Result.UnmappedObservations) > 100 || len(result.Result.UnresolvedQuestions) > 100 || len(result.Notes) > 100 {
 		return errors.New("repository analysis result exceeds cache item limits")
 	}
+	candidateEvidencePaths := make(map[string]map[string]struct{}, len(result.Result.AIUses))
 	for _, use := range result.Result.AIUses {
 		if strings.TrimSpace(use.ID) == "" || strings.TrimSpace(use.Name) == "" || !validRepositoryConfidence(use.Confidence) {
 			return errors.New("repository analysis cache contains an invalid AI use")
 		}
+		if _, duplicate := candidateEvidencePaths[use.ID]; duplicate {
+			return errors.New("repository analysis cache contains a duplicate AI use")
+		}
+		if len(use.Evidence) == 0 {
+			return errors.New("repository analysis cache contains an uncited AI use")
+		}
 		if err := validateRepositoryCitations(use.Evidence); err != nil {
 			return err
+		}
+		paths := make(map[string]struct{}, len(use.Evidence))
+		for _, citation := range use.Evidence {
+			paths[filepath.ToSlash(strings.TrimSpace(citation.Path))] = struct{}{}
+		}
+		candidateEvidencePaths[use.ID] = paths
+	}
+	seenFactSets := make(map[string]struct{}, len(result.Result.AIUseFacts))
+	for _, factSet := range result.Result.AIUseFacts {
+		if strings.TrimSpace(factSet.AIUseID) == "" || strings.TrimSpace(factSet.AIUseID) != factSet.AIUseID || len(factSet.Facts) > len(profile.CodeFactFields()) || len(factSet.UnresolvedQuestions) > 100 {
+			return errors.New("repository analysis cache contains an invalid AI-use fact set")
+		}
+		for _, question := range factSet.UnresolvedQuestions {
+			if strings.TrimSpace(question) == "" || len([]rune(question)) > 2000 {
+				return errors.New("repository analysis cache contains an invalid AI-use fact question")
+			}
+		}
+		if _, duplicate := seenFactSets[factSet.AIUseID]; duplicate {
+			return errors.New("repository analysis cache contains a duplicate AI-use fact set")
+		}
+		seenFactSets[factSet.AIUseID] = struct{}{}
+		seenFields := make(map[profile.CodeFactField]struct{}, len(factSet.Facts))
+		for _, fact := range factSet.Facts {
+			field, supported := profile.ParseCodeFactField(string(fact.Field))
+			if !supported || len(fact.Values) == 0 || len(fact.Values) > 8 || !validRepositoryConfidence(fact.Confidence) || strings.TrimSpace(fact.Rationale) == "" || len(fact.Evidence) == 0 {
+				return errors.New("repository analysis cache contains an invalid AI-use fact")
+			}
+			if _, duplicate := seenFields[field]; duplicate {
+				return errors.New("repository analysis cache contains a duplicate AI-use fact field")
+			}
+			seenFields[field] = struct{}{}
+			seenValues := make(map[string]struct{}, len(fact.Values))
+			for _, value := range fact.Values {
+				if strings.TrimSpace(value) != value || !profile.CodeFactAllowsValue(field, value) || len([]rune(value)) > profile.CodeFactValueLimit(field) {
+					return errors.New("repository analysis cache contains an invalid AI-use fact value")
+				}
+				if _, duplicate := seenValues[value]; duplicate {
+					return errors.New("repository analysis cache contains a duplicate AI-use fact value")
+				}
+				seenValues[value] = struct{}{}
+			}
+			if cacheFactReliesOnAbsence(fact) {
+				return errors.New("repository analysis cache contains an absence-based AI-use fact")
+			}
+			if err := validateRepositoryCitations(fact.Evidence); err != nil {
+				return err
+			}
+			if candidatePaths, candidate := candidateEvidencePaths[factSet.AIUseID]; candidate {
+				for _, citation := range fact.Evidence {
+					if _, allowed := candidatePaths[filepath.ToSlash(strings.TrimSpace(citation.Path))]; !allowed {
+						return errors.New("repository analysis cache contains a candidate fact citation outside that AI use's evidence paths")
+					}
+				}
+			}
+		}
+	}
+	for useID := range candidateEvidencePaths {
+		if _, reviewed := seenFactSets[useID]; !reviewed {
+			return errors.New("repository analysis cache omits a required candidate AI-use fact set")
 		}
 	}
 	for _, observation := range result.Result.ObjectiveObservations {
@@ -290,6 +356,23 @@ func validateRepositoryCitations(citations []providers.RepositoryCitation) error
 		}
 	}
 	return nil
+}
+
+func cacheFactReliesOnAbsence(value providers.RepositoryAIUseFact) bool {
+	parts := append([]string{value.Rationale}, value.Values...)
+	for _, citation := range value.Evidence {
+		parts = append(parts, citation.Summary)
+	}
+	text := strings.ToLower(strings.Join(parts, " "))
+	for _, phrase := range []string{
+		"no evidence", "without evidence", "lack of evidence", "lacks evidence", "absence of",
+		"not found", "not detected", "no indication", "not established", "does not show", "does not contain",
+	} {
+		if strings.Contains(text, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func validRepositoryConfidence(value string) bool {

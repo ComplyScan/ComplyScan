@@ -4,6 +4,7 @@ package repositoryanalysis
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -97,7 +98,7 @@ func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository
 		return providers.RepositoryAnalysisResult{
 			Provider: options.Provider, Model: options.Model,
 			Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisFull, RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository)},
-			Result:   providers.RepositorySectionResult{Scope: ".", AIUses: []providers.RepositoryAIUse{}, ObjectiveObservations: []providers.RepositoryObjectiveObservation{}, UnmappedObservations: []providers.RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{}},
+			Result:   providers.RepositorySectionResult{Scope: ".", AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{}, ObjectiveObservations: []providers.RepositoryObjectiveObservation{}, UnmappedObservations: []providers.RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{}},
 			Notes:    []string{"No eligible text files were available for repository model analysis."},
 		}, nil
 	}
@@ -222,7 +223,11 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership, confirmedUses); err != nil {
 			return providers.RepositoryAnalysisResult{}, fmt.Errorf("analyze subsystem %s: %w", chunk.scope, err)
 		}
-		summaries = append(summaries, result.Result)
+		namespaced, err := namespaceSubsystemCandidateIDs(result.Result, index, chunk.scope)
+		if err != nil {
+			return providers.RepositoryAnalysisResult{}, fmt.Errorf("analyze subsystem %s: %w", chunk.scope, err)
+		}
+		summaries = append(summaries, namespaced)
 		addUsage(&aggregate.Usage, result.Usage)
 		aggregate.Coverage.FilesSubmitted += result.Coverage.FilesSubmitted
 		aggregate.Coverage.BytesSubmitted += result.Coverage.BytesSubmitted
@@ -251,10 +256,11 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			if maxOutputTokens == 0 {
 				maxOutputTokens = repositoryOutputTokens(options.Provider, adaptiveTokenLimit)
 			}
+			fileIndex := citedFileIndex(group.summaries, files)
 			request := providers.RepositoryAnalysisRequest{
 				Mode: providers.RepositoryAnalysisSynthesis, Scope: scope,
-				RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), FileIndex: citedFileIndex(group.summaries, files),
-				Objectives: objectives, Systems: systems, ConfirmedAIUses: bindConfirmedAIUses(confirmedUses, fileReferencePaths(citedFileIndex(group.summaries, files))), SubsystemSummaries: group.summaries, MaxOutputTokens: maxOutputTokens,
+				RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), FileIndex: fileIndex,
+				Objectives: objectives, Systems: systems, ConfirmedAIUses: bindConfirmedAIUsesForSynthesis(confirmedUses, fileReferencePaths(fileIndex), group.summaries), SubsystemSummaries: group.summaries, MaxOutputTokens: maxOutputTokens,
 			}
 			result, err := reviewRepositoryWithRetry(ctx, reviewer, request, options)
 			if err != nil {
@@ -323,10 +329,11 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		maxOutputTokens := repositoryOutputTokens(options.Provider, adaptiveTokenLimit)
 		var result providers.RepositoryAnalysisResult
 		for {
+			fileIndex := citedFileIndex(group, files)
 			request := providers.RepositoryAnalysisRequest{
 				Mode: providers.RepositoryAnalysisSynthesis, Scope: "repository-synthesis",
-				RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), FileIndex: citedFileIndex(group, files),
-				Objectives: objectives, Systems: systems, ConfirmedAIUses: bindConfirmedAIUses(confirmedUses, fileReferencePaths(citedFileIndex(group, files))), SubsystemSummaries: group, MaxOutputTokens: maxOutputTokens,
+				RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), FileIndex: fileIndex,
+				Objectives: objectives, Systems: systems, ConfirmedAIUses: bindConfirmedAIUsesForSynthesis(confirmedUses, fileReferencePaths(fileIndex), group), SubsystemSummaries: group, MaxOutputTokens: maxOutputTokens,
 			}
 			result, err = reviewRepositoryWithRetry(ctx, reviewer, request, options)
 			if err == nil {
@@ -375,6 +382,44 @@ type repositoryChunk struct {
 	scope           string
 	files           []providers.RepositorySourceFile
 	maxOutputTokens int
+}
+
+// namespaceSubsystemCandidateIDs makes model-generated candidate identities
+// globally distinct before hierarchical synthesis. Candidate IDs are only
+// stable inside one bounded subsystem response; two unrelated subsystems may
+// otherwise both return a generic ID such as "assistant" and be falsely
+// merged. Confirmed operator-owned IDs are not changed.
+func namespaceSubsystemCandidateIDs(summary providers.RepositorySectionResult, subsystemIndex int, scope string) (providers.RepositorySectionResult, error) {
+	summary.AIUses = append([]providers.RepositoryAIUse(nil), summary.AIUses...)
+	summary.AIUseFacts = append([]providers.RepositoryAIUseFactSet(nil), summary.AIUseFacts...)
+	rewritten := make(map[string]string, len(summary.AIUses))
+	seen := make(map[string]struct{}, len(summary.AIUses))
+	for index := range summary.AIUses {
+		oldID := summary.AIUses[index].ID
+		if oldID == "" {
+			return providers.RepositorySectionResult{}, errors.New("cannot namespace an empty subsystem candidate AI-use ID")
+		}
+		digest := sha256.Sum256([]byte(scope + "\x00" + oldID))
+		prefix := fmt.Sprintf("subsystem-%04d-%x--", subsystemIndex+1, digest[:6])
+		maxIDRunes := 200 - len([]rune(prefix))
+		candidateRunes := []rune(oldID)
+		if len(candidateRunes) > maxIDRunes {
+			candidateRunes = candidateRunes[:maxIDRunes]
+		}
+		newID := prefix + string(candidateRunes)
+		if _, duplicate := seen[newID]; duplicate {
+			return providers.RepositorySectionResult{}, fmt.Errorf("subsystem candidate namespace collision for %q", oldID)
+		}
+		seen[newID] = struct{}{}
+		rewritten[oldID] = newID
+		summary.AIUses[index].ID = newID
+	}
+	for index := range summary.AIUseFacts {
+		if newID, candidate := rewritten[summary.AIUseFacts[index].AIUseID]; candidate {
+			summary.AIUseFacts[index].AIUseID = newID
+		}
+	}
+	return summary, nil
 }
 
 func reviewRepositoryWithRetry(ctx context.Context, reviewer Reviewer, request providers.RepositoryAnalysisRequest, options Options) (providers.RepositoryAnalysisResult, error) {
@@ -844,6 +889,39 @@ func bindConfirmedAIUses(values []providers.RepositoryConfirmedAIUse, submittedP
 	return result
 }
 
+// bindConfirmedAIUsesForSynthesis preserves an explicitly reviewed confirmed
+// use even when its subsystem returned zero positive facts and therefore cited
+// no file. An empty SubmittedFiles scope carries only the reviewed-empty status
+// and unresolved questions forward; it cannot authorize a new fact citation.
+func bindConfirmedAIUsesForSynthesis(values []providers.RepositoryConfirmedAIUse, citedPaths []string, summaries []providers.RepositorySectionResult) []providers.RepositoryConfirmedAIUse {
+	reviewed := make(map[string]struct{})
+	for _, summary := range summaries {
+		for _, factSet := range summary.AIUseFacts {
+			reviewed[factSet.AIUseID] = struct{}{}
+		}
+	}
+	result := make([]providers.RepositoryConfirmedAIUse, 0, len(values))
+	for _, value := range values {
+		copy := value
+		copy.SubmittedFiles = nil
+		definition := aiuse.Use{Paths: append([]string(nil), value.Paths...)}
+		for _, path := range citedPaths {
+			if aiuse.UseMatchesPath(definition, path) {
+				copy.SubmittedFiles = append(copy.SubmittedFiles, path)
+			}
+		}
+		if len(copy.SubmittedFiles) == 0 {
+			if _, wasReviewed := reviewed[value.ID]; !wasReviewed {
+				continue
+			}
+			copy.SubmittedFiles = []string{}
+		}
+		sort.Strings(copy.SubmittedFiles)
+		result = append(result, copy)
+	}
+	return result
+}
+
 func sourceFilePaths(values []providers.RepositorySourceFile) []string {
 	result := make([]string, 0, len(values))
 	for _, value := range values {
@@ -960,6 +1038,11 @@ func citedFileIndex(summaries []providers.RepositorySectionResult, files []provi
 	for _, summary := range summaries {
 		for _, use := range summary.AIUses {
 			add(use.Evidence)
+		}
+		for _, factSet := range summary.AIUseFacts {
+			for _, fact := range factSet.Facts {
+				add(fact.Evidence)
+			}
 		}
 		for _, observation := range summary.ObjectiveObservations {
 			add(observation.SupportingEvidence)

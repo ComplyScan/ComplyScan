@@ -37,7 +37,7 @@ func TestRepositoryAnalysisCacheRoundTripAndInvalidation(t *testing.T) {
 		Model:    "test-model",
 		Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted, RepositoryFiles: 2, RepositoryBytes: 30, FilesSubmitted: 1, BytesSubmitted: 18},
 		Result: providers.RepositorySectionResult{
-			Scope: ".", AIUses: []providers.RepositoryAIUse{}, ObjectiveObservations: []providers.RepositoryObjectiveObservation{},
+			Scope: ".", AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{}, ObjectiveObservations: []providers.RepositoryObjectiveObservation{},
 			UnmappedObservations: []providers.RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{},
 		},
 		Usage: providers.Usage{PromptTokens: 500, CompletionTokens: 100},
@@ -113,6 +113,104 @@ func TestRepositoryAnalysisCacheRoundTripAndInvalidation(t *testing.T) {
 		if _, found, err := reopened.Lookup(changedIdentity, digest); err != nil || found {
 			t.Fatalf("changed %s lookup found=%v err=%v", name, found, err)
 		}
+	}
+}
+
+func TestRepositoryAnalysisCacheValidatesTypedAIUseFacts(t *testing.T) {
+	identity := CacheIdentity{
+		Provider: providers.OpenAI, Model: "test-model", PromptVersion: providers.RepositoryAnalysisPromptVersion,
+		EndpointDigest: DigestEndpoint("https://api.example.test/v1"),
+	}
+	digest := strings.Repeat("a", 64)
+	validResult := func() providers.RepositoryAnalysisResult {
+		return providers.RepositoryAnalysisResult{
+			Provider: providers.OpenAI, Model: "test-model",
+			Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted},
+			Result: providers.RepositorySectionResult{
+				Scope: ".",
+				AIUses: []providers.RepositoryAIUse{{
+					ID: "support-replies", Name: "Support replies", Purpose: "Draft replies", Confidence: "high",
+					Evidence: []providers.RepositoryCitation{{Path: "support/model.go", Line: 2, Summary: "Model call."}},
+				}},
+				AIUseFacts: []providers.RepositoryAIUseFactSet{{
+					AIUseID: "support-replies",
+					Facts: []providers.RepositoryAIUseFact{{
+						Field: profile.CodeFactAIActivities, Values: []string{"inference"}, Confidence: "high",
+						Rationale: "The handler invokes a model.",
+						Evidence:  []providers.RepositoryCitation{{Path: "support/model.go", Line: 2, Summary: "Model call."}},
+					}},
+					UnresolvedQuestions: []string{},
+				}},
+				ObjectiveObservations: []providers.RepositoryObjectiveObservation{},
+				UnmappedObservations:  []providers.RepositoryUnmappedObservation{},
+				UnresolvedQuestions:   []string{},
+			},
+		}
+	}
+	cache, err := OpenCache(filepath.Join(t.TempDir(), "repository-analysis.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cache.Store(identity, digest, validResult()); err != nil {
+		t.Fatalf("valid fact result was rejected: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*providers.RepositoryAnalysisResult)
+	}{
+		{name: "unknown field", mutate: func(result *providers.RepositoryAnalysisResult) {
+			result.Result.AIUseFacts[0].Facts[0].Field = profile.CodeFactField("operating-regions")
+		}},
+		{name: "duplicate field", mutate: func(result *providers.RepositoryAnalysisResult) {
+			result.Result.AIUseFacts[0].Facts = append(result.Result.AIUseFacts[0].Facts, result.Result.AIUseFacts[0].Facts[0])
+		}},
+		{name: "duplicate value", mutate: func(result *providers.RepositoryAnalysisResult) {
+			result.Result.AIUseFacts[0].Facts[0].Values = []string{"inference", "inference"}
+		}},
+		{name: "missing citation", mutate: func(result *providers.RepositoryAnalysisResult) {
+			result.Result.AIUseFacts[0].Facts[0].Evidence = nil
+		}},
+		{name: "absence based", mutate: func(result *providers.RepositoryAnalysisResult) {
+			result.Result.AIUseFacts[0].Facts[0].Rationale = "No evidence of another activity was found."
+		}},
+		{name: "candidate fact cites outside candidate evidence", mutate: func(result *providers.RepositoryAnalysisResult) {
+			result.Result.AIUseFacts[0].Facts[0].Evidence[0].Path = "support/other.go"
+		}},
+		{name: "missing candidate fact coverage", mutate: func(result *providers.RepositoryAnalysisResult) {
+			result.Result.AIUseFacts = nil
+		}},
+		{name: "uncited candidate", mutate: func(result *providers.RepositoryAnalysisResult) {
+			result.Result.AIUses[0].Evidence = nil
+		}},
+		{name: "duplicate candidate", mutate: func(result *providers.RepositoryAnalysisResult) {
+			result.Result.AIUses = append(result.Result.AIUses, result.Result.AIUses[0])
+		}},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			result := validResult()
+			testCase.mutate(&result)
+			if err := cache.Store(identity, digest, result); err == nil {
+				t.Fatal("expected invalid cached fact to be rejected")
+			}
+		})
+	}
+	reviewedEmpty := validResult()
+	reviewedEmpty.Result.AIUseFacts[0].Facts = []providers.RepositoryAIUseFact{}
+	reviewedEmpty.Result.AIUseFacts[0].UnresolvedQuestions = []string{"No positive profile fact was supported."}
+	if err := cache.Store(identity, digest, reviewedEmpty); err != nil {
+		t.Fatalf("reviewed-empty fact coverage was rejected: %v", err)
+	}
+}
+
+func TestDefaultRepositoryAnalysisCacheUsesCurrentFileVersion(t *testing.T) {
+	path, err := DefaultCachePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(path) != "repository-analysis-v3.json" || repositoryCacheContextVersion != "3" || repositoryCacheSchemaVersion != 3 {
+		t.Fatalf("cache version = path %q context %q schema %d", path, repositoryCacheContextVersion, repositoryCacheSchemaVersion)
 	}
 }
 

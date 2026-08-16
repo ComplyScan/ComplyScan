@@ -65,7 +65,7 @@ func runTargeted(
 				Mode: providers.RepositoryAnalysisTargeted, RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository),
 			},
 			Result: providers.RepositorySectionResult{
-				Scope: ".", AIUses: []providers.RepositoryAIUse{}, ObjectiveObservations: []providers.RepositoryObjectiveObservation{},
+				Scope: ".", AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{}, ObjectiveObservations: []providers.RepositoryObjectiveObservation{},
 				UnmappedObservations: []providers.RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{
 					"No structurally relevant AI implementation or technical-objective code could be selected for model review.",
 				},
