@@ -8,6 +8,7 @@ Thank you for helping make AI engineering review more practical.
 - Keep deterministic detection separate from legal interpretation.
 - Prefer conservative signals with an explainable path, line, confidence, and remediation.
 - Do not add telemetry or background network access. Any external processing must remain explicit, bounded, consented, documented, and covered by privacy and failure-path tests.
+- Treat `ai.review-on-scan` as repository intent, not transferable consent. Automatic model use must also require identity-bound private trust on the current machine; fresh CI runners need explicit one-run provider selection, and `--require-ai-review` must never grant consent by itself.
 - Never add real credentials or sensitive production material to fixtures.
 
 ## Development workflow
