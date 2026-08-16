@@ -41,31 +41,62 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Run deterministic Action contract
-        id: deterministic
+        with:
+          fetch-depth: 0
+      - name: Run automatic-scope Action contract
+        id: automatic_scope
         uses: ./
         with:
           path: testdata/non-ai-repository
-          sarif-file: deterministic.sarif
+          sarif-file: automatic-scope.sarif
           upload-results: "false"
-      - name: Check deterministic Action outputs
+      - name: Check automatic-scope Action outputs
         shell: bash
         env:
-          COMPLYSCAN_EXIT_CODE: ${{ steps.deterministic.outputs.exit-code }}
-          COMPLYSCAN_SARIF_FILE: ${{ steps.deterministic.outputs.sarif-file }}
+          COMPLYSCAN_EXIT_CODE: ${{ steps.automatic_scope.outputs.exit-code }}
+          COMPLYSCAN_JSON_REPORT: ${{ steps.automatic_scope.outputs.json-report }}
+          COMPLYSCAN_MARKDOWN_REPORT: ${{ steps.automatic_scope.outputs.markdown-report }}
+          COMPLYSCAN_SARIF_FILE: ${{ steps.automatic_scope.outputs.sarif-file }}
         run: |
           test "$COMPLYSCAN_EXIT_CODE" = "0"
           test -s "$COMPLYSCAN_SARIF_FILE"
-      - name: Run required review without a credential
+          test "$COMPLYSCAN_MARKDOWN_REPORT" = "$GITHUB_WORKSPACE/testdata/non-ai-repository/.complyscan/reports/latest.md"
+          test "$COMPLYSCAN_JSON_REPORT" = "$GITHUB_WORKSPACE/testdata/non-ai-repository/.complyscan/reports/latest.json"
+          test -s "$COMPLYSCAN_MARKDOWN_REPORT"
+          test -s "$COMPLYSCAN_JSON_REPORT"
+      - name: Run deterministic scan with required-review policy
+        id: deterministic_required
+        continue-on-error: true
+        uses: ./
+        with:
+          path: testdata/non-ai-repository
+          sarif-file: deterministic-required.sarif
+          upload-results: "false"
+          require-ai-review: "true"
+      - name: Check deterministic required-review policy outputs
+        if: ${{ always() }}
+        shell: bash
+        env:
+          ACTION_OUTCOME: ${{ steps.deterministic_required.outcome }}
+          COMPLYSCAN_EXIT_CODE: ${{ steps.deterministic_required.outputs.exit-code }}
+          COMPLYSCAN_JSON_REPORT: ${{ steps.deterministic_required.outputs.json-report }}
+          COMPLYSCAN_MARKDOWN_REPORT: ${{ steps.deterministic_required.outputs.markdown-report }}
+          COMPLYSCAN_SARIF_FILE: ${{ steps.deterministic_required.outputs.sarif-file }}
+        run: |
+          test "$ACTION_OUTCOME" = "failure"
+          test "$COMPLYSCAN_EXIT_CODE" = "2"
+          test -s "$COMPLYSCAN_SARIF_FILE"
+          test -s "$COMPLYSCAN_MARKDOWN_REPORT"
+          test -s "$COMPLYSCAN_JSON_REPORT"
+      - name: Run explicit required review without a credential
         id: required_review
         continue-on-error: true
         uses: ./
         with:
           path: testdata/non-ai-repository
+          ai-review: openai
           sarif-file: required-review.sarif
           upload-results: "false"
-          review: openai
-          api-key-env: COMPLYSCAN_ACTION_TEST_MISSING_KEY
           require-ai-review: "true"
       - name: Check required-review failure outputs
         if: ${{ always() }}
@@ -73,8 +104,12 @@ jobs:
         env:
           ACTION_OUTCOME: ${{ steps.required_review.outcome }}
           COMPLYSCAN_EXIT_CODE: ${{ steps.required_review.outputs.exit-code }}
+          COMPLYSCAN_JSON_REPORT: ${{ steps.required_review.outputs.json-report }}
+          COMPLYSCAN_MARKDOWN_REPORT: ${{ steps.required_review.outputs.markdown-report }}
           COMPLYSCAN_SARIF_FILE: ${{ steps.required_review.outputs.sarif-file }}
         run: |
           test "$ACTION_OUTCOME" = "failure"
           test "$COMPLYSCAN_EXIT_CODE" = "2"
           test -s "$COMPLYSCAN_SARIF_FILE"
+          test -s "$COMPLYSCAN_MARKDOWN_REPORT"
+          test -s "$COMPLYSCAN_JSON_REPORT"

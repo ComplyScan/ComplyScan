@@ -1,5 +1,5 @@
 name: ComplyScan
-description: Discover AI implementations and code-level governance safeguards, then optionally upload SARIF results.
+description: Run the configured compliance-aware repository scan and optionally upload SARIF results.
 author: ComplyScan contributors
 
 branding:
@@ -31,44 +31,60 @@ inputs:
     description: Upload the SARIF file to GitHub code scanning.
     required: false
     default: "true"
+  publish-summary:
+    description: Append the latest concise Markdown report to the GitHub job summary. Set false to keep the report out of the summary; raw JSON is never uploaded automatically.
+    required: false
+    default: "true"
   fail-on-findings:
     description: Fail the action when a finding meets the configured fail-on threshold.
     required: false
     default: "true"
+  scope:
+    description: Scan scope. auto change-scopes file-local findings and model context on pull_request events while repository-wide governance gates still run; it requires the checked-out base commit and uses full scope on non-PR events. Change-scoped pull_request_target runs are refused; consciously use full only when a base-branch scan is intended.
+    required: false
+    default: auto
   changed-since:
-    description: Optional Git reference used to limit code findings to changed files and explicit AI review context to changed eligible files plus bounded connected files; requires the reference to be available in the checkout.
+    description: Optional explicit base Git reference for auto or pull-request scope. File-local findings and model context are change-scoped while repository-wide governance gates still run.
     required: false
     default: ""
+  ai-review:
+    description: AI review mode. none is the safe deterministic default; configured explicitly trusts the provider destination and API-key environment name committed in repository configuration; otherwise use ollama, openai, anthropic, gemini, xai, groq, mistral, openrouter, or openai-compatible for a workflow-controlled one-run provider.
+    required: false
+    default: none
   review:
-    description: Explicit AI review provider; empty or none runs a deterministic scan, configured uses repository configuration, and a provider name overrides it.
+    description: Deprecated alias for ai-review. An empty legacy value follows the new safe none default; do not set both inputs.
     required: false
     default: ""
   require-ai-review:
-    description: Return exit code 2 if an explicitly requested AI review is incomplete.
+    description: Policy-only gate that returns exit code 2 unless AI review completes. With ai-review none, the deterministic report is still produced before the gate fails.
+    required: false
+    default: "false"
+  refresh-review:
+    description: Ignore matching cached model results and request a fresh configured AI review.
     required: false
     default: "false"
   ollama-model:
-    description: Optional Ollama model override.
+    description: Optional one-run Ollama model override.
     required: false
     default: ""
   ollama-endpoint:
-    description: Optional loopback Ollama base URL override.
+    description: Optional one-run loopback Ollama base URL override.
     required: false
     default: ""
   model:
-    description: Optional remote-provider model override.
+    description: Optional one-run remote-provider model override.
     required: false
     default: ""
   api-key-env:
-    description: Optional environment-variable name containing the remote-provider API key; never pass the key value here.
+    description: Workflow-controlled environment-variable name containing a hosted-provider API key; never pass the credential value here. Required for hosted providers other than OpenAI, Anthropic, and Gemini.
     required: false
     default: ""
   provider-name:
-    description: Optional display name for a custom OpenAI-compatible provider.
+    description: Workflow-controlled display name for a custom OpenAI-compatible provider; required with ai-review openai-compatible.
     required: false
     default: ""
   base-url:
-    description: Optional HTTPS API base URL for an OpenAI-compatible provider; prefer repository configuration.
+    description: Workflow-controlled HTTPS API base URL for an OpenAI-compatible provider; required with ai-review openai-compatible.
     required: false
     default: ""
 
@@ -79,6 +95,12 @@ outputs:
   sarif-file:
     description: Absolute path to the generated SARIF file.
     value: ${{ steps.scan.outputs.sarif-file }}
+  markdown-report:
+    description: Absolute path to the latest concise Markdown report.
+    value: ${{ steps.scan.outputs.markdown-report }}
+  json-report:
+    description: Absolute path to the latest JSON evidence bundle; the Action does not upload it automatically.
+    value: ${{ steps.scan.outputs.json-report }}
 
 runs:
   using: composite
@@ -93,6 +115,9 @@ runs:
       id: scan
       shell: bash
       env:
+        COMPLYSCAN_EVENT_NAME: ${{ github.event_name }}
+        COMPLYSCAN_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        INPUT_AI_REVIEW: ${{ inputs.ai-review }}
         INPUT_CHANGED_SINCE: ${{ inputs.changed-since }}
         INPUT_API_KEY_ENV: ${{ inputs.api-key-env }}
         INPUT_BASE_URL: ${{ inputs.base-url }}
@@ -102,9 +127,11 @@ runs:
         INPUT_OLLAMA_MODEL: ${{ inputs.ollama-model }}
         INPUT_PATH: ${{ inputs.path }}
         INPUT_PROVIDER_NAME: ${{ inputs.provider-name }}
+        INPUT_REFRESH_REVIEW: ${{ inputs.refresh-review }}
         INPUT_REVIEW: ${{ inputs.review }}
         INPUT_REQUIRE_AI_REVIEW: ${{ inputs.require-ai-review }}
         INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
+        INPUT_SCOPE: ${{ inputs.scope }}
         INPUT_SEVERITY: ${{ inputs.severity }}
       run: |
         target="$INPUT_PATH"
@@ -121,25 +148,132 @@ runs:
         binary="$RUNNER_TEMP/complyscan-action"
         go -C "$GITHUB_ACTION_PATH" build -o "$binary" ./cmd/complyscan
 
-        command_name=scan
-        review_value=$(printf '%s' "$INPUT_REVIEW" | tr '[:upper:]' '[:lower:]')
-        if [[ -n "$review_value" && "$review_value" != "none" ]]; then
-          command_name=review
+        scope_value=$(printf '%s' "$INPUT_SCOPE" | tr '[:upper:]' '[:lower:]')
+        case "$scope_value" in
+          auto|pull-request|full) ;;
+          *)
+            echo "Invalid scope '$INPUT_SCOPE' (want auto, pull-request, or full)." >&2
+            exit 2
+            ;;
+        esac
+        if [[ "$scope_value" == "full" && -n "$INPUT_CHANGED_SINCE" ]]; then
+          echo "changed-since cannot be combined with scope: full." >&2
+          exit 2
         fi
-        if [[ "$command_name" == "scan" && ( -n "$INPUT_MODEL" || -n "$INPUT_API_KEY_ENV" || -n "$INPUT_PROVIDER_NAME" || -n "$INPUT_BASE_URL" || -n "$INPUT_OLLAMA_MODEL" || -n "$INPUT_OLLAMA_ENDPOINT" || "$INPUT_REQUIRE_AI_REVIEW" == "true" ) ]]; then
-          echo "AI-specific Action inputs require review: configured or an explicit review provider." >&2
+        if [[ "$COMPLYSCAN_EVENT_NAME" == "pull_request_target" && ( "$scope_value" == "auto" || "$scope_value" == "pull-request" || -n "$INPUT_CHANGED_SINCE" ) ]]; then
+          echo "ComplyScan refuses change-scoped pull_request_target runs because its default checkout is the base branch and cannot assess PR changes safely. Use a pull_request workflow for change scanning, or consciously choose scope: full for a base-only scan." >&2
           exit 2
         fi
 
-        arguments=("$command_name" "$target" --format sarif --severity "$INPUT_SEVERITY")
-        if [[ -n "$INPUT_CHANGED_SINCE" ]]; then
-          arguments+=(--changed-since "$INPUT_CHANGED_SINCE")
+        changed_since="$INPUT_CHANGED_SINCE"
+        derived_pr_base=false
+        if [[ -z "$changed_since" && ( "$scope_value" == "pull-request" || ( "$scope_value" == "auto" && "$COMPLYSCAN_EVENT_NAME" == "pull_request" ) ) ]]; then
+          changed_since="$COMPLYSCAN_PR_BASE_SHA"
+          derived_pr_base=true
         fi
-        if [[ "$command_name" == "review" && "$review_value" != "configured" ]]; then
-          arguments+=(--provider "$INPUT_REVIEW")
+        if [[ "$derived_pr_base" == "true" && -z "$changed_since" ]]; then
+          echo "ComplyScan could not determine this pull request's base SHA. Use actions/checkout with fetch-depth: 0, supply changed-since, or explicitly choose scope: full." >&2
+          exit 2
         fi
-        if [[ "$command_name" == "review" && "$INPUT_REQUIRE_AI_REVIEW" == "true" ]]; then
+        if [[ -n "$changed_since" ]] && ! git -C "$target" rev-parse --verify --quiet "${changed_since}^{commit}" >/dev/null; then
+          echo "ComplyScan cannot access changed-since reference '$changed_since'. Use actions/checkout with fetch-depth: 0, supply an available reference, or explicitly choose scope: full." >&2
+          exit 2
+        fi
+        if [[ "$scope_value" == "pull-request" && -z "$changed_since" ]]; then
+          echo "scope: pull-request requires a GitHub pull-request base SHA or an explicit changed-since reference." >&2
+          exit 2
+        fi
+
+        ai_review_value=$(printf '%s' "$INPUT_AI_REVIEW" | tr '[:upper:]' '[:lower:]')
+        legacy_review_value=$(printf '%s' "$INPUT_REVIEW" | tr '[:upper:]' '[:lower:]')
+        if [[ -n "$legacy_review_value" ]]; then
+          if [[ "$ai_review_value" != "none" ]]; then
+            echo "ai-review and its deprecated review alias cannot both be set." >&2
+            exit 2
+          fi
+          ai_review_value="$legacy_review_value"
+        fi
+        case "$ai_review_value" in
+          none|configured|ollama|openai|anthropic|gemini|xai|groq|mistral|openrouter|openai-compatible) ;;
+          *)
+            echo "Invalid ai-review '$ai_review_value' (want none, configured, ollama, openai, anthropic, gemini, xai, groq, mistral, openrouter, or openai-compatible)." >&2
+            exit 2
+            ;;
+        esac
+
+        effective_api_key_env="$INPUT_API_KEY_ENV"
+        effective_base_url="$INPUT_BASE_URL"
+        effective_provider_name="$INPUT_PROVIDER_NAME"
+        case "$ai_review_value" in
+          none)
+            if [[ -n "$INPUT_MODEL" || -n "$INPUT_API_KEY_ENV" || -n "$INPUT_PROVIDER_NAME" || -n "$INPUT_BASE_URL" || -n "$INPUT_OLLAMA_MODEL" || -n "$INPUT_OLLAMA_ENDPOINT" || "$INPUT_REFRESH_REVIEW" == "true" ]]; then
+              echo "ai-review: none cannot be combined with provider, model, endpoint, credential-routing, or refresh inputs." >&2
+              exit 2
+            fi
+            ;;
+          openai)
+            if [[ -z "$effective_api_key_env" ]]; then
+              effective_api_key_env=OPENAI_API_KEY
+            fi
+            ;;
+          anthropic)
+            if [[ -z "$effective_api_key_env" ]]; then
+              effective_api_key_env=ANTHROPIC_API_KEY
+            fi
+            ;;
+          gemini)
+            if [[ -z "$effective_api_key_env" ]]; then
+              effective_api_key_env=GEMINI_API_KEY
+            fi
+            ;;
+          xai|groq|mistral|openrouter)
+            if [[ -z "$effective_api_key_env" ]]; then
+              echo "ai-review: $ai_review_value requires workflow input api-key-env so repository configuration cannot choose a credential." >&2
+              exit 2
+            fi
+            case "$ai_review_value" in
+              xai)
+                [[ -n "$effective_base_url" ]] || effective_base_url=https://api.x.ai/v1
+                [[ -n "$effective_provider_name" ]] || effective_provider_name=xAI
+                ;;
+              groq)
+                [[ -n "$effective_base_url" ]] || effective_base_url=https://api.groq.com/openai/v1
+                [[ -n "$effective_provider_name" ]] || effective_provider_name=Groq
+                ;;
+              mistral)
+                [[ -n "$effective_base_url" ]] || effective_base_url=https://api.mistral.ai/v1
+                [[ -n "$effective_provider_name" ]] || effective_provider_name=Mistral
+                ;;
+              openrouter)
+                [[ -n "$effective_base_url" ]] || effective_base_url=https://openrouter.ai/api/v1
+                [[ -n "$effective_provider_name" ]] || effective_provider_name=OpenRouter
+                ;;
+            esac
+            ;;
+          openai-compatible)
+            if [[ -z "$INPUT_API_KEY_ENV" || -z "$INPUT_BASE_URL" || -z "$INPUT_PROVIDER_NAME" ]]; then
+              echo "ai-review: openai-compatible requires workflow inputs api-key-env, base-url, and provider-name so repository configuration cannot choose a credential destination." >&2
+              exit 2
+            fi
+            ;;
+        esac
+
+        arguments=(scan "$target" --format sarif --severity "$INPUT_SEVERITY")
+        if [[ -n "$changed_since" ]]; then
+          arguments+=(--changed-since "$changed_since")
+        fi
+        if [[ "$ai_review_value" == "none" ]]; then
+          arguments+=(--deterministic-only)
+        elif [[ "$ai_review_value" == "configured" ]]; then
+          arguments+=(--deep)
+        else
+          arguments+=(--provider "$ai_review_value")
+        fi
+        if [[ "$INPUT_REQUIRE_AI_REVIEW" == "true" ]]; then
           arguments+=(--require-ai-review)
+        fi
+        if [[ "$INPUT_REFRESH_REVIEW" == "true" ]]; then
+          arguments+=(--refresh-review)
         fi
         if [[ -n "$INPUT_OLLAMA_MODEL" ]]; then
           arguments+=(--ollama-model "$INPUT_OLLAMA_MODEL")
@@ -150,14 +284,14 @@ runs:
         if [[ -n "$INPUT_MODEL" ]]; then
           arguments+=(--model "$INPUT_MODEL")
         fi
-        if [[ -n "$INPUT_API_KEY_ENV" ]]; then
-          arguments+=(--api-key-env "$INPUT_API_KEY_ENV")
+        if [[ -n "$effective_api_key_env" ]]; then
+          arguments+=(--api-key-env "$effective_api_key_env")
         fi
-        if [[ -n "$INPUT_PROVIDER_NAME" ]]; then
-          arguments+=(--provider-name "$INPUT_PROVIDER_NAME")
+        if [[ -n "$effective_provider_name" ]]; then
+          arguments+=(--provider-name "$effective_provider_name")
         fi
-        if [[ -n "$INPUT_BASE_URL" ]]; then
-          arguments+=(--base-url "$INPUT_BASE_URL")
+        if [[ -n "$effective_base_url" ]]; then
+          arguments+=(--base-url "$effective_base_url")
         fi
         if [[ -n "$INPUT_CONFIG" ]]; then
           config="$INPUT_CONFIG"
@@ -167,6 +301,11 @@ runs:
           arguments+=(--config "$config")
         fi
 
+        markdown_report="$target/.complyscan/reports/latest.md"
+        json_report="$target/.complyscan/reports/latest.json"
+        report_start_marker="$RUNNER_TEMP/complyscan-report-start"
+        touch "$report_start_marker"
+
         set +e
         "$binary" "${arguments[@]}" > "$sarif_file"
         status=$?
@@ -174,11 +313,31 @@ runs:
 
         echo "exit-code=$status" >> "$GITHUB_OUTPUT"
         echo "sarif-file=$sarif_file" >> "$GITHUB_OUTPUT"
+        echo "markdown-report=$markdown_report" >> "$GITHUB_OUTPUT"
+        echo "json-report=$json_report" >> "$GITHUB_OUTPUT"
         if [[ -s "$sarif_file" ]]; then
           echo "sarif-ready=true" >> "$GITHUB_OUTPUT"
         else
           echo "sarif-ready=false" >> "$GITHUB_OUTPUT"
         fi
+        if [[ -s "$markdown_report" && "$markdown_report" -nt "$report_start_marker" ]]; then
+          echo "markdown-report-ready=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "markdown-report-ready=false" >> "$GITHUB_OUTPUT"
+        fi
+        if [[ -s "$json_report" && "$json_report" -nt "$report_start_marker" ]]; then
+          echo "json-report-ready=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "json-report-ready=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Publish concise report summary
+      if: ${{ always() && inputs.publish-summary == 'true' && steps.scan.outputs.markdown-report-ready == 'true' }}
+      shell: bash
+      env:
+        COMPLYSCAN_MARKDOWN_REPORT: ${{ steps.scan.outputs.markdown-report }}
+      run: |
+        cat "$COMPLYSCAN_MARKDOWN_REPORT" >> "$GITHUB_STEP_SUMMARY"
 
     - name: Upload SARIF
       if: ${{ always() && inputs.upload-results == 'true' && steps.scan.outputs.sarif-ready == 'true' }}

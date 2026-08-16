@@ -24,4 +24,3 @@ jobs:
         uses: ./
         with:
           severity: medium
-          changed-since: ${{ github.event.pull_request.base.sha }}
