@@ -119,3 +119,33 @@ func TestCompactSynthesisGroupsOnceAndReattachesValidatedEvidenceLocally(t *test
 		t.Fatalf("final ID was not derived locally from model grouping: %#v", result.Result.AIUses[0])
 	}
 }
+
+func TestFinalEvidenceAssemblyRetainsMoreFactValuesThanOneModelResponseCanEmit(t *testing.T) {
+	sets := make([]providers.RepositoryAIUseFactSet, 0, 9)
+	for index := 0; index < 9; index++ {
+		citation := providers.RepositoryCitation{Path: fmt.Sprintf("part-%d.go", index+1), Line: 1, Summary: "Checked source evidence."}
+		sets = append(sets, providers.RepositoryAIUseFactSet{
+			AIUseID: "local-use",
+			Facts: []providers.RepositoryAIUseFact{{
+				Field: profile.CodeFactIntendedPurpose, Values: []string{fmt.Sprintf("Purpose %d", index+1)},
+				Confidence: "medium", Rationale: "Directly shown by the source batch.", Evidence: []providers.RepositoryCitation{citation},
+			}},
+		})
+	}
+
+	merged, err := mergeRepositoryFactSets("grouped-use", sets, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(merged.Facts) != 1 || len(merged.Facts[0].Values) != 9 || len(merged.Facts[0].Evidence) != 9 {
+		t.Fatalf("final validated fact union = %#v", merged)
+	}
+
+	compact, err := mergeRepositoryFactSets("grouped-use", sets, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(compact.Facts) != 1 || len(compact.Facts[0].Values) != 8 || len(compact.Facts[0].Evidence) != 0 {
+		t.Fatalf("compact grouping hint = %#v", compact)
+	}
+}

@@ -1816,10 +1816,11 @@ func mergeRepositoryFactSets(useID string, sets []providers.RepositoryAIUseFactS
 			}
 			merged := &result.Facts[index]
 			values := uniqueRepositoryStrings(append(merged.Values, fact.Values...), 0)
-			if retainEvidence && len(values) > 8 {
-				return providers.RepositoryAIUseFactSet{}, fmt.Errorf("validated source facts for AI use %q field %q contain %d distinct values; maximum representable is 8", useID, fact.Field, len(values))
-			}
-			if len(values) > 8 {
+			// The eight-value bound belongs to each model response, not to the
+			// final deterministic union of several validated source batches. The
+			// assembled report is ordinary typed JSON and can retain every checked
+			// value without asking the synthesis model to repeat or truncate it.
+			if !retainEvidence && len(values) > 8 {
 				values = values[:8]
 			}
 			merged.Values = values
