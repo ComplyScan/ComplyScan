@@ -90,10 +90,12 @@ func TestRunTargetedUsesObservedProviderLimitsForSourceBatchConcurrency(t *testi
 		name        string
 		limits      providers.RateLimitSnapshot
 		initial     bool
+		probe       bool
 		wantMaximum int
 		wantAtLeast int
 		wantAll     bool
 		wantRestAll bool
+		wantProbes  int
 	}{
 		{
 			name: "live qualification capacity starts the complete queue together",
@@ -102,6 +104,14 @@ func TestRunTargetedUsesObservedProviderLimitsForSourceBatchConcurrency(t *testi
 				TokensKnown: true, LimitTokens: 500_000, RemainingTokens: 490_000, ResetTokens: time.Minute,
 			},
 			initial: true, wantAtLeast: 3, wantAll: true,
+		},
+		{
+			name: "source-free capacity probe starts the complete queue together",
+			limits: providers.RateLimitSnapshot{
+				RequestsKnown: true, LimitRequests: 500, RemainingRequests: 499, ResetRequests: time.Minute,
+				TokensKnown: true, LimitTokens: 500_000, RemainingTokens: 490_000, ResetTokens: time.Minute,
+			},
+			probe: true, wantAtLeast: 3, wantAll: true, wantProbes: 1,
 		},
 		{
 			name: "high capacity runs the remaining queue concurrently",
@@ -123,12 +133,19 @@ func TestRunTargetedUsesObservedProviderLimitsForSourceBatchConcurrency(t *testi
 		t.Run(testCase.name, func(t *testing.T) {
 			repository, _ := exhaustiveCandidateRepository(30)
 			reviewer := &rateAwareConcurrentReviewer{rateLimits: testCase.limits}
+			probes := 0
 			options := Options{
 				Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
 				Wait: func(context.Context, time.Duration) error { return nil },
 			}
 			if testCase.initial {
 				options.InitialRateLimits = testCase.limits
+			}
+			if testCase.probe {
+				options.ProbeRateLimits = func(context.Context) (providers.RateLimitSnapshot, error) {
+					probes++
+					return testCase.limits, nil
+				}
 			}
 			result, err := Run(context.Background(), reviewer, repository, nil, nil, options)
 			if err != nil {
@@ -152,6 +169,9 @@ func TestRunTargetedUsesObservedProviderLimitsForSourceBatchConcurrency(t *testi
 			}
 			if result.Coverage.SourceBatchesCompleted != calls || result.Coverage.SourceBatchesTotal != calls {
 				t.Fatalf("batch coverage = %d/%d, source calls = %d", result.Coverage.SourceBatchesCompleted, result.Coverage.SourceBatchesTotal, calls)
+			}
+			if probes != testCase.wantProbes {
+				t.Fatalf("source-free capacity probes = %d, want %d", probes, testCase.wantProbes)
 			}
 		})
 	}
@@ -187,6 +207,24 @@ func TestRunTargetedRunsLimitedWavesAndWaitsForProviderReset(t *testing.T) {
 	}
 	if result.Coverage.SourceBatchesCompleted != calls || result.Coverage.SourceBatchesTotal != calls {
 		t.Fatalf("batch coverage = %d/%d, source calls = %d", result.Coverage.SourceBatchesCompleted, result.Coverage.SourceBatchesTotal, calls)
+	}
+}
+
+func TestRunTargetedDoesNotProbeCapacityForOneSourcePackage(t *testing.T) {
+	reviewer := &rateAwareConcurrentReviewer{}
+	probes := 0
+	_, err := Run(context.Background(), reviewer, singleTargetedRepository(), nil, nil, Options{
+		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
+		ProbeRateLimits: func(context.Context) (providers.RateLimitSnapshot, error) {
+			probes++
+			return providers.RateLimitSnapshot{RequestsKnown: true, LimitRequests: 500, RemainingRequests: 499}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probes != 0 {
+		t.Fatalf("source-free capacity probes = %d, want 0 for a one-package review", probes)
 	}
 }
 

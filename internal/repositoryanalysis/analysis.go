@@ -64,6 +64,7 @@ type Options struct {
 	OnProgress        func(Progress) error
 	Wait              func(context.Context, time.Duration) error
 	InitialRateLimits providers.RateLimitSnapshot
+	ProbeRateLimits   func(context.Context) (providers.RateLimitSnapshot, error)
 }
 
 type Progress struct {
@@ -254,6 +255,26 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 	}
 	adaptiveTokenLimit := 0
 	observedLimits := options.InitialRateLimits
+	if len(chunks) > 1 && !observedLimits.Available() && options.ProbeRateLimits != nil {
+		if err := progress(options, Progress{Stage: "rate-limit-probe", Total: len(chunks), Scope: ".", Detail: "checking live provider capacity without repository source"}); err != nil {
+			return partialFailure("provider capacity probe", err)
+		}
+		probed, probeErr := options.ProbeRateLimits(ctx)
+		if probeErr != nil || !probed.Available() {
+			detail := "the provider returned no usable capacity headers; the first source batch will calibrate this run"
+			if probeErr != nil {
+				detail = "the source-free capacity probe did not complete; the first source batch will calibrate this run: " + probeErr.Error()
+			}
+			if err := progress(options, Progress{Stage: "rate-limit-probe-fallback", Total: len(chunks), Scope: ".", Detail: detail}); err != nil {
+				return partialFailure("provider capacity probe", err)
+			}
+		} else {
+			observedLimits = probed
+			if err := progress(options, Progress{Stage: "rate-limit-probe-complete", Total: len(chunks), Scope: ".", Detail: rateLimitCapacityDetail(probed)}); err != nil {
+				return partialFailure("provider capacity probe", err)
+			}
+		}
+	}
 	capacityWait := time.Duration(0)
 	for index := 0; index < len(chunks); {
 		chunk := chunks[index]
@@ -754,6 +775,17 @@ func sourceBatchWaveLimit(snapshot providers.RateLimitSnapshot, estimatedTokens,
 		}
 	}
 	return limit, wait
+}
+
+func rateLimitCapacityDetail(snapshot providers.RateLimitSnapshot) string {
+	parts := make([]string, 0, 2)
+	if snapshot.RequestsKnown {
+		parts = append(parts, fmt.Sprintf("%d request slot(s) currently remaining", snapshot.RemainingRequests))
+	}
+	if snapshot.TokensKnown {
+		parts = append(parts, fmt.Sprintf("%d token(s) currently remaining", snapshot.RemainingTokens))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func replenishRateLimitSnapshot(snapshot providers.RateLimitSnapshot, waited time.Duration) providers.RateLimitSnapshot {

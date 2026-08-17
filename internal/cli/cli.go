@@ -1254,11 +1254,22 @@ func reviewRepositoryWithProvider(
 	}
 	model = configuredModel
 	kind = configuredKind
+	var probeRateLimits func(context.Context) (providers.RateLimitSnapshot, error)
+	if kind == providers.OpenAI && !initialRateLimits.Available() {
+		probeRateLimits = func(probeContext context.Context) (providers.RateLimitSnapshot, error) {
+			outcome, probeErr := qualifyConfiguredModel(probeContext, settings, true)
+			if probeErr != nil {
+				return providers.RateLimitSnapshot{}, probeErr
+			}
+			return outcome.Result.RateLimits, nil
+		}
+	}
 	liveCountdown := llmActivityAvailable(progressWriter)
 	result, err := repositoryanalysis.Run(ctx, reviewer, repository, evidence, systems, repositoryanalysis.Options{
 		Mode: mode, MaxInputTokens: settings.RepositoryAnalysis.MaxInputTokens, Provider: kind, Model: model,
 		Ownership: ownershipRules, ConfirmedAIUses: confirmedAIUses,
 		InitialRateLimits: initialRateLimits,
+		ProbeRateLimits:   probeRateLimits,
 		OnProgress: func(progress repositoryanalysis.Progress) error {
 			switch progress.Stage {
 			case "targeted-batch-queue":
@@ -1269,6 +1280,15 @@ func reviewRepositoryWithProvider(
 				return err
 			case "targeted-batch-concurrency":
 				_, err := fmt.Fprintf(progressWriter, "Provider capacity detected: running %d source batches concurrently (%s).\n", progress.Completed, progress.Detail)
+				return err
+			case "rate-limit-probe":
+				_, err := fmt.Fprintln(progressWriter, "Checking live OpenAI request/token capacity with a source-free request...")
+				return err
+			case "rate-limit-probe-complete":
+				_, err := fmt.Fprintf(progressWriter, "Live OpenAI capacity detected: %s.\n", progress.Detail)
+				return err
+			case "rate-limit-probe-fallback":
+				_, err := fmt.Fprintf(progressWriter, "Live OpenAI capacity unavailable; %s.\n", progress.Detail)
 				return err
 			case "batch-capacity-wait":
 				if progress.Wait != progress.OriginalWait {
