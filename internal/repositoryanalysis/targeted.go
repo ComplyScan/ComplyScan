@@ -291,7 +291,7 @@ func runTargeted(
 		if !canRecover || incomplete.Reason != "max_output_tokens" {
 			return partialFailure("analyze targeted repository evidence", err)
 		}
-		recoveryOutputTokens := targetedRecoveryOutputTokens(options.Provider, request.MaxOutputTokens, incomplete)
+		recoveryOutputTokens := repositoryAdaptiveRecoveryOutputTokens(options.Provider, request.MaxOutputTokens, incomplete)
 		if recoveryOutputTokens <= request.MaxOutputTokens || !outputFitsTokenLimit(incomplete.InputTokens, recoveryOutputTokens, incomplete.TokenLimit) {
 			return fallBackToBatches(selected, err)
 		}
@@ -388,7 +388,7 @@ func runTargeted(
 				if !canRecover || incomplete.Reason != "max_output_tokens" {
 					return partialFailure("analyze targeted repository follow-up", finalErr)
 				}
-				recoveryOutput := targetedRecoveryOutputTokens(options.Provider, request.MaxOutputTokens, incomplete)
+				recoveryOutput := repositoryAdaptiveRecoveryOutputTokens(options.Provider, request.MaxOutputTokens, incomplete)
 				if recoveryOutput <= request.MaxOutputTokens || !outputFitsTokenLimit(incomplete.InputTokens, recoveryOutput, incomplete.TokenLimit) {
 					return fallBackFollowUpToBatches(finalErr)
 				}
@@ -475,7 +475,11 @@ func targetedOutputTokens(provider providers.Kind) int {
 	return targetedRemoteOutputTokens
 }
 
-func targetedRecoveryOutputTokens(provider providers.Kind, current int, incomplete *providers.RemoteIncompleteError) int {
+// repositoryAdaptiveRecoveryOutputTokens grows a response allowance to the
+// adapter's safe provider ceiling. Source-batch orchestration deliberately
+// keeps its smaller 8K cap, while compact targeted and synthesis responses may
+// need more output space to avoid a split/recombine loop.
+func repositoryAdaptiveRecoveryOutputTokens(provider providers.Kind, current int, incomplete *providers.RemoteIncompleteError) int {
 	if incomplete == nil {
 		return current
 	}

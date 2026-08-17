@@ -13,10 +13,12 @@ import (
 )
 
 type wideSynthesisBudgetReviewer struct {
-	mu                sync.Mutex
-	sourceRequests    int
-	synthesisRequests int
-	synthesisInputs   []int
+	mu                     sync.Mutex
+	sourceRequests         int
+	synthesisRequests      int
+	synthesisInputs        []int
+	synthesisOutputLimits  []int
+	minimumSynthesisOutput int
 }
 
 func (reviewer *wideSynthesisBudgetReviewer) ReviewRepository(_ context.Context, request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
@@ -29,6 +31,17 @@ func (reviewer *wideSynthesisBudgetReviewer) ReviewRepository(_ context.Context,
 	if request.Mode == providers.RepositoryAnalysisSynthesis {
 		reviewer.synthesisRequests++
 		reviewer.synthesisInputs = append(reviewer.synthesisInputs, len(request.SubsystemSummaries))
+		reviewer.synthesisOutputLimits = append(reviewer.synthesisOutputLimits, request.MaxOutputTokens)
+		if request.MaxOutputTokens < reviewer.minimumSynthesisOutput {
+			return providers.RepositoryAnalysisResult{
+					Provider: providers.OpenAI, Model: "test", Result: section,
+					Coverage: providers.RepositoryCoverage{Mode: request.Mode},
+					Usage:    providers.Usage{PromptTokens: 10, CompletionTokens: request.MaxOutputTokens},
+				}, &providers.RemoteIncompleteError{
+					Provider: "OpenAI", Status: "incomplete", Reason: "max_output_tokens",
+					InputTokens: 50_000, OutputTokens: request.MaxOutputTokens,
+				}
+		}
 	} else {
 		reviewer.sourceRequests++
 		// Reproduce the real failure shape: every bounded source result is
@@ -43,23 +56,36 @@ func (reviewer *wideSynthesisBudgetReviewer) ReviewRepository(_ context.Context,
 	}, nil
 }
 
-func TestTargetedBatchesUseFullConfiguredBudgetForGlobalSynthesis(t *testing.T) {
-	repository := discovery.Repository{Root: "."}
-	for index := 0; index < 13; index++ {
-		content := []byte("package ai\n// " + strings.Repeat("bounded implementation evidence ", 230) + "\n")
-		repository.Files = append(repository.Files, discovery.File{
-			Path: fmt.Sprintf("internal/use_%02d.go", index), Kind: discovery.KindSource, Content: content, Size: int64(len(content)),
-		})
+func TestGlobalSynthesisGrowsPastEightKBeforeSplittingAndRecombining(t *testing.T) {
+	repository := synthesisBudgetRepository()
+	reviewer := &wideSynthesisBudgetReviewer{minimumSynthesisOutput: 16_384}
+	result, err := runWideSynthesisBudgetFixture(repository, reviewer)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if reviewer.sourceRequests != 13 {
+		t.Fatalf("source requests = %d, want 13 bounded requests", reviewer.sourceRequests)
+	}
+	if reviewer.synthesisRequests != 3 {
+		t.Fatalf("synthesis requests = %d, want 4K, 8K, and 16K attempts", reviewer.synthesisRequests)
+	}
+	for index, count := range reviewer.synthesisInputs {
+		if count != 13 {
+			t.Fatalf("synthesis attempt %d received %d summaries, want all 13 without a split/recombine cycle", index+1, count)
+		}
+	}
+	if got := reviewer.synthesisOutputLimits; len(got) != 3 || got[0] != 4_096 || got[1] != 8_192 || got[2] != 16_384 {
+		t.Fatalf("synthesis output allowances = %v, want [4096 8192 16384]", got)
+	}
+	if result.Coverage.SourceBatchesCompleted != 13 || result.Coverage.SourceBatchesTotal != 13 {
+		t.Fatalf("source coverage = %#v", result.Coverage)
+	}
+}
+
+func TestTargetedBatchesUseFullConfiguredBudgetForGlobalSynthesis(t *testing.T) {
+	repository := synthesisBudgetRepository()
 	reviewer := &wideSynthesisBudgetReviewer{}
-	sourceRequestBudget := sourceBudget(targetedRemoteInputTokens, nil, nil, nil)
-	result, err := runHierarchical(context.Background(), reviewer, repository, codegraph.Build(repository), repositoryFiles(repository), nil, nil, nil, sourceRequestBudget, Options{
-		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", TargetedBatches: true, MaxInputTokens: DefaultRemoteInputTokens,
-		InitialRateLimits: providers.RateLimitSnapshot{
-			RequestsKnown: true, LimitRequests: 1_000, RemainingRequests: 1_000,
-			TokensKnown: true, LimitTokens: 10_000_000, RemainingTokens: 10_000_000,
-		},
-	})
+	result, err := runWideSynthesisBudgetFixture(repository, reviewer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,4 +98,26 @@ func TestTargetedBatchesUseFullConfiguredBudgetForGlobalSynthesis(t *testing.T) 
 	if result.Coverage.SourceBatchesCompleted != 13 || result.Coverage.SourceBatchesTotal != 13 {
 		t.Fatalf("source coverage = %#v", result.Coverage)
 	}
+}
+
+func synthesisBudgetRepository() discovery.Repository {
+	repository := discovery.Repository{Root: "."}
+	for index := 0; index < 13; index++ {
+		content := []byte("package ai\n// " + strings.Repeat("bounded implementation evidence ", 230) + "\n")
+		repository.Files = append(repository.Files, discovery.File{
+			Path: fmt.Sprintf("internal/use_%02d.go", index), Kind: discovery.KindSource, Content: content, Size: int64(len(content)),
+		})
+	}
+	return repository
+}
+
+func runWideSynthesisBudgetFixture(repository discovery.Repository, reviewer *wideSynthesisBudgetReviewer) (providers.RepositoryAnalysisResult, error) {
+	sourceRequestBudget := sourceBudget(targetedRemoteInputTokens, nil, nil, nil)
+	return runHierarchical(context.Background(), reviewer, repository, codegraph.Build(repository), repositoryFiles(repository), nil, nil, nil, sourceRequestBudget, Options{
+		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", TargetedBatches: true, MaxInputTokens: DefaultRemoteInputTokens,
+		InitialRateLimits: providers.RateLimitSnapshot{
+			RequestsKnown: true, LimitRequests: 1_000, RemainingRequests: 1_000,
+			TokensKnown: true, LimitTokens: 10_000_000, RemainingTokens: 10_000_000,
+		},
+	})
 }

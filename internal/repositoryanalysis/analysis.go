@@ -905,7 +905,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 				}
 				if isIncomplete && incomplete.Reason == "max_output_tokens" {
 					adaptiveTokenLimit = smallerPositive(adaptiveTokenLimit, incomplete.TokenLimit)
-					recoveryOutput := repositoryRecoveryOutputTokens(maxOutputTokens)
+					recoveryOutput := repositoryAdaptiveRecoveryOutputTokens(options.Provider, maxOutputTokens, incomplete)
 					if recoveryOutput > maxOutputTokens && outputFitsTokenLimit(incomplete.InputTokens, recoveryOutput, adaptiveTokenLimit) {
 						groups[index].maxOutputTokens = recoveryOutput
 						if err := progress(options, Progress{
@@ -1065,7 +1065,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			if ok && usageIsZero(result.Usage) {
 				addUsage(&aggregate.Usage, usageFromIncomplete(incomplete))
 			}
-			recoveryOutput := repositoryRecoveryOutputTokens(maxOutputTokens)
+			recoveryOutput := repositoryAdaptiveRecoveryOutputTokens(options.Provider, maxOutputTokens, incomplete)
 			if ok {
 				adaptiveTokenLimit = smallerPositive(adaptiveTokenLimit, incomplete.TokenLimit)
 			}
