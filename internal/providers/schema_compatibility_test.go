@@ -69,6 +69,43 @@ func TestRepositoryAnalysisSchemaBindsObjectiveObservationIDs(t *testing.T) {
 	assertSchemaEnum(t, observationProperties, "ai_use_id", []string{""})
 }
 
+func TestRepositoryAnalysisSchemaBindsSynthesisObservationMembership(t *testing.T) {
+	sourceUse := repositoryAIUseItemSchema(t, repositoryAnalysisSchema(RepositoryAnalysisRequest{Mode: RepositoryAnalysisTargeted}, false))
+	sourceProperties := sourceUse["properties"].(map[string]any)
+	if _, exists := sourceProperties["member_observation_ids"]; exists {
+		t.Fatal("source-analysis schema exposed synthesis-only observation membership")
+	}
+
+	synthesis := repositoryAnalysisSchema(RepositoryAnalysisRequest{
+		Mode: RepositoryAnalysisSynthesis,
+		SubsystemSummaries: []RepositorySectionResult{{AIUses: []RepositoryAIUse{
+			{ID: "group-b", MemberObservationIDs: []string{"observation-z"}},
+			{ID: "group-a", MemberObservationIDs: []string{"observation-a"}},
+		}}},
+	}, false)
+	synthesisUse := repositoryAIUseItemSchema(t, synthesis)
+	required := synthesisUse["required"].([]string)
+	if !containsSchemaField(required, "member_observation_ids") {
+		t.Fatalf("synthesis AI use does not require observation membership: %#v", required)
+	}
+	properties := synthesisUse["properties"].(map[string]any)
+	members := properties["member_observation_ids"].(map[string]any)
+	items := members["items"].(map[string]any)
+	got, ok := items["enum"].([]string)
+	if !ok || fmt.Sprint(got) != fmt.Sprint([]string{"observation-a", "observation-z"}) {
+		t.Fatalf("synthesis observation enum = %#v", items["enum"])
+	}
+}
+
+func repositoryAIUseItemSchema(t *testing.T, schema map[string]any) map[string]any {
+	t.Helper()
+	properties := schema["properties"].(map[string]any)
+	result := properties["result"].(map[string]any)
+	resultProperties := result["properties"].(map[string]any)
+	uses := resultProperties["ai_uses"].(map[string]any)
+	return uses["items"].(map[string]any)
+}
+
 func assertSchemaEnum(t *testing.T, properties map[string]any, field string, want []string) {
 	t.Helper()
 	schema, ok := properties[field].(map[string]any)

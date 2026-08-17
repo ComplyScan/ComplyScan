@@ -12,7 +12,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 )
 
-const RepositoryAnalysisPromptVersion = "9"
+const RepositoryAnalysisPromptVersion = "10"
 
 const (
 	maxRepositoryUses         = 100
@@ -46,11 +46,15 @@ func (provider *OllamaProvider) ReviewRepository(ctx context.Context, request Re
 	if err != nil {
 		return RepositoryAnalysisResult{}, err
 	}
-	requiredCandidateIDs, err := repositorySynthesisCandidateIDs(request.SubsystemSummaries, confirmedUses)
+	requiredObservationIDs, inputObservationGroups, err := repositorySynthesisObservationIDs(request.SubsystemSummaries, confirmedUses)
 	if err != nil {
 		return RepositoryAnalysisResult{}, err
 	}
 	synthesisCitationLocations, err := repositorySynthesisCitationLocations(request.Mode, request.SubsystemSummaries, citationRanges)
+	if err != nil {
+		return RepositoryAnalysisResult{}, err
+	}
+	synthesisObservationLocations, err := repositorySynthesisObservationLocations(request.Mode, request.SubsystemSummaries, citationRanges)
 	if err != nil {
 		return RepositoryAnalysisResult{}, err
 	}
@@ -96,7 +100,7 @@ func (provider *OllamaProvider) ReviewRepository(ctx context.Context, request Re
 	if err := json.Unmarshal([]byte(response.Message.Content), &payload); err != nil {
 		return baseResult, fmt.Errorf("decode %s structured repository analysis: %w", provider.label, err)
 	}
-	section, citations, err := validateRepositorySection(payload.Result, request.Scope, allowedPaths, citationRanges, objectiveIDs, systemIDs, confirmedUses, requiredCandidateIDs, synthesisCitationLocations)
+	section, citations, err := validateRepositorySection(payload.Result, request.Mode, request.Scope, allowedPaths, citationRanges, objectiveIDs, systemIDs, confirmedUses, requiredObservationIDs, inputObservationGroups, synthesisCitationLocations, synthesisObservationLocations)
 	if err != nil {
 		return baseResult, fmt.Errorf("validate %s repository analysis: %w", provider.label, err)
 	}
@@ -335,21 +339,50 @@ func sanitizeRepositoryAnalysisRequest(request RepositoryAnalysisRequest) (Repos
 	return request, allowedPaths, citationRanges, objectiveIDs, systemIDs, confirmedUses, submittedBytes, nil
 }
 
-func repositorySynthesisCandidateIDs(summaries []RepositorySectionResult, confirmedUses map[string]repositoryConfirmedUseScope) (map[string]struct{}, error) {
+// repositorySynthesisObservationIDs extracts the trusted scan-local evidence
+// identities that a synthesis response must partition into candidate uses.
+// Input candidate IDs are deliberately not preserved: they identify a prior
+// model grouping, while observation membership is the checked join contract.
+func repositorySynthesisObservationIDs(summaries []RepositorySectionResult, confirmedUses map[string]repositoryConfirmedUseScope) (map[string]struct{}, [][]string, error) {
+	if len(summaries) == 0 {
+		return nil, nil, nil
+	}
 	result := make(map[string]struct{})
+	groups := make([][]string, 0)
 	for _, summary := range summaries {
 		for _, use := range summary.AIUses {
 			id := cleanReviewText(use.ID, 200)
 			if id == "" || id != use.ID {
-				return nil, fmt.Errorf("repository synthesis contains non-canonical candidate AI-use ID %q", use.ID)
+				return nil, nil, fmt.Errorf("repository synthesis contains non-canonical candidate AI-use ID %q", use.ID)
 			}
 			if _, confirmed := confirmedUses[id]; confirmed {
-				return nil, fmt.Errorf("repository synthesis candidate AI use %q conflicts with a bound confirmed use", id)
+				return nil, nil, fmt.Errorf("repository synthesis candidate AI use %q conflicts with a bound confirmed use", id)
 			}
-			result[id] = struct{}{}
+			if len(use.MemberObservationIDs) == 0 {
+				return nil, nil, fmt.Errorf("repository synthesis candidate AI use %q has no trusted member observations", id)
+			}
+			group := make([]string, 0, len(use.MemberObservationIDs))
+			seenGroup := make(map[string]struct{}, len(use.MemberObservationIDs))
+			for _, rawObservationID := range use.MemberObservationIDs {
+				observationID := cleanReviewText(rawObservationID, 200)
+				if observationID == "" || observationID != rawObservationID {
+					return nil, nil, fmt.Errorf("repository synthesis candidate AI use %q contains non-canonical observation ID %q", id, rawObservationID)
+				}
+				if _, duplicate := seenGroup[observationID]; duplicate {
+					return nil, nil, fmt.Errorf("repository synthesis candidate AI use %q repeats observation %q", id, observationID)
+				}
+				if _, duplicate := result[observationID]; duplicate {
+					return nil, nil, fmt.Errorf("repository synthesis input repeats observation %q across candidate uses", observationID)
+				}
+				seenGroup[observationID] = struct{}{}
+				result[observationID] = struct{}{}
+				group = append(group, observationID)
+			}
+			sort.Strings(group)
+			groups = append(groups, group)
 		}
 	}
-	return result, nil
+	return result, groups, nil
 }
 
 func repositorySynthesisCitationLocations(mode RepositoryAnalysisMode, summaries []RepositorySectionResult, ranges map[string]repositoryLineRange) (map[repositoryCitationLocation]struct{}, error) {
@@ -398,6 +431,45 @@ func repositorySynthesisCitationLocations(mode RepositoryAnalysisMode, summaries
 	return result, nil
 }
 
+// repositorySynthesisObservationLocations preserves which exact checked
+// citations belong to each scan-local observation. Global synthesis may merge
+// observation groups, but it may not attach evidence from an observation that
+// is outside the proposed membership.
+func repositorySynthesisObservationLocations(mode RepositoryAnalysisMode, summaries []RepositorySectionResult, ranges map[string]repositoryLineRange) (map[string]map[repositoryCitationLocation]struct{}, error) {
+	if mode != RepositoryAnalysisSynthesis {
+		return nil, nil
+	}
+	result := make(map[string]map[repositoryCitationLocation]struct{})
+	for _, summary := range summaries {
+		factCitations := make(map[string][]RepositoryCitation, len(summary.AIUseFacts))
+		for _, factSet := range summary.AIUseFacts {
+			for _, fact := range factSet.Facts {
+				factCitations[factSet.AIUseID] = append(factCitations[factSet.AIUseID], fact.Evidence...)
+			}
+		}
+		for _, use := range summary.AIUses {
+			locations := make(map[repositoryCitationLocation]struct{})
+			citations := append(append([]RepositoryCitation(nil), use.Evidence...), factCitations[use.ID]...)
+			for _, citation := range citations {
+				path := filepath.ToSlash(strings.TrimSpace(citation.Path))
+				allowed, exists := ranges[path]
+				if path == "" || path != citation.Path || !exists || citation.Line < allowed.start || citation.Line > allowed.end {
+					return nil, fmt.Errorf("repository synthesis observation contains an invalid checked citation %s:%d", citation.Path, citation.Line)
+				}
+				locations[repositoryCitationLocation{path: path, line: citation.Line}] = struct{}{}
+			}
+			for _, observationID := range use.MemberObservationIDs {
+				copy := make(map[repositoryCitationLocation]struct{}, len(locations))
+				for location := range locations {
+					copy[location] = struct{}{}
+				}
+				result[observationID] = copy
+			}
+		}
+	}
+	return result, nil
+}
+
 func cleanRepositorySource(value string) string {
 	return strings.ReplaceAll(cleanTechnicalSource(value, len([]rune(value))+1), "\r\n", "\n")
 }
@@ -409,7 +481,7 @@ func countSourceLines(value string) int {
 	return strings.Count(value, "\n") + 1
 }
 
-func validateRepositorySection(value RepositorySectionResult, scope string, allowedPaths map[string]int, citationRanges map[string]repositoryLineRange, objectiveIDs, systemIDs map[string]struct{}, confirmedUses map[string]repositoryConfirmedUseScope, requiredCandidateIDs map[string]struct{}, synthesisCitationLocations map[repositoryCitationLocation]struct{}) (RepositorySectionResult, int, error) {
+func validateRepositorySection(value RepositorySectionResult, mode RepositoryAnalysisMode, scope string, allowedPaths map[string]int, citationRanges map[string]repositoryLineRange, objectiveIDs, systemIDs map[string]struct{}, confirmedUses map[string]repositoryConfirmedUseScope, requiredObservationIDs map[string]struct{}, inputObservationGroups [][]string, synthesisCitationLocations map[repositoryCitationLocation]struct{}, synthesisObservationLocations map[string]map[repositoryCitationLocation]struct{}) (RepositorySectionResult, int, error) {
 	value.Scope = cleanReviewText(value.Scope, 300)
 	if value.Scope == "" {
 		value.Scope = scope
@@ -421,7 +493,9 @@ func validateRepositorySection(value RepositorySectionResult, scope string, allo
 		return RepositorySectionResult{}, 0, errors.New("model repository analysis exceeded result limits")
 	}
 	seenUses := make(map[string]struct{}, len(value.AIUses))
+	observationMembership := make(map[string]string, len(requiredObservationIDs))
 	candidateEvidencePaths := make(map[string]map[string]struct{}, len(value.AIUses))
+	candidateEvidenceLocations := make(map[string]map[repositoryCitationLocation]struct{}, len(value.AIUses))
 	citations := 0
 	for index := range value.AIUses {
 		use := &value.AIUses[index]
@@ -443,6 +517,32 @@ func validateRepositorySection(value RepositorySectionResult, scope string, allo
 			return RepositorySectionResult{}, 0, fmt.Errorf("model repository analysis recreated confirmed AI use %q as a candidate", use.ID)
 		}
 		seenUses[use.ID] = struct{}{}
+		allowedCandidateLocations := make(map[repositoryCitationLocation]struct{})
+		if mode == RepositoryAnalysisSynthesis {
+			if len(use.MemberObservationIDs) == 0 {
+				return RepositorySectionResult{}, 0, fmt.Errorf("synthesized AI use %q has no member observations", use.ID)
+			}
+			for memberIndex, rawObservationID := range use.MemberObservationIDs {
+				observationID := cleanReviewText(rawObservationID, 200)
+				if observationID == "" || observationID != rawObservationID {
+					return RepositorySectionResult{}, 0, fmt.Errorf("synthesized AI use %q returned non-canonical observation ID %q", use.ID, rawObservationID)
+				}
+				if _, allowed := requiredObservationIDs[observationID]; !allowed {
+					return RepositorySectionResult{}, 0, fmt.Errorf("synthesized AI use %q returned unknown observation %q", use.ID, observationID)
+				}
+				if existing, duplicate := observationMembership[observationID]; duplicate {
+					return RepositorySectionResult{}, 0, fmt.Errorf("synthesis assigned observation %q to both AI use %q and %q", observationID, existing, use.ID)
+				}
+				observationMembership[observationID] = use.ID
+				use.MemberObservationIDs[memberIndex] = observationID
+				for location := range synthesisObservationLocations[observationID] {
+					allowedCandidateLocations[location] = struct{}{}
+				}
+			}
+			sort.Strings(use.MemberObservationIDs)
+		} else if len(use.MemberObservationIDs) > 0 {
+			return RepositorySectionResult{}, 0, fmt.Errorf("source analysis candidate AI use %q returned synthesis-only member observations", use.ID)
+		}
 		if !validRepositoryConfidence(use.Confidence) {
 			return RepositorySectionResult{}, 0, fmt.Errorf("AI use %q has invalid confidence %q", use.ID, use.Confidence)
 		}
@@ -454,6 +554,15 @@ func validateRepositorySection(value RepositorySectionResult, scope string, allo
 		if len(use.Evidence) == 0 {
 			return RepositorySectionResult{}, 0, fmt.Errorf("AI use %q has no checked evidence citation", use.ID)
 		}
+		if mode == RepositoryAnalysisSynthesis {
+			for _, citation := range use.Evidence {
+				location := repositoryCitationLocation{path: citation.Path, line: citation.Line}
+				if _, allowed := allowedCandidateLocations[location]; !allowed {
+					return RepositorySectionResult{}, 0, fmt.Errorf("synthesized AI use %q cited %s:%d outside its member observations", use.ID, citation.Path, citation.Line)
+				}
+			}
+			candidateEvidenceLocations[use.ID] = allowedCandidateLocations
+		}
 		paths := make(map[string]struct{}, len(use.Evidence))
 		for _, citation := range use.Evidence {
 			paths[citation.Path] = struct{}{}
@@ -461,9 +570,22 @@ func validateRepositorySection(value RepositorySectionResult, scope string, allo
 		candidateEvidencePaths[use.ID] = paths
 		use.UnresolvedQuestions = cleanRepositoryList(use.UnresolvedQuestions, maxRepositoryQuestions)
 	}
-	for _, useID := range sortedRepositoryIDs(requiredCandidateIDs) {
-		if _, exists := seenUses[useID]; !exists {
-			return RepositorySectionResult{}, 0, fmt.Errorf("repository synthesis omitted reviewed candidate AI use %q", useID)
+	for _, observationID := range sortedRepositoryIDs(requiredObservationIDs) {
+		if _, exists := observationMembership[observationID]; !exists {
+			return RepositorySectionResult{}, 0, fmt.Errorf("repository synthesis omitted reviewed evidence observation %q", observationID)
+		}
+	}
+	// A later synthesis level may merge prior groups, but it may not split one
+	// already validated group and thereby detach its evidence from its facts.
+	for _, group := range inputObservationGroups {
+		if len(group) < 2 {
+			continue
+		}
+		assignedUse := observationMembership[group[0]]
+		for _, observationID := range group[1:] {
+			if observationMembership[observationID] != assignedUse {
+				return RepositorySectionResult{}, 0, fmt.Errorf("repository synthesis split previously grouped observations %q and %q", group[0], observationID)
+			}
 		}
 	}
 	seenFactSets := make(map[string]struct{}, len(value.AIUseFacts))
@@ -544,6 +666,12 @@ func validateRepositorySection(value RepositorySectionResult, scope string, allo
 				for _, citation := range fact.Evidence {
 					if _, allowed := candidateEvidencePaths[factSet.AIUseID][citation.Path]; !allowed {
 						return RepositorySectionResult{}, 0, fmt.Errorf("fact %q attributed citation %q outside candidate AI use %q evidence paths", field, citation.Path, factSet.AIUseID)
+					}
+					if mode == RepositoryAnalysisSynthesis {
+						location := repositoryCitationLocation{path: citation.Path, line: citation.Line}
+						if _, allowed := candidateEvidenceLocations[factSet.AIUseID][location]; !allowed {
+							return RepositorySectionResult{}, 0, fmt.Errorf("fact %q cited %s:%d outside synthesized AI use %q member observations", field, citation.Path, citation.Line, factSet.AIUseID)
+						}
 					}
 				}
 			}
@@ -853,16 +981,30 @@ func repositoryAnalysisSchema(request RepositoryAnalysisRequest, allowFollowUp b
 	}
 	useCitations := citations()
 	useCitations["minItems"] = 1
+	useProperties := map[string]any{
+		"id": stringValue(120), "name": stringValue(160), "purpose": stringValue(targetedMaximumTextChars),
+		"lifecycle": stringValue(100), "confidence": confidence, "evidence": useCitations, "unresolved_questions": stringsArray(),
+	}
+	useRequired := []string{"id", "name", "purpose", "lifecycle", "confidence", "evidence", "unresolved_questions"}
+	if mode == RepositoryAnalysisSynthesis {
+		observationIDs := make([]string, 0)
+		for _, summary := range request.SubsystemSummaries {
+			for _, use := range summary.AIUses {
+				observationIDs = append(observationIDs, use.MemberObservationIDs...)
+			}
+		}
+		useProperties["member_observation_ids"] = map[string]any{
+			"type": "array", "items": enumStringValue(observationIDs, 200), "minItems": 1, "maxItems": maxRepositoryUses,
+		}
+		useRequired = append(useRequired, "member_observation_ids")
+	}
 	properties := map[string]any{
 		"result": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"scope": stringValue(300),
 				"ai_uses": arrayValue(map[string]any{
-					"type": "object", "properties": map[string]any{
-						"id": stringValue(120), "name": stringValue(160), "purpose": stringValue(targetedMaximumTextChars),
-						"lifecycle": stringValue(100), "confidence": confidence, "evidence": useCitations, "unresolved_questions": stringsArray(),
-					}, "required": []string{"id", "name", "purpose", "lifecycle", "confidence", "evidence", "unresolved_questions"}, "additionalProperties": false,
+					"type": "object", "properties": useProperties, "required": useRequired, "additionalProperties": false,
 				}, targetedMaximumUses),
 				"ai_use_facts": factSets,
 				"objective_observations": arrayValue(map[string]any{
@@ -907,8 +1049,11 @@ Perform three connected tasks:
 Rules:
 - be concise: short phrases, at most two citations per item, no repeated rationale, and only outcome-changing unresolved questions;
 - when confirmed_ai_uses is present, treat those stable IDs and path scopes as operator-owned context: do not rename, merge, or recreate them under ai_uses;
-- give each newly discovered candidate a concise stable ID based on its technical identity, and preserve that exact ID through synthesis;
-- ai_use_facts may reference only an exact candidate ID returned under ai_uses or an exact supplied confirmed_ai_uses ID; never guess, fuzzy-match, or rewrite an ID;
+- in source-analysis modes, give each local evidence observation a concise temporary candidate ID only so its fact set can reference it; local orchestration replaces that ID and it is never durable identity;
+- in synthesis mode, group technically connected observations into candidate AI uses by returning every supplied member_observation_id exactly once; one use may span routes, model calls, review gates, storage, and logging in different paths or batches;
+- shared gateways, generic model clients, logging, and provider configuration may support several uses and do not by themselves justify merging otherwise distinct workflows;
+- synthesis may merge supplied observation groups but must never split a previously grouped set; the candidate id in the synthesis response is only a temporary fact-set key and local orchestration replaces it with an ID derived from exact membership;
+- ai_use_facts may reference only an exact temporary candidate ID returned under ai_uses or an exact supplied confirmed_ai_uses ID; never guess, fuzzy-match, or rewrite a confirmed ID;
 - return exactly one ai_use_facts entry for every returned candidate and every supplied confirmed AI use, including a reviewed entry with an empty facts array when no positive fact is supported;
 - return each fact field at most once per AI use, include every directly supported value for that field, and give every fact a short rationale plus at least one exact citation;
 - preserve concise use-specific unknowns under that fact set's unresolved_questions; use an empty facts array when the use was reviewed but no positive fact is supported, rather than fabricating one;
@@ -935,6 +1080,6 @@ Rules:
 - never conclude geographic operation, organisation or legal role, contracts, actual production status, actual placing on the market or distribution, legal applicability, legal risk category, compliance, real human practice, or runtime effectiveness; report only the narrower submitted technical mechanism and leave those organisation facts unresolved;
 - do not invent systems, legal conclusions, requirements, code, paths, line numbers, or runtime facts;
 - when allow_follow_up is true, request at most one bounded follow-up only for specific missing code that could materially change the result; use literal identifiers or short phrases and optional repository-relative path substrings, never commands, globs, regular expressions, traversal, secrets, or requests for complete files;
-- synthesis mode must reconcile duplicate subsystem observations and facts, preserve every reviewed candidate and bound confirmed AI-use ID including reviewed-empty fact sets, preserve the strongest well-cited cross-subsystem interpretation, and never invent new evidence.
+- synthesis mode must assign every reviewed member observation exactly once, reconcile duplicate facts inside the resulting groups, preserve every bound confirmed AI-use ID including reviewed-empty fact sets, preserve the strongest well-cited cross-subsystem interpretation, and never invent new evidence.
 
 Return only the requested structured object.`

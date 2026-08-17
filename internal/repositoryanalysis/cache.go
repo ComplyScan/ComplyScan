@@ -22,9 +22,9 @@ import (
 )
 
 const (
-	repositoryCacheSchemaVersion  = 3
-	repositoryCacheContextVersion = "4"
-	repositoryCacheFileName       = "repository-analysis-v3.json"
+	repositoryCacheSchemaVersion  = 4
+	repositoryCacheContextVersion = "5"
+	repositoryCacheFileName       = "repository-analysis-v4.json"
 	maxRepositoryCacheBytes       = 32 << 20
 	maxRepositoryCacheEntries     = 40
 	maxRepositoryCacheEntryBytes  = 2 << 20
@@ -249,6 +249,7 @@ func validateRepositoryCacheEntry(entry repositoryCacheEntry) error {
 		return errors.New("repository analysis result exceeds cache item limits")
 	}
 	candidateEvidencePaths := make(map[string]map[string]struct{}, len(result.Result.AIUses))
+	seenObservationIDs := make(map[string]struct{})
 	for _, use := range result.Result.AIUses {
 		if strings.TrimSpace(use.ID) == "" || strings.TrimSpace(use.Name) == "" || !validRepositoryConfidence(use.Confidence) {
 			return errors.New("repository analysis cache contains an invalid AI use")
@@ -258,6 +259,26 @@ func validateRepositoryCacheEntry(entry repositoryCacheEntry) error {
 		}
 		if len(use.Evidence) == 0 {
 			return errors.New("repository analysis cache contains an uncited AI use")
+		}
+		if len(use.MemberObservationIDs) == 0 || len(use.MemberObservationIDs) > 100 {
+			return errors.New("repository analysis cache contains an AI use without bounded observation membership")
+		}
+		members := append([]string(nil), use.MemberObservationIDs...)
+		sort.Strings(members)
+		for index, observationID := range members {
+			if strings.TrimSpace(observationID) == "" || strings.TrimSpace(observationID) != observationID {
+				return errors.New("repository analysis cache contains a non-canonical observation ID")
+			}
+			if index > 0 && members[index-1] == observationID {
+				return errors.New("repository analysis cache contains duplicate observation membership")
+			}
+			if _, duplicate := seenObservationIDs[observationID]; duplicate {
+				return errors.New("repository analysis cache assigns one observation to multiple AI uses")
+			}
+			seenObservationIDs[observationID] = struct{}{}
+		}
+		if use.ID != inferredCandidateID(members) {
+			return errors.New("repository analysis cache contains an AI-use ID not derived from its observation membership")
 		}
 		if err := validateRepositoryCitations(use.Evidence); err != nil {
 			return err

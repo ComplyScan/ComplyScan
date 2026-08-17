@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +67,11 @@ func TestWriteJSON(t *testing.T) {
 	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{Coverage: providers.RepositoryCoverage{
 		Mode: providers.RepositoryAnalysisTargeted, Subsystems: 2, SourceBatchesCompleted: 2, SourceBatchesTotal: 2,
 	}, Result: providers.RepositorySectionResult{
+		AIUses: []providers.RepositoryAIUse{{
+			ID: "inferred-use-example", Name: "Inferred assistant", Purpose: "Draft replies", Confidence: "medium",
+			Evidence: []providers.RepositoryCitation{{Path: "assistant.go", Line: 12, Summary: "Model invocation"}}, MemberObservationIDs: []string{"observation-a", "observation-b"},
+		}},
+		AIUseFacts: []providers.RepositoryAIUseFactSet{{AIUseID: "inferred-use-example", Facts: []providers.RepositoryAIUseFact{}, UnresolvedQuestions: []string{}}},
 		ObjectiveObservations: []providers.RepositoryObjectiveObservation{{
 			ObjectiveID: "pack/human-review", AIUseID: "assistant", SystemID: "assistant",
 			Strength: providers.StrengthPartial, Confidence: "high", Rationale: "A review path is present but incomplete.",
@@ -79,7 +85,7 @@ func TestWriteJSON(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 11 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
+	if decoded.SchemaVersion != 12 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
 		t.Fatalf("unexpected tool: %#v", decoded.Tool)
 	}
 	if decoded.RepositoryAnalysisRun != RepositoryAnalysisCompleted {
@@ -100,11 +106,14 @@ func TestWriteJSON(t *testing.T) {
 		decoded.RepositoryAnalysis.Result.ObjectiveObservations[0].AIUseID != "assistant" {
 		t.Fatalf("use-scoped repository observation was not serialized: %#v", decoded.RepositoryAnalysis)
 	}
+	if len(decoded.RepositoryAnalysis.Result.AIUses) != 1 || !reflect.DeepEqual(decoded.RepositoryAnalysis.Result.AIUses[0].MemberObservationIDs, []string{"observation-a", "observation-b"}) {
+		t.Fatalf("schema-version 12 inferred-use observation membership was not serialized: %#v", decoded.RepositoryAnalysis.Result.AIUses)
+	}
 	if decoded.RepositoryAnalysis.Coverage.SourceBatchesCompleted != 2 || decoded.RepositoryAnalysis.Coverage.SourceBatchesTotal != 2 {
-		t.Fatalf("schema-version 11 batch coverage was not serialized: %#v", decoded.RepositoryAnalysis.Coverage)
+		t.Fatalf("schema-version 12 batch coverage was not serialized: %#v", decoded.RepositoryAnalysis.Coverage)
 	}
 	if !strings.Contains(output.String(), `"ai_use_id": "assistant"`) {
-		t.Fatalf("schema-version 11 AI-use attribution is missing:\n%s", output.String())
+		t.Fatalf("schema-version 12 AI-use attribution is missing:\n%s", output.String())
 	}
 	if !strings.Contains(output.String(), `"framework_system_contexts": 1`) ||
 		!strings.Contains(output.String(), `"with_in_scope_code_evidence": 1`) ||
@@ -196,7 +205,7 @@ func TestWriteJSONUsesCurrentEvidenceInvestigationContract(t *testing.T) {
 	if err := WriteJSON(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), `"schema_version": 11`) || !strings.Contains(output.String(), `"repository_analysis_run": "not-requested"`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
+	if !strings.Contains(output.String(), `"schema_version": 12`) || !strings.Contains(output.String(), `"repository_analysis_run": "not-requested"`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
 		t.Fatalf("unexpected current-schema investigation JSON:\n%s", output.String())
 	}
 }

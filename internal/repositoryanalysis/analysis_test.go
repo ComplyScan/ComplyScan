@@ -3,6 +3,7 @@ package repositoryanalysis
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -352,6 +353,45 @@ func TestNamespaceSubsystemCandidateIDsPreventsCrossSubsystemCollisions(t *testi
 	}
 	if first.AIUseFacts[1].AIUseID != "confirmed-use" || second.AIUseFacts[1].AIUseID != "confirmed-use" {
 		t.Fatalf("confirmed IDs must remain stable: first=%#v second=%#v", first.AIUseFacts, second.AIUseFacts)
+	}
+	renamed := base
+	renamed.AIUses = append([]providers.RepositoryAIUse(nil), base.AIUses...)
+	renamed.AIUseFacts = append([]providers.RepositoryAIUseFactSet(nil), base.AIUseFacts...)
+	renamed.AIUses[0].ID = "different-model-wording"
+	renamed.AIUseFacts[0].AIUseID = "different-model-wording"
+	renamedObservation, err := namespaceSubsystemCandidateIDs(renamed, 0, "api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renamedObservation.AIUses[0].ID != first.AIUses[0].ID || !reflect.DeepEqual(renamedObservation.AIUses[0].MemberObservationIDs, first.AIUses[0].MemberObservationIDs) {
+		t.Fatalf("model-authored key changed trusted observation identity: first=%#v renamed=%#v", first.AIUses[0], renamedObservation.AIUses[0])
+	}
+}
+
+func TestAssignSynthesisCandidateIDDependsOnlyOnObservationMembership(t *testing.T) {
+	base := providers.RepositorySectionResult{
+		AIUses: []providers.RepositoryAIUse{{
+			ID: "model-group-a", Name: "First wording", Purpose: "First purpose", MemberObservationIDs: []string{"observation-b", "observation-a"},
+		}},
+		AIUseFacts: []providers.RepositoryAIUseFactSet{{AIUseID: "model-group-a", Facts: []providers.RepositoryAIUseFact{}, UnresolvedQuestions: []string{}}},
+	}
+	first, err := assignSynthesisCandidateIDs(base, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base.AIUses[0].ID = "model-group-b"
+	base.AIUses[0].Name = "Different wording"
+	base.AIUses[0].Purpose = "Different purpose"
+	base.AIUseFacts[0].AIUseID = "model-group-b"
+	second, err := assignSynthesisCandidateIDs(base, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.AIUses[0].ID != second.AIUses[0].ID || first.AIUses[0].ID != inferredCandidateID([]string{"observation-a", "observation-b"}) {
+		t.Fatalf("trusted inferred IDs differ for identical membership: first=%q second=%q", first.AIUses[0].ID, second.AIUses[0].ID)
+	}
+	if first.AIUseFacts[0].AIUseID != first.AIUses[0].ID || second.AIUseFacts[0].AIUseID != second.AIUses[0].ID {
+		t.Fatalf("fact bindings were not rewritten with trusted identity: first=%#v second=%#v", first.AIUseFacts, second.AIUseFacts)
 	}
 }
 

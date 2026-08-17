@@ -370,13 +370,19 @@ type RepositoryAIUseFact struct {
 // RepositoryAIUse is a model-discovered implementation or integration. It is
 // an advisory inventory candidate, not a legal classification.
 type RepositoryAIUse struct {
-	ID                  string               `json:"id"`
-	Name                string               `json:"name"`
-	Purpose             string               `json:"purpose"`
-	Lifecycle           string               `json:"lifecycle"`
-	Confidence          string               `json:"confidence"`
-	Evidence            []RepositoryCitation `json:"evidence"`
-	UnresolvedQuestions []string             `json:"unresolved_questions,omitempty"`
+	ID         string               `json:"id"`
+	Name       string               `json:"name"`
+	Purpose    string               `json:"purpose"`
+	Lifecycle  string               `json:"lifecycle"`
+	Confidence string               `json:"confidence"`
+	Evidence   []RepositoryCitation `json:"evidence"`
+	// MemberObservationIDs contains trusted, scan-local evidence-observation
+	// identities after synthesis. The model proposes membership, but local
+	// orchestration replaces its temporary group ID with an ID derived from
+	// this exact membership. Confirmed human-owned uses continue to use their
+	// separately supplied stable IDs.
+	MemberObservationIDs []string `json:"member_observation_ids,omitempty"`
+	UnresolvedQuestions  []string `json:"unresolved_questions,omitempty"`
 }
 
 type RepositoryObjectiveObservation struct {

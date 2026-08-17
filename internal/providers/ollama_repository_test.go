@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -99,6 +100,11 @@ func TestReviewRepositoryRequiresCheckedCandidateEvidenceAndFactCoverage(t *test
 			content: `{"result":{"scope":".","ai_uses":[{"id":"assistant","name":"Assistant","purpose":"Draft replies","lifecycle":"unknown","confidence":"medium","evidence":[{"path":"app.go","line":2,"summary":"The handler calls a model."}],"unresolved_questions":[]},{"id":"ranking","name":"Ranking","purpose":"Rank results","lifecycle":"unknown","confidence":"medium","evidence":[{"path":"rank.go","line":2,"summary":"The ranker calls a model."}],"unresolved_questions":[]}],"ai_use_facts":[{"ai_use_id":"assistant","facts":[{"field":"ai-activities","values":["inference"],"confidence":"high","rationale":"The ranker invokes a model.","evidence":[{"path":"rank.go","line":2,"summary":"The ranker calls a model."}]}],"unresolved_questions":[]},{"ai_use_id":"ranking","facts":[],"unresolved_questions":[]}],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`,
 			wantErr: `outside candidate AI use "assistant" evidence paths`,
 		},
+		{
+			name:    "source candidate cannot forge synthesis membership",
+			content: `{"result":{"scope":".","ai_uses":[{"id":"assistant","name":"Assistant","purpose":"Draft replies","lifecycle":"unknown","confidence":"medium","evidence":[{"path":"app.go","line":2,"summary":"The handler calls a model."}],"member_observation_ids":["observation-forged"],"unresolved_questions":[]}],"ai_use_facts":[{"ai_use_id":"assistant","facts":[],"unresolved_questions":[]}],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`,
+			wantErr: `source analysis candidate AI use "assistant" returned synthesis-only member observations`,
+		},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -130,7 +136,7 @@ func TestReviewRepositorySynthesisPreservesReviewedCandidatesAndExactCitations(t
 		Scope: "subsystem-1",
 		AIUses: []RepositoryAIUse{{
 			ID: "subsystem-0001-assistant", Name: "Assistant", Purpose: "Draft replies", Lifecycle: "unknown", Confidence: "medium",
-			Evidence: []RepositoryCitation{{Path: "app.go", Line: 2, Summary: "The handler calls a model."}},
+			Evidence: []RepositoryCitation{{Path: "app.go", Line: 2, Summary: "The handler calls a model."}}, MemberObservationIDs: []string{"observation-1"},
 		}},
 		AIUseFacts:            []RepositoryAIUseFactSet{{AIUseID: "subsystem-0001-assistant", Facts: []RepositoryAIUseFact{}, UnresolvedQuestions: []string{"Deployment is not established."}}},
 		ObjectiveObservations: []RepositoryObjectiveObservation{},
@@ -144,17 +150,17 @@ func TestReviewRepositorySynthesisPreservesReviewedCandidatesAndExactCitations(t
 	}{
 		{
 			name:    "preserves reviewed empty fact set",
-			content: `{"result":{"scope":"repository-synthesis","ai_uses":[{"id":"subsystem-0001-assistant","name":"Assistant","purpose":"Draft replies","lifecycle":"unknown","confidence":"medium","evidence":[{"path":"app.go","line":2,"summary":"The handler calls a model."}],"unresolved_questions":[]}],"ai_use_facts":[{"ai_use_id":"subsystem-0001-assistant","facts":[],"unresolved_questions":["Deployment is not established."]}],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`,
+			content: `{"result":{"scope":"repository-synthesis","ai_uses":[{"id":"group-1","name":"Assistant","purpose":"Draft replies","lifecycle":"unknown","confidence":"medium","evidence":[{"path":"app.go","line":2,"summary":"The handler calls a model."}],"member_observation_ids":["observation-1"],"unresolved_questions":[]}],"ai_use_facts":[{"ai_use_id":"group-1","facts":[],"unresolved_questions":["Deployment is not established."]}],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`,
 		},
 		{
 			name:    "rejects invented line in checked file",
-			content: `{"result":{"scope":"repository-synthesis","ai_uses":[{"id":"subsystem-0001-assistant","name":"Assistant","purpose":"Draft replies","lifecycle":"unknown","confidence":"medium","evidence":[{"path":"app.go","line":3,"summary":"A different line allegedly calls a model."}],"unresolved_questions":[]}],"ai_use_facts":[{"ai_use_id":"subsystem-0001-assistant","facts":[],"unresolved_questions":[]}],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`,
+			content: `{"result":{"scope":"repository-synthesis","ai_uses":[{"id":"group-1","name":"Assistant","purpose":"Draft replies","lifecycle":"unknown","confidence":"medium","evidence":[{"path":"app.go","line":3,"summary":"A different line allegedly calls a model."}],"member_observation_ids":["observation-1"],"unresolved_questions":[]}],"ai_use_facts":[{"ai_use_id":"group-1","facts":[],"unresolved_questions":[]}],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`,
 			wantErr: `synthesis citation app.go:3 was not present in a checked subsystem result`,
 		},
 		{
 			name:    "rejects omitted reviewed candidate",
 			content: `{"result":{"scope":"repository-synthesis","ai_uses":[],"ai_use_facts":[],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`,
-			wantErr: `repository synthesis omitted reviewed candidate AI use "subsystem-0001-assistant"`,
+			wantErr: `repository synthesis omitted reviewed evidence observation "observation-1"`,
 		},
 	}
 	for _, testCase := range tests {
@@ -184,6 +190,118 @@ func TestReviewRepositorySynthesisPreservesReviewedCandidatesAndExactCitations(t
 			}
 			if len(result.Result.AIUseFacts) != 1 || len(result.Result.AIUseFacts[0].Facts) != 0 {
 				t.Fatalf("reviewed-empty fact coverage was not preserved: %#v", result.Result.AIUseFacts)
+			}
+		})
+	}
+}
+
+func TestReviewRepositorySynthesisGroupsExactObservationMembership(t *testing.T) {
+	summaries := []RepositorySectionResult{
+		{
+			Scope: "batch-a",
+			AIUses: []RepositoryAIUse{{
+				ID: "batch-a-use", Name: "Route observation", Purpose: "Receives a drafting request", Lifecycle: "unknown", Confidence: "medium",
+				Evidence: []RepositoryCitation{{Path: "route.go", Line: 2, Summary: "The route calls the drafting service."}}, MemberObservationIDs: []string{"observation-a"},
+			}},
+			AIUseFacts:            []RepositoryAIUseFactSet{{AIUseID: "batch-a-use", Facts: []RepositoryAIUseFact{}, UnresolvedQuestions: []string{}}},
+			ObjectiveObservations: []RepositoryObjectiveObservation{}, UnmappedObservations: []RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{},
+		},
+		{
+			Scope: "batch-b",
+			AIUses: []RepositoryAIUse{{
+				ID: "batch-b-use", Name: "Model observation", Purpose: "Drafts a response", Lifecycle: "unknown", Confidence: "high",
+				Evidence: []RepositoryCitation{{Path: "model.go", Line: 3, Summary: "The service invokes a model."}}, MemberObservationIDs: []string{"observation-b"},
+			}},
+			AIUseFacts:            []RepositoryAIUseFactSet{{AIUseID: "batch-b-use", Facts: []RepositoryAIUseFact{}, UnresolvedQuestions: []string{}}},
+			ObjectiveObservations: []RepositoryObjectiveObservation{}, UnmappedObservations: []RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{},
+		},
+	}
+	content := `{"result":{"scope":"repository-synthesis","ai_uses":[{"id":"temporary-group","name":"Response drafting","purpose":"Draft responses requested by the route","lifecycle":"unknown","confidence":"high","evidence":[{"path":"route.go","line":2,"summary":"The route calls the drafting service."},{"path":"model.go","line":3,"summary":"The service invokes a model."}],"member_observation_ids":["observation-a","observation-b"],"unresolved_questions":[]}],"ai_use_facts":[{"ai_use_id":"temporary-group","facts":[],"unresolved_questions":[]}],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`
+	provider := &OllamaProvider{
+		kind: OpenAI, label: "OpenAI", model: "test-model",
+		completion: func(context.Context, ollamaChatRequest) (ollamaChatResponse, error) {
+			var response ollamaChatResponse
+			response.Done = true
+			response.Message.Content = content
+			return response, nil
+		},
+	}
+	result, err := provider.ReviewRepository(context.Background(), RepositoryAnalysisRequest{
+		Mode: RepositoryAnalysisSynthesis, Scope: "repository-synthesis", RepositoryFiles: 2,
+		FileIndex:          []RepositoryFileReference{{Path: "route.go", Kind: "source", LineCount: 2}, {Path: "model.go", Kind: "source", LineCount: 3}},
+		SubsystemSummaries: summaries,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Result.AIUses) != 1 || !reflect.DeepEqual(result.Result.AIUses[0].MemberObservationIDs, []string{"observation-a", "observation-b"}) {
+		t.Fatalf("synthesized membership = %#v", result.Result.AIUses)
+	}
+
+	provider.completion = func(context.Context, ollamaChatRequest) (ollamaChatResponse, error) {
+		content := `{"result":{"scope":"repository-synthesis","ai_uses":[{"id":"route-group","name":"Route","purpose":"Route","lifecycle":"unknown","confidence":"medium","evidence":[{"path":"model.go","line":3,"summary":"Borrowed model evidence."}],"member_observation_ids":["observation-a"],"unresolved_questions":[]},{"id":"model-group","name":"Model","purpose":"Model","lifecycle":"unknown","confidence":"medium","evidence":[{"path":"model.go","line":3,"summary":"The service invokes a model."}],"member_observation_ids":["observation-b"],"unresolved_questions":[]}],"ai_use_facts":[{"ai_use_id":"route-group","facts":[],"unresolved_questions":[]},{"ai_use_id":"model-group","facts":[],"unresolved_questions":[]}],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`
+		var response ollamaChatResponse
+		response.Done = true
+		response.Message.Content = content
+		return response, nil
+	}
+	_, err = provider.ReviewRepository(context.Background(), RepositoryAnalysisRequest{
+		Mode: RepositoryAnalysisSynthesis, Scope: "repository-synthesis", RepositoryFiles: 2,
+		FileIndex:          []RepositoryFileReference{{Path: "route.go", Kind: "source", LineCount: 2}, {Path: "model.go", Kind: "source", LineCount: 3}},
+		SubsystemSummaries: summaries,
+	})
+	if err == nil || !strings.Contains(err.Error(), "outside its member observations") {
+		t.Fatalf("cross-observation citation error = %v", err)
+	}
+}
+
+func TestReviewRepositorySynthesisRejectsMembershipAndCitationMisattribution(t *testing.T) {
+	summary := RepositorySectionResult{
+		Scope: "prior-group",
+		AIUses: []RepositoryAIUse{{
+			ID: "prior-use", Name: "Prior group", Purpose: "Connected workflow", Lifecycle: "unknown", Confidence: "medium",
+			Evidence:             []RepositoryCitation{{Path: "a.go", Line: 1, Summary: "First observation."}, {Path: "b.go", Line: 1, Summary: "Second observation."}},
+			MemberObservationIDs: []string{"observation-a", "observation-b"},
+		}},
+		AIUseFacts:            []RepositoryAIUseFactSet{{AIUseID: "prior-use", Facts: []RepositoryAIUseFact{}, UnresolvedQuestions: []string{}}},
+		ObjectiveObservations: []RepositoryObjectiveObservation{}, UnmappedObservations: []RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{},
+	}
+	for _, testCase := range []struct {
+		name, content, want string
+	}{
+		{
+			name:    "cannot split a validated group",
+			content: `{"result":{"scope":"synthesis","ai_uses":[{"id":"a","name":"A","purpose":"A","lifecycle":"unknown","confidence":"medium","evidence":[{"path":"a.go","line":1,"summary":"First observation."}],"member_observation_ids":["observation-a"],"unresolved_questions":[]},{"id":"b","name":"B","purpose":"B","lifecycle":"unknown","confidence":"medium","evidence":[{"path":"b.go","line":1,"summary":"Second observation."}],"member_observation_ids":["observation-b"],"unresolved_questions":[]}],"ai_use_facts":[{"ai_use_id":"a","facts":[],"unresolved_questions":[]},{"ai_use_id":"b","facts":[],"unresolved_questions":[]}],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`,
+			want:    "split previously grouped observations",
+		},
+		{
+			name:    "cannot invent an observation",
+			content: `{"result":{"scope":"synthesis","ai_uses":[{"id":"a","name":"A","purpose":"A","lifecycle":"unknown","confidence":"medium","evidence":[{"path":"a.go","line":1,"summary":"First observation."}],"member_observation_ids":["observation-a","observation-b","observation-c"],"unresolved_questions":[]}],"ai_use_facts":[{"ai_use_id":"a","facts":[],"unresolved_questions":[]}],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`,
+			want:    `unknown observation "observation-c"`,
+		},
+		{
+			name:    "cannot assign one observation twice",
+			content: `{"result":{"scope":"synthesis","ai_uses":[{"id":"a","name":"A","purpose":"A","lifecycle":"unknown","confidence":"medium","evidence":[{"path":"a.go","line":1,"summary":"First observation."},{"path":"b.go","line":1,"summary":"Second observation."}],"member_observation_ids":["observation-a","observation-b"],"unresolved_questions":[]},{"id":"b","name":"B","purpose":"B","lifecycle":"unknown","confidence":"medium","evidence":[{"path":"b.go","line":1,"summary":"Second observation."}],"member_observation_ids":["observation-b"],"unresolved_questions":[]}],"ai_use_facts":[{"ai_use_id":"a","facts":[],"unresolved_questions":[]},{"ai_use_id":"b","facts":[],"unresolved_questions":[]}],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`,
+			want:    `assigned observation "observation-b" to both AI use`,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			provider := &OllamaProvider{
+				kind: OpenAI, label: "OpenAI", model: "test-model",
+				completion: func(context.Context, ollamaChatRequest) (ollamaChatResponse, error) {
+					var response ollamaChatResponse
+					response.Done = true
+					response.Message.Content = testCase.content
+					return response, nil
+				},
+			}
+			_, err := provider.ReviewRepository(context.Background(), RepositoryAnalysisRequest{
+				Mode: RepositoryAnalysisSynthesis, Scope: "synthesis", RepositoryFiles: 2,
+				FileIndex:          []RepositoryFileReference{{Path: "a.go", Kind: "source", LineCount: 1}, {Path: "b.go", Kind: "source", LineCount: 1}},
+				SubsystemSummaries: []RepositorySectionResult{summary},
+			})
+			if err == nil || !strings.Contains(err.Error(), testCase.want) {
+				t.Fatalf("error = %v, want %q", err, testCase.want)
 			}
 		})
 	}

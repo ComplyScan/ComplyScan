@@ -144,6 +144,15 @@ func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository
 		if err := validateSystemAttribution(result.Result, systems, options.Ownership, confirmedUses); err != nil {
 			return incompleteRepositoryAttempt(result, options, repository, "The broad repository response failed trusted attribution validation, so no model-authored conclusion was retained."), err
 		}
+		observations, err := namespaceSubsystemCandidateIDs(result.Result, 0, ".")
+		if err != nil {
+			return incompleteRepositoryAttempt(result, options, repository, "The broad repository response could not be assigned trusted observation identities, so no model-authored conclusion was retained."), err
+		}
+		grouped, err := assignSynthesisCandidateIDs(observations, confirmedUses)
+		if err != nil {
+			return incompleteRepositoryAttempt(result, options, repository, "The broad repository response could not be assigned trusted inferred-use identities, so no model-authored conclusion was retained."), err
+		}
+		result.Result = grouped
 		if err := progress(options, Progress{Stage: "full-repository", Completed: 1, Total: 1, Scope: ".", InputBytes: fullBytes}); err != nil {
 			return incompleteRepositoryAttempt(result, options, repository, "The broad repository review completed at the provider but local completion was interrupted, so no model-authored conclusion was retained."), err
 		}
@@ -440,7 +449,11 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership, confirmedUses); err != nil {
 				return partialFailure(scope, err)
 			}
-			next = append(next, result.Result)
+			grouped, err := assignSynthesisCandidateIDs(result.Result, confirmedUses)
+			if err != nil {
+				return partialFailure(scope, err)
+			}
+			next = append(next, grouped)
 			if err := progress(options, Progress{Stage: "synthesis", Completed: index + 1, Total: len(groups), Scope: scope, InputBytes: summaryBytes(group.summaries)}); err != nil {
 				return partialFailure(scope, err)
 			}
@@ -514,7 +527,11 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership, confirmedUses); err != nil {
 			return partialFailure("repository synthesis", err)
 		}
-		summaries[0] = result.Result
+		grouped, err := assignSynthesisCandidateIDs(result.Result, confirmedUses)
+		if err != nil {
+			return partialFailure("repository synthesis", err)
+		}
+		summaries[0] = grouped
 	}
 	if options.TargetedBatches {
 		aggregate.Coverage.Mode = providers.RepositoryAnalysisTargeted
@@ -555,11 +572,11 @@ type repositoryChunk struct {
 	maxOutputTokens int
 }
 
-// namespaceSubsystemCandidateIDs makes model-generated candidate identities
-// globally distinct before hierarchical synthesis. Candidate IDs are only
-// stable inside one bounded subsystem response; two unrelated subsystems may
-// otherwise both return a generic ID such as "assistant" and be falsely
-// merged. Confirmed operator-owned IDs are not changed.
+// namespaceSubsystemCandidateIDs replaces model-authored batch keys with
+// trusted scan-local observation identities before synthesis. The identity is
+// derived from the checked evidence position and local orchestration order,
+// not from the model's proposed product name. Confirmed operator-owned IDs are
+// not changed.
 func namespaceSubsystemCandidateIDs(summary providers.RepositorySectionResult, subsystemIndex int, scope string) (providers.RepositorySectionResult, error) {
 	summary.AIUses = append([]providers.RepositoryAIUse(nil), summary.AIUses...)
 	summary.AIUseFacts = append([]providers.RepositoryAIUseFactSet(nil), summary.AIUseFacts...)
@@ -570,20 +587,21 @@ func namespaceSubsystemCandidateIDs(summary providers.RepositorySectionResult, s
 		if oldID == "" {
 			return providers.RepositorySectionResult{}, errors.New("cannot namespace an empty subsystem candidate AI-use ID")
 		}
-		digest := sha256.Sum256([]byte(scope + "\x00" + oldID))
-		prefix := fmt.Sprintf("subsystem-%04d-%x--", subsystemIndex+1, digest[:6])
-		maxIDRunes := 200 - len([]rune(prefix))
-		candidateRunes := []rune(oldID)
-		if len(candidateRunes) > maxIDRunes {
-			candidateRunes = candidateRunes[:maxIDRunes]
+		locations := make([]string, 0, len(summary.AIUses[index].Evidence))
+		for _, citation := range summary.AIUses[index].Evidence {
+			locations = append(locations, fmt.Sprintf("%s:%d", citation.Path, citation.Line))
 		}
-		newID := prefix + string(candidateRunes)
+		sort.Strings(locations)
+		seed := fmt.Sprintf("%d\x00%s\x00%d\x00%s", subsystemIndex, scope, index, strings.Join(locations, "\x00"))
+		digest := sha256.Sum256([]byte(seed))
+		newID := fmt.Sprintf("observation-%04d-%x", subsystemIndex+1, digest[:12])
 		if _, duplicate := seen[newID]; duplicate {
 			return providers.RepositorySectionResult{}, fmt.Errorf("subsystem candidate namespace collision for %q", oldID)
 		}
 		seen[newID] = struct{}{}
 		rewritten[oldID] = newID
 		summary.AIUses[index].ID = newID
+		summary.AIUses[index].MemberObservationIDs = []string{newID}
 	}
 	for index := range summary.AIUseFacts {
 		if newID, candidate := rewritten[summary.AIUseFacts[index].AIUseID]; candidate {
@@ -591,6 +609,57 @@ func namespaceSubsystemCandidateIDs(summary providers.RepositorySectionResult, s
 		}
 	}
 	return summary, nil
+}
+
+// assignSynthesisCandidateIDs replaces temporary model grouping keys with a
+// trusted candidate identity derived solely from exact observation membership.
+// Names and descriptions may change without changing the join key for the same
+// synthesized group. These inferred IDs remain report-local; durable IDs are
+// still owned by the optional AI-use register.
+func assignSynthesisCandidateIDs(summary providers.RepositorySectionResult, confirmedUses []providers.RepositoryConfirmedAIUse) (providers.RepositorySectionResult, error) {
+	summary.AIUses = append([]providers.RepositoryAIUse(nil), summary.AIUses...)
+	summary.AIUseFacts = append([]providers.RepositoryAIUseFactSet(nil), summary.AIUseFacts...)
+	confirmed := make(map[string]struct{}, len(confirmedUses))
+	for _, use := range confirmedUses {
+		confirmed[use.ID] = struct{}{}
+	}
+	rewritten := make(map[string]string, len(summary.AIUses))
+	seen := make(map[string]struct{}, len(summary.AIUses))
+	for index := range summary.AIUses {
+		oldID := summary.AIUses[index].ID
+		members := append([]string(nil), summary.AIUses[index].MemberObservationIDs...)
+		if oldID == "" || len(members) == 0 {
+			return providers.RepositorySectionResult{}, fmt.Errorf("cannot assign trusted ID to incomplete synthesized candidate %q", oldID)
+		}
+		sort.Strings(members)
+		for memberIndex := 1; memberIndex < len(members); memberIndex++ {
+			if members[memberIndex] == members[memberIndex-1] {
+				return providers.RepositorySectionResult{}, fmt.Errorf("synthesized candidate %q repeats observation %q", oldID, members[memberIndex])
+			}
+		}
+		newID := inferredCandidateID(members)
+		if _, collision := confirmed[newID]; collision {
+			return providers.RepositorySectionResult{}, fmt.Errorf("trusted inferred candidate ID %q conflicts with a confirmed AI use", newID)
+		}
+		if _, duplicate := seen[newID]; duplicate {
+			return providers.RepositorySectionResult{}, fmt.Errorf("synthesis returned duplicate observation membership for candidate %q", oldID)
+		}
+		seen[newID] = struct{}{}
+		rewritten[oldID] = newID
+		summary.AIUses[index].ID = newID
+		summary.AIUses[index].MemberObservationIDs = members
+	}
+	for index := range summary.AIUseFacts {
+		if newID, candidate := rewritten[summary.AIUseFacts[index].AIUseID]; candidate {
+			summary.AIUseFacts[index].AIUseID = newID
+		}
+	}
+	return summary, nil
+}
+
+func inferredCandidateID(sortedObservationIDs []string) string {
+	digest := sha256.Sum256([]byte(strings.Join(sortedObservationIDs, "\x00")))
+	return fmt.Sprintf("inferred-use-%x", digest[:16])
 }
 
 func reviewRepositoryWithRetry(ctx context.Context, reviewer Reviewer, request providers.RepositoryAnalysisRequest, options Options) (providers.RepositoryAnalysisResult, error) {

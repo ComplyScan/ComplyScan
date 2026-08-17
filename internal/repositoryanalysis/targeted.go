@@ -378,6 +378,15 @@ func runTargeted(
 			result.Notes = append(result.Notes, "The model requested a bounded follow-up, but trusted local retrieval found no new eligible excerpt; the initial grounded result was retained.")
 		}
 	}
+	observations, err := namespaceSubsystemCandidateIDs(result.Result, 0, ".")
+	if err != nil {
+		return partialFailure("assign targeted evidence observation identities", err)
+	}
+	grouped, err := assignSynthesisCandidateIDs(observations, confirmedUses)
+	if err != nil {
+		return partialFailure("assign targeted inferred-use identities", err)
+	}
+	result.Result = grouped
 	result.Coverage.Mode = providers.RepositoryAnalysisTargeted
 	result.Notes = append(result.Notes,
 		fmt.Sprintf("Targeted analysis selected %d of %d structural candidate file(s) from %d discovered repository file(s).", len(selected), considered, len(repository.Files)),

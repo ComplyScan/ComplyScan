@@ -123,17 +123,19 @@ func TestRepositoryAnalysisCacheValidatesTypedAIUseFacts(t *testing.T) {
 	}
 	digest := strings.Repeat("a", 64)
 	validResult := func() providers.RepositoryAnalysisResult {
+		members := []string{"observation-0001-aabbccddeeff"}
+		candidateID := inferredCandidateID(members)
 		return providers.RepositoryAnalysisResult{
 			Provider: providers.OpenAI, Model: "test-model",
 			Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted},
 			Result: providers.RepositorySectionResult{
 				Scope: ".",
 				AIUses: []providers.RepositoryAIUse{{
-					ID: "support-replies", Name: "Support replies", Purpose: "Draft replies", Confidence: "high",
-					Evidence: []providers.RepositoryCitation{{Path: "support/model.go", Line: 2, Summary: "Model call."}},
+					ID: candidateID, Name: "Support replies", Purpose: "Draft replies", Confidence: "high",
+					Evidence: []providers.RepositoryCitation{{Path: "support/model.go", Line: 2, Summary: "Model call."}}, MemberObservationIDs: members,
 				}},
 				AIUseFacts: []providers.RepositoryAIUseFactSet{{
-					AIUseID: "support-replies",
+					AIUseID: candidateID,
 					Facts: []providers.RepositoryAIUseFact{{
 						Field: profile.CodeFactAIActivities, Values: []string{"inference"}, Confidence: "high",
 						Rationale: "The handler invokes a model.",
@@ -186,6 +188,12 @@ func TestRepositoryAnalysisCacheValidatesTypedAIUseFacts(t *testing.T) {
 		{name: "duplicate candidate", mutate: func(result *providers.RepositoryAnalysisResult) {
 			result.Result.AIUses = append(result.Result.AIUses, result.Result.AIUses[0])
 		}},
+		{name: "missing observation membership", mutate: func(result *providers.RepositoryAnalysisResult) {
+			result.Result.AIUses[0].MemberObservationIDs = nil
+		}},
+		{name: "identity not derived from membership", mutate: func(result *providers.RepositoryAnalysisResult) {
+			result.Result.AIUses[0].MemberObservationIDs = []string{"different-observation"}
+		}},
 		{name: "impossible batch coverage", mutate: func(result *providers.RepositoryAnalysisResult) {
 			result.Coverage.SourceBatchesCompleted = 1
 			result.Coverage.SourceBatchesTotal = 2
@@ -214,7 +222,7 @@ func TestDefaultRepositoryAnalysisCacheUsesCurrentFileVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.Base(path) != "repository-analysis-v3.json" || repositoryCacheContextVersion != "4" || repositoryCacheSchemaVersion != 3 {
+	if filepath.Base(path) != "repository-analysis-v4.json" || repositoryCacheContextVersion != "5" || repositoryCacheSchemaVersion != 4 {
 		t.Fatalf("cache version = path %q context %q schema %d", path, repositoryCacheContextVersion, repositoryCacheSchemaVersion)
 	}
 }

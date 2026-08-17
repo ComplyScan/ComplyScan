@@ -47,6 +47,46 @@ type compactingSynthesisReviewer struct {
 	combinedSummaryPasses int
 }
 
+type crossBatchGroupingReviewer struct {
+	requests       []providers.RepositoryAnalysisRequest
+	sourceRequests int
+}
+
+func (reviewer *crossBatchGroupingReviewer) ReviewRepository(_ context.Context, request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
+	reviewer.requests = append(reviewer.requests, request)
+	result := providers.RepositorySectionResult{
+		Scope: request.Scope, AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{},
+		ObjectiveObservations: []providers.RepositoryObjectiveObservation{}, UnmappedObservations: []providers.RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{},
+	}
+	if request.Mode != providers.RepositoryAnalysisSynthesis {
+		reviewer.sourceRequests++
+		citation := providers.RepositoryCitation{Path: request.Files[0].Path, Line: request.Files[0].ContentStartLine, Summary: "One part of the same connected workflow."}
+		result.AIUses = []providers.RepositoryAIUse{{
+			ID: "model-local-key", Name: "Workflow part", Purpose: "One bounded observation", Lifecycle: "unknown", Confidence: "medium", Evidence: []providers.RepositoryCitation{citation},
+		}}
+		result.AIUseFacts = []providers.RepositoryAIUseFactSet{{AIUseID: "model-local-key", Facts: []providers.RepositoryAIUseFact{}, UnresolvedQuestions: []string{}}}
+	} else {
+		members := make([]string, 0)
+		evidence := make([]providers.RepositoryCitation, 0)
+		for _, summary := range request.SubsystemSummaries {
+			for _, use := range summary.AIUses {
+				members = append(members, use.MemberObservationIDs...)
+				evidence = append(evidence, use.Evidence...)
+			}
+		}
+		result.AIUses = []providers.RepositoryAIUse{{
+			ID: "model-proposed-group", Name: "Connected AI workflow", Purpose: "One use spanning bounded source batches", Lifecycle: "unknown", Confidence: "high",
+			Evidence: evidence, MemberObservationIDs: members,
+		}}
+		result.AIUseFacts = []providers.RepositoryAIUseFactSet{{AIUseID: "model-proposed-group", Facts: []providers.RepositoryAIUseFact{}, UnresolvedQuestions: []string{}}}
+	}
+	return providers.RepositoryAnalysisResult{
+		Provider: providers.OpenAI, Model: "test", Result: result,
+		Coverage: providers.RepositoryCoverage{Mode: request.Mode, FilesSubmitted: len(request.Files), BytesSubmitted: sourceFileBytes(request.Files)},
+		Usage:    providers.Usage{PromptTokens: 10, CompletionTokens: 2},
+	}, nil
+}
+
 func (reviewer *compactingSynthesisReviewer) ReviewRepository(_ context.Context, request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
 	reviewer.requests = append(reviewer.requests, request)
 	result := providers.RepositorySectionResult{
@@ -218,6 +258,35 @@ func TestRunTargetedCompactsSingletonSummariesBeforeCombiningThem(t *testing.T) 
 	}
 	if result.Coverage.SourceBatchesCompleted != result.Coverage.SourceBatchesTotal || result.Coverage.SourceBatchesTotal < 2 {
 		t.Fatalf("completed compacted synthesis coverage = %#v", result.Coverage)
+	}
+}
+
+func TestRunTargetedAssignsTrustedIDAfterCrossBatchGrouping(t *testing.T) {
+	repository, expectedPaths := exhaustiveCandidateRepository(10)
+	reviewer := &crossBatchGroupingReviewer{}
+
+	result, err := Run(context.Background(), reviewer, repository, nil, nil, Options{
+		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertExhaustiveSourceCoverage(t, reviewer.requests, expectedPaths)
+	if reviewer.sourceRequests < 2 {
+		t.Fatalf("source requests = %d, want a cross-batch grouping fixture", reviewer.sourceRequests)
+	}
+	if len(result.Result.AIUses) != 1 {
+		t.Fatalf("final inferred uses = %#v, want one grouped use", result.Result.AIUses)
+	}
+	use := result.Result.AIUses[0]
+	if len(use.MemberObservationIDs) != reviewer.sourceRequests {
+		t.Fatalf("group membership = %v, want one observation from each of %d source batches", use.MemberObservationIDs, reviewer.sourceRequests)
+	}
+	if use.ID != inferredCandidateID(use.MemberObservationIDs) || strings.Contains(use.ID, "model-proposed-group") || strings.Contains(use.ID, "model-local-key") {
+		t.Fatalf("candidate ID %q was not assigned locally from exact membership %v", use.ID, use.MemberObservationIDs)
+	}
+	if len(result.Result.AIUseFacts) != 1 || result.Result.AIUseFacts[0].AIUseID != use.ID {
+		t.Fatalf("group fact binding was not rewritten to trusted ID: use=%#v facts=%#v", use, result.Result.AIUseFacts)
 	}
 }
 
