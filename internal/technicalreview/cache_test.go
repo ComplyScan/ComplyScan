@@ -58,6 +58,11 @@ func TestCacheReusesOnlyIdenticalModelPackPromptAndCandidateContext(t *testing.T
 	if _, found, err := reopened.Lookup(changedPrompt, candidate); err != nil || found {
 		t.Fatalf("changed prompt cache hit=%t err=%v", found, err)
 	}
+	changedModelDigest := identity
+	changedModelDigest.ModelDigest = "sha256:new-model-artifact"
+	if _, found, err := reopened.Lookup(changedModelDigest, candidate); err != nil || found {
+		t.Fatalf("changed model digest cache hit=%t err=%v", found, err)
+	}
 	changedPack := identity
 	changedPack.PackDigest = strings.Repeat("9", 64)
 	if _, found, err := reopened.Lookup(changedPack, candidate); err != nil || found {

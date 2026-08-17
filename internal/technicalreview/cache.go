@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	cacheSchemaVersion = 2
-	cacheFileName      = "technical-review-v2.json"
+	cacheSchemaVersion = 3
+	cacheFileName      = "technical-review-v3.json"
 	maxCacheBytes      = 8 << 20
 	maxCacheEntries    = 200
 )
@@ -24,6 +24,7 @@ const (
 type Identity struct {
 	Provider      providers.Kind `json:"provider"`
 	Model         string         `json:"model"`
+	ModelDigest   string         `json:"model_digest,omitempty"`
 	PromptVersion string         `json:"prompt_version"`
 	PackID        string         `json:"pack_id"`
 	PackVersion   string         `json:"pack_version"`
@@ -146,7 +147,7 @@ func (cache *Cache) Store(identity Identity, candidate providers.TechnicalCandid
 
 func entryKey(identity Identity, systemID, objectiveID, fingerprint, candidateDigest string) string {
 	value := strings.Join([]string{
-		string(identity.Provider), identity.Model, identity.PromptVersion,
+		string(identity.Provider), identity.Model, identity.ModelDigest, identity.PromptVersion,
 		identity.PackID, identity.PackVersion, identity.PackDigest,
 		systemID, objectiveID, fingerprint, candidateDigest,
 	}, "\x00")
@@ -157,6 +158,9 @@ func validateEntry(entry cacheEntry) error {
 	if entry.Identity.Provider == "" || strings.TrimSpace(entry.Identity.Model) == "" || strings.TrimSpace(entry.Identity.PromptVersion) == "" ||
 		strings.TrimSpace(entry.Identity.PackID) == "" || strings.TrimSpace(entry.Identity.PackVersion) == "" || strings.TrimSpace(entry.Identity.PackDigest) == "" {
 		return errors.New("cache identity is incomplete")
+	}
+	if strings.ContainsAny(entry.Identity.ModelDigest, "\r\n\x00") || len(entry.Identity.ModelDigest) > 300 {
+		return errors.New("cache model digest is invalid")
 	}
 	if entry.ObjectiveID == "" || len(entry.Fingerprint) != 64 || len(entry.CandidateDigest) != 64 {
 		return errors.New("candidate identity is incomplete")

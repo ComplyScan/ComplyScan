@@ -89,9 +89,6 @@ type ProgressHandler func(Progress) error
 // rules used during filesystem traversal. This keeps reused setup snapshots
 // inside the scan's final privacy and scope boundary.
 func ApplyExclusions(repository Repository, exclusions, excludedFiles []string) Repository {
-	if len(exclusions) == 0 && len(excludedFiles) == 0 {
-		return repository
-	}
 	filtered := Repository{Root: repository.Root, Files: make([]File, 0, len(repository.Files))}
 	for _, file := range repository.Files {
 		if isExcluded(file.Path, filepath.Base(filepath.FromSlash(file.Path)), exclusions) || isExcludedFile(file.Path, excludedFiles) {
@@ -232,6 +229,11 @@ func walk(ctx context.Context, root, relDir string, parents []gitignoreContext, 
 }
 
 func processFile(root, relPath string, info fs.FileInfo, options Options, result *Result) error {
+	// Keep this as a second privacy boundary in case a future discovery path
+	// reaches processFile without applying the normal path filters first.
+	if isSensitiveEnvironmentFile(relPath) {
+		return nil
+	}
 	if !info.Mode().IsRegular() || info.Size() > options.MaxFileSize {
 		return nil
 	}
@@ -329,6 +331,9 @@ func isExcluded(relPath, name string, excludes []string) bool {
 
 func isExcludedFile(relPath string, excludedFiles []string) bool {
 	relPath = filepath.ToSlash(filepath.Clean(filepath.FromSlash(relPath)))
+	if isSensitiveEnvironmentFile(relPath) {
+		return true
+	}
 	for _, value := range excludedFiles {
 		candidate := filepath.ToSlash(filepath.Clean(filepath.FromSlash(value)))
 		if candidate != "." && relPath == candidate {

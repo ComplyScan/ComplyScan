@@ -113,6 +113,122 @@ func TestDiscoverTrackedOnly(t *testing.T) {
 	}
 }
 
+func TestDiscoverAlwaysExcludesLiveDotenvFilesAndKeepsExplicitTemplates(t *testing.T) {
+	root := t.TempDir()
+	liveFiles := map[string]string{
+		".env":                          "OPENAI_API_KEY=sk-live-secret\n",
+		".env.local":                    "PRIVATE_VALUE=unrecognisable-opaque-value\n",
+		".env.production":               "DATABASE_URL=postgres://production\n",
+		".env.example.local":            "PRIVATE_VALUE=template-looking-live-value\n",
+		".env.sample.production":        "PRIVATE_VALUE=sample-looking-live-value\n",
+		".env.template.secret":          "PRIVATE_VALUE=template-looking-secret-value\n",
+		"nested/.env":                   "TOKEN=nested-secret\n",
+		"nested/.env.development.local": "MYSTERY=nested-opaque-value\n",
+	}
+	templateFiles := []string{
+		".env.example",
+		".env.template",
+		".env.sample",
+		".env.dist",
+		".env.production.example",
+		"nested/.env.test.template",
+		"service.env.sample",
+	}
+	for path, content := range liveFiles {
+		writeTestFile(t, root, path, content)
+	}
+	for _, path := range templateFiles {
+		writeTestFile(t, root, path, "OPENAI_API_KEY=replace-me\n")
+	}
+	writeTestFile(t, root, "app.py", "print('safe')\n")
+
+	result, err := Discover(context.Background(), root, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := repositoryPaths(result.Repository)
+	for path := range liveFiles {
+		if contains(paths, path) {
+			t.Errorf("live dotenv file %q entered filesystem discovery: %v", path, paths)
+		}
+	}
+	for _, path := range templateFiles {
+		if !contains(paths, path) {
+			t.Errorf("explicit dotenv template %q was excluded: %v", path, paths)
+			continue
+		}
+		for _, file := range result.Repository.Files {
+			if file.Path == path && file.Kind != KindEnvTemplate {
+				t.Errorf("template %q kind = %q, want %q", path, file.Kind, KindEnvTemplate)
+			}
+		}
+	}
+	if result.Stats.FilesRead != len(templateFiles)+1 {
+		t.Fatalf("dotenv secrets affected discovered-file accounting: %#v", result.Stats)
+	}
+}
+
+func TestTrackedDiscoveryAlwaysExcludesLiveDotenvFilesAndKeepsTemplates(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	root := t.TempDir()
+	liveFiles := []string{".env", ".env.local", ".env.production", ".env.example.local", ".env.sample.production", ".env.template.secret", "nested/.env.staging"}
+	templateFiles := []string{".env.example", ".env.production.sample", "nested/.env.template"}
+	for _, path := range liveFiles {
+		writeTestFile(t, root, path, "SECRET=opaque-real-value\n")
+	}
+	for _, path := range templateFiles {
+		writeTestFile(t, root, path, "SECRET=replace-me\n")
+	}
+	writeTestFile(t, root, "main.go", "package main\n")
+	// Force-add the dotenv files so a developer's global Git ignore rules
+	// cannot make this tracked-discovery test pass without exercising the
+	// built-in privacy boundary.
+	for _, args := range [][]string{{"init"}, {"add", "-f", "."}} {
+		command := exec.Command("git", append([]string{"-C", root}, args...)...)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+
+	result, err := Discover(context.Background(), root, Options{TrackedOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := repositoryPaths(result.Repository)
+	for _, path := range liveFiles {
+		if contains(paths, path) {
+			t.Errorf("live dotenv file %q entered tracked discovery: %v", path, paths)
+		}
+	}
+	for _, path := range templateFiles {
+		if !contains(paths, path) {
+			t.Errorf("tracked dotenv template %q was excluded: %v", path, paths)
+		}
+	}
+}
+
+func TestApplyExclusionsAlwaysRemovesDotenvSecretsFromReusedDiscovery(t *testing.T) {
+	repository := Repository{Root: "/repository", Files: []File{
+		{Path: ".env", Kind: KindOtherText, Content: []byte("OPENAI_API_KEY=sk-live-secret")},
+		{Path: "nested/.env.production", Kind: KindOtherText, Content: []byte("MYSTERY=opaque")},
+		{Path: ".env.example", Kind: KindEnvTemplate, Content: []byte("OPENAI_API_KEY=replace-me")},
+		{Path: "main.go", Kind: KindSource, Content: []byte("package main")},
+	}}
+
+	filtered := ApplyExclusions(repository, nil, nil)
+	paths := repositoryPaths(filtered)
+	if contains(paths, ".env") || contains(paths, "nested/.env.production") {
+		t.Fatalf("reused dotenv secrets crossed the final exclusion boundary: %v", paths)
+	}
+	for _, wanted := range []string{".env.example", "main.go"} {
+		if !contains(paths, wanted) {
+			t.Fatalf("reused safe file %q was removed: %v", wanted, paths)
+		}
+	}
+}
+
 func TestDiscoverExcludesOnlyTheExactProtectedFile(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, root, ".complyscan.yml", "private active config\n")
@@ -177,6 +293,12 @@ func TestClassifyRelevantFiles(t *testing.T) {
 		".github/workflows/ci.yaml": KindGitHubAction,
 		"infra/main.tf":             KindTerraform,
 		".env.example":              KindEnvTemplate,
+		".env.production.sample":    KindEnvTemplate,
+		"nested/.env.test.template": KindEnvTemplate,
+		"service.env.dist":          KindEnvTemplate,
+		".env.example.local":        KindOtherText,
+		".env.sample.production":    KindOtherText,
+		".env.template.secret":      KindOtherText,
 		"README.md":                 KindReadme,
 		"docs/model-card.md":        KindModelCard,
 		"docs/privacy-policy.md":    KindPrivacy,

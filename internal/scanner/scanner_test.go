@@ -79,6 +79,31 @@ func TestScannerAppliesExclusionsToReusedDiscovery(t *testing.T) {
 	}
 }
 
+func TestScannerRemovesDotenvSecretsFromReusedDiscoveryBeforeAnyAnalysis(t *testing.T) {
+	target := t.TempDir()
+	discovered := discovery.Result{Repository: discovery.Repository{Root: target, Files: []discovery.File{
+		{Path: ".env", Kind: discovery.KindOtherText, Content: []byte("OPENAI_API_KEY=sk-live-secret")},
+		{Path: "nested/.env.production", Kind: discovery.KindOtherText, Content: []byte("OPAQUE=private-value")},
+		{Path: ".env.example", Kind: discovery.KindEnvTemplate, Content: []byte("OPENAI_API_KEY=replace-me")},
+		{Path: "app.py", Kind: discovery.KindSource, Content: []byte("print('safe')")},
+	}}}
+
+	result, err := New().ScanDiscovered(context.Background(), target, discovered, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := make(map[string]bool, len(result.FullRepository.Files))
+	for _, file := range result.FullRepository.Files {
+		paths[file.Path] = true
+	}
+	if paths[".env"] || paths["nested/.env.production"] {
+		t.Fatalf("dotenv secret remained available to inventory or model context: %#v", result.FullRepository.Files)
+	}
+	if !paths[".env.example"] || !paths["app.py"] {
+		t.Fatalf("safe reusable context was removed: %#v", result.FullRepository.Files)
+	}
+}
+
 func TestFindingFingerprintSurvivesLineMovement(t *testing.T) {
 	first := rules.Finding{RuleID: "TEST-001", Title: "Test", Path: "src/app.go", StartLine: 4, Evidence: "logger.Info(prompt)"}
 	second := first

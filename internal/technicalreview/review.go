@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/providers"
+	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
 
 type Reviewer interface {
@@ -43,19 +44,38 @@ type Options struct {
 }
 
 const (
-	ProgressStageCandidate       = "candidate"
-	ProgressStageRateLimitWait   = "rate-limit-wait"
-	ProgressStageRateLimitResume = "rate-limit-resume"
-	minimumRateLimitCooldown     = 60 * time.Second
-	maxRateLimitTotalWait        = 10 * time.Minute
+	ProgressStageCandidate        = "candidate"
+	ProgressStageRateLimitWait    = "rate-limit-wait"
+	ProgressStageRateLimitResume  = "rate-limit-resume"
+	ProgressStageOutputRecovery   = "output-recovery"
+	ProgressStageValidationRepair = "validation-repair"
+	minimumRateLimitCooldown      = 60 * time.Second
+	minimumTransientCooldown      = time.Second
+	maxRateLimitTotalWait         = 10 * time.Minute
+	maxTechnicalProviderAttempts  = 4
+	maximumTechnicalOutputTokens  = 16_384
 )
+
+type technicalOutputRecoveryError struct {
+	cause error
+}
+
+type technicalValidationRepairError struct {
+	cause error
+}
+
+func (value *technicalValidationRepairError) Error() string { return value.cause.Error() }
+func (value *technicalValidationRepairError) Unwrap() error { return value.cause }
+
+func (value *technicalOutputRecoveryError) Error() string { return value.cause.Error() }
+func (value *technicalOutputRecoveryError) Unwrap() error { return value.cause }
 
 // Run applies source-context-free cache reuse around one-candidate model requests.
 // Cache failures are reported as notes and never prevent the requested review.
 func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalReviewRequest, options Options) (providers.TechnicalReviewResult, error) {
 	base, err := reviewer.ReviewTechnical(ctx, providers.TechnicalReviewRequest{})
 	if err != nil {
-		return providers.TechnicalReviewResult{}, err
+		return base, err
 	}
 	base.InputCandidates = len(request.Candidates)
 	if len(request.Candidates) == 0 {
@@ -64,7 +84,7 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 	base.Observations = []providers.TechnicalObservation{}
 	base.Reviewed = 0
 	base.Notes = withoutNoCandidatesNote(base.Notes)
-	selected := request.Candidates
+	selected := redactTechnicalCandidates(request.Candidates)
 	if options.MaxCandidates > 0 && len(selected) > options.MaxCandidates {
 		selected = selected[:options.MaxCandidates]
 		base.Notes = append(base.Notes, fmt.Sprintf("Technical evidence investigation was limited to the first %d of %d targets.", len(selected), len(request.Candidates)))
@@ -80,7 +100,7 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 	cacheHits := 0
 	for index, candidate := range selected {
 		if err := ctx.Err(); err != nil {
-			return providers.TechnicalReviewResult{}, err
+			return base, err
 		}
 		observation, hit, lookupErr := providers.TechnicalObservation{}, false, error(nil)
 		if cacheEnabled && !options.Refresh {
@@ -93,12 +113,13 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 		}
 		if options.OnProgress != nil {
 			if err := options.OnProgress(Progress{Stage: ProgressStageCandidate, Current: index + 1, Total: len(selected), Candidate: candidate, Cached: hit}); err != nil {
-				return providers.TechnicalReviewResult{}, err
+				return base, err
 			}
 		}
 		if hit {
 			cacheHits++
 			base.Observations = append(base.Observations, observation)
+			base.Reviewed = len(base.Observations)
 			continue
 		}
 		baseCandidate := candidate
@@ -106,7 +127,10 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 		followUpExcerpts := 0
 		if planner, ok := reviewer.(SearchPlanner); ok && options.RetrieveFollowUp != nil && needsModelDirectedFollowUp(baseCandidate) {
 			var plannerUsage providers.Usage
-			plan, plannerUsage, err = planTechnicalSearchWithRetry(ctx, planner, baseCandidate, index+1, len(selected), options)
+			var plannerRequests int
+			plan, plannerUsage, plannerRequests, err = planTechnicalSearchWithRetry(ctx, planner, baseCandidate, index+1, len(selected), options)
+			addUsage(&base.Usage, plannerUsage)
+			base.ProviderRequests += plannerRequests
 			if err != nil {
 				if ctx.Err() != nil {
 					return base, ctx.Err()
@@ -114,18 +138,18 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 				base.Notes = append(base.Notes, candidateFailureNote(candidate, "follow-up planning", err))
 				continue
 			}
-			base.Usage.PromptTokens += plannerUsage.PromptTokens
-			base.Usage.CompletionTokens += plannerUsage.CompletionTokens
-			base.Usage.ReasoningTokens += plannerUsage.ReasoningTokens
-			base.Usage.TotalDurationNS += plannerUsage.TotalDurationNS
 			if strings.HasPrefix(plan.Reason, "Follow-up skipped") {
 				base.Notes = append(base.Notes, plan.Reason)
 			}
 			if plan.Needed {
 				candidate, followUpExcerpts = options.RetrieveFollowUp(baseCandidate, plan)
+				candidate = redactTechnicalCandidate(candidate)
 			}
 		}
 		partial, err := reviewTechnicalWithRetry(ctx, reviewer, providers.TechnicalReviewRequest{Candidates: []providers.TechnicalCandidate{candidate}}, candidate, index+1, len(selected), options)
+		addUsage(&base.Usage, partial.Usage)
+		base.ProviderRequests += partial.ProviderRequests
+		base.Notes = appendUnique(base.Notes, partial.Notes...)
 		if err != nil {
 			if ctx.Err() != nil {
 				return base, ctx.Err()
@@ -142,11 +166,7 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 		observation.FollowUpQueries = searchQueryLabels(plan.Queries)
 		observation.FollowUpExcerpts = followUpExcerpts
 		base.Observations = append(base.Observations, observation)
-		base.Usage.PromptTokens += partial.Usage.PromptTokens
-		base.Usage.CompletionTokens += partial.Usage.CompletionTokens
-		base.Usage.ReasoningTokens += partial.Usage.ReasoningTokens
-		base.Usage.TotalDurationNS += partial.Usage.TotalDurationNS
-		base.Notes = appendUnique(base.Notes, partial.Notes...)
+		base.Reviewed = len(base.Observations)
 		if cacheEnabled {
 			if err := options.Cache.Store(options.Identity, baseCandidate, observation); err != nil {
 				base.Notes = append(base.Notes, "Technical review cache could not be updated and was disabled: "+err.Error())
@@ -158,53 +178,139 @@ func Run(ctx context.Context, reviewer Reviewer, request providers.TechnicalRevi
 	if cacheHits > 0 {
 		base.Notes = append(base.Notes, fmt.Sprintf("Reused %d of %d technical observation(s) from the local source-free review cache.", cacheHits, len(selected)))
 	}
+	if base.ProviderRequests > 0 {
+		base.Notes = append(base.Notes, fmt.Sprintf("Technical evidence investigation usage aggregates %d provider request attempt(s) made during this run.", base.ProviderRequests))
+	}
 	return base, nil
+}
+
+// redactTechnicalCandidates establishes the privacy boundary before any
+// reviewer, optional model search planner, progress callback, or cache sees
+// repository source. The copy prevents redaction from mutating the caller's
+// evidence bundle, while retaining exact paths and line metadata for citation
+// validation.
+func redactTechnicalCandidates(candidates []providers.TechnicalCandidate) []providers.TechnicalCandidate {
+	result := make([]providers.TechnicalCandidate, len(candidates))
+	for index, candidate := range candidates {
+		result[index] = redactTechnicalCandidate(candidate)
+	}
+	return result
+}
+
+func redactTechnicalCandidate(candidate providers.TechnicalCandidate) providers.TechnicalCandidate {
+	candidate.SourceContexts = append([]providers.TechnicalSourceContext(nil), candidate.SourceContexts...)
+	for index := range candidate.SourceContexts {
+		candidate.SourceContexts[index].Source = rules.RedactSecrets(candidate.SourceContexts[index].Source)
+	}
+	return candidate
 }
 
 func reviewTechnicalWithRetry(ctx context.Context, reviewer Reviewer, request providers.TechnicalReviewRequest, candidate providers.TechnicalCandidate, current, total int, options Options) (providers.TechnicalReviewResult, error) {
 	var result providers.TechnicalReviewResult
-	err := retryRateLimited(ctx, candidate, current, total, options, func() error {
-		var err error
-		result, err = reviewer.ReviewTechnical(ctx, request)
+	var cumulative providers.Usage
+	var attemptNotes []string
+	providerRequests := 0
+	err := retryTemporary(ctx, candidate, current, total, options, func() error {
+		providerRequests++
+		attempt, err := reviewer.ReviewTechnical(ctx, request)
+		addUsage(&cumulative, attempt.Usage)
+		attemptNotes = appendUnique(attemptNotes, attempt.Notes...)
+		result = attempt
+		if incomplete, ok := providers.AsRemoteIncompleteError(err); ok && incomplete.Reason == "max_output_tokens" {
+			next := request.MaxOutputTokens * 2
+			if next <= 0 {
+				if attempt.Provider == providers.Ollama {
+					next = 2400
+				} else {
+					next = 8192
+				}
+			}
+			if next > maximumTechnicalOutputTokens {
+				next = maximumTechnicalOutputTokens
+			}
+			if next > request.MaxOutputTokens {
+				request.MaxOutputTokens = next
+				return &technicalOutputRecoveryError{cause: err}
+			}
+		}
+		if _, invalid := providers.AsStructuredOutputValidationError(err); invalid {
+			return &technicalValidationRepairError{cause: err}
+		}
 		return err
 	})
+	result.Usage = cumulative
+	result.ProviderRequests = providerRequests
+	result.Notes = appendUnique(result.Notes, attemptNotes...)
 	return result, err
 }
 
-func planTechnicalSearchWithRetry(ctx context.Context, planner SearchPlanner, candidate providers.TechnicalCandidate, current, total int, options Options) (providers.TechnicalSearchPlan, providers.Usage, error) {
+func planTechnicalSearchWithRetry(ctx context.Context, planner SearchPlanner, candidate providers.TechnicalCandidate, current, total int, options Options) (providers.TechnicalSearchPlan, providers.Usage, int, error) {
 	var plan providers.TechnicalSearchPlan
-	var usage providers.Usage
-	err := retryRateLimited(ctx, candidate, current, total, options, func() error {
-		var err error
-		plan, usage, err = planner.PlanTechnicalSearch(ctx, candidate)
+	var cumulative providers.Usage
+	providerRequests := 0
+	err := retryTemporary(ctx, candidate, current, total, options, func() error {
+		providerRequests++
+		attemptPlan, usage, err := planner.PlanTechnicalSearch(ctx, candidate)
+		addUsage(&cumulative, usage)
+		plan = attemptPlan
 		return err
 	})
-	return plan, usage, err
+	return plan, cumulative, providerRequests, err
 }
 
-func retryRateLimited(ctx context.Context, candidate providers.TechnicalCandidate, current, total int, options Options, operation func() error) error {
+func retryTemporary(ctx context.Context, candidate providers.TechnicalCandidate, current, total int, options Options, operation func() error) error {
 	totalWait := time.Duration(0)
-	for attempt := 0; ; attempt++ {
+	for attempt := 1; attempt <= maxTechnicalProviderAttempts; attempt++ {
 		err := operation()
 		if err == nil {
 			return nil
 		}
-		rateLimit, ok := providers.AsRemoteRateLimitError(err)
-		if !ok || rateLimit.RequestTooLarge {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return contextErr
+		}
+		delay, retryable := technicalRetryDelay(err, attempt)
+		if !retryable {
 			return err
 		}
-		delay := rateLimit.RetryAfter
-		if delay < minimumRateLimitCooldown {
-			delay = minimumRateLimitCooldown
+		var outputRecovery *technicalOutputRecoveryError
+		var validationRepair *technicalValidationRepairError
+		if attempt == maxTechnicalProviderAttempts {
+			if errors.As(err, &outputRecovery) {
+				return fmt.Errorf("provider output remained truncated after %d request attempts: %w", attempt, err)
+			}
+			if errors.As(err, &validationRepair) {
+				return fmt.Errorf("provider structured output remained invalid after %d request attempts: %w", attempt, err)
+			}
+			return fmt.Errorf("provider remained temporarily unavailable after %d request attempts: %w", attempt, err)
+		}
+		if errors.As(err, &outputRecovery) {
+			if options.OnProgress != nil {
+				if progressErr := options.OnProgress(Progress{
+					Stage: ProgressStageOutputRecovery, Current: current, Total: total, Candidate: candidate, Attempt: attempt,
+				}); progressErr != nil {
+					return progressErr
+				}
+			}
+			continue
+		}
+		if errors.As(err, &validationRepair) {
+			if options.OnProgress != nil {
+				if progressErr := options.OnProgress(Progress{
+					Stage: ProgressStageValidationRepair, Current: current, Total: total, Candidate: candidate, Attempt: attempt,
+				}); progressErr != nil {
+					return progressErr
+				}
+			}
+			continue
 		}
 		if totalWait+delay > maxRateLimitTotalWait {
-			return fmt.Errorf("provider rate limit exceeded the %s automatic wait budget after %d retry cycle(s): %w", maxRateLimitTotalWait, attempt, err)
+			return fmt.Errorf("provider retry wait exceeded the %s automatic budget after %d request attempt(s): %w", maxRateLimitTotalWait, attempt, err)
 		}
 		totalWait += delay
 		if options.OnProgress != nil {
 			if progressErr := options.OnProgress(Progress{
 				Stage: ProgressStageRateLimitWait, Current: current, Total: total, Candidate: candidate,
-				Attempt: attempt + 1, Wait: delay, OriginalWait: delay,
+				Attempt: attempt, Wait: delay, OriginalWait: delay,
 			}); progressErr != nil {
 				return progressErr
 			}
@@ -221,7 +327,7 @@ func retryRateLimited(ctx context.Context, candidate providers.TechnicalCandidat
 			}
 			return options.OnProgress(Progress{
 				Stage: ProgressStageRateLimitWait, Current: current, Total: total, Candidate: candidate,
-				Attempt: attempt + 1, Wait: remaining, OriginalWait: delay,
+				Attempt: attempt, Wait: remaining, OriginalWait: delay,
 			})
 		}); err != nil {
 			return err
@@ -229,12 +335,53 @@ func retryRateLimited(ctx context.Context, candidate providers.TechnicalCandidat
 		if options.OnProgress != nil {
 			if err := options.OnProgress(Progress{
 				Stage: ProgressStageRateLimitResume, Current: current, Total: total, Candidate: candidate,
-				Attempt: attempt + 1, OriginalWait: delay,
+				Attempt: attempt, OriginalWait: delay,
 			}); err != nil {
 				return err
 			}
 		}
 	}
+	return nil
+}
+
+func technicalRetryDelay(err error, attempt int) (time.Duration, bool) {
+	var outputRecovery *technicalOutputRecoveryError
+	if errors.As(err, &outputRecovery) {
+		return 0, true
+	}
+	var validationRepair *technicalValidationRepairError
+	if errors.As(err, &validationRepair) {
+		return 0, true
+	}
+	if rateLimit, ok := providers.AsRemoteRateLimitError(err); ok {
+		if rateLimit.RequestTooLarge || rateLimit.Permanent {
+			return 0, false
+		}
+		delay := rateLimit.RetryAfter
+		if delay < minimumRateLimitCooldown {
+			delay = minimumRateLimitCooldown
+		}
+		return delay, true
+	}
+	if transient, ok := providers.AsRemoteTransientError(err); ok {
+		delay := transient.RetryAfter
+		if delay <= 0 {
+			shift := min(attempt-1, 5)
+			delay = minimumTransientCooldown * time.Duration(1<<shift)
+		}
+		if delay < minimumTransientCooldown {
+			delay = minimumTransientCooldown
+		}
+		return delay, true
+	}
+	return 0, false
+}
+
+func addUsage(target *providers.Usage, value providers.Usage) {
+	target.PromptTokens += value.PromptTokens
+	target.CompletionTokens += value.CompletionTokens
+	target.ReasoningTokens += value.ReasoningTokens
+	target.TotalDurationNS += value.TotalDurationNS
 }
 
 func waitForRateLimit(ctx context.Context, delay time.Duration, onTick func(time.Duration) error) error {

@@ -19,6 +19,10 @@ var manifests = map[string]struct{}{
 	"yarn.lock": {},
 }
 
+var environmentTemplateMarkers = map[string]struct{}{
+	"dist": {}, "example": {}, "examples": {}, "sample": {}, "samples": {}, "template": {}, "templates": {},
+}
+
 func Classify(path string) FileKind {
 	normalized := strings.ToLower(filepath.ToSlash(path))
 	base := strings.ToLower(filepath.Base(normalized))
@@ -41,7 +45,7 @@ func Classify(path string) FileKind {
 	if ext == ".tf" || ext == ".tfvars" {
 		return KindTerraform
 	}
-	if base == ".env.example" || base == ".env.template" || strings.HasSuffix(base, ".env.example") || strings.HasSuffix(base, ".env.template") {
+	if isEnvironmentTemplate(base) {
 		return KindEnvTemplate
 	}
 	if strings.HasPrefix(base, "readme") {
@@ -70,4 +74,29 @@ func Classify(path string) FileKind {
 		return KindConfig
 	}
 	return KindOtherText
+}
+
+// isSensitiveEnvironmentFile identifies dotenv files that can contain live
+// credentials. The decision is intentionally based on the file name rather
+// than its content: unfamiliar secret formats must remain outside discovery
+// just as recognisable API keys do.
+func isSensitiveEnvironmentFile(path string) bool {
+	base := strings.ToLower(filepath.Base(filepath.ToSlash(path)))
+	if base != ".env" && !strings.HasPrefix(base, ".env.") {
+		return false
+	}
+	return !isEnvironmentTemplate(base)
+}
+
+func isEnvironmentTemplate(path string) bool {
+	base := strings.ToLower(filepath.Base(filepath.ToSlash(path)))
+	if !strings.Contains(base, ".env.") {
+		return false
+	}
+	lastDot := strings.LastIndexByte(base, '.')
+	if lastDot < 0 || lastDot == len(base)-1 {
+		return false
+	}
+	_, ok := environmentTemplateMarkers[base[lastDot+1:]]
+	return ok
 }

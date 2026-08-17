@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/ComplyScan/ComplyScan/internal/providers"
+	"github.com/ComplyScan/ComplyScan/internal/rules"
 	"github.com/ComplyScan/ComplyScan/internal/verification"
 )
 
@@ -33,7 +34,10 @@ func AttachVerifications(request providers.TechnicalReviewRequest, results []ver
 				source.WriteByte('\n')
 			}
 		}
-		value := []rune(source.String())
+		// Verification output is already redacted by the runner, but apply the
+		// same canonical defence at the context boundary so recipe metadata and
+		// future result producers cannot introduce a credential.
+		value := []rune(rules.RedactSecrets(source.String()))
 		if len(value) == 0 {
 			continue
 		}

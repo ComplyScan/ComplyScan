@@ -14,6 +14,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/ownership"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/reconciliation"
+	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
 
 const (
@@ -287,7 +288,7 @@ func buildMissingEvidenceInvestigation(pack framework.PackReference, objective f
 	if len(manifest) > 0 && len(candidate.SourceContexts) < 8 {
 		candidate.SourceContexts = append(candidate.SourceContexts, providers.TechnicalSourceContext{
 			Role: "eligible-file-manifest", Symbol: "repository-manifest", Path: "(system-owned repository)",
-			Source: strings.Join(manifest, "\n"),
+			Source: rules.RedactSecrets(strings.Join(manifest, "\n")),
 		})
 	}
 	digest, err := providers.TechnicalCandidateDigest(candidate)
@@ -504,7 +505,10 @@ func appendTechnicalSource(candidate *providers.TechnicalCandidate, graph codegr
 	if remaining < limit {
 		limit = remaining
 	}
-	source := graph.SourceForSymbol(reference.ID, limit)
+	// Fetch the complete symbol before redaction. Truncating first could split a
+	// credential at the boundary and prevent the canonical recogniser from
+	// seeing the complete value.
+	source := boundTechnicalSource(graph.SourceForSymbol(reference.ID, int(^uint(0)>>1)), limit)
 	if source == "" {
 		return remaining
 	}
@@ -541,7 +545,17 @@ func boundedRepositoryExcerpt(content []byte, line, maxChars int) string {
 	if end > len(lines) {
 		end = len(lines)
 	}
-	value := strings.Join(lines[start:end], "\n")
+	return boundTechnicalSource(strings.Join(lines[start:end], "\n"), maxChars)
+}
+
+// boundTechnicalSource applies the canonical repository-secret redaction
+// before truncation. Redaction replaces text within a line and therefore keeps
+// source line boundaries and the citation metadata derived from them intact.
+func boundTechnicalSource(value string, maxChars int) string {
+	if maxChars <= 0 {
+		return ""
+	}
+	value = rules.RedactSecrets(value)
 	runes := []rune(value)
 	if len(runes) > maxChars {
 		return string(runes[:maxChars])
