@@ -571,6 +571,16 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 					unknownWaveLimit = max(1, unknownWaveLimit/2)
 				}
 			}
+			var recoveryErr error
+			observedLimits, adaptiveTokenLimit, recoveryErr = recoverRepositorySourceWaveOutputs(
+				ctx, reviewer, wave, responses, chunks, prefetched, observedLimits, adaptiveTokenLimit, unknownWaveLimit, options,
+			)
+			if recoveryErr != nil {
+				return partialFailure("source output recovery", recoveryErr)
+			}
+			if chunks[index].maxOutputTokens > 0 && chunks[index].maxOutputTokens != prepared.maxOutputTokens {
+				prepared = prepareRepositorySourceBatch(chunks[index], repository, graph, objectives, systems, confirmedUses, budget, adaptiveTokenLimit, options)
+			}
 			batchResponse = prefetched[chunkID]
 			delete(prefetched, chunkID)
 		}
@@ -1248,6 +1258,137 @@ func runRepositorySourceBatchWave(ctx context.Context, reviewer Reviewer, calls 
 	}
 	waitGroup.Wait()
 	return results
+}
+
+// recoverRepositorySourceWaveOutputs retries every output-exhausted member of
+// one completed source wave together. The original wave already paid the cost
+// of discovering which batches need more response space; recovering those
+// batches one at a time would turn an otherwise parallel review into several
+// serial model generations. Capacity admission and accounting remain explicit.
+func recoverRepositorySourceWaveOutputs(
+	ctx context.Context,
+	reviewer Reviewer,
+	initialCalls []repositorySourceBatchCall,
+	initialResponses []repositorySourceBatchResponse,
+	chunks []repositoryChunk,
+	prefetched map[string]repositorySourceBatchResponse,
+	observedLimits providers.RateLimitSnapshot,
+	adaptiveTokenLimit int,
+	unknownWaveLimit int,
+	options Options,
+) (providers.RateLimitSnapshot, int, error) {
+	pending := make([]repositorySourceBatchCall, 0, len(initialCalls))
+	for index, response := range initialResponses {
+		incomplete, ok := providers.AsRemoteIncompleteError(response.err)
+		if !ok || incomplete.Reason != "max_output_tokens" {
+			continue
+		}
+		call := initialCalls[index]
+		effectiveTokenLimit := smallerPositive(adaptiveTokenLimit, incomplete.TokenLimit)
+		recoveryOutput := repositoryRecoveryOutputTokens(call.maxOutputTokens)
+		if recoveryOutput <= call.maxOutputTokens || !outputFitsTokenLimit(incomplete.InputTokens, recoveryOutput, effectiveTokenLimit) {
+			continue
+		}
+		adaptiveTokenLimit = effectiveTokenLimit
+		call.chunk.maxOutputTokens = recoveryOutput
+		chunks[call.index].maxOutputTokens = recoveryOutput
+		call.maxOutputTokens = recoveryOutput
+		call.request.MaxOutputTokens = recoveryOutput
+		call.request.OutputRecovery = true
+		call.estimatedTokens = estimatedRepositoryRequestTokens(call.request)
+		pending = append(pending, call)
+	}
+	for len(pending) > 0 {
+		waveLimit, wait := sourceBatchWaveLimit(observedLimits, pending[0].estimatedTokens, len(pending), unknownWaveLimit)
+		if waveLimit == 0 {
+			if wait <= 0 {
+				wait = minimumRateLimitCooldown
+			}
+			if wait > maxRateLimitTotalWait {
+				return observedLimits, adaptiveTokenLimit, fmt.Errorf("one provider-capacity reset wait exceeds the %s automatic per-window wait budget", maxRateLimitTotalWait)
+			}
+			if err := progress(options, Progress{Stage: "batch-capacity-wait", Scope: pending[0].chunk.scope, Wait: wait, OriginalWait: wait, Detail: "waiting for provider capacity before concurrent source-output recovery"}); err != nil {
+				return observedLimits, adaptiveTokenLimit, err
+			}
+			if err := waitForConfiguredRateLimit(ctx, options, wait); err != nil {
+				return observedLimits, adaptiveTokenLimit, err
+			}
+			observedLimits = replenishRateLimitSnapshot(observedLimits, wait)
+			continue
+		}
+
+		recoveryWave := make([]repositorySourceBatchCall, 0, waveLimit)
+		estimatedTokens := 0
+		for _, call := range pending {
+			if len(recoveryWave) >= waveLimit {
+				break
+			}
+			if observedLimits.TokensKnown && len(recoveryWave) > 0 && estimatedTokens+call.estimatedTokens > observedLimits.RemainingTokens {
+				break
+			}
+			recoveryWave = append(recoveryWave, call)
+			estimatedTokens += call.estimatedTokens
+		}
+		if len(recoveryWave) == 0 {
+			recoveryWave = append(recoveryWave, pending[0])
+			estimatedTokens = pending[0].estimatedTokens
+		}
+		if len(recoveryWave) > 1 {
+			detail := fmt.Sprintf("recovering %d output-exhausted source batches concurrently", len(recoveryWave))
+			if observedLimits.RequestsKnown && observedLimits.TokensKnown {
+				detail = fmt.Sprintf("observed request and token capacity allow %d concurrent source-output recoveries", len(recoveryWave))
+			}
+			if err := progress(options, Progress{Stage: "targeted-batch-concurrency", Completed: len(recoveryWave), Total: len(pending), Scope: recoveryWave[0].chunk.scope, Detail: detail}); err != nil {
+				return observedLimits, adaptiveTokenLimit, err
+			}
+		}
+		for _, call := range recoveryWave {
+			if err := progress(options, Progress{
+				Stage: "adaptive-output-retry", Completed: call.index, Total: len(chunks), Scope: call.chunk.scope, InputBytes: call.inputBytes,
+				Detail: fmt.Sprintf("increase output allowance to %d tokens after the previous response exhausted its output space", call.maxOutputTokens),
+			}); err != nil {
+				return observedLimits, adaptiveTokenLimit, err
+			}
+			startStage := "subsystem"
+			startCompleted := call.index
+			if options.TargetedBatches {
+				startStage = "targeted-batch-start"
+				startCompleted = call.index + 1
+			}
+			if err := progress(options, Progress{Stage: startStage, Completed: startCompleted, Total: len(chunks), Scope: call.chunk.scope, InputBytes: call.inputBytes}); err != nil {
+				return observedLimits, adaptiveTokenLimit, err
+			}
+		}
+
+		observedLimits = reserveRateLimitSnapshot(observedLimits, len(recoveryWave), estimatedTokens)
+		recovered := runRepositorySourceBatchWave(ctx, reviewer, recoveryWave, options)
+		for index, response := range recovered {
+			call := recoveryWave[index]
+			original := prefetched[response.id]
+			prefetched[response.id] = mergeRepositorySourceRecovery(original, response)
+			extraRequests := max(0, response.result.Coverage.ProviderRequests-1)
+			observedLimits = reserveRateLimitSnapshot(observedLimits, extraRequests, extraRequests*call.estimatedTokens)
+			observedLimits = conservativeRateLimitSnapshot(observedLimits, response.result.RateLimits)
+		}
+		pending = pending[len(recoveryWave):]
+	}
+	return observedLimits, adaptiveTokenLimit, nil
+}
+
+func mergeRepositorySourceRecovery(original, recovery repositorySourceBatchResponse) repositorySourceBatchResponse {
+	result := recovery.result
+	result.Coverage.FilesSubmitted += original.result.Coverage.FilesSubmitted
+	result.Coverage.BytesSubmitted += original.result.Coverage.BytesSubmitted
+	result.Coverage.ProviderRequests += original.result.Coverage.ProviderRequests
+	addUsage(&result.Usage, original.result.Usage)
+	result.RateLimits = latestRateLimitSnapshot(original.result.RateLimits, result.RateLimits)
+	if result.Provider == providers.None {
+		result.Provider = original.result.Provider
+	}
+	if strings.TrimSpace(result.Model) == "" {
+		result.Model = original.result.Model
+	}
+	return repositorySourceBatchResponse{id: recovery.id, scope: recovery.scope, result: result, err: recovery.err}
 }
 
 func prepareRepositorySynthesisCall(level, index int, group repositorySummaryGroup, repository discovery.Repository, files []providers.RepositorySourceFile, objectives []providers.RepositoryObjective, systems []providers.RepositorySystemContext, confirmedUses []providers.RepositoryConfirmedAIUse, adaptiveTokenLimit int, options Options) repositorySynthesisCall {
