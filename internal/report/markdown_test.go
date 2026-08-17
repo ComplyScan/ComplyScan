@@ -166,7 +166,7 @@ func TestWriteMarkdownExplainsTestOnlyComponentsAndQuickScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"Analysis performed: **deterministic checks only**",
+		"Scan status: **deterministic checks only**",
 		"Repository AI review: **not run — deterministic checks only**",
 		"This scan used deterministic checks only",
 		"**AI libraries or configuration found:** OpenAI",
@@ -191,7 +191,7 @@ func TestWriteMarkdownDistinguishesIncompleteRepositoryReview(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"deterministic scan completed, but the AI code review did not finish",
-		"Analysis performed: **deterministic checks complete; AI code review incomplete**",
+		"Scan status: **deterministic checks complete; AI code review incomplete**",
 		"Repository AI review: **incomplete; deterministic results are available**",
 		"Scan incomplete or uncertain",
 	} {
@@ -260,10 +260,10 @@ func TestWriteMarkdownPrioritizesDeveloperDecisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"## Overall result", "**Action required**", "## 1. What to do next", "Possible secret exposure", "Human oversight",
+		"## Summary", "**Action required**", "## 1. What to do next", "Possible secret exposure", "Human oversight",
 		"## 2. What ComplyScan found", "Answer generation",
 		"### Code-level safeguard decisions", "Implemented in the reviewed code", "audit.go:11",
-		"## 3. What ComplyScan could not determine", "Where will this AI feature be offered or used?",
+		"## 3. Open questions", "Where will this AI feature be offered or used?",
 		"<summary>Legal and technical details</summary>", "Article 12",
 		"## How this scan was performed", "Full technical results: `latest.json`",
 	} {

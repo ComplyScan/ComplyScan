@@ -265,7 +265,7 @@ func TestConciseMarkdownSeparatesSavedSuggestedAndUngroupedAIUses(t *testing.T) 
 		"Organising code into confirmed AI uses is optional", "you can act on this report without doing it",
 		"#### Confirmed AI-use scopes", "Confirmed generation", "#### Draft AI-use scopes (optional)", "Draft ranking",
 		"#### Retired AI uses", "Retired classifier", "Current signals match retired AI use", "Matching local technical signal found", "No matching signal was observed in this scan",
-		"#### Likely AI uses found by the code review", "Suggested assistant", "**Other AI-related code signals (1):** OpenAI at unowned.py:4",
+		"#### Suggested workflows and components", "Suggested assistant", "**Other AI-related code signals (1):** OpenAI at unowned.py:4",
 		"##### What code indicates for Confirmed generation", "Model provider integration", "Human control", "required (high confidence)",
 		"The route calls an approval gate.",
 		"Possible roles indicated by the repository", "Deployer", "Organisation context that repository code cannot establish",
@@ -331,7 +331,7 @@ func TestConciseMarkdownOptionalAIUseGroupingDoesNotChangeCleanOutcome(t *testin
 	if err := WriteMarkdown(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "**No urgent code problems found**") {
+	if !strings.Contains(output.String(), "**Scan completed — no urgent code changes identified**") {
 		t.Fatalf("optional AI-use organization changed the scan outcome:\n%s", output.String())
 	}
 	if !strings.Contains(output.String(), "AI-reviewed safeguards: **no code-level decisions returned**") {
@@ -339,6 +339,63 @@ func TestConciseMarkdownOptionalAIUseGroupingDoesNotChangeCleanOutcome(t *testin
 	}
 	if strings.Contains(output.String(), "| **Review** |") {
 		t.Fatalf("optional AI-use organization produced a required action:\n%s", output.String())
+	}
+}
+
+func TestDeveloperReportSeparatesTechnicalFollowUpFromLegalApplicability(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	value.RepositoryAnalysisRun = RepositoryAnalysisCompleted
+	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{
+		Provider: providers.OpenAI, Model: "test-model",
+		Result: providers.RepositorySectionResult{
+			AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{},
+			ObjectiveObservations: []providers.RepositoryObjectiveObservation{
+				{ObjectiveID: "pack/security", Strength: providers.StrengthPartial, Confidence: "high", Rationale: "Input sanitization exists.", SupportingEvidence: []providers.RepositoryCitation{{Path: "security.go", Line: 12}}, MissingEvidence: []string{"Adversarial-input tests"}},
+				{ObjectiveID: "pack/robustness", Strength: providers.StrengthPartial, Confidence: "high", Rationale: "Provider errors are detected.", SupportingEvidence: []providers.RepositoryCitation{{Path: "remote.go", Line: 20}}, MissingEvidence: []string{"Retry-exhaustion test", "Fallback outcome"}},
+				{ObjectiveID: "pack/thresholds", Strength: providers.StrengthPartial, Confidence: "medium", Rationale: "Thresholds are configured.", SupportingEvidence: []providers.RepositoryCitation{{Path: "benchmark.go", Line: 30}}, MissingEvidence: []string{"Executable threshold enforcement"}},
+				{ObjectiveID: "pack/safe-stop", Strength: providers.StrengthUncertain, Confidence: "medium", Rationale: "The active-provider gate was not included.", MissingEvidence: []string{"Production safe-stop path"}},
+			},
+			UnmappedObservations: []providers.RepositoryUnmappedObservation{{
+				Summary: "Generic provider helper", SuggestedReview: "Review the helper.", Evidence: []providers.RepositoryCitation{{Path: "helper.go", Line: 8}},
+			}},
+			UnresolvedQuestions: []string{},
+		},
+	}
+	value.AIUseInventory = &aiuse.Snapshot{
+		Summary: aiuse.SnapshotSummary{Suggested: 3},
+		Suggested: []aiuse.Suggestion{
+			{Name: "Repository technical review", Purpose: "Review repository evidence.", Evidence: []providers.RepositoryCitation{{Path: "review.go", Line: 10}}},
+			{Name: "Remote model inference adapters", Purpose: "Send requests to model providers.", Evidence: []providers.RepositoryCitation{{Path: "remote.go", Line: 5}}},
+			{Name: "Repository benchmark evaluation", Purpose: "Evaluate analysis quality.", Evidence: []providers.RepositoryCitation{{Path: "benchmark.go", Line: 30}}},
+		},
+	}
+
+	var output bytes.Buffer
+	if err := WriteMarkdown(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	text := output.String()
+	for _, expected := range []string{
+		"**Scan completed — technical follow-up recommended**",
+		"High/medium deterministic findings: **0**",
+		"Safeguards needing follow-up or more evidence: **4**",
+		"Legal applicability: **not determined from repository code**",
+		"Missing evidence: Adversarial-input tests",
+		"Missing evidence: Retry-exhaustion test; Fallback outcome",
+		"| safe-stop | Could not determine from the reviewed code",
+		"| AI workflow | Repository technical review |",
+		"| Supporting infrastructure | Remote model inference adapters |",
+		"| Evaluation/test tooling | Repository benchmark evaluation |",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Errorf("developer report missing %q:\n%s", expected, text)
+		}
+	}
+	if count := strings.Count(text, "| **Review** |"); count != maxDeveloperActions {
+		t.Fatalf("top action count = %d, want %d:\n%s", count, maxDeveloperActions, text)
+	}
+	if strings.Contains(text, "Review the helper") {
+		t.Fatalf("unmapped infrastructure signal displaced concrete safeguard work:\n%s", text)
 	}
 }
 
