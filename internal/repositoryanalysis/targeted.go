@@ -177,15 +177,23 @@ func runTargeted(
 	recordResult := func(value providers.RepositoryAnalysisResult) {
 		audit.Coverage.FilesSubmitted += value.Coverage.FilesSubmitted
 		audit.Coverage.BytesSubmitted += value.Coverage.BytesSubmitted
+		audit.Coverage.ProviderRequests += value.Coverage.ProviderRequests
 		addUsage(&audit.Usage, value.Usage)
 		audit.Coverage.CitationsChecked += value.Coverage.CitationsChecked
+		if value.RateLimits.Available() {
+			audit.RateLimits = latestRateLimitSnapshot(audit.RateLimits, value.RateLimits)
+		}
 	}
 	recordErrorResult := func(value providers.RepositoryAnalysisResult, err error) {
 		audit.Coverage.FilesSubmitted += value.Coverage.FilesSubmitted
 		audit.Coverage.BytesSubmitted += value.Coverage.BytesSubmitted
+		audit.Coverage.ProviderRequests += value.Coverage.ProviderRequests
 		addUsage(&audit.Usage, value.Usage)
 		if incomplete, ok := providers.AsRemoteIncompleteError(err); ok && usageIsZero(value.Usage) {
 			addUsage(&audit.Usage, usageFromIncomplete(incomplete))
+		}
+		if value.RateLimits.Available() {
+			audit.RateLimits = latestRateLimitSnapshot(audit.RateLimits, value.RateLimits)
 		}
 	}
 	partialFailure := func(stage string, cause error) (providers.RepositoryAnalysisResult, error) {
@@ -205,6 +213,7 @@ func runTargeted(
 		value.Coverage.RepositoryBytes = audit.Coverage.RepositoryBytes
 		value.Coverage.FilesSubmitted = audit.Coverage.FilesSubmitted
 		value.Coverage.BytesSubmitted = audit.Coverage.BytesSubmitted
+		value.Coverage.ProviderRequests = audit.Coverage.ProviderRequests
 		value.Coverage.CitationsChecked = audit.Coverage.CitationsChecked
 		value.Usage = audit.Usage
 		return value
@@ -212,22 +221,42 @@ func runTargeted(
 	fallBackToBatches := func(files []providers.RepositorySourceFile, cause error) (providers.RepositoryAnalysisResult, error) {
 		batchOptions := options
 		batchOptions.TargetedBatches = true
+		if audit.RateLimits.Available() {
+			batchOptions.InitialRateLimits = audit.RateLimits
+		}
 		if progressErr := progress(options, Progress{
 			Stage: "adaptive-split", Scope: ".", InputBytes: requestContextBytes(files, providers.RepositoryGraphContext{}),
-			Detail: "the provider limit still rejects the compact package; switching to bounded source batches",
+			Detail: "the compact package could not produce a valid bounded result; switching to smaller source batches",
 		}); progressErr != nil {
 			return partialFailure("prepare bounded targeted batches", progressErr)
 		}
 		batched, batchErr := runHierarchical(ctx, reviewer, repository, graph, files, objectives, systems, confirmedUses, budget, batchOptions)
 		batched.Coverage.FilesSubmitted += audit.Coverage.FilesSubmitted
 		batched.Coverage.BytesSubmitted += audit.Coverage.BytesSubmitted
+		batched.Coverage.ProviderRequests += audit.Coverage.ProviderRequests
 		batched.Coverage.CitationsChecked += audit.Coverage.CitationsChecked
 		addUsage(&batched.Usage, audit.Usage)
-		batched.Notes = append(batched.Notes, "The initial compact package exceeded the provider token limit, so ComplyScan continued with bounded source batches instead of dropping selected evidence.")
+		batched.Notes = append(batched.Notes, "The initial compact package could not produce a valid bounded result, so ComplyScan continued with smaller source batches instead of dropping selected evidence.")
 		if batchErr != nil {
-			return batched, fmt.Errorf("continue targeted review after compact-package limit (%v): %w", cause, batchErr)
+			return batched, fmt.Errorf("continue targeted review after compact-package failure (%v): %w", cause, batchErr)
 		}
 		return batched, nil
+	}
+	estimated := estimatedRepositoryRequestTokens(request)
+	// A compact targeted call is an optimization, not a reason to hold the
+	// complete selected source package until a temporarily exhausted capacity
+	// window resets. Queue the same selected evidence as bounded batches so the
+	// shared scheduler can wait and admit each transfer deliberately.
+	if targetedCapacityRequiresQueue(options.InitialRateLimits, estimated) {
+		return fallBackToBatches(selected, fmt.Errorf("the live provider-capacity snapshot cannot safely admit the compact request estimated at %d tokens", estimated))
+	}
+	preflightLimits, intrinsicallyTooLarge, preflightErr := waitForInitialRepositoryCapacity(ctx, options, estimated, ".")
+	if preflightErr != nil {
+		return partialFailure("wait for initial provider capacity", preflightErr)
+	}
+	options.InitialRateLimits = preflightLimits
+	if intrinsicallyTooLarge {
+		return fallBackToBatches(selected, fmt.Errorf("the live provider token window cannot admit the compact request estimated at %d tokens", estimated))
 	}
 	result, err := reviewRepositoryWithRetry(ctx, reviewer, request, options)
 	if err != nil {
@@ -255,11 +284,17 @@ func runTargeted(
 		}
 	}
 	if err != nil {
+		if _, invalid := providers.AsRepositoryValidationError(err); invalid {
+			return fallBackToBatches(selected, err)
+		}
 		incomplete, canRecover := providers.AsRemoteIncompleteError(err)
 		if !canRecover || incomplete.Reason != "max_output_tokens" {
 			return partialFailure("analyze targeted repository evidence", err)
 		}
-		recoveryOutputTokens := targetedRecoveryOutputTokens(request.MaxOutputTokens, incomplete)
+		recoveryOutputTokens := targetedRecoveryOutputTokens(options.Provider, request.MaxOutputTokens, incomplete)
+		if recoveryOutputTokens <= request.MaxOutputTokens || !outputFitsTokenLimit(incomplete.InputTokens, recoveryOutputTokens, incomplete.TokenLimit) {
+			return fallBackToBatches(selected, err)
+		}
 		if progressErr := progress(options, Progress{
 			Stage: "targeted-output-recovery", Completed: 0, Total: 1, Scope: ".", InputBytes: inputBytes,
 			Detail: fmt.Sprintf("retry compact output with %d token(s) after %d output token(s), including %d reasoning token(s)", recoveryOutputTokens, incomplete.OutputTokens, incomplete.ReasoningTokens),
@@ -272,6 +307,12 @@ func runTargeted(
 		result, err = reviewRepositoryWithRetry(ctx, reviewer, request, options)
 		if err != nil {
 			recordErrorResult(result, err)
+			if _, invalid := providers.AsRepositoryValidationError(err); invalid {
+				return fallBackToBatches(selected, err)
+			}
+			if incompleteAgain, exhaustedAgain := providers.AsRemoteIncompleteError(err); exhaustedAgain && incompleteAgain.Reason == "max_output_tokens" {
+				return fallBackToBatches(selected, err)
+			}
 			return partialFailure("recover targeted repository output", err)
 		}
 		recordResult(result)
@@ -302,6 +343,13 @@ func runTargeted(
 				return partialFailure("prepare targeted repository follow-up", err)
 			}
 			finalFiles := append(append([]providers.RepositorySourceFile(nil), selected...), followUpFiles...)
+			fallBackFollowUpToBatches := func(cause error) (providers.RepositoryAnalysisResult, error) {
+				batched, batchErr := fallBackToBatches(finalFiles, cause)
+				batched.FollowUpRequested = true
+				batched.FollowUpQueries = append([]string(nil), result.FollowUpQueries...)
+				batched.FollowUpExcerpts = len(followUpFiles)
+				return batched, batchErr
+			}
 			finalGraph := repositoryGraphContext(graph, finalFiles)
 			request.Files = finalFiles
 			request.ConfirmedAIUses = bindConfirmedAIUses(confirmedUses, sourceFilePaths(finalFiles))
@@ -327,19 +375,22 @@ func runTargeted(
 					}
 					if finalErr != nil {
 						if repeated, stillTooLarge := providers.AsRemoteRateLimitError(finalErr); stillTooLarge && repeated.RequestTooLarge {
-							return fallBackToBatches(finalFiles, finalErr)
+							return fallBackFollowUpToBatches(finalErr)
 						}
 					}
 				}
 			}
 			if finalErr != nil {
+				if _, invalid := providers.AsRepositoryValidationError(finalErr); invalid {
+					return fallBackFollowUpToBatches(finalErr)
+				}
 				incomplete, canRecover := providers.AsRemoteIncompleteError(finalErr)
 				if !canRecover || incomplete.Reason != "max_output_tokens" {
 					return partialFailure("analyze targeted repository follow-up", finalErr)
 				}
-				recoveryOutput := targetedRecoveryOutputTokens(request.MaxOutputTokens, incomplete)
+				recoveryOutput := targetedRecoveryOutputTokens(options.Provider, request.MaxOutputTokens, incomplete)
 				if recoveryOutput <= request.MaxOutputTokens || !outputFitsTokenLimit(incomplete.InputTokens, recoveryOutput, incomplete.TokenLimit) {
-					return fallBackToBatches(finalFiles, finalErr)
+					return fallBackFollowUpToBatches(finalErr)
 				}
 				if progressErr := progress(options, Progress{
 					Stage: "adaptive-output-retry", Scope: ".", InputBytes: requestContextBytes(finalFiles, finalGraph),
@@ -353,7 +404,13 @@ func runTargeted(
 				if finalErr != nil {
 					recordErrorResult(final, finalErr)
 					if repeated, stillTooLarge := providers.AsRemoteRateLimitError(finalErr); stillTooLarge && repeated.RequestTooLarge {
-						return fallBackToBatches(finalFiles, finalErr)
+						return fallBackFollowUpToBatches(finalErr)
+					}
+					if _, invalid := providers.AsRepositoryValidationError(finalErr); invalid {
+						return fallBackFollowUpToBatches(finalErr)
+					}
+					if incompleteAgain, exhaustedAgain := providers.AsRemoteIncompleteError(finalErr); exhaustedAgain && incompleteAgain.Reason == "max_output_tokens" {
+						return fallBackFollowUpToBatches(finalErr)
 					}
 					return partialFailure("recover targeted repository follow-up output", finalErr)
 				}
@@ -400,6 +457,17 @@ func runTargeted(
 	return result, nil
 }
 
+func targetedCapacityRequiresQueue(snapshot providers.RateLimitSnapshot, estimatedTokens int) bool {
+	// If a known dimension is fully exhausted, every shape must wait; preserve
+	// the cheaper compact request and let the shared preflight honor its reset.
+	if snapshot.RequestsKnown && snapshot.RemainingRequests <= 0 || snapshot.TokensKnown && snapshot.RemainingTokens <= 0 {
+		return false
+	}
+	// A positive residual token balance may admit a smaller batch immediately,
+	// so queueing avoids an unnecessary whole-window wait.
+	return snapshot.TokensKnown && estimatedTokens > 0 && snapshot.RemainingTokens < estimatedTokens
+}
+
 func targetedOutputTokens(provider providers.Kind) int {
 	if provider == providers.Ollama {
 		return maximumRecoveryOutput
@@ -407,18 +475,33 @@ func targetedOutputTokens(provider providers.Kind) int {
 	return targetedRemoteOutputTokens
 }
 
-func targetedRecoveryOutputTokens(current int, incomplete *providers.RemoteIncompleteError) int {
-	if incomplete == nil || incomplete.TokenLimit <= 0 || incomplete.InputTokens <= 0 {
+func targetedRecoveryOutputTokens(provider providers.Kind, current int, incomplete *providers.RemoteIncompleteError) int {
+	if incomplete == nil {
 		return current
 	}
-	available := incomplete.TokenLimit - incomplete.InputTokens
-	if available > providers.OpenAIMaxOutputTokens {
-		available = providers.OpenAIMaxOutputTokens
+	ceiling := 16_384
+	if provider == providers.OpenAI {
+		ceiling = providers.OpenAIMaxOutputTokens
+	} else if provider == providers.Ollama {
+		ceiling = maximumRecoveryOutput
 	}
-	if available <= current {
+	recovery := current * 2
+	if recovery < minimumRecoveryOutput {
+		recovery = minimumRecoveryOutput
+	}
+	if recovery > ceiling {
+		recovery = ceiling
+	}
+	if incomplete.TokenLimit > 0 && incomplete.InputTokens > 0 {
+		available := incomplete.TokenLimit - incomplete.InputTokens
+		if available < recovery {
+			recovery = available
+		}
+	}
+	if recovery <= current {
 		return current
 	}
-	return available
+	return recovery
 }
 
 func targetedFollowUpFiles(repository discovery.Repository, graph codegraph.Graph, plan providers.TechnicalSearchPlan, existing []providers.RepositorySourceFile, budget int64) []providers.RepositorySourceFile {

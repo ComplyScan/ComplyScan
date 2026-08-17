@@ -125,10 +125,11 @@ func TestRunTargetedUsesObservedProviderLimitsForSourceBatchConcurrency(t *testi
 			name: "request allowance bounds each wave",
 			limits: providers.RateLimitSnapshot{
 				RequestsKnown: true, LimitRequests: 2, RemainingRequests: 2, ResetRequests: time.Minute,
+				TokensKnown: true, LimitTokens: 500_000, RemainingTokens: 490_000, ResetTokens: time.Minute,
 			},
 			wantMaximum: 2, wantAtLeast: 2,
 		},
-		{name: "missing headers preserve sequential execution", wantMaximum: 1, wantAtLeast: 1},
+		{name: "missing headers use adaptive slow start", wantAtLeast: 2},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			repository, _ := exhaustiveCandidateRepository(30)
@@ -142,9 +143,9 @@ func TestRunTargetedUsesObservedProviderLimitsForSourceBatchConcurrency(t *testi
 				options.InitialRateLimits = testCase.limits
 			}
 			if testCase.probe {
-				options.ProbeRateLimits = func(context.Context) (providers.RateLimitSnapshot, error) {
+				options.ProbeRateLimits = func(context.Context) (CapacityProbeResult, error) {
 					probes++
-					return testCase.limits, nil
+					return CapacityProbeResult{RateLimits: testCase.limits, ProviderRequests: 1}, nil
 				}
 			}
 			result, err := Run(context.Background(), reviewer, repository, nil, nil, options)
@@ -185,6 +186,7 @@ func TestRunTargetedRunsLimitedWavesAndWaitsForProviderReset(t *testing.T) {
 		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
 		InitialRateLimits: providers.RateLimitSnapshot{
 			RequestsKnown: true, LimitRequests: 3, RemainingRequests: 3, ResetRequests: 20 * time.Millisecond,
+			TokensKnown: true, LimitTokens: 500_000, RemainingTokens: 490_000, ResetTokens: 20 * time.Millisecond,
 		},
 		Wait: func(context.Context, time.Duration) error {
 			waits++
@@ -215,9 +217,9 @@ func TestRunTargetedDoesNotProbeCapacityForOneSourcePackage(t *testing.T) {
 	probes := 0
 	_, err := Run(context.Background(), reviewer, singleTargetedRepository(), nil, nil, Options{
 		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
-		ProbeRateLimits: func(context.Context) (providers.RateLimitSnapshot, error) {
+		ProbeRateLimits: func(context.Context) (CapacityProbeResult, error) {
 			probes++
-			return providers.RateLimitSnapshot{RequestsKnown: true, LimitRequests: 500, RemainingRequests: 499}, nil
+			return CapacityProbeResult{RateLimits: providers.RateLimitSnapshot{RequestsKnown: true, LimitRequests: 500, RemainingRequests: 499}, ProviderRequests: 1}, nil
 		},
 	})
 	if err != nil {
@@ -263,16 +265,16 @@ func TestSourceBatchWaveLimitUsesBothRequestAndTokenCapacity(t *testing.T) {
 		RequestsKnown: true, LimitRequests: 500, RemainingRequests: 12, ResetRequests: 20 * time.Second,
 		TokensKnown: true, LimitTokens: 500_000, RemainingTokens: 25_000, ResetTokens: 45 * time.Second,
 	}
-	if limit, wait := sourceBatchWaveLimit(snapshot, 10_000, 13); limit != 2 || wait != 0 {
+	if limit, wait := sourceBatchWaveLimit(snapshot, 10_000, 13, 1); limit != 2 || wait != 0 {
 		t.Fatalf("token-bounded wave = %d, wait %s; want 2, 0", limit, wait)
 	}
 	snapshot.RemainingTokens = 5_000
-	if limit, wait := sourceBatchWaveLimit(snapshot, 10_000, 13); limit != 0 || wait != 45*time.Second {
+	if limit, wait := sourceBatchWaveLimit(snapshot, 10_000, 13, 1); limit != 0 || wait != 45*time.Second {
 		t.Fatalf("exhausted token wave = %d, wait %s; want 0, 45s", limit, wait)
 	}
 	snapshot.RemainingTokens = 25_000
 	snapshot.RemainingRequests = 0
-	if limit, wait := sourceBatchWaveLimit(snapshot, 10_000, 13); limit != 0 || wait != 20*time.Second {
+	if limit, wait := sourceBatchWaveLimit(snapshot, 10_000, 13, 1); limit != 0 || wait != 20*time.Second {
 		t.Fatalf("exhausted request wave = %d, wait %s; want 0, 20s", limit, wait)
 	}
 }

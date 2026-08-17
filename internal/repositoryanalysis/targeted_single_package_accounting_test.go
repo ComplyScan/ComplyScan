@@ -128,6 +128,34 @@ func TestRunSingleTargetedFollowUpFailurePreservesAccountingWithoutInitialSemant
 }
 
 func TestRunSingleTargetedSuccessfulSecondCallsReportTotalTransfersAndUsage(t *testing.T) {
+	t.Run("hosted output recovery without context ceiling header", func(t *testing.T) {
+		incompleteUsage := providers.Usage{PromptTokens: 4_200, CompletionTokens: 4_096, ReasoningTokens: 3_000}
+		recoveryUsage := providers.Usage{PromptTokens: 4_100, CompletionTokens: 700, ReasoningTokens: 300}
+		reviewer := &targetedScriptedReviewer{steps: []targetedReviewStep{
+			func(providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
+				return providers.RepositoryAnalysisResult{}, &providers.RemoteIncompleteError{
+					Provider: "OpenAI", Status: "incomplete", Reason: "max_output_tokens",
+					InputTokens: incompleteUsage.PromptTokens, OutputTokens: incompleteUsage.CompletionTokens, ReasoningTokens: incompleteUsage.ReasoningTokens,
+				}
+			},
+			func(request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
+				if request.MaxOutputTokens != 8_192 {
+					return providers.RepositoryAnalysisResult{}, fmt.Errorf("hosted recovery output = %d, want 8192 without conflating TPM headers with context limits", request.MaxOutputTokens)
+				}
+				return targetedSuccessfulResult(request, recoveryUsage, false), nil
+			},
+		}}
+
+		result, err := runSingleTargetedFixture(reviewer, singleTargetedRepository())
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertTargetedAttemptCoverage(t, result, reviewer.requests)
+		wantUsage := recoveryUsage
+		addUsage(&wantUsage, incompleteUsage)
+		assertUsageEquals(t, result.Usage, wantUsage, "hosted output recovery without context ceiling")
+	})
+
 	t.Run("output recovery", func(t *testing.T) {
 		incompleteUsage := providers.Usage{PromptTokens: 4_200, CompletionTokens: 4_096, ReasoningTokens: 3_000}
 		recoveryUsage := providers.Usage{PromptTokens: 4_100, CompletionTokens: 350, ReasoningTokens: 180}
@@ -393,8 +421,8 @@ func assertTargetedAttemptCoverage(t *testing.T, result providers.RepositoryAnal
 		wantFiles += len(request.Files)
 		wantBytes += repositorySourceContentBytes(request.Files)
 	}
-	if result.Coverage.FilesSubmitted != wantFiles || result.Coverage.BytesSubmitted != wantBytes {
-		t.Fatalf("targeted transfer coverage = %d file excerpt(s)/%d byte(s), want all attempted transfers %d/%d: %#v", result.Coverage.FilesSubmitted, result.Coverage.BytesSubmitted, wantFiles, wantBytes, result.Coverage)
+	if result.Coverage.FilesSubmitted != wantFiles || result.Coverage.BytesSubmitted != wantBytes || result.Coverage.ProviderRequests != len(requests) {
+		t.Fatalf("targeted transfer coverage = %d file excerpt(s)/%d byte(s)/%d request(s), want all attempted transfers %d/%d/%d: %#v", result.Coverage.FilesSubmitted, result.Coverage.BytesSubmitted, result.Coverage.ProviderRequests, wantFiles, wantBytes, len(requests), result.Coverage)
 	}
 }
 

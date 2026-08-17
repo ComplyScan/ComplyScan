@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -30,13 +31,24 @@ const (
 	minimumInputTokens         = 8_000
 	charactersPerToken         = 3
 	contextReservePercent      = 20
-	minimumRateLimitCooldown   = 60 * time.Second
+	minimumRateLimitCooldown   = time.Second
 	maxRateLimitTotalWait      = 10 * time.Minute
+	maxValidationRepairRetries = 2
+	maxTransientRetryAttempts  = 8
 	minimumAdaptiveOutput      = 1024
 	minimumRecoveryOutput      = 4096
 	maximumRecoveryOutput      = 8192
 	maxConcurrentSourceBatches = 32
 	sourceBatchTokenOverhead   = 8192
+	// The source-free compatibility probe shares model qualification's bounded
+	// four-attempt transient retry contract. Reserve the maximum up front so the
+	// advertised repository-layer ceiling cannot be crossed before actual probe
+	// accounting is returned.
+	maxCapacityProbeProviderRequests = 4
+	// MaxProviderRequestsPerRun bounds remote cost and retry amplification for
+	// one repository-analysis layer. Reaching it yields an honest incomplete
+	// result with attempted-transfer and usage accounting.
+	MaxProviderRequestsPerRun = 256
 )
 
 type Reviewer interface {
@@ -64,7 +76,60 @@ type Options struct {
 	OnProgress        func(Progress) error
 	Wait              func(context.Context, time.Duration) error
 	InitialRateLimits providers.RateLimitSnapshot
-	ProbeRateLimits   func(context.Context) (providers.RateLimitSnapshot, error)
+	InitialUsage      providers.Usage
+	// InitialProviderRequests accounts for a live, source-free compatibility
+	// request whose capacity snapshot is reused by this repository run.
+	InitialProviderRequests int
+	ProbeRateLimits         func(context.Context) (CapacityProbeResult, error)
+	retryGate               chan struct{}
+	requestBudget           *providerRequestBudget
+}
+
+// CapacityProbeResult records a source-free request used to discover live
+// provider capacity. It is still a metered provider request and therefore
+// participates in the repository review's request/token accounting.
+type CapacityProbeResult struct {
+	RateLimits       providers.RateLimitSnapshot
+	Usage            providers.Usage
+	ProviderRequests int
+	// ModelDigest is the qualified provider artifact identity when one is
+	// available (notably an Ollama tag digest). It never contains source data.
+	ModelDigest string
+}
+
+type providerRequestBudget struct {
+	mu    sync.Mutex
+	used  int
+	limit int
+}
+
+func (value *providerRequestBudget) reserve() bool {
+	return value.reserveCount(1)
+}
+
+func (value *providerRequestBudget) reserveCount(count int) bool {
+	if value == nil {
+		return true
+	}
+	if count <= 0 {
+		return true
+	}
+	value.mu.Lock()
+	defer value.mu.Unlock()
+	if value.used+count > value.limit {
+		return false
+	}
+	value.used += count
+	return true
+}
+
+func (value *providerRequestBudget) releaseCount(count int) {
+	if value == nil || count <= 0 {
+		return
+	}
+	value.mu.Lock()
+	value.used = max(0, value.used-count)
+	value.mu.Unlock()
 }
 
 type Progress struct {
@@ -80,7 +145,15 @@ type Progress struct {
 
 // Run selects compact structural evidence in auto and targeted modes. Deep,
 // full, and hierarchical modes retain broad repository analysis.
-func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository, evidence []framework.TechnicalEvidenceReport, systems []profile.System, options Options) (providers.RepositoryAnalysisResult, error) {
+func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository, evidence []framework.TechnicalEvidenceReport, systems []profile.System, options Options) (result providers.RepositoryAnalysisResult, runErr error) {
+	defer func() {
+		if options.InitialProviderRequests <= 0 {
+			return
+		}
+		result.Coverage.ProviderRequests += options.InitialProviderRequests
+		addUsage(&result.Usage, options.InitialUsage)
+		result.Notes = append(result.Notes, fmt.Sprintf("Provider request and token totals include %d live source-free model compatibility request(s) that supplied this run's initial capacity snapshot.", options.InitialProviderRequests))
+	}()
 	if reviewer == nil {
 		return providers.RepositoryAnalysisResult{}, errors.New("repository analysis reviewer is required")
 	}
@@ -98,6 +171,13 @@ func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository
 	}
 	if options.MaxInputTokens < minimumInputTokens {
 		return providers.RepositoryAnalysisResult{}, fmt.Errorf("repository analysis input budget must be at least %d tokens", minimumInputTokens)
+	}
+	if options.retryGate == nil {
+		options.retryGate = make(chan struct{}, 1)
+	}
+	if options.requestBudget == nil {
+		initialRequests := max(0, options.InitialProviderRequests)
+		options.requestBudget = &providerRequestBudget{used: initialRequests, limit: MaxProviderRequestsPerRun}
 	}
 	files := repositoryFiles(repository)
 	if len(files) == 0 {
@@ -130,16 +210,38 @@ func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository
 			MaxOutputTokens: repositoryOutputTokens(options.Provider, 0), Files: files, Objectives: objectives, Systems: systemContext,
 			ConfirmedAIUses: bindConfirmedAIUses(confirmedUses, sourceFilePaths(files)), Graph: fullGraph,
 		}
+		fullEstimate := estimatedRepositoryRequestTokens(request)
+		preflightLimits, intrinsicallyTooLarge, preflightErr := waitForInitialRepositoryCapacity(ctx, options, fullEstimate, ".")
+		if preflightErr != nil {
+			return providers.RepositoryAnalysisResult{}, preflightErr
+		}
+		options.InitialRateLimits = preflightLimits
+		if intrinsicallyTooLarge {
+			if options.Mode == ModeFull {
+				return providers.RepositoryAnalysisResult{}, fmt.Errorf("the configured provider capacity cannot admit the full repository request estimated at %d tokens; use auto or hierarchical mode so ComplyScan can split it safely", fullEstimate)
+			}
+			batched, batchErr := runHierarchical(ctx, reviewer, repository, graph, files, objectives, systemContext, confirmedUses, budget, options)
+			batched.Notes = append(batched.Notes, "The live provider-capacity snapshot could not safely admit the broad request, so no broad source transfer was attempted and ComplyScan used bounded batches instead.")
+			return batched, batchErr
+		}
 		result, err := reviewRepositoryWithRetry(ctx, reviewer, request, options)
 		if err != nil {
 			if rateLimit, ok := providers.AsRemoteRateLimitError(err); ok && rateLimit.RequestTooLarge && options.Mode == ModeAuto {
-				batched, batchErr := runHierarchical(ctx, reviewer, repository, graph, files, objectives, systemContext, confirmedUses, budget, options)
+				batchOptions := options
+				if result.RateLimits.Available() {
+					batchOptions.InitialRateLimits = result.RateLimits
+				}
+				batched, batchErr := runHierarchical(ctx, reviewer, repository, graph, files, objectives, systemContext, confirmedUses, budget, batchOptions)
 				mergeRepositoryAttemptAccounting(&batched, result)
 				batched.Notes = append(batched.Notes, "The initial broad request exceeded the provider limit; its attempted source transfer and known usage are included before the hierarchical retry.")
 				return batched, batchErr
 			}
 			if incomplete, ok := providers.AsRemoteIncompleteError(err); ok && incomplete.Reason == "max_output_tokens" && options.Mode == ModeAuto {
-				batched, batchErr := runHierarchical(ctx, reviewer, repository, graph, files, objectives, systemContext, confirmedUses, budget, options)
+				batchOptions := options
+				if result.RateLimits.Available() {
+					batchOptions.InitialRateLimits = result.RateLimits
+				}
+				batched, batchErr := runHierarchical(ctx, reviewer, repository, graph, files, objectives, systemContext, confirmedUses, budget, batchOptions)
 				mergeRepositoryAttemptAccounting(&batched, result)
 				batched.Notes = append(batched.Notes, "The initial broad response exhausted its output allowance; its attempted source transfer and known usage are included before the hierarchical retry.")
 				return batched, batchErr
@@ -197,6 +299,7 @@ func mergeRepositoryAttemptAccounting(target *providers.RepositoryAnalysisResult
 	}
 	target.Coverage.FilesSubmitted += attempt.Coverage.FilesSubmitted
 	target.Coverage.BytesSubmitted += attempt.Coverage.BytesSubmitted
+	target.Coverage.ProviderRequests += attempt.Coverage.ProviderRequests
 	target.Coverage.CitationsChecked += attempt.Coverage.CitationsChecked
 	addUsage(&target.Usage, attempt.Usage)
 }
@@ -218,17 +321,24 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		aggregate.Coverage.Mode = providers.RepositoryAnalysisTargeted
 	}
 	sourceBatchesCompleted := 0
+	sourceBatchesStarted := make(map[string]struct{}, len(chunks))
 	prefetched := make(map[string]repositorySourceBatchResponse)
+	synthesisPrefetched := make(map[int]repositorySynthesisResponse)
 	partialFailure := func(scope string, cause error) (providers.RepositoryAnalysisResult, error) {
 		for key, response := range prefetched {
 			mergeRepositoryAttemptAccounting(&aggregate, response.result)
 			delete(prefetched, key)
 		}
+		drainRepositorySynthesisPrefetch(&aggregate, synthesisPrefetched)
 		aggregate.Coverage.Subsystems = sourceBatchesCompleted
+		aggregate.Coverage.SourceBatchesStarted = len(sourceBatchesStarted)
 		aggregate.Coverage.SourceBatchesCompleted = sourceBatchesCompleted
 		aggregate.Coverage.SourceBatchesTotal = len(chunks)
-		detail := fmt.Sprintf("repository model review completed %d of %d bounded source batch(es)", sourceBatchesCompleted, len(chunks))
-		status := detail + "; remaining candidate evidence was not reviewed and completed batches were not globally synthesized"
+		detail := fmt.Sprintf("repository model review validated %d of %d bounded source batch(es); %d distinct source batch(es) started a provider request", sourceBatchesCompleted, len(chunks), len(sourceBatchesStarted))
+		status := detail + "; remaining candidate evidence did not reach a validated response and completed batches were not globally synthesized"
+		if len(sourceBatchesStarted) >= len(chunks) && sourceBatchesCompleted < len(chunks) {
+			status = detail + "; every planned source batch started a provider request, but one or more responses could not be validated and no global synthesis was retained"
+		}
 		if sourceBatchesCompleted == len(chunks) {
 			status = detail + "; all candidate evidence batches were reviewed, but global synthesis did not complete"
 		}
@@ -240,7 +350,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			ObjectiveObservations: []providers.RepositoryObjectiveObservation{}, UnmappedObservations: []providers.RepositoryUnmappedObservation{},
 			UnresolvedQuestions: []string{status},
 		}
-		aggregate.Notes = append(aggregate.Notes, detail+" before the provider review stopped. This partial result must not be treated as a completed zero-use review.")
+		aggregate.Notes = append(aggregate.Notes, detail+" before the repository review stopped. This partial result must not be treated as a completed zero-use review.")
 		if aggregate.Coverage.FilesSubmitted > 0 {
 			aggregate.Notes = append(aggregate.Notes, "Attempted-transfer coverage includes every concurrently started source request, including responses that were not retained after another batch failed.")
 		}
@@ -259,8 +369,55 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		if err := progress(options, Progress{Stage: "rate-limit-probe", Total: len(chunks), Scope: ".", Detail: "checking live provider capacity without repository source"}); err != nil {
 			return partialFailure("provider capacity probe", err)
 		}
+		if !options.requestBudget.reserveCount(maxCapacityProbeProviderRequests) {
+			return partialFailure("provider capacity probe", fmt.Errorf("repository review reached the safety ceiling of %d provider requests", MaxProviderRequestsPerRun))
+		}
 		probed, probeErr := options.ProbeRateLimits(ctx)
-		if probeErr != nil || !probed.Available() {
+		probeRequests := max(0, probed.ProviderRequests)
+		if probeRequests < maxCapacityProbeProviderRequests {
+			options.requestBudget.releaseCount(maxCapacityProbeProviderRequests - probeRequests)
+		}
+		if probeRequests > maxCapacityProbeProviderRequests {
+			return partialFailure("provider capacity probe", fmt.Errorf("source-free capacity probe exceeded its safety allowance of %d provider requests", maxCapacityProbeProviderRequests))
+		}
+		addUsage(&aggregate.Usage, probed.Usage)
+		aggregate.Coverage.ProviderRequests += probeRequests
+		if probeErr != nil && (errors.Is(probeErr, context.Canceled) || errors.Is(probeErr, context.DeadlineExceeded) || ctx.Err() != nil) {
+			return partialFailure("provider capacity probe", probeErr)
+		}
+		if probeErr != nil {
+			retryableProbeFailure := false
+			probeWait := time.Duration(0)
+			if rateLimit, ok := providers.AsRemoteRateLimitError(probeErr); ok {
+				retryableProbeFailure = !rateLimit.Permanent && !rateLimit.RequestTooLarge
+				probeWait = max(rateLimit.RetryAfter, exhaustedCapacityReset(rateLimit.RateLimits))
+			}
+			if transient, ok := providers.AsRemoteTransientError(probeErr); ok {
+				retryableProbeFailure = true
+				probeWait = max(transient.RetryAfter, exhaustedCapacityReset(transient.RateLimits))
+			}
+			if !retryableProbeFailure {
+				return partialFailure("provider capacity probe", fmt.Errorf("source-free provider check failed before repository code was sent: %w", probeErr))
+			}
+			if probeWait < minimumRateLimitCooldown {
+				probeWait = minimumRateLimitCooldown
+			}
+			if probeWait > 0 {
+				if probeWait > maxRateLimitTotalWait {
+					return partialFailure("provider capacity probe", fmt.Errorf("provider capacity probe requested a retry wait beyond the %s automatic budget: %w", maxRateLimitTotalWait, probeErr))
+				}
+				if err := progress(options, Progress{Stage: "batch-capacity-wait", Scope: ".", Wait: probeWait, OriginalWait: probeWait, Detail: "honoring provider backoff before any repository source is sent"}); err != nil {
+					return partialFailure("provider capacity probe", err)
+				}
+				if err := waitForConfiguredRateLimit(ctx, options, probeWait); err != nil {
+					return partialFailure("provider capacity probe", err)
+				}
+			}
+			if probed.RateLimits.Available() {
+				observedLimits = replenishRateLimitSnapshot(probed.RateLimits, probeWait)
+			}
+		}
+		if probeErr != nil || !probed.RateLimits.Available() {
 			detail := "the provider returned no usable capacity headers; the first source batch will calibrate this run"
 			if probeErr != nil {
 				detail = "the source-free capacity probe did not complete; the first source batch will calibrate this run: " + probeErr.Error()
@@ -269,13 +426,13 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 				return partialFailure("provider capacity probe", err)
 			}
 		} else {
-			observedLimits = probed
-			if err := progress(options, Progress{Stage: "rate-limit-probe-complete", Total: len(chunks), Scope: ".", Detail: rateLimitCapacityDetail(probed)}); err != nil {
+			observedLimits = probed.RateLimits
+			if err := progress(options, Progress{Stage: "rate-limit-probe-complete", Total: len(chunks), Scope: ".", Detail: rateLimitCapacityDetail(probed.RateLimits)}); err != nil {
 				return partialFailure("provider capacity probe", err)
 			}
 		}
 	}
-	capacityWait := time.Duration(0)
+	unknownWaveLimit := 1
 	for index := 0; index < len(chunks); {
 		chunk := chunks[index]
 		prepared := prepareRepositorySourceBatch(chunk, repository, graph, objectives, systems, confirmedUses, budget, adaptiveTokenLimit, options)
@@ -293,20 +450,46 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			}
 			continue
 		}
+		if observedLimits.TokensKnown && observedLimits.LimitTokens > 0 && prepared.estimatedTokens > observedLimits.LimitTokens {
+			inputAndEnvelope := prepared.estimatedTokens - prepared.maxOutputTokens
+			availableOutput := observedLimits.LimitTokens - inputAndEnvelope
+			if availableOutput >= minimumAdaptiveOutput && availableOutput < prepared.maxOutputTokens {
+				chunks[index].maxOutputTokens = availableOutput
+				if err := progress(options, Progress{
+					Stage: "capacity-preflight-output", Completed: index, Total: len(chunks), Scope: chunk.scope,
+					InputBytes: prepared.inputBytes, Detail: fmt.Sprintf("reduce output allowance from %d to %d so one request fits the observed %d-token provider window", prepared.maxOutputTokens, availableOutput, observedLimits.LimitTokens),
+				}); err != nil {
+					return partialFailure(chunk.scope, err)
+				}
+				continue
+			}
+			parts, split := splitRepositoryChunk(chunk, minimumAdaptiveOutput)
+			if !split {
+				return partialFailure(chunk.scope, fmt.Errorf("the smallest safe source segment is estimated at %d tokens, exceeding the provider's observed %d-token window", prepared.estimatedTokens, observedLimits.LimitTokens))
+			}
+			chunks = replaceRepositoryChunk(chunks, index, parts)
+			if err := progress(options, Progress{
+				Stage: "capacity-preflight-split", Completed: index, Total: len(chunks), Scope: chunk.scope,
+				InputBytes: prepared.inputBytes, Detail: fmt.Sprintf("split source before transfer so each request can fit the observed %d-token provider window", observedLimits.LimitTokens),
+			}); err != nil {
+				return partialFailure(chunk.scope, err)
+			}
+			continue
+		}
 
-		batchResponse, ready := prefetched[chunk.scope]
+		chunkID := repositoryChunkID(chunk)
+		batchResponse, ready := prefetched[chunkID]
 		if ready {
-			delete(prefetched, chunk.scope)
+			delete(prefetched, chunkID)
 		} else {
-			waveLimit, wait := sourceBatchWaveLimit(observedLimits, prepared.estimatedTokens, len(chunks)-index)
+			waveLimit, wait := sourceBatchWaveLimit(observedLimits, prepared.estimatedTokens, len(chunks)-index, unknownWaveLimit)
 			if waveLimit == 0 {
 				if wait <= 0 {
 					wait = minimumRateLimitCooldown
 				}
-				if capacityWait+wait > maxRateLimitTotalWait {
-					return partialFailure(chunk.scope, fmt.Errorf("provider capacity remained exhausted beyond the %s automatic wait budget", maxRateLimitTotalWait))
+				if wait > maxRateLimitTotalWait {
+					return partialFailure(chunk.scope, fmt.Errorf("one provider-capacity reset wait exceeds the %s automatic per-window wait budget", maxRateLimitTotalWait))
 				}
-				capacityWait += wait
 				if err := progress(options, Progress{Stage: "batch-capacity-wait", Scope: chunk.scope, Wait: wait, OriginalWait: wait, Detail: "waiting for provider request/token capacity before starting the next source batch wave"}); err != nil {
 					return partialFailure(chunk.scope, err)
 				}
@@ -321,7 +504,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			estimatedTokens := 0
 			for candidateIndex := index; candidateIndex < len(chunks) && len(wave) < waveLimit; candidateIndex++ {
 				candidate := chunks[candidateIndex]
-				if _, alreadyStarted := prefetched[candidate.scope]; alreadyStarted {
+				if _, alreadyStarted := prefetched[repositoryChunkID(candidate)]; alreadyStarted {
 					break
 				}
 				candidateCall := prepareRepositorySourceBatch(candidate, repository, graph, objectives, systems, confirmedUses, budget, adaptiveTokenLimit, options)
@@ -339,9 +522,13 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 				wave = append(wave, prepared)
 			}
 			if len(wave) > 1 {
+				detail := fmt.Sprintf("successful bounded requests support a cautious wave of %d source batches", len(wave))
+				if observedLimits.RequestsKnown && observedLimits.TokensKnown {
+					detail = fmt.Sprintf("observed request and token capacity allow %d source batches", len(wave))
+				}
 				if err := progress(options, Progress{
 					Stage: "targeted-batch-concurrency", Completed: len(wave), Total: len(chunks) - index, Scope: chunk.scope,
-					Detail: fmt.Sprintf("provider response headers allow %d source batches to run concurrently", len(wave)),
+					Detail: detail,
 				}); err != nil {
 					return partialFailure(chunk.scope, err)
 				}
@@ -359,22 +546,58 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			}
 			observedLimits = reserveRateLimitSnapshot(observedLimits, len(wave), estimatedTokens)
 			responses := runRepositorySourceBatchWave(ctx, reviewer, wave, options)
-			for _, response := range responses {
-				prefetched[response.scope] = response
+			waveSucceeded := true
+			for responseIndex, response := range responses {
+				call := wave[responseIndex]
+				if response.result.Coverage.ProviderRequests > 0 {
+					sourceBatchesStarted[repositoryChunkID(call.chunk)] = struct{}{}
+				}
+				prefetched[response.id] = response
+				// The wave reservation covers the first provider attempt for each
+				// logical batch. Validation repairs and transient retries are real
+				// additional RPM/TPM consumers; reserve them conservatively when a
+				// provider did not return a fresher complete capacity snapshot.
+				extraRequests := max(0, response.result.Coverage.ProviderRequests-1)
+				observedLimits = reserveRateLimitSnapshot(observedLimits, extraRequests, extraRequests*call.estimatedTokens)
 				observedLimits = conservativeRateLimitSnapshot(observedLimits, response.result.RateLimits)
+				if response.err != nil || response.result.Coverage.ProviderRequests != 1 {
+					waveSucceeded = false
+				}
 			}
-			batchResponse = prefetched[chunk.scope]
-			delete(prefetched, chunk.scope)
+			if !observedLimits.Available() && options.Provider != providers.Ollama {
+				if waveSucceeded {
+					unknownWaveLimit = min(maxConcurrentSourceBatches, max(1, unknownWaveLimit*2))
+				} else {
+					unknownWaveLimit = max(1, unknownWaveLimit/2)
+				}
+			}
+			batchResponse = prefetched[chunkID]
+			delete(prefetched, chunkID)
 		}
 
 		result, err := batchResponse.result, batchResponse.err
 		aggregate.Coverage.FilesSubmitted += result.Coverage.FilesSubmitted
 		aggregate.Coverage.BytesSubmitted += result.Coverage.BytesSubmitted
+		aggregate.Coverage.ProviderRequests += result.Coverage.ProviderRequests
 		if err != nil {
 			addUsage(&aggregate.Usage, result.Usage)
 			incomplete, isIncomplete := providers.AsRemoteIncompleteError(err)
 			if isIncomplete && usageIsZero(result.Usage) {
 				addUsage(&aggregate.Usage, usageFromIncomplete(incomplete))
+			}
+			if _, invalid := providers.AsRepositoryValidationError(err); invalid {
+				parts, split := splitRepositoryChunk(chunk, prepared.maxOutputTokens)
+				if split {
+					delete(sourceBatchesStarted, chunkID)
+					chunks = replaceRepositoryChunk(chunks, index, parts)
+					if progressErr := progress(options, Progress{
+						Stage: "validation-split", Completed: index, Total: len(chunks), Scope: chunk.scope,
+						InputBytes: prepared.inputBytes, Detail: fmt.Sprintf("structured output stayed invalid after corrective regeneration; split into %d smaller evidence part(s)", len(parts)),
+					}); progressErr != nil {
+						return partialFailure(chunk.scope, progressErr)
+					}
+					continue
+				}
 			}
 			if rateLimit, ok := providers.AsRemoteRateLimitError(err); ok && rateLimit.RequestTooLarge {
 				adaptiveTokenLimit = smallerPositive(adaptiveTokenLimit, rateLimit.LimitTokens)
@@ -393,6 +616,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 				if !split {
 					return partialFailure(chunk.scope, fmt.Errorf("provider token limit %d is too small for the smallest safe repository segment: %w", rateLimit.LimitTokens, err))
 				}
+				delete(sourceBatchesStarted, chunkID)
 				chunks = replaceRepositoryChunk(chunks, index, parts)
 				if err := progress(options, Progress{
 					Stage: "adaptive-split", Completed: index, Total: len(chunks), Scope: chunk.scope,
@@ -403,6 +627,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 				continue
 			}
 			if isIncomplete && incomplete.Reason == "max_output_tokens" {
+				adaptiveTokenLimit = smallerPositive(adaptiveTokenLimit, incomplete.TokenLimit)
 				recoveryOutput := repositoryRecoveryOutputTokens(prepared.maxOutputTokens)
 				if recoveryOutput > prepared.maxOutputTokens && outputFitsTokenLimit(incomplete.InputTokens, recoveryOutput, adaptiveTokenLimit) {
 					chunks[index].maxOutputTokens = recoveryOutput
@@ -414,10 +639,11 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 					}
 					continue
 				}
-				parts, split := splitRepositoryChunk(chunk, recoveryOutput)
+				parts, split := splitRepositoryChunk(chunk, outputWithinTokenLimit(incomplete.InputTokens, recoveryOutput, adaptiveTokenLimit))
 				if !split {
 					return partialFailure(chunk.scope, fmt.Errorf("model exhausted %d output tokens for the smallest safe repository segment: %w", prepared.maxOutputTokens, err))
 				}
+				delete(sourceBatchesStarted, chunkID)
 				chunks = replaceRepositoryChunk(chunks, index, parts)
 				if err := progress(options, Progress{
 					Stage: "adaptive-output-split", Completed: index, Total: len(chunks), Scope: chunk.scope,
@@ -454,28 +680,188 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			groups[index] = repositorySummaryGroup{summaries: plainGroups[index]}
 		}
 		next := make([]providers.RepositorySectionResult, 0, len(groups))
+		synthesisUnknownWaveLimit := 1
 		for index := 0; index < len(groups); {
 			group := groups[index]
-			scope := fmt.Sprintf("synthesis-level-%d-part-%d", levels, index+1)
-			if err := progress(options, Progress{Stage: "synthesis", Completed: index, Total: len(groups), Scope: scope, InputBytes: summaryBytes(group.summaries)}); err != nil {
-				return partialFailure(scope, err)
+			prepared := prepareRepositorySynthesisCall(levels, index, group, repository, files, objectives, systems, confirmedUses, adaptiveTokenLimit, options)
+			scope := prepared.scope
+			maxOutputTokens := prepared.maxOutputTokens
+			if prepared.inputBytes > budget {
+				parts, split := splitRepositorySummaryGroup(group, maxOutputTokens)
+				if !split && len(group.summaries) == 1 {
+					if fragments, fragmented := fragmentRepositorySection(group.summaries[0]); fragmented {
+						parts = make([]repositorySummaryGroup, 0, len(fragments))
+						for _, fragment := range fragments {
+							parts = append(parts, repositorySummaryGroup{summaries: []providers.RepositorySectionResult{fragment}, maxOutputTokens: maxOutputTokens})
+						}
+						split = true
+					}
+				}
+				if !split {
+					return partialFailure(scope, fmt.Errorf("synthesis request requires %d encoded bytes and one semantic summary atom cannot be divided to fit the per-request budget of %d bytes", prepared.inputBytes, budget))
+				}
+				shiftRepositorySynthesisPrefetch(synthesisPrefetched, index, len(parts)-1)
+				groups = replaceRepositorySummaryGroup(groups, index, parts)
+				if progressErr := progress(options, Progress{
+					Stage: "synthesis-context-split", Completed: index, Total: len(groups), Scope: scope,
+					InputBytes: prepared.inputBytes, Detail: fmt.Sprintf("encoded synthesis request exceeded %d bytes; split into %d semantic group(s)", budget, len(parts)),
+				}); progressErr != nil {
+					return partialFailure(scope, progressErr)
+				}
+				continue
 			}
-			maxOutputTokens := group.maxOutputTokens
-			if maxOutputTokens == 0 {
-				maxOutputTokens = repositoryOutputTokens(options.Provider, adaptiveTokenLimit)
+			if observedLimits.TokensKnown && observedLimits.LimitTokens > 0 && prepared.estimatedTokens > observedLimits.LimitTokens {
+				inputAndEnvelope := prepared.estimatedTokens - prepared.maxOutputTokens
+				availableOutput := observedLimits.LimitTokens - inputAndEnvelope
+				if availableOutput >= minimumAdaptiveOutput && availableOutput < prepared.maxOutputTokens {
+					groups[index].maxOutputTokens = availableOutput
+					if err := progress(options, Progress{
+						Stage: "capacity-preflight-output", Completed: index, Total: len(groups), Scope: scope,
+						InputBytes: prepared.inputBytes, Detail: fmt.Sprintf("reduce synthesis output allowance from %d to %d so one request fits the observed %d-token provider window", prepared.maxOutputTokens, availableOutput, observedLimits.LimitTokens),
+					}); err != nil {
+						return partialFailure(scope, err)
+					}
+					continue
+				}
+				parts, split := splitRepositorySummaryGroup(group, minimumAdaptiveOutput)
+				if !split && len(group.summaries) == 1 {
+					if fragments, fragmented := fragmentRepositorySection(group.summaries[0]); fragmented {
+						parts = make([]repositorySummaryGroup, 0, len(fragments))
+						for _, fragment := range fragments {
+							parts = append(parts, repositorySummaryGroup{summaries: []providers.RepositorySectionResult{fragment}, maxOutputTokens: minimumAdaptiveOutput})
+						}
+						split = true
+					}
+				}
+				if !split {
+					return partialFailure(scope, fmt.Errorf("the smallest safe synthesis atom is estimated at %d tokens, exceeding the provider's observed %d-token window", prepared.estimatedTokens, observedLimits.LimitTokens))
+				}
+				shiftRepositorySynthesisPrefetch(synthesisPrefetched, index, len(parts)-1)
+				groups = replaceRepositorySummaryGroup(groups, index, parts)
+				if err := progress(options, Progress{
+					Stage: "capacity-preflight-split", Completed: index, Total: len(groups), Scope: scope,
+					InputBytes: prepared.inputBytes, Detail: fmt.Sprintf("split synthesis before transfer so each request can fit the observed %d-token provider window", observedLimits.LimitTokens),
+				}); err != nil {
+					return partialFailure(scope, err)
+				}
+				continue
 			}
-			fileIndex := citedFileIndex(group.summaries, files)
-			request := providers.RepositoryAnalysisRequest{
-				Mode: providers.RepositoryAnalysisSynthesis, Scope: scope,
-				RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), FileIndex: fileIndex,
-				Objectives: objectives, Systems: systems, ConfirmedAIUses: bindConfirmedAIUsesForSynthesis(confirmedUses, fileReferencePaths(fileIndex), group.summaries), SubsystemSummaries: group.summaries, MaxOutputTokens: maxOutputTokens,
+
+			batchResponse, ready := synthesisPrefetched[index]
+			if ready {
+				delete(synthesisPrefetched, index)
+			} else {
+				waveLimit, wait := sourceBatchWaveLimit(observedLimits, prepared.estimatedTokens, len(groups)-index, synthesisUnknownWaveLimit)
+				if waveLimit == 0 {
+					if wait <= 0 {
+						wait = minimumRateLimitCooldown
+					}
+					if wait > maxRateLimitTotalWait {
+						return partialFailure(scope, fmt.Errorf("one provider synthesis-capacity reset wait exceeds the %s automatic per-window wait budget", maxRateLimitTotalWait))
+					}
+					if err := progress(options, Progress{Stage: "batch-capacity-wait", Scope: scope, Wait: wait, OriginalWait: wait, Detail: "waiting for provider request/token capacity before starting the next synthesis wave"}); err != nil {
+						return partialFailure(scope, err)
+					}
+					if err := waitForConfiguredRateLimit(ctx, options, wait); err != nil {
+						return partialFailure(scope, err)
+					}
+					observedLimits = replenishRateLimitSnapshot(observedLimits, wait)
+					continue
+				}
+				wave := make([]repositorySynthesisCall, 0, waveLimit)
+				estimatedTokens := 0
+				for candidateIndex := index; candidateIndex < len(groups) && len(wave) < waveLimit; candidateIndex++ {
+					if _, alreadyPrefetched := synthesisPrefetched[candidateIndex]; alreadyPrefetched {
+						break
+					}
+					candidateCall := prepareRepositorySynthesisCall(levels, candidateIndex, groups[candidateIndex], repository, files, objectives, systems, confirmedUses, adaptiveTokenLimit, options)
+					if candidateCall.inputBytes > budget {
+						break
+					}
+					if observedLimits.TokensKnown && len(wave) > 0 && estimatedTokens+candidateCall.estimatedTokens > observedLimits.RemainingTokens {
+						break
+					}
+					wave = append(wave, candidateCall)
+					estimatedTokens += candidateCall.estimatedTokens
+				}
+				if len(wave) == 0 {
+					wave = append(wave, prepared)
+				}
+				if len(wave) > 1 {
+					detail := fmt.Sprintf("successful bounded requests support a cautious wave of %d synthesis groups", len(wave))
+					if observedLimits.RequestsKnown && observedLimits.TokensKnown {
+						detail = fmt.Sprintf("observed request and token capacity allow %d synthesis groups", len(wave))
+					}
+					if err := progress(options, Progress{Stage: "synthesis-concurrency", Completed: len(wave), Total: len(groups) - index, Scope: scope, Detail: detail}); err != nil {
+						return partialFailure(scope, err)
+					}
+				}
+				for _, call := range wave {
+					if err := progress(options, Progress{Stage: "synthesis-start", Completed: call.index + 1, Total: len(groups), Scope: call.scope, InputBytes: call.inputBytes}); err != nil {
+						return partialFailure(call.scope, err)
+					}
+				}
+				observedLimits = reserveRateLimitSnapshot(observedLimits, len(wave), estimatedTokens)
+				responses := runRepositorySynthesisWave(ctx, reviewer, wave, options)
+				waveSucceeded := true
+				for responseIndex, response := range responses {
+					call := wave[responseIndex]
+					synthesisPrefetched[call.index] = response
+					extraRequests := max(0, response.result.Coverage.ProviderRequests-1)
+					observedLimits = reserveRateLimitSnapshot(observedLimits, extraRequests, extraRequests*call.estimatedTokens)
+					observedLimits = conservativeRateLimitSnapshot(observedLimits, response.result.RateLimits)
+					if response.err != nil || response.result.Coverage.ProviderRequests != 1 {
+						waveSucceeded = false
+					}
+				}
+				if !observedLimits.Available() && options.Provider != providers.Ollama {
+					if waveSucceeded {
+						synthesisUnknownWaveLimit = min(maxConcurrentSourceBatches, max(1, synthesisUnknownWaveLimit*2))
+					} else {
+						synthesisUnknownWaveLimit = max(1, synthesisUnknownWaveLimit/2)
+					}
+				}
+				batchResponse = synthesisPrefetched[index]
+				delete(synthesisPrefetched, index)
 			}
-			result, err := reviewRepositoryWithRetry(ctx, reviewer, request, options)
+			result, err := batchResponse.result, batchResponse.err
+			aggregate.Coverage.ProviderRequests += result.Coverage.ProviderRequests
 			if err != nil {
 				addUsage(&aggregate.Usage, result.Usage)
 				incomplete, isIncomplete := providers.AsRemoteIncompleteError(err)
 				if isIncomplete && usageIsZero(result.Usage) {
 					addUsage(&aggregate.Usage, usageFromIncomplete(incomplete))
+				}
+				_, invalid := providers.AsRepositoryValidationError(err)
+				_, representation := providers.AsRepositoryRepresentationError(err)
+				if invalid || representation {
+					parts, split := splitRepositorySummaryGroup(group, maxOutputTokens)
+					if !split && len(group.summaries) == 1 {
+						if fragments, fragmented := fragmentRepositorySection(group.summaries[0]); fragmented {
+							parts = make([]repositorySummaryGroup, 0, len(fragments))
+							for _, fragment := range fragments {
+								parts = append(parts, repositorySummaryGroup{summaries: []providers.RepositorySectionResult{fragment}, maxOutputTokens: maxOutputTokens})
+							}
+							split = true
+						}
+					}
+					if split {
+						shiftRepositorySynthesisPrefetch(synthesisPrefetched, index, len(parts)-1)
+						groups = replaceRepositorySummaryGroup(groups, index, parts)
+						stage := "validation-split"
+						detail := fmt.Sprintf("synthesis output stayed invalid after corrective regeneration; split into %d smaller group(s)", len(parts))
+						if representation {
+							stage = "representation-split"
+							detail = fmt.Sprintf("validated synthesis semantics exceeded one result representation; split locally into %d identity-preserving group(s) before any provider transfer", len(parts))
+						}
+						if progressErr := progress(options, Progress{
+							Stage: stage, Completed: index, Total: len(groups), Scope: scope,
+							InputBytes: summaryBytes(group.summaries), Detail: detail,
+						}); progressErr != nil {
+							return partialFailure(scope, progressErr)
+						}
+						continue
+					}
 				}
 				if rateLimit, ok := providers.AsRemoteRateLimitError(err); ok && rateLimit.RequestTooLarge {
 					adaptiveTokenLimit = smallerPositive(adaptiveTokenLimit, rateLimit.LimitTokens)
@@ -494,6 +880,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 					if !split {
 						return partialFailure(scope, fmt.Errorf("provider token limit %d is too small for one subsystem summary: %w", rateLimit.LimitTokens, err))
 					}
+					shiftRepositorySynthesisPrefetch(synthesisPrefetched, index, len(parts)-1)
 					groups = replaceRepositorySummaryGroup(groups, index, parts)
 					if err := progress(options, Progress{
 						Stage: "adaptive-split", Completed: index, Total: len(groups), Scope: scope,
@@ -504,6 +891,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 					continue
 				}
 				if isIncomplete && incomplete.Reason == "max_output_tokens" {
+					adaptiveTokenLimit = smallerPositive(adaptiveTokenLimit, incomplete.TokenLimit)
 					recoveryOutput := repositoryRecoveryOutputTokens(maxOutputTokens)
 					if recoveryOutput > maxOutputTokens && outputFitsTokenLimit(incomplete.InputTokens, recoveryOutput, adaptiveTokenLimit) {
 						groups[index].maxOutputTokens = recoveryOutput
@@ -515,10 +903,11 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 						}
 						continue
 					}
-					parts, split := splitRepositorySummaryGroup(group, recoveryOutput)
+					parts, split := splitRepositorySummaryGroup(group, outputWithinTokenLimit(incomplete.InputTokens, recoveryOutput, adaptiveTokenLimit))
 					if !split {
 						return partialFailure(scope, fmt.Errorf("model exhausted %d output tokens and the synthesis input cannot be divided further: %w", maxOutputTokens, err))
 					}
+					shiftRepositorySynthesisPrefetch(synthesisPrefetched, index, len(parts)-1)
 					groups = replaceRepositorySummaryGroup(groups, index, parts)
 					if err := progress(options, Progress{
 						Stage: "adaptive-output-split", Completed: index, Total: len(groups), Scope: scope,
@@ -554,17 +943,52 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			// otherwise a large, fully reviewed repository is incorrectly marked
 			// incomplete immediately after the compaction pass.
 			if len(partitionSummaries(next, budget)) >= len(next) {
-				return partialFailure(fmt.Sprintf("synthesis level %d", levels), errors.New("repository synthesis could not reduce subsystem summaries within the configured input budget"))
+				fragmented := make([]providers.RepositorySectionResult, 0, len(next))
+				fragmentedAny := false
+				for _, summary := range next {
+					parts, ok := fragmentRepositorySection(summary)
+					if !ok {
+						fragmented = append(fragmented, summary)
+						continue
+					}
+					fragmentedAny = true
+					fragmented = append(fragmented, parts...)
+				}
+				if !fragmentedAny {
+					return partialFailure(fmt.Sprintf("synthesis level %d", levels), errors.New("repository synthesis could not reduce the remaining semantic summary atoms within the configured input budget"))
+				}
+				summaries = fragmented
+				if progressErr := progress(options, Progress{
+					Stage: "synthesis-context-split", Total: len(fragmented), Scope: fmt.Sprintf("synthesis-level-%d", levels),
+					Detail: "model compaction did not reduce the encoded request; split validated summaries into smaller identity-preserving semantic atoms",
+				}); progressErr != nil {
+					return partialFailure(fmt.Sprintf("synthesis level %d", levels), progressErr)
+				}
+				continue
 			}
 		}
 		summaries = next
 	}
+	usedValidatedSourceFallback := false
 	if len(summaries) == 1 && len(chunks) == 1 {
 		// A forced hierarchical analysis still gets an explicit synthesis pass so
 		// its output follows the same global contract as larger repositories.
 		group := summaries
 		maxOutputTokens := repositoryOutputTokens(options.Provider, adaptiveTokenLimit)
 		var result providers.RepositoryAnalysisResult
+		retainValidatedSource := func(cause error) error {
+			grouped, groupErr := assignSynthesisCandidateIDs(group[0], confirmedUses)
+			if groupErr != nil {
+				return fmt.Errorf("retain validated single-source result after optional synthesis failure: %w", groupErr)
+			}
+			summaries[0] = grouped
+			usedValidatedSourceFallback = true
+			aggregate.Notes = append(aggregate.Notes, "The optional single-batch synthesis did not complete after bounded recovery; ComplyScan retained the already validated source result and derived its report-local grouping IDs locally. Provider-attempt accounting is retained. Cause: "+cause.Error())
+			return progress(options, Progress{
+				Stage: "synthesis-source-fallback", Scope: "repository-synthesis", InputBytes: summaryBytes(group),
+				Detail: "retained the validated single-source result after optional synthesis failed",
+			})
+		}
 		for {
 			fileIndex := citedFileIndex(group, files)
 			request := providers.RepositoryAnalysisRequest{
@@ -572,11 +996,40 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 				RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), FileIndex: fileIndex,
 				Objectives: objectives, Systems: systems, ConfirmedAIUses: bindConfirmedAIUsesForSynthesis(confirmedUses, fileReferencePaths(fileIndex), group), SubsystemSummaries: group, MaxOutputTokens: maxOutputTokens,
 			}
+			estimated := estimatedRepositoryRequestTokens(request)
+			preflightOptions := options
+			preflightOptions.InitialRateLimits = observedLimits
+			preflightLimits, intrinsicallyTooLarge, preflightErr := waitForInitialRepositoryCapacity(ctx, preflightOptions, estimated, "repository-synthesis")
+			if preflightErr != nil {
+				return partialFailure("repository synthesis capacity", preflightErr)
+			}
+			observedLimits = preflightLimits
+			if intrinsicallyTooLarge {
+				if fallbackErr := retainValidatedSource(fmt.Errorf("live provider token capacity could not safely admit the optional single-batch synthesis estimated at %d tokens", estimated)); fallbackErr != nil {
+					return partialFailure("repository synthesis", fallbackErr)
+				}
+				break
+			}
 			result, err = reviewRepositoryWithRetry(ctx, reviewer, request, options)
+			aggregate.Coverage.ProviderRequests += result.Coverage.ProviderRequests
 			if err == nil {
 				break
 			}
 			addUsage(&aggregate.Usage, result.Usage)
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+				return partialFailure("repository synthesis", err)
+			}
+			if _, invalid := providers.AsRepositoryValidationError(err); invalid {
+				// One validated source batch has no cross-batch conflicts to
+				// reconcile. If the optional forced synthesis cannot satisfy the
+				// stricter grouping contract after bounded repairs, retain that
+				// already checked source result and derive its report-local IDs
+				// locally instead of discarding useful semantics.
+				if progressErr := retainValidatedSource(err); progressErr != nil {
+					return partialFailure("repository synthesis", progressErr)
+				}
+				break
+			}
 			if rateLimit, rateLimited := providers.AsRemoteRateLimitError(err); rateLimited && rateLimit.RequestTooLarge {
 				adaptiveTokenLimit = smallerPositive(adaptiveTokenLimit, rateLimit.LimitTokens)
 				reducedOutput := repositoryOutputTokens(options.Provider, adaptiveTokenLimit)
@@ -590,15 +1043,24 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 					maxOutputTokens = reducedOutput
 					continue
 				}
-				return partialFailure("repository synthesis", fmt.Errorf("provider token limit %d is too small for the final bounded synthesis: %w", rateLimit.LimitTokens, err))
+				if fallbackErr := retainValidatedSource(err); fallbackErr != nil {
+					return partialFailure("repository synthesis", fallbackErr)
+				}
+				break
 			}
 			incomplete, ok := providers.AsRemoteIncompleteError(err)
 			if ok && usageIsZero(result.Usage) {
 				addUsage(&aggregate.Usage, usageFromIncomplete(incomplete))
 			}
 			recoveryOutput := repositoryRecoveryOutputTokens(maxOutputTokens)
+			if ok {
+				adaptiveTokenLimit = smallerPositive(adaptiveTokenLimit, incomplete.TokenLimit)
+			}
 			if !ok || incomplete.Reason != "max_output_tokens" || recoveryOutput <= maxOutputTokens || !outputFitsTokenLimit(incomplete.InputTokens, recoveryOutput, adaptiveTokenLimit) {
-				return partialFailure("repository synthesis", err)
+				if fallbackErr := retainValidatedSource(err); fallbackErr != nil {
+					return partialFailure("repository synthesis", fallbackErr)
+				}
+				break
 			}
 			if progressErr := progress(options, Progress{
 				Stage: "adaptive-output-retry", Scope: "repository-synthesis", InputBytes: summaryBytes(group),
@@ -608,16 +1070,18 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			}
 			maxOutputTokens = recoveryOutput
 		}
-		addUsage(&aggregate.Usage, result.Usage)
-		aggregate.Coverage.CitationsChecked += result.Coverage.CitationsChecked
-		if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership, confirmedUses); err != nil {
-			return partialFailure("repository synthesis", err)
+		if !usedValidatedSourceFallback {
+			addUsage(&aggregate.Usage, result.Usage)
+			aggregate.Coverage.CitationsChecked += result.Coverage.CitationsChecked
+			if err := validateSystemAttribution(result.Result, profileSystems(systems), options.Ownership, confirmedUses); err != nil {
+				return partialFailure("repository synthesis", err)
+			}
+			grouped, err := assignSynthesisCandidateIDs(result.Result, confirmedUses)
+			if err != nil {
+				return partialFailure("repository synthesis", err)
+			}
+			summaries[0] = grouped
 		}
-		grouped, err := assignSynthesisCandidateIDs(result.Result, confirmedUses)
-		if err != nil {
-			return partialFailure("repository synthesis", err)
-		}
-		summaries[0] = grouped
 	}
 	if options.TargetedBatches {
 		aggregate.Coverage.Mode = providers.RepositoryAnalysisTargeted
@@ -627,22 +1091,31 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 	aggregate.Coverage.RepositoryFiles = len(repository.Files)
 	aggregate.Coverage.RepositoryBytes = repositorySize(repository)
 	aggregate.Coverage.Subsystems = len(chunks)
+	aggregate.Coverage.SourceBatchesStarted = len(sourceBatchesStarted)
 	aggregate.Coverage.SourceBatchesCompleted = len(chunks)
 	aggregate.Coverage.SourceBatchesTotal = len(chunks)
 	aggregate.Result = summaries[0]
 	aggregate.Result.Scope = "."
 	if options.TargetedBatches {
-		aggregate.Notes = []string{
-			fmt.Sprintf("All %d structurally selected source batch(es) were reviewed within the per-request provider boundary and then globally synthesized.", len(chunks)),
+		completion := fmt.Sprintf("All %d structurally selected source batch(es) were reviewed within the per-request provider boundary and then globally synthesized.", len(chunks))
+		if usedValidatedSourceFallback {
+			completion = "The single structurally selected source batch validated; optional synthesis did not complete, so the validated source result was retained without cross-batch reconciliation."
+		}
+		aggregate.Notes = append([]string{
+			completion,
 			"Batch boundaries are a context-management mechanism, not declared AI-system boundaries; files outside the local structural candidate set were not model-reviewed.",
 			"Repository model analysis is advisory; deterministic findings remain available for comparison.",
-		}
+		}, aggregate.Notes...)
 	} else {
-		aggregate.Notes = []string{
-			fmt.Sprintf("The repository exceeded the one-request context budget and was analyzed as %d subsystem slice(s) followed by global synthesis.", len(chunks)),
+		completion := fmt.Sprintf("The repository exceeded the one-request context budget and was analyzed as %d subsystem slice(s) followed by global synthesis.", len(chunks))
+		if usedValidatedSourceFallback {
+			completion = "The forced single subsystem validated; optional synthesis did not complete, so the validated source result was retained without cross-subsystem reconciliation."
+		}
+		aggregate.Notes = append([]string{
+			completion,
 			"Subsystem boundaries are a context-management mechanism, not declared AI-system boundaries.",
 			"Repository-wide model analysis is advisory; deterministic findings and the bounded evidence investigation remain available for comparison.",
-		}
+		}, aggregate.Notes...)
 	}
 	return aggregate, nil
 }
@@ -653,6 +1126,7 @@ type repositorySummaryGroup struct {
 }
 
 type repositoryChunk struct {
+	id              string
 	scope           string
 	files           []providers.RepositorySourceFile
 	maxOutputTokens int
@@ -668,7 +1142,23 @@ type repositorySourceBatchCall struct {
 }
 
 type repositorySourceBatchResponse struct {
+	id     string
 	scope  string
+	result providers.RepositoryAnalysisResult
+	err    error
+}
+
+type repositorySynthesisCall struct {
+	index           int
+	scope           string
+	group           repositorySummaryGroup
+	request         providers.RepositoryAnalysisRequest
+	inputBytes      int64
+	estimatedTokens int
+	maxOutputTokens int
+}
+
+type repositorySynthesisResponse struct {
 	result providers.RepositoryAnalysisResult
 	err    error
 }
@@ -704,7 +1194,7 @@ func runRepositorySourceBatchWave(ctx context.Context, reviewer Reviewer, calls 
 	results := make([]repositorySourceBatchResponse, len(calls))
 	if len(calls) == 1 {
 		result, err := reviewRepositoryWithRetry(ctx, reviewer, calls[0].request, options)
-		results[0] = repositorySourceBatchResponse{scope: calls[0].chunk.scope, result: result, err: err}
+		results[0] = repositorySourceBatchResponse{id: repositoryChunkID(calls[0].chunk), scope: calls[0].chunk.scope, result: result, err: err}
 		return results
 	}
 
@@ -717,11 +1207,56 @@ func runRepositorySourceBatchWave(ctx context.Context, reviewer Reviewer, calls 
 			return options.OnProgress(value)
 		}
 	}
-	if options.Wait != nil {
-		parallelOptions.Wait = func(ctx context.Context, delay time.Duration) error {
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(len(calls))
+	for index := range calls {
+		go func(index int) {
+			defer waitGroup.Done()
+			result, err := reviewRepositoryWithRetry(ctx, reviewer, calls[index].request, parallelOptions)
+			results[index] = repositorySourceBatchResponse{id: repositoryChunkID(calls[index].chunk), scope: calls[index].chunk.scope, result: result, err: err}
+		}(index)
+	}
+	waitGroup.Wait()
+	return results
+}
+
+func prepareRepositorySynthesisCall(level, index int, group repositorySummaryGroup, repository discovery.Repository, files []providers.RepositorySourceFile, objectives []providers.RepositoryObjective, systems []providers.RepositorySystemContext, confirmedUses []providers.RepositoryConfirmedAIUse, adaptiveTokenLimit int, options Options) repositorySynthesisCall {
+	scope := fmt.Sprintf("synthesis-level-%d-part-%d", level, index+1)
+	maxOutputTokens := group.maxOutputTokens
+	if maxOutputTokens == 0 {
+		maxOutputTokens = repositoryOutputTokens(options.Provider, adaptiveTokenLimit)
+	}
+	fileIndex := citedFileIndex(group.summaries, files)
+	request := providers.RepositoryAnalysisRequest{
+		Mode: providers.RepositoryAnalysisSynthesis, Scope: scope,
+		RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), FileIndex: fileIndex,
+		Objectives: objectives, Systems: systems, ConfirmedAIUses: bindConfirmedAIUsesForSynthesis(confirmedUses, fileReferencePaths(fileIndex), group.summaries), SubsystemSummaries: group.summaries, MaxOutputTokens: maxOutputTokens,
+	}
+	inputBytes := summaryBytes(group.summaries)
+	if encoded, err := json.Marshal(request); err == nil {
+		inputBytes = int64(len(encoded))
+	}
+	return repositorySynthesisCall{
+		index: index, scope: scope, group: group, request: request, inputBytes: inputBytes,
+		estimatedTokens: int(inputBytes)/charactersPerToken + maxOutputTokens + sourceBatchTokenOverhead,
+		maxOutputTokens: maxOutputTokens,
+	}
+}
+
+func runRepositorySynthesisWave(ctx context.Context, reviewer Reviewer, calls []repositorySynthesisCall, options Options) []repositorySynthesisResponse {
+	results := make([]repositorySynthesisResponse, len(calls))
+	if len(calls) == 1 {
+		result, err := reviewRepositoryWithRetry(ctx, reviewer, calls[0].request, options)
+		results[0] = repositorySynthesisResponse{result: result, err: err}
+		return results
+	}
+	parallelOptions := options
+	var callbackMu sync.Mutex
+	if options.OnProgress != nil {
+		parallelOptions.OnProgress = func(value Progress) error {
 			callbackMu.Lock()
 			defer callbackMu.Unlock()
-			return options.Wait(ctx, delay)
+			return options.OnProgress(value)
 		}
 	}
 	var waitGroup sync.WaitGroup
@@ -730,23 +1265,68 @@ func runRepositorySourceBatchWave(ctx context.Context, reviewer Reviewer, calls 
 		go func(index int) {
 			defer waitGroup.Done()
 			result, err := reviewRepositoryWithRetry(ctx, reviewer, calls[index].request, parallelOptions)
-			results[index] = repositorySourceBatchResponse{scope: calls[index].chunk.scope, result: result, err: err}
+			results[index] = repositorySynthesisResponse{result: result, err: err}
 		}(index)
 	}
 	waitGroup.Wait()
 	return results
 }
 
-func sourceBatchWaveLimit(snapshot providers.RateLimitSnapshot, estimatedTokens, pending int) (int, time.Duration) {
+func mergeRepositorySynthesisAccounting(target *providers.RepositoryAnalysisResult, result providers.RepositoryAnalysisResult) {
+	if target == nil {
+		return
+	}
+	target.Coverage.ProviderRequests += result.Coverage.ProviderRequests
+	target.Coverage.CitationsChecked += result.Coverage.CitationsChecked
+	addUsage(&target.Usage, result.Usage)
+}
+
+func drainRepositorySynthesisPrefetch(target *providers.RepositoryAnalysisResult, pending map[int]repositorySynthesisResponse) {
+	for key, response := range pending {
+		mergeRepositorySynthesisAccounting(target, response.result)
+		delete(pending, key)
+	}
+}
+
+// shiftRepositorySynthesisPrefetch preserves already-paid, validated sibling
+// responses when the current group is replaced by smaller groups. Their source
+// summaries are unchanged; only their queue indices move to the right.
+func shiftRepositorySynthesisPrefetch(pending map[int]repositorySynthesisResponse, afterIndex, delta int) {
+	if delta <= 0 || len(pending) == 0 {
+		return
+	}
+	moved := make(map[int]repositorySynthesisResponse)
+	for index, response := range pending {
+		if index <= afterIndex {
+			continue
+		}
+		delete(pending, index)
+		moved[index+delta] = response
+	}
+	for index, response := range moved {
+		pending[index] = response
+	}
+}
+
+func sourceBatchWaveLimit(snapshot providers.RateLimitSnapshot, estimatedTokens, pending, unknownLimit int) (int, time.Duration) {
 	if pending <= 0 {
 		return 0, 0
 	}
 	if !snapshot.Available() {
-		return 1, 0
+		if unknownLimit < 1 {
+			unknownLimit = 1
+		}
+		return min(pending, min(maxConcurrentSourceBatches, unknownLimit)), 0
 	}
 	limit := pending
 	if limit > maxConcurrentSourceBatches {
 		limit = maxConcurrentSourceBatches
+	}
+	// A provider may disclose only RPM or only TPM. The missing limiter can be
+	// the tighter one, so a partial snapshot caps concurrency at one. The known
+	// dimension is still authoritative when it says capacity is exhausted.
+	if !snapshot.RequestsKnown || !snapshot.TokensKnown {
+		limit = min(limit, 1)
 	}
 	var wait time.Duration
 	if snapshot.RequestsKnown {
@@ -789,11 +1369,32 @@ func rateLimitCapacityDetail(snapshot providers.RateLimitSnapshot) string {
 }
 
 func replenishRateLimitSnapshot(snapshot providers.RateLimitSnapshot, waited time.Duration) providers.RateLimitSnapshot {
-	if snapshot.RequestsKnown && (snapshot.ResetRequests <= 0 || waited >= snapshot.ResetRequests) {
-		snapshot.RemainingRequests = snapshot.LimitRequests
+	cautiousReset := false
+	if snapshot.RequestsKnown {
+		if snapshot.ResetRequests > 0 && waited >= snapshot.ResetRequests {
+			snapshot.RemainingRequests = snapshot.LimitRequests
+		} else if snapshot.RemainingRequests <= 0 && snapshot.ResetRequests <= 0 {
+			// Some providers expose an exhausted counter without a reset time.
+			// A short wait is not evidence that the entire window replenished, so
+			// admit one calibration request instead of a full concurrent wave.
+			snapshot.RemainingRequests = 1
+			cautiousReset = true
+		}
 	}
-	if snapshot.TokensKnown && (snapshot.ResetTokens <= 0 || waited >= snapshot.ResetTokens) {
-		snapshot.RemainingTokens = snapshot.LimitTokens
+	if snapshot.TokensKnown {
+		if snapshot.ResetTokens > 0 && waited >= snapshot.ResetTokens {
+			snapshot.RemainingTokens = snapshot.LimitTokens
+		} else if snapshot.ResetTokens <= 0 && snapshot.RemainingTokens < snapshot.LimitTokens {
+			// The provider disclosed a token window but no portable reset time.
+			// After the caller's conservative cooldown, admit one calibration
+			// request instead of looping forever on a positive-but-insufficient
+			// stale remainder.
+			snapshot.RemainingTokens = snapshot.LimitTokens
+			cautiousReset = true
+		}
+	}
+	if cautiousReset && snapshot.RequestsKnown && snapshot.RemainingRequests > 1 {
+		snapshot.RemainingRequests = 1
 	}
 	return snapshot
 }
@@ -839,6 +1440,27 @@ func conservativeRateLimitSnapshot(current, next providers.RateLimitSnapshot) pr
 			result.RemainingTokens = min(current.RemainingTokens, next.RemainingTokens)
 			result.ResetTokens = max(current.ResetTokens, next.ResetTokens)
 		}
+	}
+	return result
+}
+
+// latestRateLimitSnapshot replaces only the dimensions that a newer response
+// actually disclosed. Providers frequently return just RPM or just TPM on a
+// retry; replacing the whole snapshot would silently forget the other active
+// limiter.
+func latestRateLimitSnapshot(current, next providers.RateLimitSnapshot) providers.RateLimitSnapshot {
+	result := current
+	if next.RequestsKnown {
+		result.RequestsKnown = true
+		result.LimitRequests = next.LimitRequests
+		result.RemainingRequests = next.RemainingRequests
+		result.ResetRequests = next.ResetRequests
+	}
+	if next.TokensKnown {
+		result.TokensKnown = true
+		result.LimitTokens = next.LimitTokens
+		result.RemainingTokens = next.RemainingTokens
+		result.ResetTokens = next.ResetTokens
 	}
 	return result
 }
@@ -947,10 +1569,56 @@ func reviewRepositoryWithRetry(ctx context.Context, reviewer Reviewer, request p
 	var attemptedUsage providers.Usage
 	attemptedFiles := 0
 	var attemptedSourceBytes int64
+	providerRequests := 0
+	validationRepairs := 0
+	transientRetries := 0
+	var latestLimits providers.RateLimitSnapshot
 	for attempt := 0; ; attempt++ {
+		gateHeld := false
+		if attempt > 0 && options.retryGate != nil {
+			select {
+			case options.retryGate <- struct{}{}:
+				gateHeld = true
+			case <-ctx.Done():
+				return providers.RepositoryAnalysisResult{
+					Provider: options.Provider, Model: options.Model,
+					Coverage: providers.RepositoryCoverage{FilesSubmitted: attemptedFiles, BytesSubmitted: attemptedSourceBytes, ProviderRequests: providerRequests},
+					Usage:    attemptedUsage, RateLimits: latestLimits,
+				}, ctx.Err()
+			}
+		}
+		if !options.requestBudget.reserve() {
+			if gateHeld {
+				<-options.retryGate
+			}
+			return providers.RepositoryAnalysisResult{
+				Provider: options.Provider, Model: options.Model,
+				Coverage: providers.RepositoryCoverage{FilesSubmitted: attemptedFiles, BytesSubmitted: attemptedSourceBytes, ProviderRequests: providerRequests},
+				Usage:    attemptedUsage, RateLimits: latestLimits,
+			}, fmt.Errorf("repository review reached the safety ceiling of %d provider requests", MaxProviderRequestsPerRun)
+		}
 		attemptedFiles += len(request.Files)
 		attemptedSourceBytes += repositorySourceContentBytes(request.Files)
+		providerRequests++
 		result, err := reviewer.ReviewRepository(ctx, request)
+		if gateHeld {
+			<-options.retryGate
+		}
+		if _, representation := providers.AsRepositoryRepresentationError(err); representation {
+			// The provider adapter rejected an already validated synthesis shape
+			// before making a network call. Undo the optimistic attempt/transfer
+			// reservation so splitting remains truthful and does not consume the
+			// paid-request safety ceiling.
+			options.requestBudget.releaseCount(1)
+			attemptedFiles -= len(request.Files)
+			attemptedSourceBytes -= repositorySourceContentBytes(request.Files)
+			providerRequests--
+			result.Usage = attemptedUsage
+			result.Coverage.FilesSubmitted = attemptedFiles
+			result.Coverage.BytesSubmitted = attemptedSourceBytes
+			result.Coverage.ProviderRequests = providerRequests
+			return result, err
+		}
 		addUsage(&attemptedUsage, result.Usage)
 		if incomplete, ok := providers.AsRemoteIncompleteError(err); ok && usageIsZero(result.Usage) {
 			addUsage(&attemptedUsage, usageFromIncomplete(incomplete))
@@ -958,24 +1626,51 @@ func reviewRepositoryWithRetry(ctx context.Context, reviewer Reviewer, request p
 		result.Usage = attemptedUsage
 		result.Coverage.FilesSubmitted = attemptedFiles
 		result.Coverage.BytesSubmitted = attemptedSourceBytes
+		result.Coverage.ProviderRequests = providerRequests
+		if result.RateLimits.Available() {
+			latestLimits = latestRateLimitSnapshot(latestLimits, result.RateLimits)
+			result.RateLimits = latestLimits
+		} else if latestLimits.Available() {
+			result.RateLimits = latestLimits
+		}
 		if err == nil {
 			return result, nil
 		}
-		rateLimit, ok := providers.AsRemoteRateLimitError(err)
-		if !ok || rateLimit.RequestTooLarge {
+		if validationErr, ok := providers.AsRepositoryValidationError(err); ok {
+			if validationRepairs >= maxValidationRepairRetries {
+				return result, fmt.Errorf("structured repository response remained invalid after %d corrective regeneration attempt(s): %w", validationRepairs, err)
+			}
+			validationRepairs++
+			request.ValidationFeedback = validationErr.Diagnostic
+			if progressErr := progress(options, Progress{
+				Stage: "validation-repair", Completed: validationRepairs, Total: maxValidationRepairRetries,
+				Scope: request.Scope, Detail: validationErr.Diagnostic,
+			}); progressErr != nil {
+				return result, progressErr
+			}
+			continue
+		}
+		delay, retryDetail, retryable := repositoryRetryPolicy(err, transientRetries)
+		if !retryable {
 			return result, err
 		}
-		delay := rateLimit.RetryAfter
-		if delay < minimumRateLimitCooldown {
-			delay = minimumRateLimitCooldown
+		if transientRetries >= maxTransientRetryAttempts {
+			return result, fmt.Errorf("provider remained unavailable after %d bounded retry cycle(s): %w", transientRetries, err)
+		}
+		transientRetries++
+		// Production waits add a small random spread so independently started
+		// scans do not all resume on the same millisecond. Injected test waits
+		// stay deterministic.
+		if options.Wait == nil {
+			delay = jitteredRetryDelay(delay)
 		}
 		if totalWait+delay > maxRateLimitTotalWait {
-			return result, fmt.Errorf("provider rate limit exceeded the %s automatic wait budget after %d retry cycle(s): %w", maxRateLimitTotalWait, attempt, err)
+			return result, fmt.Errorf("provider retry wait exceeded the %s automatic budget after %d retry cycle(s): %w", maxRateLimitTotalWait, transientRetries, err)
 		}
 		totalWait += delay
 		if err := progress(options, Progress{
-			Stage: "rate-limit-wait", Completed: attempt + 1,
-			Scope: request.Scope, Wait: delay, OriginalWait: delay, Detail: "temporary provider token limit",
+			Stage: "rate-limit-wait", Completed: transientRetries,
+			Scope: request.Scope, Wait: delay, OriginalWait: delay, Detail: retryDetail,
 		}); err != nil {
 			return result, err
 		}
@@ -983,23 +1678,83 @@ func reviewRepositoryWithRetry(ctx context.Context, reviewer Reviewer, request p
 			if err := options.Wait(ctx, delay); err != nil {
 				return result, err
 			}
+			latestLimits = replenishRateLimitSnapshot(latestLimits, delay)
 			continue
 		}
 		if err := waitForRateLimit(ctx, delay, func(remaining time.Duration) error {
 			return progress(options, Progress{
-				Stage: "rate-limit-wait", Completed: attempt + 1,
-				Scope: request.Scope, Wait: remaining, OriginalWait: delay, Detail: "temporary provider token limit",
+				Stage: "rate-limit-wait", Completed: transientRetries,
+				Scope: request.Scope, Wait: remaining, OriginalWait: delay, Detail: retryDetail,
 			})
 		}); err != nil {
 			return result, err
 		}
+		latestLimits = replenishRateLimitSnapshot(latestLimits, delay)
 		if err := progress(options, Progress{
-			Stage: "rate-limit-resume", Completed: attempt + 1,
-			Scope: request.Scope, OriginalWait: delay, Detail: "temporary provider token limit",
+			Stage: "rate-limit-resume", Completed: transientRetries,
+			Scope: request.Scope, OriginalWait: delay, Detail: retryDetail,
 		}); err != nil {
 			return result, err
 		}
 	}
+}
+
+func repositoryRetryPolicy(err error, priorRetries int) (time.Duration, string, bool) {
+	if rateLimit, ok := providers.AsRemoteRateLimitError(err); ok {
+		if rateLimit.RequestTooLarge || rateLimit.Permanent {
+			return 0, "", false
+		}
+		delay := rateLimit.RetryAfter
+		if observedReset := exhaustedCapacityReset(rateLimit.RateLimits); observedReset > delay {
+			delay = observedReset
+		}
+		if delay < minimumRateLimitCooldown {
+			delay = exponentialRetryDelay(priorRetries)
+		}
+		return delay, "temporary provider rate limit", true
+	}
+	if transient, ok := providers.AsRemoteTransientError(err); ok {
+		delay := transient.RetryAfter
+		if observedReset := exhaustedCapacityReset(transient.RateLimits); observedReset > delay {
+			delay = observedReset
+		}
+		if delay < minimumRateLimitCooldown {
+			delay = exponentialRetryDelay(priorRetries)
+		}
+		detail := "temporary provider transport failure"
+		if transient.StatusCode > 0 {
+			detail = fmt.Sprintf("temporary provider HTTP %d", transient.StatusCode)
+		}
+		return delay, detail, true
+	}
+	return 0, "", false
+}
+
+func exhaustedCapacityReset(snapshot providers.RateLimitSnapshot) time.Duration {
+	var wait time.Duration
+	if snapshot.RequestsKnown && snapshot.RemainingRequests <= 0 {
+		wait = snapshot.ResetRequests
+	}
+	if snapshot.TokensKnown && snapshot.RemainingTokens <= 0 && snapshot.ResetTokens > wait {
+		wait = snapshot.ResetTokens
+	}
+	return wait
+}
+
+func exponentialRetryDelay(priorRetries int) time.Duration {
+	shift := min(max(priorRetries, 0), 6)
+	return minimumRateLimitCooldown * time.Duration(1<<shift)
+}
+
+func jitteredRetryDelay(delay time.Duration) time.Duration {
+	if delay < minimumRateLimitCooldown {
+		delay = minimumRateLimitCooldown
+	}
+	window := delay / 5
+	if window <= 0 {
+		return delay
+	}
+	return delay + time.Duration(rand.Int63n(int64(window)+1))
 }
 
 func waitForRateLimit(ctx context.Context, delay time.Duration, onTick func(time.Duration) error) error {
@@ -1030,8 +1785,14 @@ func waitForRateLimit(ctx context.Context, delay time.Duration, onTick func(time
 }
 
 func repositoryOutputTokens(provider providers.Kind, tokenLimit int) int {
-	if provider == providers.Ollama || tokenLimit <= 0 {
+	if provider == providers.Ollama {
 		return 8192
+	}
+	// Hosted models vary in their maximum structured-output allowance. Start
+	// with the broadly portable 4K contract used by targeted review and model
+	// qualification, then grow only after a typed output-exhaustion response.
+	if tokenLimit <= 0 {
+		return targetedRemoteOutputTokens
 	}
 	value := tokenLimit / 5
 	if value < minimumAdaptiveOutput {
@@ -1068,6 +1829,17 @@ func outputFitsTokenLimit(inputTokens, outputTokens, tokenLimit int) bool {
 	return tokenLimit <= 0 || inputTokens+outputTokens <= tokenLimit
 }
 
+func outputWithinTokenLimit(inputTokens, requested, tokenLimit int) int {
+	if tokenLimit <= 0 || inputTokens+requested <= tokenLimit {
+		return requested
+	}
+	available := tokenLimit - inputTokens
+	if available < minimumAdaptiveOutput {
+		return minimumAdaptiveOutput
+	}
+	return available
+}
+
 func smallerPositive(current, candidate int) int {
 	if candidate <= 0 {
 		return current
@@ -1079,14 +1851,15 @@ func smallerPositive(current, candidate int) int {
 }
 
 func splitRepositoryChunk(chunk repositoryChunk, maxOutputTokens int) ([]repositoryChunk, bool) {
+	parentID := repositoryChunkID(chunk)
 	if len(chunk.files) > 1 {
 		split := balancedFileSplit(chunk.files)
 		if split <= 0 || split >= len(chunk.files) {
 			return nil, false
 		}
 		return []repositoryChunk{
-			{scope: chunk.scope + " (adaptive part 1)", files: append([]providers.RepositorySourceFile(nil), chunk.files[:split]...), maxOutputTokens: maxOutputTokens},
-			{scope: chunk.scope + " (adaptive part 2)", files: append([]providers.RepositorySourceFile(nil), chunk.files[split:]...), maxOutputTokens: maxOutputTokens},
+			{id: parentID + "/part-1", scope: chunk.scope + " (adaptive part 1)", files: append([]providers.RepositorySourceFile(nil), chunk.files[:split]...), maxOutputTokens: maxOutputTokens},
+			{id: parentID + "/part-2", scope: chunk.scope + " (adaptive part 2)", files: append([]providers.RepositorySourceFile(nil), chunk.files[split:]...), maxOutputTokens: maxOutputTokens},
 		}, true
 	}
 	if len(chunk.files) != 1 {
@@ -1097,9 +1870,29 @@ func splitRepositoryChunk(chunk repositoryChunk, maxOutputTokens int) ([]reposit
 		return nil, false
 	}
 	return []repositoryChunk{
-		{scope: chunk.scope + " (adaptive segment 1)", files: []providers.RepositorySourceFile{left}, maxOutputTokens: maxOutputTokens},
-		{scope: chunk.scope + " (adaptive segment 2)", files: []providers.RepositorySourceFile{right}, maxOutputTokens: maxOutputTokens},
+		{id: parentID + "/segment-1", scope: chunk.scope + " (adaptive segment 1)", files: []providers.RepositorySourceFile{left}, maxOutputTokens: maxOutputTokens},
+		{id: parentID + "/segment-2", scope: chunk.scope + " (adaptive segment 2)", files: []providers.RepositorySourceFile{right}, maxOutputTokens: maxOutputTokens},
 	}, true
+}
+
+// repositoryChunkID is an orchestration identity, not a model-facing label.
+// Human-readable scopes are intentionally not identities: a generated scope
+// such as "foo (part 1)" can also be a real top-level directory name.
+func repositoryChunkID(chunk repositoryChunk) string {
+	if value := strings.TrimSpace(chunk.id); value != "" {
+		return value
+	}
+	hash := sha256.New()
+	_, _ = hash.Write([]byte(chunk.scope))
+	for _, file := range chunk.files {
+		_, _ = hash.Write([]byte{0})
+		_, _ = hash.Write([]byte(filepath.ToSlash(file.Path)))
+		_, _ = hash.Write([]byte{0})
+		_, _ = hash.Write([]byte(fmt.Sprintf("%d", file.ContentStartLine)))
+		_, _ = hash.Write([]byte{0})
+		_, _ = hash.Write([]byte(file.Content))
+	}
+	return fmt.Sprintf("source-%x", hash.Sum(nil))
 }
 
 func balancedFileSplit(files []providers.RepositorySourceFile) int {
@@ -1152,7 +1945,7 @@ func replaceRepositoryChunk(values []repositoryChunk, index int, replacements []
 }
 
 func splitRepositorySummaryGroup(group repositorySummaryGroup, maxOutputTokens int) ([]repositorySummaryGroup, bool) {
-	if len(group.summaries) < 3 {
+	if len(group.summaries) < 2 {
 		return nil, false
 	}
 	middle := len(group.summaries) / 2
@@ -1168,6 +1961,79 @@ func replaceRepositorySummaryGroup(values []repositorySummaryGroup, index int, r
 	result = append(result, replacements...)
 	result = append(result, values[index+1:]...)
 	return result
+}
+
+// fragmentRepositorySection splits one validated summary along its existing
+// semantic identities. It never invents or merges an AI use: candidate facts
+// and objective observations stay with their exact candidate ID, while
+// confirmed-use facts, unassigned objectives, unmapped observations, and
+// unresolved questions become independent synthesis atoms. This lets a large
+// summary be reduced without truncating model evidence.
+func fragmentRepositorySection(value providers.RepositorySectionResult) ([]providers.RepositorySectionResult, bool) {
+	newFragment := func() providers.RepositorySectionResult {
+		return providers.RepositorySectionResult{
+			Scope:  value.Scope,
+			AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{},
+			ObjectiveObservations: []providers.RepositoryObjectiveObservation{},
+			UnmappedObservations:  []providers.RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{},
+		}
+	}
+	factUsed := make([]bool, len(value.AIUseFacts))
+	objectiveUsed := make([]bool, len(value.ObjectiveObservations))
+	fragments := make([]providers.RepositorySectionResult, 0, len(value.AIUses)+len(value.AIUseFacts)+len(value.ObjectiveObservations)+2)
+	for _, use := range value.AIUses {
+		fragment := newFragment()
+		fragment.AIUses = append(fragment.AIUses, use)
+		for index, factSet := range value.AIUseFacts {
+			if factSet.AIUseID == use.ID {
+				fragment.AIUseFacts = append(fragment.AIUseFacts, factSet)
+				factUsed[index] = true
+			}
+		}
+		for index, observation := range value.ObjectiveObservations {
+			if observation.AIUseID == use.ID {
+				fragment.ObjectiveObservations = append(fragment.ObjectiveObservations, observation)
+				objectiveUsed[index] = true
+			}
+		}
+		fragments = append(fragments, fragment)
+	}
+	for factIndex, factSet := range value.AIUseFacts {
+		if factUsed[factIndex] {
+			continue
+		}
+		fragment := newFragment()
+		fragment.AIUseFacts = append(fragment.AIUseFacts, factSet)
+		for index, observation := range value.ObjectiveObservations {
+			if !objectiveUsed[index] && observation.AIUseID != "" && observation.AIUseID == factSet.AIUseID {
+				fragment.ObjectiveObservations = append(fragment.ObjectiveObservations, observation)
+				objectiveUsed[index] = true
+			}
+		}
+		fragments = append(fragments, fragment)
+	}
+	for index, observation := range value.ObjectiveObservations {
+		if objectiveUsed[index] {
+			continue
+		}
+		fragment := newFragment()
+		fragment.ObjectiveObservations = append(fragment.ObjectiveObservations, observation)
+		fragments = append(fragments, fragment)
+	}
+	for _, observation := range value.UnmappedObservations {
+		fragment := newFragment()
+		fragment.UnmappedObservations = append(fragment.UnmappedObservations, observation)
+		fragments = append(fragments, fragment)
+	}
+	if len(value.UnresolvedQuestions) > 0 {
+		fragment := newFragment()
+		fragment.UnresolvedQuestions = append(fragment.UnresolvedQuestions, value.UnresolvedQuestions...)
+		fragments = append(fragments, fragment)
+	}
+	if len(fragments) < 2 {
+		return nil, false
+	}
+	return fragments, true
 }
 
 func partitionRepository(files []providers.RepositorySourceFile, budget int64) ([]repositoryChunk, error) {
@@ -1214,6 +2080,9 @@ func partitionRepository(files []providers.RepositorySourceFile, budget int64) (
 			}
 			chunks = append(chunks, current)
 		}
+	}
+	for index := range chunks {
+		chunks[index].id = fmt.Sprintf("source-%06d", index+1)
 	}
 	return chunks, nil
 }
@@ -1471,7 +2340,12 @@ func sourceFilePaths(values []providers.RepositorySourceFile) []string {
 
 func fileReferencePaths(values []providers.RepositoryFileReference) []string {
 	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {
+		if _, duplicate := seen[value.Path]; duplicate {
+			continue
+		}
+		seen[value.Path] = struct{}{}
 		result = append(result, value.Path)
 	}
 	return result
@@ -1499,6 +2373,41 @@ func requestContextBytes(files []providers.RepositorySourceFile, graph providers
 		Graph providers.RepositoryGraphContext `json:"repository_graph"`
 	}{Files: files, Graph: graph})
 	return int64(len(encoded))
+}
+
+func estimatedRepositoryRequestTokens(request providers.RepositoryAnalysisRequest) int {
+	encoded, _ := json.Marshal(request)
+	return len(encoded)/charactersPerToken + request.MaxOutputTokens + sourceBatchTokenOverhead
+}
+
+func waitForInitialRepositoryCapacity(ctx context.Context, options Options, estimatedTokens int, scope string) (providers.RateLimitSnapshot, bool, error) {
+	snapshot := options.InitialRateLimits
+	if snapshot.TokensKnown && snapshot.LimitTokens > 0 && estimatedTokens > snapshot.LimitTokens {
+		return snapshot, true, nil
+	}
+	for snapshot.Available() {
+		limit, wait := sourceBatchWaveLimit(snapshot, estimatedTokens, 1, 1)
+		if limit > 0 {
+			return snapshot, false, nil
+		}
+		if wait <= 0 {
+			wait = minimumRateLimitCooldown
+		}
+		if wait > maxRateLimitTotalWait {
+			return snapshot, false, fmt.Errorf("one provider-capacity reset wait exceeds the %s automatic per-window wait budget", maxRateLimitTotalWait)
+		}
+		if err := progress(options, Progress{
+			Stage: "batch-capacity-wait", Scope: scope, Wait: wait, OriginalWait: wait,
+			Detail: "waiting for live provider capacity before the first repository source transfer",
+		}); err != nil {
+			return snapshot, false, err
+		}
+		if err := waitForConfiguredRateLimit(ctx, options, wait); err != nil {
+			return snapshot, false, err
+		}
+		snapshot = replenishRateLimitSnapshot(snapshot, wait)
+	}
+	return snapshot, false, nil
 }
 
 func repositoryGraphContext(graph codegraph.Graph, files []providers.RepositorySourceFile) providers.RepositoryGraphContext {
@@ -1637,8 +2546,13 @@ func citedFileIndex(summaries []providers.RepositorySectionResult, files []provi
 		}
 	}
 	result := make([]providers.RepositoryFileReference, 0, len(wanted))
+	indexed := make(map[string]struct{}, len(wanted))
 	for _, file := range files {
 		if _, exists := wanted[file.Path]; exists {
+			if _, duplicate := indexed[file.Path]; duplicate {
+				continue
+			}
+			indexed[file.Path] = struct{}{}
 			result = append(result, providers.RepositoryFileReference{Path: file.Path, Kind: file.Kind, LineCount: file.LineCount})
 		}
 	}

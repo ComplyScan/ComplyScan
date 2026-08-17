@@ -109,6 +109,9 @@ func TestRepositoryAnalysisCacheRoundTripAndInvalidation(t *testing.T) {
 	otherPrompt := identity
 	otherPrompt.PromptVersion = "next-prompt"
 	changedIdentities["prompt"] = otherPrompt
+	otherDigest := identity
+	otherDigest.ModelDigest = "sha256:new-model-artifact"
+	changedIdentities["model digest"] = otherDigest
 	for name, changedIdentity := range changedIdentities {
 		if _, found, err := reopened.Lookup(changedIdentity, digest); err != nil || found {
 			t.Fatalf("changed %s lookup found=%v err=%v", name, found, err)
@@ -222,7 +225,7 @@ func TestDefaultRepositoryAnalysisCacheUsesCurrentFileVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.Base(path) != "repository-analysis-v4.json" || repositoryCacheContextVersion != "5" || repositoryCacheSchemaVersion != 4 {
+	if filepath.Base(path) != "repository-analysis-v6.json" || repositoryCacheContextVersion != "7" || repositoryCacheSchemaVersion != 6 {
 		t.Fatalf("cache version = path %q context %q schema %d", path, repositoryCacheContextVersion, repositoryCacheSchemaVersion)
 	}
 }

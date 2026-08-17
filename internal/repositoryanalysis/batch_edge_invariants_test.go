@@ -189,7 +189,7 @@ func TestRepositoryCacheRejectsIncompleteSourceBatchCounters(t *testing.T) {
 	base := providers.RepositoryAnalysisResult{
 		Provider: providers.OpenAI, Model: "test-model",
 		Coverage: providers.RepositoryCoverage{
-			Mode: providers.RepositoryAnalysisTargeted, Subsystems: 2, SourceBatchesCompleted: 2, SourceBatchesTotal: 2,
+			Mode: providers.RepositoryAnalysisTargeted, Subsystems: 2, SourceBatchesStarted: 2, SourceBatchesCompleted: 2, SourceBatchesTotal: 2, ProviderRequests: 3,
 		},
 		Result: providers.RepositorySectionResult{
 			Scope: ".", AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{},
@@ -200,9 +200,9 @@ func TestRepositoryCacheRejectsIncompleteSourceBatchCounters(t *testing.T) {
 		t.Fatalf("complete batch counters were rejected: %v", err)
 	}
 	invalid := []providers.RepositoryCoverage{
-		{Mode: providers.RepositoryAnalysisTargeted, Subsystems: 1, SourceBatchesCompleted: 1, SourceBatchesTotal: 2},
-		{Mode: providers.RepositoryAnalysisTargeted, Subsystems: 2, SourceBatchesCompleted: 3, SourceBatchesTotal: 2},
-		{Mode: providers.RepositoryAnalysisTargeted, Subsystems: 1, SourceBatchesCompleted: 2, SourceBatchesTotal: 2},
+		{Mode: providers.RepositoryAnalysisTargeted, Subsystems: 1, SourceBatchesStarted: 1, SourceBatchesCompleted: 1, SourceBatchesTotal: 2, ProviderRequests: 1},
+		{Mode: providers.RepositoryAnalysisTargeted, Subsystems: 2, SourceBatchesStarted: 2, SourceBatchesCompleted: 3, SourceBatchesTotal: 2, ProviderRequests: 2},
+		{Mode: providers.RepositoryAnalysisTargeted, Subsystems: 1, SourceBatchesStarted: 2, SourceBatchesCompleted: 2, SourceBatchesTotal: 2, ProviderRequests: 2},
 	}
 	for index, coverage := range invalid {
 		value := base

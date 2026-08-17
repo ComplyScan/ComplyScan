@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/ComplyScan/ComplyScan/internal/discovery"
@@ -19,6 +20,7 @@ import (
 // answer. That makes these tests exercise coverage and batching rather than a
 // fake model's ability to rediscover the fixture.
 type exhaustiveBatchReviewer struct {
+	mu             sync.Mutex
 	requests       []providers.RepositoryAnalysisRequest
 	sourceRequests int
 	failSourceAt   int
@@ -29,6 +31,7 @@ type semanticPartialReviewer struct {
 }
 
 type recoveryAccountingReviewer struct {
+	mu              sync.Mutex
 	requests        []providers.RepositoryAnalysisRequest
 	incompleteMode  providers.RepositoryAnalysisMode
 	incompleteUsed  bool
@@ -42,17 +45,21 @@ type recoveryAccountingReviewer struct {
 }
 
 type compactingSynthesisReviewer struct {
+	mu                    sync.Mutex
 	requests              []providers.RepositoryAnalysisRequest
 	singleSummaryPasses   int
 	combinedSummaryPasses int
 }
 
 type crossBatchGroupingReviewer struct {
+	mu             sync.Mutex
 	requests       []providers.RepositoryAnalysisRequest
 	sourceRequests int
 }
 
 func (reviewer *crossBatchGroupingReviewer) ReviewRepository(_ context.Context, request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
+	reviewer.mu.Lock()
+	defer reviewer.mu.Unlock()
 	reviewer.requests = append(reviewer.requests, request)
 	result := providers.RepositorySectionResult{
 		Scope: request.Scope, AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{},
@@ -88,6 +95,8 @@ func (reviewer *crossBatchGroupingReviewer) ReviewRepository(_ context.Context, 
 }
 
 func (reviewer *compactingSynthesisReviewer) ReviewRepository(_ context.Context, request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
+	reviewer.mu.Lock()
+	defer reviewer.mu.Unlock()
 	reviewer.requests = append(reviewer.requests, request)
 	result := providers.RepositorySectionResult{
 		Scope: request.Scope, AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{},
@@ -112,6 +121,8 @@ func (reviewer *compactingSynthesisReviewer) ReviewRepository(_ context.Context,
 }
 
 func (reviewer *recoveryAccountingReviewer) ReviewRepository(_ context.Context, request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
+	reviewer.mu.Lock()
+	defer reviewer.mu.Unlock()
 	reviewer.requests = append(reviewer.requests, request)
 	if reviewer.primeAdaptive && !reviewer.adaptivePrimed && len(request.Files) > 0 {
 		reviewer.adaptivePrimed = true
@@ -170,6 +181,8 @@ func (reviewer *semanticPartialReviewer) ReviewRepository(ctx context.Context, r
 }
 
 func (reviewer *exhaustiveBatchReviewer) ReviewRepository(_ context.Context, request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
+	reviewer.mu.Lock()
+	defer reviewer.mu.Unlock()
 	reviewer.requests = append(reviewer.requests, request)
 	if len(request.Files) > 0 {
 		reviewer.sourceRequests++

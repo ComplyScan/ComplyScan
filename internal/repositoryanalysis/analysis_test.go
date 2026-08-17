@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 )
 
 type recordingReviewer struct {
+	mu       sync.Mutex
 	requests []providers.RepositoryAnalysisRequest
 }
 
@@ -25,6 +27,7 @@ type repositoryFollowUpReviewer struct {
 
 type repositoryOutputRecoveryReviewer struct {
 	recordingReviewer
+	recoveryMu sync.Mutex
 	incomplete bool
 }
 
@@ -40,6 +43,8 @@ func (reviewer *repositoryFollowUpReviewer) ReviewRepository(ctx context.Context
 }
 
 func (reviewer *repositoryOutputRecoveryReviewer) ReviewRepository(ctx context.Context, request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
+	reviewer.recoveryMu.Lock()
+	defer reviewer.recoveryMu.Unlock()
 	reviewer.requests = append(reviewer.requests, request)
 	if !reviewer.incomplete {
 		reviewer.incomplete = true
@@ -54,6 +59,7 @@ func (reviewer *repositoryOutputRecoveryReviewer) ReviewRepository(ctx context.C
 
 type adaptiveReviewer struct {
 	recordingReviewer
+	adaptiveMu          sync.Mutex
 	maxSourceBytes      int64
 	temporary429        bool
 	temporary429Count   int
@@ -61,6 +67,8 @@ type adaptiveReviewer struct {
 }
 
 func (reviewer *adaptiveReviewer) ReviewRepository(ctx context.Context, request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
+	reviewer.adaptiveMu.Lock()
+	defer reviewer.adaptiveMu.Unlock()
 	reviewer.requests = append(reviewer.requests, request)
 	if reviewer.temporary429 || reviewer.temporary429Count > 0 {
 		reviewer.temporary429 = false
@@ -80,7 +88,7 @@ func (reviewer *adaptiveReviewer) ReviewRepository(ctx context.Context, request 
 	if request.Mode == providers.RepositoryAnalysisSubsystem && reviewer.minimumOutputTokens > 0 && request.MaxOutputTokens < reviewer.minimumOutputTokens {
 		return providers.RepositoryAnalysisResult{}, &providers.RemoteIncompleteError{
 			Provider: "OpenAI", Status: "incomplete", Reason: "max_output_tokens",
-			InputTokens: 7_000, OutputTokens: request.MaxOutputTokens,
+			InputTokens: 5_000, OutputTokens: request.MaxOutputTokens, TokenLimit: 10_000,
 		}
 	}
 	// Avoid appending the successful request twice when delegating.
@@ -89,6 +97,8 @@ func (reviewer *adaptiveReviewer) ReviewRepository(ctx context.Context, request 
 }
 
 func (reviewer *recordingReviewer) ReviewRepository(_ context.Context, request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
+	reviewer.mu.Lock()
+	defer reviewer.mu.Unlock()
 	reviewer.requests = append(reviewer.requests, request)
 	result := providers.RepositorySectionResult{
 		Scope: request.Scope, AIUses: []providers.RepositoryAIUse{}, ObjectiveObservations: []providers.RepositoryObjectiveObservation{},
@@ -467,7 +477,7 @@ func TestRunRecoversWhenSubsystemExhaustsOutputTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	foundIncompleteRequest, foundRecoveredRequest, foundOutputSplit := false, false, false
+	foundIncompleteRequest, foundRecoveredRequest, foundOutputRetry := false, false, false
 	for _, request := range reviewer.requests {
 		if request.Mode != providers.RepositoryAnalysisSubsystem {
 			continue
@@ -480,12 +490,12 @@ func TestRunRecoversWhenSubsystemExhaustsOutputTokens(t *testing.T) {
 		}
 	}
 	for _, value := range progressEvents {
-		if value.Stage == "adaptive-output-split" {
-			foundOutputSplit = true
+		if value.Stage == "adaptive-output-retry" {
+			foundOutputRetry = true
 		}
 	}
-	if result.Coverage.Subsystems < 2 || !foundIncompleteRequest || !foundRecoveredRequest || !foundOutputSplit {
-		t.Fatalf("output recovery missing: coverage=%#v incomplete=%t recovered=%t split=%t requests=%#v", result.Coverage, foundIncompleteRequest, foundRecoveredRequest, foundOutputSplit, reviewer.requests)
+	if result.Coverage.Subsystems < 2 || !foundIncompleteRequest || !foundRecoveredRequest || !foundOutputRetry {
+		t.Fatalf("output recovery missing: coverage=%#v incomplete=%t recovered=%t retry=%t requests=%#v", result.Coverage, foundIncompleteRequest, foundRecoveredRequest, foundOutputRetry, reviewer.requests)
 	}
 }
 
@@ -495,6 +505,17 @@ func TestRepositoryRecoveryOutputTokens(t *testing.T) {
 		if got := repositoryRecoveryOutputTokens(input); got != want {
 			t.Fatalf("repositoryRecoveryOutputTokens(%d) = %d, want %d", input, got, want)
 		}
+	}
+}
+
+func TestRepositoryOutputBootstrapIsPortableAcrossHostedModels(t *testing.T) {
+	for _, provider := range []providers.Kind{providers.OpenAI, providers.Anthropic, providers.Gemini, providers.OpenRouter, providers.Compatible} {
+		if got := repositoryOutputTokens(provider, 0); got != targetedRemoteOutputTokens {
+			t.Fatalf("%s bootstrap output = %d, want %d", provider, got, targetedRemoteOutputTokens)
+		}
+	}
+	if got := repositoryOutputTokens(providers.Ollama, 0); got != maximumRecoveryOutput {
+		t.Fatalf("Ollama bootstrap output = %d, want %d", got, maximumRecoveryOutput)
 	}
 }
 
@@ -513,7 +534,7 @@ func TestRunWaitsAndRetriesTemporaryRateLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(waits) != 1 || waits[0] != time.Minute || len(reviewer.requests) != 2 || result.Coverage.Mode != providers.RepositoryAnalysisFull {
+	if len(waits) != 1 || waits[0] != 2*time.Second || len(reviewer.requests) != 2 || result.Coverage.Mode != providers.RepositoryAnalysisFull {
 		t.Fatalf("unexpected retry: waits=%v requests=%d result=%#v", waits, len(reviewer.requests), result)
 	}
 }
@@ -537,8 +558,8 @@ func TestRunRepeatsFullCooldownUntilTemporaryRateLimitClears(t *testing.T) {
 		t.Fatalf("unexpected repeated retry: waits=%v requests=%d result=%#v", waits, len(reviewer.requests), result)
 	}
 	for _, wait := range waits {
-		if wait != time.Minute {
-			t.Fatalf("wait = %s, want one minute", wait)
+		if wait != 2*time.Second {
+			t.Fatalf("wait = %s, want the provider's two-second Retry-After", wait)
 		}
 	}
 }
@@ -644,5 +665,30 @@ func TestCitedFileIndexIncludesAIUseFactEvidence(t *testing.T) {
 	index := citedFileIndex(summaries, files)
 	if len(index) != 1 || index[0].Path != "support/review.go" || index[0].LineCount != 20 {
 		t.Fatalf("fact citation index = %#v", index)
+	}
+}
+
+func TestCitedFileIndexDeduplicatesSegmentedSourcePaths(t *testing.T) {
+	summaries := []providers.RepositorySectionResult{{
+		AIUseFacts: []providers.RepositoryAIUseFactSet{{
+			AIUseID: "support-replies",
+			Facts: []providers.RepositoryAIUseFact{{
+				Field: profile.CodeFactAIActivities, Values: []string{"inference"}, Confidence: "high",
+				Rationale: "The segmented source invokes the model.",
+				Evidence:  []providers.RepositoryCitation{{Path: "support/large.go", Line: 240, Summary: "Model call."}},
+			}},
+		}},
+	}}
+	files := []providers.RepositorySourceFile{
+		{Path: "support/large.go", Kind: "source", ContentStartLine: 1, LineCount: 200},
+		{Path: "support/large.go", Kind: "source", ContentStartLine: 201, LineCount: 400},
+	}
+	index := citedFileIndex(summaries, files)
+	if len(index) != 1 || index[0].Path != "support/large.go" {
+		t.Fatalf("segmented citation index = %#v, want one path", index)
+	}
+	paths := fileReferencePaths(append(index, index...))
+	if len(paths) != 1 || paths[0] != "support/large.go" {
+		t.Fatalf("deduplicated file-reference paths = %#v", paths)
 	}
 }

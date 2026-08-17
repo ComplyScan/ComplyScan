@@ -22,9 +22,9 @@ import (
 )
 
 const (
-	repositoryCacheSchemaVersion  = 4
-	repositoryCacheContextVersion = "5"
-	repositoryCacheFileName       = "repository-analysis-v4.json"
+	repositoryCacheSchemaVersion  = 6
+	repositoryCacheContextVersion = "7"
+	repositoryCacheFileName       = "repository-analysis-v6.json"
 	maxRepositoryCacheBytes       = 32 << 20
 	maxRepositoryCacheEntries     = 40
 	maxRepositoryCacheEntryBytes  = 2 << 20
@@ -36,6 +36,7 @@ const (
 type CacheIdentity struct {
 	Provider       providers.Kind `json:"provider"`
 	Model          string         `json:"model"`
+	ModelDigest    string         `json:"model_digest,omitempty"`
 	PromptVersion  string         `json:"prompt_version"`
 	EndpointDigest string         `json:"endpoint_digest"`
 }
@@ -207,7 +208,7 @@ func writeRepositoryCacheField(writer io.Writer, value []byte) {
 }
 
 func repositoryCacheEntryKey(identity CacheIdentity, inputDigest string) string {
-	value := strings.Join([]string{string(identity.Provider), identity.Model, identity.PromptVersion, identity.EndpointDigest, inputDigest}, "\x00")
+	value := strings.Join([]string{string(identity.Provider), identity.Model, identity.ModelDigest, identity.PromptVersion, identity.EndpointDigest, inputDigest}, "\x00")
 	digest := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(digest[:])
 }
@@ -215,6 +216,9 @@ func repositoryCacheEntryKey(identity CacheIdentity, inputDigest string) string 
 func validateRepositoryCacheIdentity(identity CacheIdentity, inputDigest string) error {
 	if identity.Provider == "" || identity.Provider == providers.None || strings.TrimSpace(identity.Model) == "" || strings.TrimSpace(identity.PromptVersion) == "" {
 		return errors.New("repository analysis cache identity is incomplete")
+	}
+	if strings.ContainsAny(identity.ModelDigest, "\r\n\x00") || len(identity.ModelDigest) > 300 {
+		return errors.New("repository analysis cache model digest is invalid")
 	}
 	if !validSHA256(identity.EndpointDigest) || !validSHA256(inputDigest) {
 		return errors.New("repository analysis cache digests must be SHA-256 values")
@@ -236,7 +240,7 @@ func validateRepositoryCacheEntry(entry repositoryCacheEntry) error {
 	if !validRepositoryAnalysisMode(result.Coverage.Mode) || result.Coverage.ReviewScope != "" && result.Coverage.ReviewScope != providers.RepositoryReviewScopeChanged {
 		return errors.New("repository analysis result contains an invalid review mode or scope")
 	}
-	if result.Coverage.RepositoryFiles < 0 || result.Coverage.RepositoryBytes < 0 || result.Coverage.FilesSubmitted < 0 || result.Coverage.BytesSubmitted < 0 || result.Coverage.Subsystems < 0 || result.Coverage.SourceBatchesCompleted < 0 || result.Coverage.SourceBatchesTotal < 0 || result.Coverage.SourceBatchesCompleted != result.Coverage.SourceBatchesTotal || result.Coverage.SourceBatchesTotal > 0 && result.Coverage.Subsystems != result.Coverage.SourceBatchesTotal || result.Coverage.CitationsChecked < 0 {
+	if result.Coverage.RepositoryFiles < 0 || result.Coverage.RepositoryBytes < 0 || result.Coverage.FilesSubmitted < 0 || result.Coverage.BytesSubmitted < 0 || result.Coverage.ProviderRequests < 0 || result.Coverage.Subsystems < 0 || result.Coverage.SourceBatchesStarted < 0 || result.Coverage.SourceBatchesCompleted < 0 || result.Coverage.SourceBatchesTotal < 0 || result.Coverage.SourceBatchesCompleted != result.Coverage.SourceBatchesTotal || result.Coverage.SourceBatchesTotal > 0 && (result.Coverage.Subsystems != result.Coverage.SourceBatchesTotal || result.Coverage.SourceBatchesStarted < result.Coverage.SourceBatchesTotal || result.Coverage.ProviderRequests < result.Coverage.SourceBatchesStarted) || result.Coverage.CitationsChecked < 0 {
 		return errors.New("repository analysis result contains invalid coverage counters")
 	}
 	if len(result.FollowUpQueries) > 3 || result.FollowUpExcerpts < 0 || result.FollowUpExcerpts > 3 || !result.FollowUpRequested && (len(result.FollowUpQueries) > 0 || result.FollowUpExcerpts > 0) {
