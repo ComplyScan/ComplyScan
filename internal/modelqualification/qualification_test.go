@@ -32,12 +32,13 @@ func TestQualifyAcceptsOneBoundStructuredObservation(t *testing.T) {
 			Provider: providers.Ollama, Model: "test-model", InputFindings: 1, Reviewed: 1,
 			Observations: []providers.Observation{{Fingerprint: finding.Fingerprint, RuleID: finding.RuleID}},
 			Usage:        providers.Usage{PromptTokens: 10, CompletionTokens: 5},
+			RateLimits:   providers.RateLimitSnapshot{RequestsKnown: true, LimitRequests: 500, RemainingRequests: 499},
 		}, nil
 	}), identity, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != "compatible" || result.ExpiresAt.Sub(result.CheckedAt) != CacheValidity || result.Usage.PromptTokens != 10 {
+	if result.Status != "compatible" || result.ExpiresAt.Sub(result.CheckedAt) != CacheValidity || result.Usage.PromptTokens != 10 || result.RateLimits.RemainingRequests != 499 {
 		t.Fatalf("result = %#v", result)
 	}
 }

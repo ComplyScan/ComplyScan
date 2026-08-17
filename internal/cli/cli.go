@@ -751,6 +751,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 					progressWriter = cmd.ErrOrStderr()
 				}
 				modelQualified := true
+				reviewRateLimits := providers.RateLimitSnapshot{}
 				if len(aiReviewFindings) > 0 || candidateCount > 0 || repositoryAnalysisRequested {
 					if _, err := fmt.Fprintf(progressWriter, "Checking model compatibility before repository review...\n"); err != nil {
 						return fmt.Errorf("write model qualification progress: %w", err)
@@ -770,6 +771,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 							return fmt.Errorf("write model qualification warning: %w", err)
 						}
 					} else {
+						reviewRateLimits = outcome.Result.RateLimits
 						source := "live"
 						if outcome.Result.FromCache {
 							source = "cached"
@@ -800,7 +802,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						}
 					}
 					if isRemoteReviewProvider(cfg.AI.Provider) {
-						disclosure := "Remote review sends every structurally selected candidate file as one or more bounded, redacted code-evidence requests, then may send bounded synthesis and finding records; request count and provider cost grow with the candidate set."
+						disclosure := "Remote review sends every structurally selected candidate file as one or more bounded, redacted code-evidence requests, then may send bounded synthesis and finding records; independent source batches can run concurrently within observed provider limits, and request count and provider cost grow with the candidate set."
 						if deepRepositoryAnalysis {
 							disclosure = "Remote deep review may send substantially more eligible redacted repository text, plus bounded finding records, to the selected provider; usage may incur cost."
 						} else if !repositoryAnalysisRequested {
@@ -822,7 +824,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 					}
 					repositoryReview, reviewErr := reviewRepositoryWithProvider(
 						cmd.Context(), cfg.AI, aiReviewRepository, frameworkEvidenceReports(frameworkResults), cfg.Systems, cfg.Ownership,
-						confirmedAIUseReviewContexts, refreshReview, progressWriter,
+						confirmedAIUseReviewContexts, refreshReview, reviewRateLimits, progressWriter,
 					)
 					if reviewErr != nil {
 						aiReviewIncomplete = true
@@ -1206,6 +1208,7 @@ func reviewRepositoryWithProvider(
 	ownershipRules []ownership.Rule,
 	confirmedAIUses []providers.RepositoryConfirmedAIUse,
 	refresh bool,
+	initialRateLimits providers.RateLimitSnapshot,
 	progressWriter io.Writer,
 ) (providers.RepositoryAnalysisResult, error) {
 	mode := repositoryanalysis.Mode(settings.RepositoryAnalysis.Mode)
@@ -1255,6 +1258,7 @@ func reviewRepositoryWithProvider(
 	result, err := repositoryanalysis.Run(ctx, reviewer, repository, evidence, systems, repositoryanalysis.Options{
 		Mode: mode, MaxInputTokens: settings.RepositoryAnalysis.MaxInputTokens, Provider: kind, Model: model,
 		Ownership: ownershipRules, ConfirmedAIUses: confirmedAIUses,
+		InitialRateLimits: initialRateLimits,
 		OnProgress: func(progress repositoryanalysis.Progress) error {
 			switch progress.Stage {
 			case "targeted-batch-queue":
@@ -1262,6 +1266,15 @@ func reviewRepositoryWithProvider(
 				return err
 			case "targeted-batch-start":
 				_, err := fmt.Fprintf(progressWriter, "Starting AI evidence batch %d/%d: %s\n", progress.Completed, progress.Total, progress.Scope)
+				return err
+			case "targeted-batch-concurrency":
+				_, err := fmt.Fprintf(progressWriter, "Provider capacity detected: running %d source batches concurrently (%s).\n", progress.Completed, progress.Detail)
+				return err
+			case "batch-capacity-wait":
+				if progress.Wait != progress.OriginalWait {
+					return nil
+				}
+				_, err := fmt.Fprintf(progressWriter, "Provider capacity is temporarily exhausted; waiting %s before the next source-batch wave.\n", progress.Wait.Round(time.Second))
 				return err
 			case "targeted-batch":
 				_, err := fmt.Fprintf(progressWriter, "AI evidence batch %d/%d analyzed: %s\n", progress.Completed, progress.Total, progress.Scope)

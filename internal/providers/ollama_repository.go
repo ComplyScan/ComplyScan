@@ -84,7 +84,14 @@ func (provider *OllamaProvider) ReviewRepository(ctx context.Context, request Re
 		Options: map[string]any{"temperature": 0, "num_predict": maxOutputTokens}, MaxOutputTokens: maxOutputTokens,
 	})
 	if err != nil {
-		return RepositoryAnalysisResult{}, err
+		rateLimits := response.RateLimits
+		if value, ok := AsRemoteRateLimitError(err); ok && value.RateLimits.Available() {
+			rateLimits = value.RateLimits
+		}
+		if value, ok := AsRemoteIncompleteError(err); ok && value.RateLimits.Available() {
+			rateLimits = value.RateLimits
+		}
+		return RepositoryAnalysisResult{Provider: provider.kind, Model: provider.model, RateLimits: rateLimits}, err
 	}
 	baseResult := RepositoryAnalysisResult{
 		Provider: provider.kind,
@@ -94,7 +101,8 @@ func (provider *OllamaProvider) ReviewRepository(ctx context.Context, request Re
 			FilesSubmitted: len(request.Files), BytesSubmitted: submittedBytes,
 			Subsystems: len(request.SubsystemSummaries),
 		},
-		Usage: Usage{PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount, ReasoningTokens: response.ReasoningCount, TotalDurationNS: response.TotalDuration},
+		Usage:      Usage{PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount, ReasoningTokens: response.ReasoningCount, TotalDurationNS: response.TotalDuration},
+		RateLimits: response.RateLimits,
 	}
 	var payload repositoryAnalysisPayload
 	if err := json.Unmarshal([]byte(response.Message.Content), &payload); err != nil {

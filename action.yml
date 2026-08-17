@@ -48,7 +48,7 @@ inputs:
     required: false
     default: ""
   ai-review:
-    description: AI review mode. none is the safe deterministic default. Any enabled mode may send every structural candidate across multiple bounded requests plus synthesis, with variable runtime and provider cost. configured explicitly trusts the provider destination and API-key environment name committed in repository configuration; otherwise use ollama, openai, anthropic, gemini, xai, groq, mistral, openrouter, or openai-compatible for a workflow-controlled one-run provider.
+    description: AI review mode. none is the safe deterministic default. Any enabled mode may send every structural candidate across multiple bounded requests plus synthesis; independent source batches may run concurrently within observed provider limits, with variable runtime and provider cost. configured explicitly trusts the provider destination and API-key environment name committed in repository configuration; otherwise use ollama, openai, anthropic, gemini, xai, groq, mistral, openrouter, or openai-compatible for a workflow-controlled one-run provider.
     required: false
     default: none
   review:

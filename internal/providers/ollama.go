@@ -68,12 +68,13 @@ type ollamaChatResponse struct {
 	Message struct {
 		Content string `json:"content"`
 	} `json:"message"`
-	Error           string `json:"error"`
-	Done            bool   `json:"done"`
-	TotalDuration   int64  `json:"total_duration"`
-	PromptEvalCount int    `json:"prompt_eval_count"`
-	EvalCount       int    `json:"eval_count"`
-	ReasoningCount  int    `json:"-"`
+	Error           string            `json:"error"`
+	Done            bool              `json:"done"`
+	TotalDuration   int64             `json:"total_duration"`
+	PromptEvalCount int               `json:"prompt_eval_count"`
+	EvalCount       int               `json:"eval_count"`
+	ReasoningCount  int               `json:"-"`
+	RateLimits      RateLimitSnapshot `json:"-"`
 }
 
 type reviewInput struct {
@@ -202,6 +203,7 @@ func (provider *OllamaProvider) Review(ctx context.Context, request ReviewReques
 		PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount,
 		ReasoningTokens: response.ReasoningCount, TotalDurationNS: response.TotalDuration,
 	}
+	result.RateLimits = response.RateLimits
 	if result.Reviewed < len(selected) {
 		result.Notes = append(result.Notes, fmt.Sprintf("%s returned %d valid observation(s) for %d submitted findings.", provider.label, result.Reviewed, len(selected)))
 	}

@@ -30,13 +30,14 @@ type Identity struct {
 }
 
 type Result struct {
-	Identity  Identity        `json:"identity"`
-	Status    string          `json:"status"`
-	CheckedAt time.Time       `json:"checked_at"`
-	ExpiresAt time.Time       `json:"expires_at"`
-	Detail    string          `json:"detail"`
-	Usage     providers.Usage `json:"usage,omitempty"`
-	FromCache bool            `json:"-"`
+	Identity   Identity                    `json:"identity"`
+	Status     string                      `json:"status"`
+	CheckedAt  time.Time                   `json:"checked_at"`
+	ExpiresAt  time.Time                   `json:"expires_at"`
+	Detail     string                      `json:"detail"`
+	Usage      providers.Usage             `json:"usage,omitempty"`
+	RateLimits providers.RateLimitSnapshot `json:"-"`
+	FromCache  bool                        `json:"-"`
 }
 
 func CurrentIdentity(provider providers.Kind, model, digest string) Identity {
@@ -79,7 +80,7 @@ func Qualify(ctx context.Context, reviewer Reviewer, identity Identity, now time
 	return Result{
 		Identity: identity, Status: "compatible", CheckedAt: checkedAt, ExpiresAt: checkedAt.Add(CacheValidity),
 		Detail: "Passed the bounded structured-output, record-binding, and prompt-injection compatibility check.",
-		Usage:  result.Usage,
+		Usage:  result.Usage, RateLimits: result.RateLimits,
 	}, nil
 }
 

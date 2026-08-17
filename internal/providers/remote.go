@@ -41,6 +41,7 @@ type RemoteRateLimitError struct {
 	RequestedTokens int
 	RetryAfter      time.Duration
 	RequestTooLarge bool
+	RateLimits      RateLimitSnapshot
 }
 
 func (value *RemoteRateLimitError) Error() string {
@@ -71,6 +72,7 @@ type RemoteIncompleteError struct {
 	OutputTokens    int
 	ReasoningTokens int
 	TokenLimit      int
+	RateLimits      RateLimitSnapshot
 }
 
 func (value *RemoteIncompleteError) Error() string {
@@ -217,14 +219,16 @@ func openAICompletion(client *http.Client, apiKey, model string) func(context.Co
 		started := time.Now()
 		var responseHeaders http.Header
 		if err := postRemoteJSON(ctx, client, "OpenAI", openAIResponsesURL, apiKey, "Authorization", "Bearer ", body, &payload, &responseHeaders, nil); err != nil {
-			return ollamaChatResponse{}, err
+			return ollamaChatResponse{RateLimits: remoteRateLimitSnapshot(responseHeaders)}, err
 		}
+		rateLimits := remoteRateLimitSnapshot(responseHeaders)
 		if payload.Status != "completed" {
-			return ollamaChatResponse{}, &RemoteIncompleteError{
+			return ollamaChatResponse{RateLimits: rateLimits}, &RemoteIncompleteError{
 				Provider: "OpenAI", Status: payload.Status, Reason: payload.IncompleteDetails.Reason,
 				InputTokens: payload.Usage.InputTokens, OutputTokens: payload.Usage.OutputTokens,
 				ReasoningTokens: payload.Usage.OutputDetails.ReasoningTokens,
 				TokenLimit:      remoteResponseTokenLimit(responseHeaders),
+				RateLimits:      rateLimits,
 			}
 		}
 		content := ""
@@ -240,6 +244,7 @@ func openAICompletion(client *http.Client, apiKey, model string) func(context.Co
 		}
 		response, err := remoteResponse(content, payload.Usage.InputTokens, payload.Usage.OutputTokens, time.Since(started), "OpenAI")
 		response.ReasoningCount = payload.Usage.OutputDetails.ReasoningTokens
+		response.RateLimits = rateLimits
 		return response, err
 	}
 }
@@ -460,7 +465,7 @@ func postRemoteJSON(ctx context.Context, client *http.Client, label, endpoint, a
 		return fmt.Errorf("read %s response: %w", label, err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return remoteStatusError(label, response.StatusCode, responseBody, response.Header.Get("Retry-After"))
+		return remoteStatusError(label, response.StatusCode, responseBody, response.Header)
 	}
 	if err := json.Unmarshal(responseBody, target); err != nil {
 		return fmt.Errorf("decode %s response: %w", label, err)
@@ -468,7 +473,7 @@ func postRemoteJSON(ctx context.Context, client *http.Client, label, endpoint, a
 	return nil
 }
 
-func remoteStatusError(label string, status int, body []byte, retryAfterHeader string) error {
+func remoteStatusError(label string, status int, body []byte, headers http.Header) error {
 	var payload struct {
 		Error struct {
 			Message string `json:"message"`
@@ -482,14 +487,80 @@ func remoteStatusError(label string, status int, body []byte, retryAfterHeader s
 		limit, requested := remoteTokenLimit(message)
 		return &RemoteRateLimitError{
 			Provider: label, Message: message, LimitTokens: limit, RequestedTokens: requested,
-			RetryAfter:      remoteRetryAfter(retryAfterHeader, message),
+			RetryAfter:      remoteRetryAfter(headers.Get("Retry-After"), message),
 			RequestTooLarge: strings.Contains(strings.ToLower(message), "request too large") || limit > 0 && requested > limit,
+			RateLimits:      remoteRateLimitSnapshot(headers),
 		}
 	}
 	if message != "" {
 		return fmt.Errorf("%s review failed with HTTP %d: %s", label, status, message)
 	}
 	return fmt.Errorf("%s review failed with HTTP %d", label, status)
+}
+
+func remoteRateLimitSnapshot(headers http.Header) RateLimitSnapshot {
+	standardTokensKnown := headers.Get("x-ratelimit-limit-tokens") != "" && headers.Get("x-ratelimit-remaining-tokens") != ""
+	projectTokensKnown := headers.Get("x-ratelimit-limit-project-tokens") != "" && headers.Get("x-ratelimit-remaining-project-tokens") != ""
+	return RateLimitSnapshot{
+		RequestsKnown:     headers.Get("x-ratelimit-limit-requests") != "" && headers.Get("x-ratelimit-remaining-requests") != "",
+		LimitRequests:     positiveHeaderInt(headers, "x-ratelimit-limit-requests"),
+		RemainingRequests: nonNegativeHeaderInt(headers, "x-ratelimit-remaining-requests"),
+		ResetRequests:     rateLimitResetDuration(headers.Get("x-ratelimit-reset-requests")),
+		TokensKnown:       standardTokensKnown || projectTokensKnown,
+		LimitTokens:       remoteResponseTokenLimit(headers),
+		RemainingTokens:   minimumPositiveHeaderInt(headers, "x-ratelimit-remaining-tokens", "x-ratelimit-remaining-project-tokens"),
+		ResetTokens:       maximumResetDuration(headers.Get("x-ratelimit-reset-tokens"), headers.Get("x-ratelimit-reset-project-tokens")),
+	}
+}
+
+func nonNegativeHeaderInt(headers http.Header, name string) int {
+	value, err := strconv.Atoi(strings.TrimSpace(headers.Get(name)))
+	if err != nil || value < 0 {
+		return 0
+	}
+	return value
+}
+
+func minimumPositiveHeaderInt(headers http.Header, names ...string) int {
+	result := 0
+	found := false
+	for _, name := range names {
+		if strings.TrimSpace(headers.Get(name)) == "" {
+			continue
+		}
+		value := nonNegativeHeaderInt(headers, name)
+		if !found || value < result {
+			result = value
+			found = true
+		}
+	}
+	return result
+}
+
+func rateLimitResetDuration(value string) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if duration, err := time.ParseDuration(value); err == nil && duration > 0 {
+		return duration
+	}
+	if timestamp, err := http.ParseTime(value); err == nil {
+		if duration := time.Until(timestamp); duration > 0 {
+			return duration
+		}
+	}
+	return 0
+}
+
+func maximumResetDuration(values ...string) time.Duration {
+	var result time.Duration
+	for _, value := range values {
+		if duration := rateLimitResetDuration(value); duration > result {
+			result = duration
+		}
+	}
+	return result
 }
 
 func remoteTokenLimit(message string) (int, int) {

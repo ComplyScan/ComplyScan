@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/aiuse"
@@ -24,16 +25,18 @@ import (
 )
 
 const (
-	DefaultRemoteInputTokens = 180_000
-	DefaultLocalInputTokens  = 24_000
-	minimumInputTokens       = 8_000
-	charactersPerToken       = 3
-	contextReservePercent    = 20
-	minimumRateLimitCooldown = 60 * time.Second
-	maxRateLimitTotalWait    = 10 * time.Minute
-	minimumAdaptiveOutput    = 1024
-	minimumRecoveryOutput    = 4096
-	maximumRecoveryOutput    = 8192
+	DefaultRemoteInputTokens   = 180_000
+	DefaultLocalInputTokens    = 24_000
+	minimumInputTokens         = 8_000
+	charactersPerToken         = 3
+	contextReservePercent      = 20
+	minimumRateLimitCooldown   = 60 * time.Second
+	maxRateLimitTotalWait      = 10 * time.Minute
+	minimumAdaptiveOutput      = 1024
+	minimumRecoveryOutput      = 4096
+	maximumRecoveryOutput      = 8192
+	maxConcurrentSourceBatches = 32
+	sourceBatchTokenOverhead   = 8192
 )
 
 type Reviewer interface {
@@ -51,15 +54,16 @@ const (
 )
 
 type Options struct {
-	Mode            Mode
-	MaxInputTokens  int
-	Provider        providers.Kind
-	Model           string
-	Ownership       []ownership.Rule
-	ConfirmedAIUses []providers.RepositoryConfirmedAIUse
-	TargetedBatches bool
-	OnProgress      func(Progress) error
-	Wait            func(context.Context, time.Duration) error
+	Mode              Mode
+	MaxInputTokens    int
+	Provider          providers.Kind
+	Model             string
+	Ownership         []ownership.Rule
+	ConfirmedAIUses   []providers.RepositoryConfirmedAIUse
+	TargetedBatches   bool
+	OnProgress        func(Progress) error
+	Wait              func(context.Context, time.Duration) error
+	InitialRateLimits providers.RateLimitSnapshot
 }
 
 type Progress struct {
@@ -213,7 +217,12 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		aggregate.Coverage.Mode = providers.RepositoryAnalysisTargeted
 	}
 	sourceBatchesCompleted := 0
+	prefetched := make(map[string]repositorySourceBatchResponse)
 	partialFailure := func(scope string, cause error) (providers.RepositoryAnalysisResult, error) {
+		for key, response := range prefetched {
+			mergeRepositoryAttemptAccounting(&aggregate, response.result)
+			delete(prefetched, key)
+		}
 		aggregate.Coverage.Subsystems = sourceBatchesCompleted
 		aggregate.Coverage.SourceBatchesCompleted = sourceBatchesCompleted
 		aggregate.Coverage.SourceBatchesTotal = len(chunks)
@@ -231,6 +240,9 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			UnresolvedQuestions: []string{status},
 		}
 		aggregate.Notes = append(aggregate.Notes, detail+" before the provider review stopped. This partial result must not be treated as a completed zero-use review.")
+		if aggregate.Coverage.FilesSubmitted > 0 {
+			aggregate.Notes = append(aggregate.Notes, "Attempted-transfer coverage includes every concurrently started source request, including responses that were not retained after another batch failed.")
+		}
 		return aggregate, fmt.Errorf("%s: %s: %w", detail, scope, cause)
 	}
 	sourceStage := "subsystem"
@@ -241,47 +253,100 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		}
 	}
 	adaptiveTokenLimit := 0
+	observedLimits := options.InitialRateLimits
+	capacityWait := time.Duration(0)
 	for index := 0; index < len(chunks); {
 		chunk := chunks[index]
-		chunkGraph := boundedRepositoryGraphContext(graph, chunk.files, budget)
-		chunkBytes := requestContextBytes(chunk.files, chunkGraph)
-		if chunkBytes > budget && chunk.maxOutputTokens == 0 {
+		prepared := prepareRepositorySourceBatch(chunk, repository, graph, objectives, systems, confirmedUses, budget, adaptiveTokenLimit, options)
+		if prepared.inputBytes > budget && chunk.maxOutputTokens == 0 {
 			parts, split := splitRepositoryChunk(chunk, 0)
 			if !split {
-				return partialFailure(chunk.scope, fmt.Errorf("requires %d encoded context bytes and cannot be safely divided to fit the per-request budget of %d bytes", chunkBytes, budget))
+				return partialFailure(chunk.scope, fmt.Errorf("requires %d encoded context bytes and cannot be safely divided to fit the per-request budget of %d bytes", prepared.inputBytes, budget))
 			}
 			chunks = replaceRepositoryChunk(chunks, index, parts)
 			if err := progress(options, Progress{
 				Stage: "adaptive-context-split", Completed: index, Total: len(chunks), Scope: chunk.scope,
-				InputBytes: chunkBytes, Detail: fmt.Sprintf("encoded request exceeded %d bytes; split into %d smaller part(s)", budget, len(parts)),
+				InputBytes: prepared.inputBytes, Detail: fmt.Sprintf("encoded request exceeded %d bytes; split into %d smaller part(s)", budget, len(parts)),
 			}); err != nil {
 				return partialFailure(chunk.scope, err)
 			}
 			continue
 		}
-		startStage := sourceStage
-		startCompleted := index
-		if options.TargetedBatches {
-			startStage = "targeted-batch-start"
-			startCompleted = index + 1
+
+		batchResponse, ready := prefetched[chunk.scope]
+		if ready {
+			delete(prefetched, chunk.scope)
+		} else {
+			waveLimit, wait := sourceBatchWaveLimit(observedLimits, prepared.estimatedTokens, len(chunks)-index)
+			if waveLimit == 0 {
+				if wait <= 0 {
+					wait = minimumRateLimitCooldown
+				}
+				if capacityWait+wait > maxRateLimitTotalWait {
+					return partialFailure(chunk.scope, fmt.Errorf("provider capacity remained exhausted beyond the %s automatic wait budget", maxRateLimitTotalWait))
+				}
+				capacityWait += wait
+				if err := progress(options, Progress{Stage: "batch-capacity-wait", Scope: chunk.scope, Wait: wait, OriginalWait: wait, Detail: "waiting for provider request/token capacity before starting the next source batch wave"}); err != nil {
+					return partialFailure(chunk.scope, err)
+				}
+				if err := waitForConfiguredRateLimit(ctx, options, wait); err != nil {
+					return partialFailure(chunk.scope, err)
+				}
+				observedLimits = replenishRateLimitSnapshot(observedLimits, wait)
+				continue
+			}
+
+			wave := make([]repositorySourceBatchCall, 0, waveLimit)
+			estimatedTokens := 0
+			for candidateIndex := index; candidateIndex < len(chunks) && len(wave) < waveLimit; candidateIndex++ {
+				candidate := chunks[candidateIndex]
+				if _, alreadyStarted := prefetched[candidate.scope]; alreadyStarted {
+					break
+				}
+				candidateCall := prepareRepositorySourceBatch(candidate, repository, graph, objectives, systems, confirmedUses, budget, adaptiveTokenLimit, options)
+				if candidateCall.inputBytes > budget && candidate.maxOutputTokens == 0 {
+					break
+				}
+				if observedLimits.TokensKnown && len(wave) > 0 && estimatedTokens+candidateCall.estimatedTokens > observedLimits.RemainingTokens {
+					break
+				}
+				candidateCall.index = candidateIndex
+				wave = append(wave, candidateCall)
+				estimatedTokens += candidateCall.estimatedTokens
+			}
+			if len(wave) == 0 {
+				wave = append(wave, prepared)
+			}
+			if len(wave) > 1 {
+				if err := progress(options, Progress{
+					Stage: "targeted-batch-concurrency", Completed: len(wave), Total: len(chunks) - index, Scope: chunk.scope,
+					Detail: fmt.Sprintf("provider response headers allow %d source batches to run concurrently", len(wave)),
+				}); err != nil {
+					return partialFailure(chunk.scope, err)
+				}
+			}
+			for _, call := range wave {
+				startStage := sourceStage
+				startCompleted := call.index
+				if options.TargetedBatches {
+					startStage = "targeted-batch-start"
+					startCompleted = call.index + 1
+				}
+				if err := progress(options, Progress{Stage: startStage, Completed: startCompleted, Total: len(chunks), Scope: call.chunk.scope, InputBytes: call.inputBytes}); err != nil {
+					return partialFailure(call.chunk.scope, err)
+				}
+			}
+			observedLimits = reserveRateLimitSnapshot(observedLimits, len(wave), estimatedTokens)
+			responses := runRepositorySourceBatchWave(ctx, reviewer, wave, options)
+			for _, response := range responses {
+				prefetched[response.scope] = response
+				observedLimits = conservativeRateLimitSnapshot(observedLimits, response.result.RateLimits)
+			}
+			batchResponse = prefetched[chunk.scope]
+			delete(prefetched, chunk.scope)
 		}
-		if err := progress(options, Progress{Stage: startStage, Completed: startCompleted, Total: len(chunks), Scope: chunk.scope, InputBytes: chunkBytes}); err != nil {
-			return partialFailure(chunk.scope, err)
-		}
-		maxOutputTokens := chunk.maxOutputTokens
-		if maxOutputTokens == 0 {
-			maxOutputTokens = repositorySourceOutputTokens(options, adaptiveTokenLimit)
-		}
-		requestMode := providers.RepositoryAnalysisSubsystem
-		if options.TargetedBatches {
-			requestMode = providers.RepositoryAnalysisTargeted
-		}
-		request := providers.RepositoryAnalysisRequest{
-			Mode: requestMode, Scope: chunk.scope,
-			RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), Files: chunk.files,
-			Objectives: objectives, Systems: systems, ConfirmedAIUses: bindConfirmedAIUses(confirmedUses, sourceFilePaths(chunk.files)), Graph: chunkGraph, MaxOutputTokens: maxOutputTokens,
-		}
-		result, err := reviewRepositoryWithRetry(ctx, reviewer, request, options)
+
+		result, err := batchResponse.result, batchResponse.err
 		aggregate.Coverage.FilesSubmitted += result.Coverage.FilesSubmitted
 		aggregate.Coverage.BytesSubmitted += result.Coverage.BytesSubmitted
 		if err != nil {
@@ -293,11 +358,11 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			if rateLimit, ok := providers.AsRemoteRateLimitError(err); ok && rateLimit.RequestTooLarge {
 				adaptiveTokenLimit = smallerPositive(adaptiveTokenLimit, rateLimit.LimitTokens)
 				reducedOutput := repositorySourceOutputTokens(options, adaptiveTokenLimit)
-				if reducedOutput < maxOutputTokens {
+				if reducedOutput < prepared.maxOutputTokens {
 					chunks[index].maxOutputTokens = reducedOutput
 					if err := progress(options, Progress{
 						Stage: "adaptive-limit-retry", Completed: index, Total: len(chunks), Scope: chunk.scope,
-						InputBytes: chunkBytes, Detail: fmt.Sprintf("provider limit %d tokens; reduce output allowance from %d to %d", rateLimit.LimitTokens, maxOutputTokens, reducedOutput),
+						InputBytes: prepared.inputBytes, Detail: fmt.Sprintf("provider limit %d tokens; reduce output allowance from %d to %d", rateLimit.LimitTokens, prepared.maxOutputTokens, reducedOutput),
 					}); err != nil {
 						return partialFailure(chunk.scope, err)
 					}
@@ -310,19 +375,19 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 				chunks = replaceRepositoryChunk(chunks, index, parts)
 				if err := progress(options, Progress{
 					Stage: "adaptive-split", Completed: index, Total: len(chunks), Scope: chunk.scope,
-					InputBytes: chunkBytes, Detail: fmt.Sprintf("provider limit %d tokens; split into %d smaller part(s)", rateLimit.LimitTokens, len(parts)),
+					InputBytes: prepared.inputBytes, Detail: fmt.Sprintf("provider limit %d tokens; split into %d smaller part(s)", rateLimit.LimitTokens, len(parts)),
 				}); err != nil {
 					return partialFailure(chunk.scope, err)
 				}
 				continue
 			}
 			if isIncomplete && incomplete.Reason == "max_output_tokens" {
-				recoveryOutput := repositoryRecoveryOutputTokens(maxOutputTokens)
-				if recoveryOutput > maxOutputTokens && outputFitsTokenLimit(incomplete.InputTokens, recoveryOutput, adaptiveTokenLimit) {
+				recoveryOutput := repositoryRecoveryOutputTokens(prepared.maxOutputTokens)
+				if recoveryOutput > prepared.maxOutputTokens && outputFitsTokenLimit(incomplete.InputTokens, recoveryOutput, adaptiveTokenLimit) {
 					chunks[index].maxOutputTokens = recoveryOutput
 					if err := progress(options, Progress{
 						Stage: "adaptive-output-retry", Completed: index, Total: len(chunks), Scope: chunk.scope,
-						InputBytes: chunkBytes, Detail: fmt.Sprintf("increase output allowance from %d to %d tokens", maxOutputTokens, recoveryOutput),
+						InputBytes: prepared.inputBytes, Detail: fmt.Sprintf("increase output allowance from %d to %d tokens", prepared.maxOutputTokens, recoveryOutput),
 					}); err != nil {
 						return partialFailure(chunk.scope, err)
 					}
@@ -330,12 +395,12 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 				}
 				parts, split := splitRepositoryChunk(chunk, recoveryOutput)
 				if !split {
-					return partialFailure(chunk.scope, fmt.Errorf("model exhausted %d output tokens for the smallest safe repository segment: %w", maxOutputTokens, err))
+					return partialFailure(chunk.scope, fmt.Errorf("model exhausted %d output tokens for the smallest safe repository segment: %w", prepared.maxOutputTokens, err))
 				}
 				chunks = replaceRepositoryChunk(chunks, index, parts)
 				if err := progress(options, Progress{
 					Stage: "adaptive-output-split", Completed: index, Total: len(chunks), Scope: chunk.scope,
-					InputBytes: chunkBytes, Detail: fmt.Sprintf("output limit %d tokens; split into %d smaller part(s) with %d output tokens", maxOutputTokens, len(parts), recoveryOutput),
+					InputBytes: prepared.inputBytes, Detail: fmt.Sprintf("output limit %d tokens; split into %d smaller part(s) with %d output tokens", prepared.maxOutputTokens, len(parts), recoveryOutput),
 				}); err != nil {
 					return partialFailure(chunk.scope, err)
 				}
@@ -354,7 +419,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		}
 		summaries = append(summaries, namespaced)
 		sourceBatchesCompleted++
-		if err := progress(options, Progress{Stage: sourceStage, Completed: index + 1, Total: len(chunks), Scope: chunk.scope, InputBytes: chunkBytes}); err != nil {
+		if err := progress(options, Progress{Stage: sourceStage, Completed: index + 1, Total: len(chunks), Scope: chunk.scope, InputBytes: prepared.inputBytes}); err != nil {
 			return partialFailure(chunk.scope, err)
 		}
 		index++
@@ -570,6 +635,189 @@ type repositoryChunk struct {
 	scope           string
 	files           []providers.RepositorySourceFile
 	maxOutputTokens int
+}
+
+type repositorySourceBatchCall struct {
+	index           int
+	chunk           repositoryChunk
+	request         providers.RepositoryAnalysisRequest
+	inputBytes      int64
+	estimatedTokens int
+	maxOutputTokens int
+}
+
+type repositorySourceBatchResponse struct {
+	scope  string
+	result providers.RepositoryAnalysisResult
+	err    error
+}
+
+func prepareRepositorySourceBatch(chunk repositoryChunk, repository discovery.Repository, graph codegraph.Graph, objectives []providers.RepositoryObjective, systems []providers.RepositorySystemContext, confirmedUses []providers.RepositoryConfirmedAIUse, budget int64, adaptiveTokenLimit int, options Options) repositorySourceBatchCall {
+	chunkGraph := boundedRepositoryGraphContext(graph, chunk.files, budget)
+	inputBytes := requestContextBytes(chunk.files, chunkGraph)
+	maxOutputTokens := chunk.maxOutputTokens
+	if maxOutputTokens == 0 {
+		maxOutputTokens = repositorySourceOutputTokens(options, adaptiveTokenLimit)
+	}
+	requestMode := providers.RepositoryAnalysisSubsystem
+	if options.TargetedBatches {
+		requestMode = providers.RepositoryAnalysisTargeted
+	}
+	request := providers.RepositoryAnalysisRequest{
+		Mode: requestMode, Scope: chunk.scope,
+		RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), Files: chunk.files,
+		Objectives: objectives, Systems: systems, ConfirmedAIUses: bindConfirmedAIUses(confirmedUses, sourceFilePaths(chunk.files)), Graph: chunkGraph, MaxOutputTokens: maxOutputTokens,
+	}
+	requestBytes := inputBytes
+	if encoded, err := json.Marshal(request); err == nil {
+		requestBytes = int64(len(encoded))
+	}
+	estimatedTokens := int(requestBytes)/charactersPerToken + maxOutputTokens + sourceBatchTokenOverhead
+	return repositorySourceBatchCall{
+		chunk: chunk, request: request, inputBytes: inputBytes,
+		estimatedTokens: estimatedTokens, maxOutputTokens: maxOutputTokens,
+	}
+}
+
+func runRepositorySourceBatchWave(ctx context.Context, reviewer Reviewer, calls []repositorySourceBatchCall, options Options) []repositorySourceBatchResponse {
+	results := make([]repositorySourceBatchResponse, len(calls))
+	if len(calls) == 1 {
+		result, err := reviewRepositoryWithRetry(ctx, reviewer, calls[0].request, options)
+		results[0] = repositorySourceBatchResponse{scope: calls[0].chunk.scope, result: result, err: err}
+		return results
+	}
+
+	parallelOptions := options
+	var callbackMu sync.Mutex
+	if options.OnProgress != nil {
+		parallelOptions.OnProgress = func(value Progress) error {
+			callbackMu.Lock()
+			defer callbackMu.Unlock()
+			return options.OnProgress(value)
+		}
+	}
+	if options.Wait != nil {
+		parallelOptions.Wait = func(ctx context.Context, delay time.Duration) error {
+			callbackMu.Lock()
+			defer callbackMu.Unlock()
+			return options.Wait(ctx, delay)
+		}
+	}
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(len(calls))
+	for index := range calls {
+		go func(index int) {
+			defer waitGroup.Done()
+			result, err := reviewRepositoryWithRetry(ctx, reviewer, calls[index].request, parallelOptions)
+			results[index] = repositorySourceBatchResponse{scope: calls[index].chunk.scope, result: result, err: err}
+		}(index)
+	}
+	waitGroup.Wait()
+	return results
+}
+
+func sourceBatchWaveLimit(snapshot providers.RateLimitSnapshot, estimatedTokens, pending int) (int, time.Duration) {
+	if pending <= 0 {
+		return 0, 0
+	}
+	if !snapshot.Available() {
+		return 1, 0
+	}
+	limit := pending
+	if limit > maxConcurrentSourceBatches {
+		limit = maxConcurrentSourceBatches
+	}
+	var wait time.Duration
+	if snapshot.RequestsKnown {
+		if snapshot.RemainingRequests <= 0 {
+			wait = snapshot.ResetRequests
+			limit = 0
+		} else if limit > snapshot.RemainingRequests {
+			limit = snapshot.RemainingRequests
+		}
+	}
+	if snapshot.TokensKnown {
+		if snapshot.RemainingTokens < estimatedTokens && snapshot.LimitTokens >= estimatedTokens {
+			if snapshot.ResetTokens > wait {
+				wait = snapshot.ResetTokens
+			}
+			limit = 0
+		} else if snapshot.RemainingTokens < estimatedTokens {
+			if limit > 1 {
+				limit = 1
+			}
+		} else if estimatedTokens > 0 {
+			tokenLimit := snapshot.RemainingTokens / estimatedTokens
+			if tokenLimit > 0 && tokenLimit < limit {
+				limit = tokenLimit
+			}
+		}
+	}
+	return limit, wait
+}
+
+func replenishRateLimitSnapshot(snapshot providers.RateLimitSnapshot, waited time.Duration) providers.RateLimitSnapshot {
+	if snapshot.RequestsKnown && (snapshot.ResetRequests <= 0 || waited >= snapshot.ResetRequests) {
+		snapshot.RemainingRequests = snapshot.LimitRequests
+	}
+	if snapshot.TokensKnown && (snapshot.ResetTokens <= 0 || waited >= snapshot.ResetTokens) {
+		snapshot.RemainingTokens = snapshot.LimitTokens
+	}
+	return snapshot
+}
+
+func reserveRateLimitSnapshot(snapshot providers.RateLimitSnapshot, requests, estimatedTokens int) providers.RateLimitSnapshot {
+	if snapshot.RequestsKnown {
+		snapshot.RemainingRequests = max(0, snapshot.RemainingRequests-requests)
+	}
+	if snapshot.TokensKnown {
+		snapshot.RemainingTokens = max(0, snapshot.RemainingTokens-estimatedTokens)
+	}
+	return snapshot
+}
+
+func conservativeRateLimitSnapshot(current, next providers.RateLimitSnapshot) providers.RateLimitSnapshot {
+	if !next.Available() {
+		return current
+	}
+	if !current.Available() {
+		return next
+	}
+	result := current
+	if next.RequestsKnown {
+		if !current.RequestsKnown {
+			result.RequestsKnown = true
+			result.LimitRequests = next.LimitRequests
+			result.RemainingRequests = next.RemainingRequests
+			result.ResetRequests = next.ResetRequests
+		} else {
+			result.LimitRequests = smallerPositive(current.LimitRequests, next.LimitRequests)
+			result.RemainingRequests = min(current.RemainingRequests, next.RemainingRequests)
+			result.ResetRequests = max(current.ResetRequests, next.ResetRequests)
+		}
+	}
+	if next.TokensKnown {
+		if !current.TokensKnown {
+			result.TokensKnown = true
+			result.LimitTokens = next.LimitTokens
+			result.RemainingTokens = next.RemainingTokens
+			result.ResetTokens = next.ResetTokens
+		} else {
+			result.LimitTokens = smallerPositive(current.LimitTokens, next.LimitTokens)
+			result.RemainingTokens = min(current.RemainingTokens, next.RemainingTokens)
+			result.ResetTokens = max(current.ResetTokens, next.ResetTokens)
+		}
+	}
+	return result
+}
+
+func waitForConfiguredRateLimit(ctx context.Context, options Options, delay time.Duration) error {
+	if options.Wait != nil {
+		return options.Wait(ctx, delay)
+	}
+	return waitForRateLimit(ctx, delay, func(remaining time.Duration) error {
+		return progress(options, Progress{Stage: "batch-capacity-wait", Wait: remaining, OriginalWait: delay, Detail: "waiting for provider request/token capacity"})
+	})
 }
 
 // namespaceSubsystemCandidateIDs replaces model-authored batch keys with

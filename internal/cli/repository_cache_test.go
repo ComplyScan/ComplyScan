@@ -58,7 +58,7 @@ func TestRepositoryReviewReusesCacheWithoutProviderCredential(t *testing.T) {
 	t.Cleanup(func() { repositoryAnalysisCacheDefaultPath = previousPath })
 
 	var output bytes.Buffer
-	result, err := reviewRepositoryWithProvider(context.Background(), settings, repository, nil, systems, nil, nil, false, &output)
+	result, err := reviewRepositoryWithProvider(context.Background(), settings, repository, nil, systems, nil, nil, false, providers.RateLimitSnapshot{}, &output)
 	if err != nil {
 		t.Fatalf("cache hit unexpectedly required provider credential: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestRepositoryReviewReusesCacheWithoutProviderCredential(t *testing.T) {
 		t.Fatalf("repository cache was not reported truthfully: result=%+v output=%q", result, output.String())
 	}
 
-	if _, err := reviewRepositoryWithProvider(context.Background(), settings, repository, nil, systems, nil, nil, true, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), settings.Remote.APIKeyEnv) {
+	if _, err := reviewRepositoryWithProvider(context.Background(), settings, repository, nil, systems, nil, nil, true, providers.RateLimitSnapshot{}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), settings.Remote.APIKeyEnv) {
 		t.Fatalf("refresh did not bypass the cache and require the provider: %v", err)
 	}
 }

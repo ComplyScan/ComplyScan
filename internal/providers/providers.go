@@ -5,6 +5,7 @@ package providers
 
 import (
 	"context"
+	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
@@ -57,14 +58,34 @@ type Usage struct {
 	TotalDurationNS  int64 `json:"total_duration_ns,omitempty"`
 }
 
+// RateLimitSnapshot is the provider's effective rolling request/token
+// allowance as observed on one API response. It is runtime scheduling data,
+// not part of the persisted evidence contract. A zero limit means the provider
+// did not disclose that dimension.
+type RateLimitSnapshot struct {
+	RequestsKnown     bool
+	LimitRequests     int
+	RemainingRequests int
+	ResetRequests     time.Duration
+	TokensKnown       bool
+	LimitTokens       int
+	RemainingTokens   int
+	ResetTokens       time.Duration
+}
+
+func (value RateLimitSnapshot) Available() bool {
+	return value.RequestsKnown || value.TokensKnown
+}
+
 type ReviewResult struct {
-	Provider      Kind          `json:"provider"`
-	Model         string        `json:"model"`
-	InputFindings int           `json:"input_findings"`
-	Reviewed      int           `json:"reviewed"`
-	Observations  []Observation `json:"observations"`
-	Notes         []string      `json:"notes,omitempty"`
-	Usage         Usage         `json:"usage,omitempty"`
+	Provider      Kind              `json:"provider"`
+	Model         string            `json:"model"`
+	InputFindings int               `json:"input_findings"`
+	Reviewed      int               `json:"reviewed"`
+	Observations  []Observation     `json:"observations"`
+	Notes         []string          `json:"notes,omitempty"`
+	Usage         Usage             `json:"usage,omitempty"`
+	RateLimits    RateLimitSnapshot `json:"-"`
 }
 
 // Provider reviews deterministic findings in an explicitly enabled layer.
@@ -479,6 +500,7 @@ type RepositoryAnalysisResult struct {
 	Result             RepositorySectionResult `json:"result"`
 	Notes              []string                `json:"notes,omitempty"`
 	Usage              Usage                   `json:"usage,omitempty"`
+	RateLimits         RateLimitSnapshot       `json:"-"`
 	FollowUpRequested  bool                    `json:"follow_up_requested,omitempty"`
 	FollowUpQueries    []string                `json:"follow_up_queries,omitempty"`
 	FollowUpExcerpts   int                     `json:"follow_up_excerpts,omitempty"`
