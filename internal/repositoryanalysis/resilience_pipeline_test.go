@@ -576,7 +576,7 @@ func TestHierarchicalRunNeverExceedsProviderRequestSafetyCeiling(t *testing.T) {
 	}
 }
 
-func TestRunHierarchicalRecompactsExactlyTwoOversizedSummaries(t *testing.T) {
+func TestRunHierarchicalStripsOversizedNonGroupingDetailBeforeSynthesis(t *testing.T) {
 	content := "package ai\n// " + strings.Repeat("bounded evidence ", 430) + "\n"
 	repository := discovery.Repository{Root: ".", Files: []discovery.File{
 		{Path: "a/use.go", Kind: discovery.KindSource, Content: []byte(content), Size: int64(len(content))},
@@ -597,11 +597,11 @@ func TestRunHierarchicalRecompactsExactlyTwoOversizedSummaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reviewer.singleSummaryPasses != 2 {
-		t.Fatalf("singleton compaction passes = %d, want exactly one for each of two oversized summaries", reviewer.singleSummaryPasses)
+	if reviewer.singleSummaryPasses != 0 {
+		t.Fatalf("singleton compaction passes = %d, want none after local compacting", reviewer.singleSummaryPasses)
 	}
-	if reviewer.combinedSummaryPasses == 0 {
-		t.Fatal("two compacted summaries were never recombined")
+	if reviewer.combinedSummaryPasses != 1 {
+		t.Fatalf("combined grouping passes = %d, want one compact synthesis", reviewer.combinedSummaryPasses)
 	}
 	if result.Coverage.SourceBatchesCompleted != 2 || result.Coverage.SourceBatchesTotal != 2 {
 		t.Fatalf("two-summary recovery coverage = %#v", result.Coverage)

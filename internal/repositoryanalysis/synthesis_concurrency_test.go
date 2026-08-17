@@ -153,29 +153,31 @@ func (reviewer *capacityAwareSynthesisReviewer) ReviewRepository(_ context.Conte
 	}
 	switch {
 	case request.Mode != providers.RepositoryAnalysisSynthesis:
-		// Each source result fits alone but not beside another source result, so
-		// the first synthesis level contains several independent singleton groups.
-		section.UnresolvedQuestions = []string{strings.Repeat("bounded source detail ", 600)}
-		if reviewer.semanticInput && len(request.Files) > 0 {
+		// Several concise observations per source result keep this fixture large
+		// enough to require independent compact-grouping requests. Bulky
+		// unresolved prose is intentionally irrelevant to synthesis now.
+		if len(request.Files) > 0 {
 			file := request.Files[0]
-			section.AIUses = []providers.RepositoryAIUse{{
-				ID: "provider-local", Name: "Unsynthesized use", Purpose: "Test candidate", Lifecycle: "development", Confidence: "medium",
-				Evidence: []providers.RepositoryCitation{{Path: file.Path, Line: file.ContentStartLine, Summary: "Submitted model invocation"}},
-			}}
-		}
-	case isLevelOne:
-		section.UnresolvedQuestions = []string{"completed:" + request.Scope}
-		if reviewer.semanticInput {
-			for _, summary := range request.SubsystemSummaries {
-				section.AIUses = append(section.AIUses, summary.AIUses...)
+			for index := 0; index < 12; index++ {
+				id := fmt.Sprintf("provider-local-%d", index)
+				section.AIUses = append(section.AIUses, providers.RepositoryAIUse{
+					ID: id, Name: fmt.Sprintf("Bounded workflow observation %d", index+1), Purpose: strings.Repeat("Detailed bounded purpose ", 14), Lifecycle: "development", Confidence: "medium",
+					Evidence: []providers.RepositoryCitation{{Path: file.Path, Line: file.ContentStartLine, Summary: strings.Repeat("Checked model invocation context ", 10)}},
+				})
+				section.AIUseFacts = append(section.AIUseFacts, providers.RepositoryAIUseFactSet{AIUseID: id, Facts: []providers.RepositoryAIUseFact{}, UnresolvedQuestions: []string{}})
 			}
 		}
 	default:
-		// A later synthesis level exposes the input order chosen by the
-		// orchestrator. It must be group order, not goroutine completion order.
+		members := make([]string, 0)
 		for _, summary := range request.SubsystemSummaries {
-			section.UnresolvedQuestions = append(section.UnresolvedQuestions, summary.UnresolvedQuestions...)
-			section.AIUses = append(section.AIUses, summary.AIUses...)
+			for _, use := range summary.AIUses {
+				members = append(members, use.MemberObservationIDs...)
+			}
+		}
+		if len(members) > 0 {
+			section.AIUses = []providers.RepositoryAIUse{{
+				ID: "temporary-group", Name: "Grouped workflow", Purpose: "Connected bounded observations", Lifecycle: "development", Confidence: "medium", MemberObservationIDs: members,
+			}}
 		}
 	}
 
@@ -299,12 +301,8 @@ func TestRunTargetedUsesCompleteProviderCapacityForConcurrentSynthesisGroupsInDe
 	if len(snapshot.levelOneCompletions) < 2 || snapshot.levelOneCompletions[0] == "synthesis-level-1-part-1" {
 		t.Fatalf("test did not force out-of-order synthesis completion: %v", snapshot.levelOneCompletions)
 	}
-	wantOrder := make([]string, snapshot.levelOneCalls)
-	for index := range wantOrder {
-		wantOrder[index] = fmt.Sprintf("completed:synthesis-level-1-part-%d", index+1)
-	}
-	if !reflect.DeepEqual(result.Result.UnresolvedQuestions, wantOrder) {
-		t.Fatalf("synthesized group order = %v, want deterministic input order %v", result.Result.UnresolvedQuestions, wantOrder)
+	if len(result.Result.AIUses) != 1 || len(result.Result.AIUses[0].MemberObservationIDs) != 12*snapshot.sourceCalls {
+		t.Fatalf("final compact grouping did not retain deterministic observation membership: %#v", result.Result.AIUses)
 	}
 }
 

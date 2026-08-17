@@ -671,6 +671,12 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		}
 		index++
 	}
+	// Source-batch results are the durable, locally validated evidence record.
+	// Synthesis receives a much smaller grouping view and decides only which
+	// scan-local observations belong together. The full facts and citations are
+	// retained here and reattached after final membership validation.
+	sourceEvidenceSummaries := append([]providers.RepositorySectionResult(nil), summaries...)
+	summaries = compactRepositoryGroupingSummaries(summaries)
 	// Targeted source batches deliberately stay small so each model request sees
 	// a focused code excerpt. The resulting validated summaries contain no raw
 	// repository source, so reusing that same small source budget for synthesis
@@ -941,6 +947,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			if err != nil {
 				return partialFailure(scope, err)
 			}
+			grouped = attachRepositoryGroupingHints(grouped, group.summaries)
 			next = append(next, grouped)
 			if err := progress(options, Progress{Stage: "synthesis", Completed: index + 1, Total: len(groups), Scope: scope, InputBytes: summaryBytes(group.summaries)}); err != nil {
 				return partialFailure(scope, err)
@@ -990,7 +997,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		maxOutputTokens := repositoryOutputTokens(options.Provider, adaptiveTokenLimit)
 		var result providers.RepositoryAnalysisResult
 		retainValidatedSource := func(cause error) error {
-			grouped, groupErr := assignSynthesisCandidateIDs(group[0], confirmedUses)
+			grouped, groupErr := assignSynthesisCandidateIDs(sourceEvidenceSummaries[0], confirmedUses)
 			if groupErr != nil {
 				return fmt.Errorf("retain validated single-source result after optional synthesis failure: %w", groupErr)
 			}
@@ -1003,11 +1010,10 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			})
 		}
 		for {
-			fileIndex := citedFileIndex(group, files)
 			request := providers.RepositoryAnalysisRequest{
 				Mode: providers.RepositoryAnalysisSynthesis, Scope: "repository-synthesis",
-				RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), FileIndex: fileIndex,
-				Objectives: objectives, Systems: systems, ConfirmedAIUses: bindConfirmedAIUsesForSynthesis(confirmedUses, fileReferencePaths(fileIndex), group), SubsystemSummaries: group, MaxOutputTokens: maxOutputTokens,
+				RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository),
+				SubsystemSummaries: group, MaxOutputTokens: maxOutputTokens, CompactSynthesis: true,
 			}
 			estimated := estimatedRepositoryRequestTokens(request)
 			preflightOptions := options
@@ -1093,8 +1099,18 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			if err != nil {
 				return partialFailure("repository synthesis", err)
 			}
-			summaries[0] = grouped
+			summaries[0] = attachRepositoryGroupingHints(grouped, group)
 		}
+	}
+	if !usedValidatedSourceFallback {
+		hydrated, err := hydrateRepositoryGroupingResult(summaries[0], sourceEvidenceSummaries, confirmedUses)
+		if err != nil {
+			return partialFailure("repository synthesis evidence reattachment", err)
+		}
+		if err := validateSystemAttribution(hydrated, profileSystems(systems), options.Ownership, confirmedUses); err != nil {
+			return partialFailure("repository synthesis evidence reattachment", err)
+		}
+		summaries[0] = hydrated
 	}
 	if options.TargetedBatches {
 		aggregate.Coverage.Mode = providers.RepositoryAnalysisTargeted
@@ -1239,11 +1255,10 @@ func prepareRepositorySynthesisCall(level, index int, group repositorySummaryGro
 	if maxOutputTokens == 0 {
 		maxOutputTokens = repositoryOutputTokens(options.Provider, adaptiveTokenLimit)
 	}
-	fileIndex := citedFileIndex(group.summaries, files)
 	request := providers.RepositoryAnalysisRequest{
 		Mode: providers.RepositoryAnalysisSynthesis, Scope: scope,
-		RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), FileIndex: fileIndex,
-		Objectives: objectives, Systems: systems, ConfirmedAIUses: bindConfirmedAIUsesForSynthesis(confirmedUses, fileReferencePaths(fileIndex), group.summaries), SubsystemSummaries: group.summaries, MaxOutputTokens: maxOutputTokens,
+		RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository),
+		SubsystemSummaries: group.summaries, MaxOutputTokens: maxOutputTokens, CompactSynthesis: true,
 	}
 	inputBytes := summaryBytes(group.summaries)
 	if encoded, err := json.Marshal(request); err == nil {
@@ -1570,6 +1585,321 @@ func assignSynthesisCandidateIDs(summary providers.RepositorySectionResult, conf
 		}
 	}
 	return summary, nil
+}
+
+func emptyRepositoryGroupingResult(scope string) providers.RepositorySectionResult {
+	return providers.RepositorySectionResult{
+		Scope: scope, AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{},
+		ObjectiveObservations: []providers.RepositoryObjectiveObservation{}, UnmappedObservations: []providers.RepositoryUnmappedObservation{},
+		UnresolvedQuestions: []string{},
+	}
+}
+
+func repositoryGroupingObservationCount(summaries []providers.RepositorySectionResult) int {
+	count := 0
+	for _, summary := range summaries {
+		for _, use := range summary.AIUses {
+			count += len(use.MemberObservationIDs)
+		}
+	}
+	return count
+}
+
+// compactRepositoryGroupingSummaries removes result fields that synthesis no
+// longer has to repeat. Short checked citation summaries and positive fact
+// values remain as grouping clues; their complete validated records stay in
+// sourceEvidenceSummaries and never depend on the grouping response.
+func compactRepositoryGroupingSummaries(summaries []providers.RepositorySectionResult) []providers.RepositorySectionResult {
+	result := make([]providers.RepositorySectionResult, 0, len(summaries))
+	for _, summary := range summaries {
+		compact := emptyRepositoryGroupingResult(summary.Scope)
+		candidateIDs := make(map[string]struct{}, len(summary.AIUses))
+		for _, use := range summary.AIUses {
+			candidateIDs[use.ID] = struct{}{}
+			copyUse := providers.RepositoryAIUse{
+				ID: use.ID, Name: use.Name, Purpose: use.Purpose, Lifecycle: use.Lifecycle, Confidence: use.Confidence,
+				MemberObservationIDs: append([]string(nil), use.MemberObservationIDs...), Evidence: compactRepositoryCitations(use.Evidence, 2),
+				UnresolvedQuestions: []string{},
+			}
+			compact.AIUses = append(compact.AIUses, copyUse)
+		}
+		for _, factSet := range summary.AIUseFacts {
+			if _, candidate := candidateIDs[factSet.AIUseID]; !candidate {
+				continue
+			}
+			copySet := providers.RepositoryAIUseFactSet{AIUseID: factSet.AIUseID, Facts: []providers.RepositoryAIUseFact{}, UnresolvedQuestions: []string{}}
+			for _, fact := range factSet.Facts {
+				copySet.Facts = append(copySet.Facts, providers.RepositoryAIUseFact{
+					Field: fact.Field, Values: append([]string(nil), fact.Values...), Confidence: fact.Confidence,
+					Rationale: "", Evidence: []providers.RepositoryCitation{},
+				})
+			}
+			compact.AIUseFacts = append(compact.AIUseFacts, copySet)
+		}
+		result = append(result, compact)
+	}
+	return result
+}
+
+// attachRepositoryGroupingHints carries a small amount of semantic context to
+// a later grouping level without asking the model to reproduce the full source
+// result. It is never used as the final evidence record.
+func attachRepositoryGroupingHints(grouped providers.RepositorySectionResult, inputs []providers.RepositorySectionResult) providers.RepositorySectionResult {
+	byObservation := make(map[string]providers.RepositoryAIUse)
+	factsByObservation := make(map[string]providers.RepositoryAIUseFactSet)
+	for _, summary := range inputs {
+		sets := make(map[string]providers.RepositoryAIUseFactSet, len(summary.AIUseFacts))
+		for _, set := range summary.AIUseFacts {
+			sets[set.AIUseID] = set
+		}
+		for _, use := range summary.AIUses {
+			for _, observationID := range use.MemberObservationIDs {
+				byObservation[observationID] = use
+				if set, exists := sets[use.ID]; exists {
+					factsByObservation[observationID] = set
+				}
+			}
+		}
+	}
+	grouped.AIUseFacts = []providers.RepositoryAIUseFactSet{}
+	grouped.ObjectiveObservations = []providers.RepositoryObjectiveObservation{}
+	grouped.UnmappedObservations = []providers.RepositoryUnmappedObservation{}
+	grouped.UnresolvedQuestions = []string{}
+	for index := range grouped.AIUses {
+		use := &grouped.AIUses[index]
+		var citations []providers.RepositoryCitation
+		factSets := make([]providers.RepositoryAIUseFactSet, 0, len(use.MemberObservationIDs))
+		for _, observationID := range use.MemberObservationIDs {
+			if source, exists := byObservation[observationID]; exists {
+				citations = append(citations, source.Evidence...)
+			}
+			if set, exists := factsByObservation[observationID]; exists {
+				factSets = append(factSets, set)
+			}
+		}
+		use.Evidence = compactRepositoryCitations(citations, 3)
+		use.UnresolvedQuestions = []string{}
+		merged, _ := mergeRepositoryFactSets(use.ID, factSets, false)
+		grouped.AIUseFacts = append(grouped.AIUseFacts, merged)
+	}
+	return grouped
+}
+
+func hydrateRepositoryGroupingResult(grouped providers.RepositorySectionResult, sources []providers.RepositorySectionResult, confirmedUses []providers.RepositoryConfirmedAIUse) (providers.RepositorySectionResult, error) {
+	byObservation := make(map[string]providers.RepositoryAIUse)
+	factsByObservation := make(map[string]providers.RepositoryAIUseFactSet)
+	confirmed := make(map[string]struct{}, len(confirmedUses))
+	for _, use := range confirmedUses {
+		confirmed[use.ID] = struct{}{}
+	}
+	confirmedFactSets := make(map[string][]providers.RepositoryAIUseFactSet, len(confirmedUses))
+	for _, summary := range sources {
+		sets := make(map[string]providers.RepositoryAIUseFactSet, len(summary.AIUseFacts))
+		for _, set := range summary.AIUseFacts {
+			sets[set.AIUseID] = set
+			if _, exists := confirmed[set.AIUseID]; exists {
+				confirmedFactSets[set.AIUseID] = append(confirmedFactSets[set.AIUseID], set)
+			}
+		}
+		for _, use := range summary.AIUses {
+			set, hasFacts := sets[use.ID]
+			for _, observationID := range use.MemberObservationIDs {
+				if _, duplicate := byObservation[observationID]; duplicate {
+					return providers.RepositorySectionResult{}, fmt.Errorf("validated source evidence repeats observation %q", observationID)
+				}
+				byObservation[observationID] = use
+				if hasFacts {
+					factsByObservation[observationID] = set
+				}
+			}
+		}
+	}
+
+	result := emptyRepositoryGroupingResult(grouped.Scope)
+	usedObservations := make(map[string]struct{}, len(byObservation))
+	for _, groupedUse := range grouped.AIUses {
+		use := groupedUse
+		use.Evidence = []providers.RepositoryCitation{}
+		use.UnresolvedQuestions = []string{}
+		factSets := make([]providers.RepositoryAIUseFactSet, 0, len(use.MemberObservationIDs))
+		for _, observationID := range use.MemberObservationIDs {
+			source, exists := byObservation[observationID]
+			if !exists {
+				return providers.RepositorySectionResult{}, fmt.Errorf("repository grouping references unknown validated observation %q", observationID)
+			}
+			if _, duplicate := usedObservations[observationID]; duplicate {
+				return providers.RepositorySectionResult{}, fmt.Errorf("repository grouping repeats validated observation %q", observationID)
+			}
+			usedObservations[observationID] = struct{}{}
+			use.Evidence = append(use.Evidence, source.Evidence...)
+			use.UnresolvedQuestions = append(use.UnresolvedQuestions, source.UnresolvedQuestions...)
+			if set, exists := factsByObservation[observationID]; exists {
+				factSets = append(factSets, set)
+			}
+		}
+		use.Evidence = compactRepositoryCitations(use.Evidence, 0)
+		use.UnresolvedQuestions = uniqueRepositoryStrings(use.UnresolvedQuestions, 100)
+		if len(use.Evidence) == 0 {
+			return providers.RepositorySectionResult{}, fmt.Errorf("repository grouping use %q has no validated source evidence", use.ID)
+		}
+		result.AIUses = append(result.AIUses, use)
+		mergedFacts, err := mergeRepositoryFactSets(use.ID, factSets, true)
+		if err != nil {
+			return providers.RepositorySectionResult{}, err
+		}
+		result.AIUseFacts = append(result.AIUseFacts, mergedFacts)
+	}
+	if len(usedObservations) != len(byObservation) {
+		return providers.RepositorySectionResult{}, fmt.Errorf("repository grouping retained %d of %d validated observations", len(usedObservations), len(byObservation))
+	}
+	confirmedIDs := make([]string, 0, len(confirmedFactSets))
+	for id := range confirmedFactSets {
+		confirmedIDs = append(confirmedIDs, id)
+	}
+	sort.Strings(confirmedIDs)
+	for _, id := range confirmedIDs {
+		mergedFacts, err := mergeRepositoryFactSets(id, confirmedFactSets[id], true)
+		if err != nil {
+			return providers.RepositorySectionResult{}, err
+		}
+		result.AIUseFacts = append(result.AIUseFacts, mergedFacts)
+	}
+
+	objectiveByKey := make(map[string]int)
+	unmappedSeen := make(map[string]struct{})
+	for _, summary := range sources {
+		for _, observation := range summary.ObjectiveObservations {
+			key := observation.AIUseID + "\x00" + observation.ObjectiveID + "\x00" + observation.SystemID
+			if existingIndex, exists := objectiveByKey[key]; exists {
+				result.ObjectiveObservations[existingIndex] = mergeRepositoryObjectiveObservations(result.ObjectiveObservations[existingIndex], observation)
+				continue
+			}
+			observation.TechnicalVerdict = observation.DerivedTechnicalVerdict()
+			objectiveByKey[key] = len(result.ObjectiveObservations)
+			result.ObjectiveObservations = append(result.ObjectiveObservations, observation)
+		}
+		for _, observation := range summary.UnmappedObservations {
+			identity := repositoryUnmappedIdentity(observation)
+			if _, duplicate := unmappedSeen[identity]; duplicate {
+				continue
+			}
+			if len(result.UnmappedObservations) >= 100 {
+				return providers.RepositorySectionResult{}, errors.New("validated source evidence contains more than 100 distinct unmapped observations")
+			}
+			unmappedSeen[identity] = struct{}{}
+			result.UnmappedObservations = append(result.UnmappedObservations, observation)
+		}
+		result.UnresolvedQuestions = append(result.UnresolvedQuestions, summary.UnresolvedQuestions...)
+	}
+	result.UnresolvedQuestions = uniqueRepositoryStrings(result.UnresolvedQuestions, 100)
+	return result, nil
+}
+
+func mergeRepositoryFactSets(useID string, sets []providers.RepositoryAIUseFactSet, retainEvidence bool) (providers.RepositoryAIUseFactSet, error) {
+	result := providers.RepositoryAIUseFactSet{AIUseID: useID, Facts: []providers.RepositoryAIUseFact{}, UnresolvedQuestions: []string{}}
+	byField := make(map[profile.CodeFactField]int)
+	for _, set := range sets {
+		result.UnresolvedQuestions = append(result.UnresolvedQuestions, set.UnresolvedQuestions...)
+		for _, fact := range set.Facts {
+			index, exists := byField[fact.Field]
+			if !exists {
+				copyFact := fact
+				copyFact.Values = append([]string(nil), fact.Values...)
+				copyFact.Evidence = append([]providers.RepositoryCitation(nil), fact.Evidence...)
+				if !retainEvidence {
+					copyFact.Rationale = ""
+					copyFact.Evidence = []providers.RepositoryCitation{}
+				}
+				byField[fact.Field] = len(result.Facts)
+				result.Facts = append(result.Facts, copyFact)
+				continue
+			}
+			merged := &result.Facts[index]
+			values := uniqueRepositoryStrings(append(merged.Values, fact.Values...), 0)
+			if retainEvidence && len(values) > 8 {
+				return providers.RepositoryAIUseFactSet{}, fmt.Errorf("validated source facts for AI use %q field %q contain %d distinct values; maximum representable is 8", useID, fact.Field, len(values))
+			}
+			if len(values) > 8 {
+				values = values[:8]
+			}
+			merged.Values = values
+			merged.Confidence = lowerRepositoryConfidence(merged.Confidence, fact.Confidence)
+			if retainEvidence {
+				merged.Evidence = compactRepositoryCitations(append(merged.Evidence, fact.Evidence...), 0)
+			}
+		}
+	}
+	result.UnresolvedQuestions = uniqueRepositoryStrings(result.UnresolvedQuestions, 100)
+	return result, nil
+}
+
+func mergeRepositoryObjectiveObservations(left, right providers.RepositoryObjectiveObservation) providers.RepositoryObjectiveObservation {
+	if left.Strength != right.Strength {
+		left.Strength = providers.StrengthUncertain
+		left.Confidence = "low"
+		left.Rationale = "Validated source batches returned differing code-level assessments; the combined result remains uncertain."
+	} else {
+		left.Confidence = lowerRepositoryConfidence(left.Confidence, right.Confidence)
+	}
+	left.SupportingEvidence = compactRepositoryCitations(append(left.SupportingEvidence, right.SupportingEvidence...), 0)
+	left.ContradictoryEvidence = compactRepositoryCitations(append(left.ContradictoryEvidence, right.ContradictoryEvidence...), 0)
+	left.MissingEvidence = uniqueRepositoryStrings(append(left.MissingEvidence, right.MissingEvidence...), 100)
+	left.UnresolvedQuestions = uniqueRepositoryStrings(append(left.UnresolvedQuestions, right.UnresolvedQuestions...), 100)
+	left.TechnicalVerdict = left.DerivedTechnicalVerdict()
+	return left
+}
+
+func compactRepositoryCitations(values []providers.RepositoryCitation, limit int) []providers.RepositoryCitation {
+	result := make([]providers.RepositoryCitation, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		key := filepath.ToSlash(value.Path) + "\x00" + fmt.Sprint(value.Line)
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, value)
+		if limit > 0 && len(result) >= limit {
+			break
+		}
+	}
+	return result
+}
+
+func uniqueRepositoryStrings(values []string, limit int) []string {
+	result := make([]string, 0, min(len(values), limit))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, duplicate := seen[value]; duplicate {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+		if limit > 0 && len(result) >= limit {
+			break
+		}
+	}
+	return result
+}
+
+func lowerRepositoryConfidence(left, right string) string {
+	rank := map[string]int{"low": 0, "medium": 1, "high": 2}
+	if rank[right] < rank[left] {
+		return right
+	}
+	return left
+}
+
+func repositoryUnmappedIdentity(value providers.RepositoryUnmappedObservation) string {
+	parts := []string{value.Summary, value.Reason, value.Confidence, value.SuggestedReview}
+	for _, citation := range value.Evidence {
+		parts = append(parts, filepath.ToSlash(citation.Path), fmt.Sprint(citation.Line))
+	}
+	return strings.Join(parts, "\x00")
 }
 
 func inferredCandidateID(sortedObservationIDs []string) string {

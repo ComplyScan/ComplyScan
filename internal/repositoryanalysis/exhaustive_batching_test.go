@@ -252,7 +252,7 @@ func TestRunTargetedReviewsEveryCandidateAcrossBoundedBatches(t *testing.T) {
 	}
 }
 
-func TestRunTargetedCompactsSingletonSummariesBeforeCombiningThem(t *testing.T) {
+func TestRunTargetedDropsBulkyNonGroupingFieldsBeforeOneSynthesis(t *testing.T) {
 	repository, expectedPaths := exhaustiveCandidateRepository(10)
 	reviewer := &compactingSynthesisReviewer{}
 
@@ -263,11 +263,24 @@ func TestRunTargetedCompactsSingletonSummariesBeforeCombiningThem(t *testing.T) 
 		t.Fatal(err)
 	}
 	assertExhaustiveSourceCoverage(t, reviewer.requests, expectedPaths)
-	if reviewer.singleSummaryPasses < 2 {
-		t.Fatalf("singleton synthesis passes = %d, want at least 2 oversized source summaries compacted", reviewer.singleSummaryPasses)
+	if reviewer.singleSummaryPasses != 0 {
+		t.Fatalf("singleton synthesis passes = %d, want no per-summary compaction calls", reviewer.singleSummaryPasses)
 	}
-	if reviewer.combinedSummaryPasses == 0 {
-		t.Fatal("compacted summaries were never combined by a later synthesis level")
+	if reviewer.combinedSummaryPasses != 1 {
+		t.Fatalf("combined synthesis passes = %d, want one compact grouping request", reviewer.combinedSummaryPasses)
+	}
+	for _, request := range reviewer.requests {
+		if request.Mode != providers.RepositoryAnalysisSynthesis {
+			continue
+		}
+		if !request.CompactSynthesis {
+			t.Fatal("synthesis request did not use the compact grouping contract")
+		}
+		for _, summary := range request.SubsystemSummaries {
+			if len(summary.UnresolvedQuestions) != 0 {
+				t.Fatal("bulky source-batch questions leaked into compact synthesis input")
+			}
+		}
 	}
 	if result.Coverage.SourceBatchesCompleted != result.Coverage.SourceBatchesTotal || result.Coverage.SourceBatchesTotal < 2 {
 		t.Fatalf("completed compacted synthesis coverage = %#v", result.Coverage)

@@ -3,6 +3,7 @@ package repositoryanalysis
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -161,13 +162,16 @@ func (reviewer *synthesisFragmentPrefetchReviewer) ReviewRepository(_ context.Co
 	result.RateLimits = completeSynthesisCapacity()
 
 	if request.Mode != providers.RepositoryAnalysisSynthesis {
-		result.Result.UnresolvedQuestions = []string{strings.Repeat("bounded source detail ", 600)}
 		if len(request.Files) > 0 {
 			file := request.Files[0]
-			result.Result.AIUses = []providers.RepositoryAIUse{{
-				ID: "provider-local", Name: "Bounded candidate", Purpose: "Exercise semantic fragmentation", Lifecycle: "development", Confidence: "medium",
-				Evidence: []providers.RepositoryCitation{{Path: file.Path, Line: file.ContentStartLine, Summary: "Submitted model invocation"}},
-			}}
+			for index := 0; index < 12; index++ {
+				id := fmt.Sprintf("provider-local-%d", index)
+				result.Result.AIUses = append(result.Result.AIUses, providers.RepositoryAIUse{
+					ID: id, Name: fmt.Sprintf("Bounded candidate %d", index+1), Purpose: strings.Repeat("Detailed bounded workflow purpose ", 10), Lifecycle: "development", Confidence: "medium",
+					Evidence: []providers.RepositoryCitation{{Path: file.Path, Line: file.ContentStartLine, Summary: strings.Repeat("Checked submitted invocation context ", 9)}},
+				})
+				result.Result.AIUseFacts = append(result.Result.AIUseFacts, providers.RepositoryAIUseFactSet{AIUseID: id, Facts: []providers.RepositoryAIUseFact{}, UnresolvedQuestions: []string{}})
+			}
 		}
 		reviewer.mu.Lock()
 		reviewer.providerCalls++
@@ -183,7 +187,7 @@ func (reviewer *synthesisFragmentPrefetchReviewer) ReviewRepository(_ context.Co
 	reviewer.summaryCalls[signature]++
 	if levelScoped && level == 1 && part > 1 && len(request.SubsystemSummaries) == 1 {
 		summary := request.SubsystemSummaries[0]
-		if len(summary.AIUses) > 0 && len(summary.UnresolvedQuestions) > 0 {
+		if len(summary.AIUses) > 0 {
 			reviewer.initialSiblingInputs[signature] = struct{}{}
 		}
 	}
@@ -196,13 +200,17 @@ func (reviewer *synthesisFragmentPrefetchReviewer) ReviewRepository(_ context.Co
 	if shouldReject {
 		return result, &providers.RepositoryValidationError{Diagnostic: "the first singleton synthesis group stayed structurally invalid"}
 	}
+	members := make([]string, 0)
 	for _, summary := range request.SubsystemSummaries {
-		result.Result.AIUses = append(result.Result.AIUses, summary.AIUses...)
-		result.Result.AIUseFacts = append(result.Result.AIUseFacts, summary.AIUseFacts...)
-		result.Result.ObjectiveObservations = append(result.Result.ObjectiveObservations, summary.ObjectiveObservations...)
-		result.Result.UnmappedObservations = append(result.Result.UnmappedObservations, summary.UnmappedObservations...)
+		for _, use := range summary.AIUses {
+			members = append(members, use.MemberObservationIDs...)
+		}
 	}
-	result.Result.UnresolvedQuestions = []string{"completed:" + request.Scope}
+	if len(members) > 0 {
+		result.Result.AIUses = []providers.RepositoryAIUse{{
+			ID: "temporary-group", Name: "Grouped candidate", Purpose: "Connected validated observations", Lifecycle: "development", Confidence: "medium", MemberObservationIDs: members,
+		}}
+	}
 	return result, nil
 }
 
