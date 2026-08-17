@@ -355,12 +355,16 @@ type RepositoryGraphRelationship struct {
 // file index so every returned citation can still be checked against the
 // discovered repository.
 type RepositoryAnalysisRequest struct {
-	Mode               RepositoryAnalysisMode     `json:"mode"`
-	Scope              string                     `json:"scope"`
-	RepositoryFiles    int                        `json:"repository_files"`
-	RepositoryBytes    int64                      `json:"repository_bytes"`
-	MaxOutputTokens    int                        `json:"-"`
-	ValidationFeedback string                     `json:"-"`
+	Mode               RepositoryAnalysisMode `json:"mode"`
+	Scope              string                 `json:"scope"`
+	RepositoryFiles    int                    `json:"repository_files"`
+	RepositoryBytes    int64                  `json:"repository_bytes"`
+	MaxOutputTokens    int                    `json:"-"`
+	ValidationFeedback string                 `json:"-"`
+	// CompactSynthesis asks the model to decide observation membership only.
+	// Validated source facts and citations are reattached locally after the
+	// grouping response, so they do not have to be repeated by the model.
+	CompactSynthesis   bool                       `json:"-"`
 	AllowFollowUp      bool                       `json:"allow_follow_up,omitempty"`
 	OutputRecovery     bool                       `json:"output_recovery,omitempty"`
 	Files              []RepositorySourceFile     `json:"files,omitempty"`
