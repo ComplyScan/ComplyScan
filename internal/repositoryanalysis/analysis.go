@@ -1207,6 +1207,7 @@ func prepareRepositorySourceBatch(chunk repositoryChunk, repository discovery.Re
 		Mode: requestMode, Scope: chunk.scope,
 		RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), Files: chunk.files,
 		Objectives: objectives, Systems: systems, ConfirmedAIUses: bindConfirmedAIUses(confirmedUses, sourceFilePaths(chunk.files)), Graph: chunkGraph, MaxOutputTokens: maxOutputTokens,
+		CompactSource: options.TargetedBatches,
 	}
 	requestBytes := inputBytes
 	if encoded, err := json.Marshal(request); err == nil {

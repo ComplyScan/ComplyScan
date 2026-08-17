@@ -364,7 +364,11 @@ type RepositoryAnalysisRequest struct {
 	// CompactSynthesis asks the model to decide observation membership only.
 	// Validated source facts and citations are reattached locally after the
 	// grouping response, so they do not have to be repeated by the model.
-	CompactSynthesis   bool                       `json:"-"`
+	CompactSynthesis bool `json:"-"`
+	// CompactSource marks one independently analyzed source batch. These calls
+	// extract only decision-relevant evidence atoms; global grouping and the
+	// complete evidence assembly happen after every batch validates.
+	CompactSource      bool                       `json:"-"`
 	AllowFollowUp      bool                       `json:"allow_follow_up,omitempty"`
 	OutputRecovery     bool                       `json:"output_recovery,omitempty"`
 	Files              []RepositorySourceFile     `json:"files,omitempty"`

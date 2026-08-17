@@ -225,7 +225,7 @@ func TestDefaultRepositoryAnalysisCacheUsesCurrentFileVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.Base(path) != "repository-analysis-v6.json" || repositoryCacheContextVersion != "8" || repositoryCacheSchemaVersion != 6 {
+	if filepath.Base(path) != "repository-analysis-v6.json" || repositoryCacheContextVersion != "9" || repositoryCacheSchemaVersion != 6 {
 		t.Fatalf("cache version = path %q context %q schema %d", path, repositoryCacheContextVersion, repositoryCacheSchemaVersion)
 	}
 }

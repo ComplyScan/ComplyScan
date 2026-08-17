@@ -385,11 +385,13 @@ func TestRemoteAdaptersPreserveMeteredUsageOnPostResponseErrors(t *testing.T) {
 
 func TestOpenAITargetedRepositoryReviewUsesCompactReasoningAndSchema(t *testing.T) {
 	for _, testCase := range []struct {
-		name, effort string
-		recovery     bool
+		name, effort  string
+		recovery      bool
+		compactSource bool
 	}{
 		{name: "initial", effort: "medium"},
 		{name: "recovery", effort: "medium", recovery: true},
+		{name: "independent source batch", effort: "low", compactSource: true},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -401,6 +403,11 @@ func TestOpenAITargetedRepositoryReviewUsesCompactReasoningAndSchema(t *testing.
 				textConfig, _ := body["text"].(map[string]any)
 				if reasoning["effort"] != testCase.effort || textConfig["verbosity"] != "low" || body["max_output_tokens"] != float64(4096) {
 					t.Fatalf("compact OpenAI settings = %#v", body)
+				}
+				encodedInput, _ := json.Marshal(body["input"])
+				input := string(encodedInput)
+				if testCase.compactSource && (!strings.Contains(input, "independent source-evidence batch") || !strings.Contains(input, "Omit routine off-topic or merely uncertain objective records")) {
+					t.Fatalf("compact source extraction instructions were omitted: %s", input)
 				}
 				encoded, _ := json.Marshal(textConfig["format"])
 				if !strings.Contains(string(encoded), `"maxItems":12`) || !strings.Contains(string(encoded), `"maxLength":320`) {
@@ -432,7 +439,8 @@ func TestOpenAITargetedRepositoryReviewUsesCompactReasoningAndSchema(t *testing.
 			}
 			result, err := provider.ReviewRepository(context.Background(), RepositoryAnalysisRequest{
 				Mode: RepositoryAnalysisTargeted, Scope: ".", RepositoryFiles: 1, OutputRecovery: testCase.recovery, MaxOutputTokens: 4096,
-				Files: []RepositorySourceFile{{Path: "app.go", Kind: "source", Content: "package app\n"}},
+				CompactSource: testCase.compactSource,
+				Files:         []RepositorySourceFile{{Path: "app.go", Kind: "source", Content: "package app\n"}},
 			})
 			if err != nil {
 				t.Fatal(err)
