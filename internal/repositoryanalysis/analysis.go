@@ -671,10 +671,23 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		}
 		index++
 	}
+	// Targeted source batches deliberately stay small so each model request sees
+	// a focused code excerpt. The resulting validated summaries contain no raw
+	// repository source, so reusing that same small source budget for synthesis
+	// needlessly fragments each summary into many model calls. Synthesis may use
+	// the caller's full configured input allowance while preserving the smaller
+	// source-transfer boundary.
+	synthesisBudget := budget
+	if options.TargetedBatches && options.MaxInputTokens > 0 {
+		configured := sourceBudget(options.MaxInputTokens, objectives, systems, confirmedUses)
+		if configured > synthesisBudget {
+			synthesisBudget = configured
+		}
+	}
 	levels := 0
 	for len(summaries) > 1 {
 		levels++
-		plainGroups := partitionSummaries(summaries, budget)
+		plainGroups := partitionSummaries(summaries, synthesisBudget)
 		groups := make([]repositorySummaryGroup, len(plainGroups))
 		for index := range plainGroups {
 			groups[index] = repositorySummaryGroup{summaries: plainGroups[index]}
@@ -686,7 +699,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			prepared := prepareRepositorySynthesisCall(levels, index, group, repository, files, objectives, systems, confirmedUses, adaptiveTokenLimit, options)
 			scope := prepared.scope
 			maxOutputTokens := prepared.maxOutputTokens
-			if prepared.inputBytes > budget {
+			if prepared.inputBytes > synthesisBudget {
 				parts, split := splitRepositorySummaryGroup(group, maxOutputTokens)
 				if !split && len(group.summaries) == 1 {
 					if fragments, fragmented := fragmentRepositorySection(group.summaries[0]); fragmented {
@@ -698,13 +711,13 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 					}
 				}
 				if !split {
-					return partialFailure(scope, fmt.Errorf("synthesis request requires %d encoded bytes and one semantic summary atom cannot be divided to fit the per-request budget of %d bytes", prepared.inputBytes, budget))
+					return partialFailure(scope, fmt.Errorf("synthesis request requires %d encoded bytes and one semantic summary atom cannot be divided to fit the per-request budget of %d bytes", prepared.inputBytes, synthesisBudget))
 				}
 				shiftRepositorySynthesisPrefetch(synthesisPrefetched, index, len(parts)-1)
 				groups = replaceRepositorySummaryGroup(groups, index, parts)
 				if progressErr := progress(options, Progress{
 					Stage: "synthesis-context-split", Completed: index, Total: len(groups), Scope: scope,
-					InputBytes: prepared.inputBytes, Detail: fmt.Sprintf("encoded synthesis request exceeded %d bytes; split into %d semantic group(s)", budget, len(parts)),
+					InputBytes: prepared.inputBytes, Detail: fmt.Sprintf("encoded synthesis request exceeded %d bytes; split into %d semantic group(s)", synthesisBudget, len(parts)),
 				}); progressErr != nil {
 					return partialFailure(scope, progressErr)
 				}
@@ -775,7 +788,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 						break
 					}
 					candidateCall := prepareRepositorySynthesisCall(levels, candidateIndex, groups[candidateIndex], repository, files, objectives, systems, confirmedUses, adaptiveTokenLimit, options)
-					if candidateCall.inputBytes > budget {
+					if candidateCall.inputBytes > synthesisBudget {
 						break
 					}
 					if observedLimits.TokensKnown && len(wave) > 0 && estimatedTokens+candidateCall.estimatedTokens > observedLimits.RemainingTokens {
@@ -942,7 +955,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			// when the compacted results still cannot be grouped more tightly;
 			// otherwise a large, fully reviewed repository is incorrectly marked
 			// incomplete immediately after the compaction pass.
-			if len(partitionSummaries(next, budget)) >= len(next) {
+			if len(partitionSummaries(next, synthesisBudget)) >= len(next) {
 				fragmented := make([]providers.RepositorySectionResult, 0, len(next))
 				fragmentedAny := false
 				for _, summary := range next {
