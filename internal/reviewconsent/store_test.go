@@ -109,8 +109,50 @@ func TestConsentInvalidatesTheFormerSinglePackageContextContract(t *testing.T) {
 	legacySum := sha256.Sum256(encoded)
 	legacyDigest := hex.EncodeToString(legacySum[:])
 	if currentDigest == legacyDigest {
-		t.Fatal("current exhaustive-review consent digest still matches the former single-package contract")
+		t.Fatal("current adaptive-review consent digest still matches the former single-package contract")
 	}
+}
+
+func TestConsentInvalidatesImmediatePriorExhaustiveBatchContextContract(t *testing.T) {
+	settings := configuredTestAI()
+	currentDigest, err := Digest(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reviewContextContractVersion != "adaptive-provider-pipeline-v2" {
+		t.Fatalf("current review context contract = %q, want adaptive-provider-pipeline-v2", reviewContextContractVersion)
+	}
+
+	current := normalizedAI{
+		Provider: settings.Provider, Endpoint: settings.Remote.BaseURL, Model: settings.Remote.Model,
+		ContextContract: reviewContextContractVersion, APIKeyEnvironment: settings.Remote.APIKeyEnv,
+		ProviderName: settings.Remote.ProviderName, RepositoryMode: settings.RepositoryAnalysis.Mode,
+		RepositoryTokenLimit: settings.RepositoryAnalysis.MaxInputTokens,
+		TimeoutSeconds:       settings.Remote.TimeoutSeconds, MaxFindings: settings.Remote.MaxFindings,
+	}
+	if current.RepositoryMode == "" {
+		current.RepositoryMode = "auto"
+	}
+	if reconstructed := normalizedTestDigest(t, current); reconstructed != currentDigest {
+		t.Fatalf("test reconstruction of current consent digest = %q, want Digest result %q", reconstructed, currentDigest)
+	}
+
+	prior := current
+	prior.ContextContract = "exhaustive-targeted-batches-v1"
+	priorDigest := normalizedTestDigest(t, prior)
+	if priorDigest == currentDigest {
+		t.Fatalf("immediate prior context contract %q still authorizes current contract %q", prior.ContextContract, current.ContextContract)
+	}
+}
+
+func normalizedTestDigest(t *testing.T, value normalizedAI) string {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
 }
 
 func TestConsentStoreRejectsUnsafeOrNonStrictRecords(t *testing.T) {

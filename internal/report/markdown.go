@@ -167,7 +167,7 @@ func WriteDetailedMarkdown(writer io.Writer, report Report) error {
 	}
 
 	if report.Review != nil {
-		if _, err := fmt.Fprintf(writer, "\n## Ollama advisory review\n\n- Model: %s\n- Findings reviewed: %d of %d\n", inlineCode(report.Review.Model), report.Review.Reviewed, report.Review.InputFindings); err != nil {
+		if _, err := fmt.Fprintf(writer, "\n## %s advisory review\n\n- Model: %s\n- Findings reviewed: %d of %d\n", providerDisplayName(report.Review.Provider), inlineCode(report.Review.Model), report.Review.Reviewed, report.Review.InputFindings); err != nil {
 			return err
 		}
 		for _, observation := range report.Review.Observations {
@@ -182,7 +182,7 @@ func WriteDetailedMarkdown(writer io.Writer, report Report) error {
 		}
 	}
 	if len(report.Frameworks) == 0 && report.TechnicalReview != nil {
-		if _, err := fmt.Fprintf(writer, "\n## Ollama technical evidence investigation\n\n- Model: %s\n- Targets investigated: %d of %d\n- Boundary: repository evidence only; runtime verification and legal acceptance remain separate\n", inlineCode(report.TechnicalReview.Model), report.TechnicalReview.Reviewed, report.TechnicalReview.InputCandidates); err != nil {
+		if _, err := fmt.Fprintf(writer, "\n## %s technical evidence investigation\n\n- Model: %s\n- Targets investigated: %d of %d\n- Boundary: repository evidence only; runtime verification and legal acceptance remain separate\n", providerDisplayName(report.TechnicalReview.Provider), inlineCode(report.TechnicalReview.Model), report.TechnicalReview.Reviewed, report.TechnicalReview.InputCandidates); err != nil {
 			return err
 		}
 		for _, observation := range report.TechnicalReview.Observations {
@@ -229,6 +229,9 @@ func WriteDetailedMarkdown(writer io.Writer, report Report) error {
 					return err
 				}
 			}
+		}
+		if err := writeTechnicalReviewNotesMarkdown(writer, report.TechnicalReview.Notes); err != nil {
+			return err
 		}
 	}
 	if len(report.ExecutionVerifications) > 0 {
@@ -297,7 +300,7 @@ func writeRepositoryAnalysisMarkdown(writer io.Writer, analysis providers.Reposi
 	}
 	if analysis.CacheHit {
 		if analysis.Coverage.SourceBatchesTotal > 0 {
-			if _, err := fmt.Fprintf(writer, "- Cached reviewed context: %d original file-excerpt submission(s), %d source-content byte(s); %d of %d bounded source batch(es) completed in the cached review; current run transferred no source\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal); err != nil {
+			if _, err := fmt.Fprintf(writer, "- Cached reviewed context: %d original file-excerpt submission(s), %d source-content byte(s); %d distinct source batch(es) started, %d of %d validated, %d provider request(s) in the cached review; current run transferred no source\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.SourceBatchesStarted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal, analysis.Coverage.ProviderRequests); err != nil {
 				return err
 			}
 		} else if _, err := fmt.Fprintf(writer, "- Cached reviewed context: %d original file-excerpt submission(s), %d source-content byte(s); current run transferred no source\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted); err != nil {
@@ -305,13 +308,13 @@ func writeRepositoryAnalysisMarkdown(writer io.Writer, analysis providers.Reposi
 		}
 	} else if analysis.Coverage.Mode == providers.RepositoryAnalysisTargeted {
 		if analysis.Coverage.SourceBatchesTotal > 0 {
-			if _, err := fmt.Fprintf(writer, "- Submitted candidate context: %d file-excerpt transfer(s), %d source-content byte(s); %d of %d bounded source batch(es) completed\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal); err != nil {
+			if _, err := fmt.Fprintf(writer, "- Candidate-context attempts: %d source-bearing submission attempt(s), %d source-content byte(s); %d distinct source batch(es) started, %d of %d validated, %d provider request(s)\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.SourceBatchesStarted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal, analysis.Coverage.ProviderRequests); err != nil {
 				return err
 			}
-		} else if _, err := fmt.Fprintf(writer, "- Submitted context: %d file-excerpt submission(s), %d source-content byte(s)\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted); err != nil {
+		} else if _, err := fmt.Fprintf(writer, "- Source-bearing submission attempts: %d file excerpt(s), %d source-content byte(s), %d provider request(s)\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.ProviderRequests); err != nil {
 			return err
 		}
-	} else if _, err := fmt.Fprintf(writer, "- Submitted context: %d file submission(s), %d source-content byte(s), %d subsystem(s)\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.Subsystems); err != nil {
+	} else if _, err := fmt.Fprintf(writer, "- Source-bearing submission attempts: %d file excerpt(s), %d source-content byte(s), %d subsystem(s), %d provider request(s)\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.Subsystems, analysis.Coverage.ProviderRequests); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(writer, "- Deterministically checked citations: %d\n", analysis.Coverage.CitationsChecked); err != nil {
@@ -329,6 +332,11 @@ func writeRepositoryAnalysisMarkdown(writer io.Writer, analysis providers.Reposi
 	}
 	if analysis.Usage.PromptTokens > 0 || analysis.Usage.CompletionTokens > 0 {
 		if _, err := fmt.Fprintf(writer, "- Model tokens: %d input, %d output (%d reasoning)\n", analysis.Usage.PromptTokens, analysis.Usage.CompletionTokens, analysis.Usage.ReasoningTokens); err != nil {
+			return err
+		}
+	}
+	if note := repositoryCurrentRunCompatibilityNote(analysis); note != "" {
+		if _, err := fmt.Fprintf(writer, "- Current-run compatibility accounting: %s\n", markdownText(note)); err != nil {
 			return err
 		}
 	}
@@ -435,6 +443,19 @@ func writeRepositoryCitationsMarkdown(writer io.Writer, label string, citations 
 		if _, err := fmt.Fprintf(writer, "- %s: %s — %s\n", markdownText(label), inlineCode(locationText(citation.Path, citation.Line)), markdownText(citation.Summary)); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func writeTechnicalReviewNotesMarkdown(writer io.Writer, notes []string) error {
+	for _, note := range notes {
+		if _, err := fmt.Fprintf(writer, "\n- Evidence investigation note: %s", markdownText(note)); err != nil {
+			return err
+		}
+	}
+	if len(notes) > 0 {
+		_, err := fmt.Fprintln(writer)
+		return err
 	}
 	return nil
 }
@@ -861,7 +882,7 @@ func writeFrameworkTechnicalReviewMarkdown(writer io.Writer, review providers.Te
 			}
 		}
 	}
-	return nil
+	return writeTechnicalReviewNotesMarkdown(writer, review.Notes)
 }
 
 func writeAIInventoryMarkdown(writer io.Writer, value inventory.Report) error {

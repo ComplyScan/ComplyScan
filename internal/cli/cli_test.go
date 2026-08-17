@@ -815,7 +815,7 @@ func TestScanJSONOutputAndSeverityFilter(t *testing.T) {
 	if decoded.Summary.High == 0 || decoded.Summary.Medium != 0 || decoded.Summary.Info != 0 {
 		t.Fatalf("severity filter not reflected in summary: %#v", decoded.Summary)
 	}
-	if decoded.SchemaVersion != 12 || decoded.Tool.Commit != "test" || decoded.Scan.ID == "" || decoded.Scan.Scope.Findings != "full-repository" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
+	if decoded.SchemaVersion != 13 || decoded.Tool.Commit != "test" || decoded.Scan.ID == "" || decoded.Scan.Scope.Findings != "full-repository" || decoded.Scan.Scope.TechnicalEvidence != "full-repository" {
 		t.Fatalf("missing evidence-bundle metadata: %#v", decoded)
 	}
 }
@@ -860,7 +860,7 @@ func TestScanMapsConfirmedAIUseToSystemRequirementsAndScopedEvidence(t *testing.
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 12 || decoded.AIUseMappings == nil || len(decoded.AIUseMappings.Uses) != 1 {
+	if decoded.SchemaVersion != 13 || decoded.AIUseMappings == nil || len(decoded.AIUseMappings.Uses) != 1 {
 		t.Fatalf("per-use mapping missing: %#v", decoded.AIUseMappings)
 	}
 	if decoded.AIUseInventory == nil || len(decoded.AIUseInventory.Confirmed) != 1 ||
@@ -1295,6 +1295,18 @@ func TestTechnicalReviewProgressDistinguishesModelAndCache(t *testing.T) {
 	}
 	if value := output.String(); !strings.Contains(value, "1/2") || !strings.Contains(value, "elapsed 12s") || !strings.Contains(value, "reviewing with Anthropic") || !strings.Contains(value, "2/2") || !strings.Contains(value, "using cached observation") || !strings.Contains(value, "system ranking, 42 owned file(s)") || !strings.Contains(value, "Rate limited · retry 1 in 1m · original wait 1m · Ctrl+C to stop") {
 		t.Fatalf("unexpected progress output:\n%s", value)
+	}
+}
+
+func TestTechnicalReviewCompleteRequiresEveryBoundObservation(t *testing.T) {
+	if technicalReviewComplete(providers.TechnicalReviewResult{InputCandidates: 2, Reviewed: 1, Observations: []providers.TechnicalObservation{{}}}) {
+		t.Fatal("partial technical review was marked complete")
+	}
+	if technicalReviewComplete(providers.TechnicalReviewResult{InputCandidates: 1, Reviewed: 1}) {
+		t.Fatal("technical review count without an observation was marked complete")
+	}
+	if !technicalReviewComplete(providers.TechnicalReviewResult{InputCandidates: 1, Reviewed: 1, Observations: []providers.TechnicalObservation{{}}}) {
+		t.Fatal("fully bound technical review was marked incomplete")
 	}
 }
 
@@ -2089,7 +2101,7 @@ func TestScanMapsSharedEvidenceAcrossEUAndNISTFrameworks(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 12 || len(decoded.Frameworks) != 2 {
+	if decoded.SchemaVersion != 13 || len(decoded.Frameworks) != 2 {
 		t.Fatalf("multi-framework contract missing: %#v", decoded.Frameworks)
 	}
 	var fingerprints []string

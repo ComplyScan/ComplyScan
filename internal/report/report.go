@@ -132,7 +132,7 @@ func NewWithMetadata(target string, tool Tool, scope ScanScope, createdAt time.T
 	created := createdAt.UTC().Format(time.RFC3339Nano)
 	identifier := sha256.Sum256([]byte(strings.Join([]string{target, tool.Version, tool.Commit, created}, "\x00")))
 	return Report{
-		SchemaVersion:         12,
+		SchemaVersion:         13,
 		RepositoryAnalysisRun: RepositoryAnalysisNotRequested,
 		Tool:                  tool,
 		Scan: ScanMetadata{
@@ -502,8 +502,8 @@ func WriteTerminalRepositoryAnalysis(w io.Writer, analysis providers.RepositoryA
 	}
 	if analysis.CacheHit {
 		if analysis.Coverage.SourceBatchesTotal > 0 {
-			if _, err := fmt.Fprintf(w, "        Cached reviewed context: %d original file-excerpt submission(s), %d/%d bounded source batch(es) completed; current run transferred no source\n",
-				analysis.Coverage.FilesSubmitted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal); err != nil {
+			if _, err := fmt.Fprintf(w, "        Cached reviewed context: %d original file-excerpt submission(s), %d source batch(es) started, %d/%d validated, %d provider request(s); current run transferred no source\n",
+				analysis.Coverage.FilesSubmitted, analysis.Coverage.SourceBatchesStarted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal, analysis.Coverage.ProviderRequests); err != nil {
 				return err
 			}
 		} else if _, err := fmt.Fprintf(w, "        Cached reviewed context: %d original file-excerpt submission(s); current run transferred no source\n", analysis.Coverage.FilesSubmitted); err != nil {
@@ -515,24 +515,24 @@ func WriteTerminalRepositoryAnalysis(w io.Writer, analysis providers.RepositoryA
 				return err
 			}
 		} else if analysis.Coverage.SourceBatchesTotal > 0 {
-			if _, err := fmt.Fprintf(w, "        Context: %d file-excerpt transfer(s), %d/%d bounded source batch(es) completed, %d verified citation(s)\n",
-				analysis.Coverage.FilesSubmitted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal, analysis.Coverage.CitationsChecked); err != nil {
+			if _, err := fmt.Fprintf(w, "        Context: %d source-bearing submission attempt(s), %d distinct source batch(es) started, %d/%d validated, %d provider request(s), %d verified citation(s)\n",
+				analysis.Coverage.FilesSubmitted, analysis.Coverage.SourceBatchesStarted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal, analysis.Coverage.ProviderRequests, analysis.Coverage.CitationsChecked); err != nil {
 				return err
 			}
 		} else if analysis.Coverage.ReviewScope == providers.RepositoryReviewScopeChanged {
-			if _, err := fmt.Fprintf(w, "        Context: %d file-excerpt submission(s) from %d eligible review-scope file(s), %d verified citation(s)\n",
-				analysis.Coverage.FilesSubmitted, analysis.Coverage.ScopeFiles, analysis.Coverage.CitationsChecked); err != nil {
+			if _, err := fmt.Fprintf(w, "        Context: %d file-excerpt submission(s) from %d eligible review-scope file(s), %d provider request(s), %d verified citation(s)\n",
+				analysis.Coverage.FilesSubmitted, analysis.Coverage.ScopeFiles, analysis.Coverage.ProviderRequests, analysis.Coverage.CitationsChecked); err != nil {
 				return err
 			}
 		} else {
-			if _, err := fmt.Fprintf(w, "        Context: %d file-excerpt submission(s) from %d discovered file(s), %d verified citation(s)\n",
-				analysis.Coverage.FilesSubmitted, analysis.Coverage.RepositoryFiles, analysis.Coverage.CitationsChecked); err != nil {
+			if _, err := fmt.Fprintf(w, "        Context: %d file-excerpt submission(s) from %d discovered file(s), %d provider request(s), %d verified citation(s)\n",
+				analysis.Coverage.FilesSubmitted, analysis.Coverage.RepositoryFiles, analysis.Coverage.ProviderRequests, analysis.Coverage.CitationsChecked); err != nil {
 				return err
 			}
 		}
 	} else {
-		if _, err := fmt.Fprintf(w, "        Context: %d file-excerpt transfer(s) across a %d-file discovered repository, %d subsystem(s), %d verified citation(s)\n",
-			analysis.Coverage.FilesSubmitted, analysis.Coverage.RepositoryFiles, analysis.Coverage.Subsystems, analysis.Coverage.CitationsChecked); err != nil {
+		if _, err := fmt.Fprintf(w, "        Context: %d source-bearing submission attempt(s) across a %d-file discovered repository, %d subsystem(s), %d provider request(s), %d verified citation(s)\n",
+			analysis.Coverage.FilesSubmitted, analysis.Coverage.RepositoryFiles, analysis.Coverage.Subsystems, analysis.Coverage.ProviderRequests, analysis.Coverage.CitationsChecked); err != nil {
 			return err
 		}
 	}
@@ -596,6 +596,15 @@ func WriteTerminalRepositoryAnalysis(w io.Writer, analysis providers.RepositoryA
 	return err
 }
 
+func repositoryCurrentRunCompatibilityNote(analysis providers.RepositoryAnalysisResult) string {
+	for _, note := range analysis.Notes {
+		if strings.Contains(note, "live source-free model compatibility request") {
+			return note
+		}
+	}
+	return ""
+}
+
 func writeConciseApplicabilityReadiness(w io.Writer, value Report) error {
 	reports := make([]*profile.AssessmentReport, 0, len(value.Frameworks)+1)
 	if value.Applicability != nil {
@@ -651,7 +660,7 @@ func writeFrameworkResultsTerminal(w io.Writer, results []FrameworkResult) error
 
 // WriteTerminalReview renders advisory observations separately from findings.
 func WriteTerminalReview(w io.Writer, review providers.ReviewResult) error {
-	if _, err := fmt.Fprintf(w, "Ollama advisory review (%s): %d of %d finding(s) reviewed\n", review.Model, review.Reviewed, review.InputFindings); err != nil {
+	if _, err := fmt.Fprintf(w, "%s advisory review (%s): %d of %d finding(s) reviewed\n", providerDisplayName(review.Provider), review.Model, review.Reviewed, review.InputFindings); err != nil {
 		return err
 	}
 	for _, observation := range review.Observations {
@@ -679,7 +688,7 @@ func WriteTerminalReview(w io.Writer, review providers.ReviewResult) error {
 // WriteTerminalTechnicalReview renders bounded evidence investigations without
 // merging them into deterministic evidence or legal applicability status.
 func WriteTerminalTechnicalReview(w io.Writer, review providers.TechnicalReviewResult) error {
-	if _, err := fmt.Fprintf(w, "Ollama technical evidence investigation (%s): %d of %d target(s) reviewed\n", review.Model, review.Reviewed, review.InputCandidates); err != nil {
+	if _, err := fmt.Fprintf(w, "%s technical evidence investigation (%s): %d of %d target(s) reviewed\n", providerDisplayName(review.Provider), review.Model, review.Reviewed, review.InputCandidates); err != nil {
 		return err
 	}
 	for _, observation := range review.Observations {
@@ -737,6 +746,33 @@ func WriteTerminalTechnicalReview(w io.Writer, review providers.TechnicalReviewR
 	}
 	_, err := fmt.Fprintln(w)
 	return err
+}
+
+func providerDisplayName(provider providers.Kind) string {
+	switch provider {
+	case providers.Ollama:
+		return "Ollama"
+	case providers.OpenAI:
+		return "OpenAI"
+	case providers.Anthropic:
+		return "Anthropic"
+	case providers.Gemini:
+		return "Google Gemini"
+	case providers.XAI:
+		return "xAI"
+	case providers.Groq:
+		return "Groq"
+	case providers.Mistral:
+		return "Mistral"
+	case providers.OpenRouter:
+		return "OpenRouter"
+	case providers.Compatible:
+		return "OpenAI-compatible provider"
+	case providers.ComplyCloud:
+		return "ComplyScan Cloud"
+	default:
+		return "AI provider"
+	}
 }
 
 // WriteTerminalExecutionVerification renders the isolated command result as

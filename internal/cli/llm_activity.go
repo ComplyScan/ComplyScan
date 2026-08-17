@@ -159,7 +159,7 @@ func (reviewer *technicalActivityReviewer) ReviewTechnical(ctx context.Context, 
 	}
 	activity := startConfiguredLLMActivity(reviewer.output, reviewer.settings, action, "Technical-evidence response received", "Technical-evidence request failed")
 	result, err := reviewer.reviewer.ReviewTechnical(ctx, request)
-	if rateLimit, retryable := providers.AsRemoteRateLimitError(err); retryable && !rateLimit.RequestTooLarge {
+	if retryableTechnicalActivityError(err) {
 		activity.Dismiss()
 	} else {
 		activity.Finish(err)
@@ -174,10 +174,18 @@ func (reviewer *technicalActivityReviewer) PlanTechnicalSearch(ctx context.Conte
 	}
 	activity := startConfiguredLLMActivity(reviewer.output, reviewer.settings, action, "Evidence-search plan received", "Evidence-search planning failed")
 	result, usage, err := reviewer.reviewer.PlanTechnicalSearch(ctx, candidate)
-	if rateLimit, retryable := providers.AsRemoteRateLimitError(err); retryable && !rateLimit.RequestTooLarge {
+	if retryableTechnicalActivityError(err) {
 		activity.Dismiss()
 	} else {
 		activity.Finish(err)
 	}
 	return result, usage, err
+}
+
+func retryableTechnicalActivityError(err error) bool {
+	if rateLimit, ok := providers.AsRemoteRateLimitError(err); ok {
+		return !rateLimit.RequestTooLarge && !rateLimit.Permanent
+	}
+	_, ok := providers.AsRemoteTransientError(err)
+	return ok
 }

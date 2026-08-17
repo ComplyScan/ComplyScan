@@ -751,7 +751,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 					progressWriter = cmd.ErrOrStderr()
 				}
 				modelQualified := true
-				reviewRateLimits := providers.RateLimitSnapshot{}
+				reviewCapacity := repositoryanalysis.CapacityProbeResult{}
 				if len(aiReviewFindings) > 0 || candidateCount > 0 || repositoryAnalysisRequested {
 					if _, err := fmt.Fprintf(progressWriter, "Checking model compatibility before repository review...\n"); err != nil {
 						return fmt.Errorf("write model qualification progress: %w", err)
@@ -765,16 +765,27 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						if repositoryAnalysisRequested {
 							reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisIncomplete
 						}
-						warning := fmt.Sprintf("%s review was incomplete because model qualification failed: %v. Deterministic findings and evidence remain available.", reviewProviderLabel(cfg.AI.Provider), qualificationErr)
+						accounting := qualificationRunAccounting(outcome.Result)
+						if accounting != "" {
+							accounting = " Compatibility attempt accounting: " + accounting + "."
+						}
+						warning := fmt.Sprintf("%s review was incomplete because model qualification failed: %v.%s Deterministic findings and evidence remain available.", reviewProviderLabel(cfg.AI.Provider), qualificationErr, accounting)
 						reportValue.Warnings = append(reportValue.Warnings, warning)
 						if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
 							return fmt.Errorf("write model qualification warning: %w", err)
 						}
 					} else {
-						reviewRateLimits = outcome.Result.RateLimits
+						reviewCapacity.ModelDigest = outcome.Result.Identity.ModelDigest
+						reviewCapacity.RateLimits = outcome.Result.RateLimits
+						if !outcome.Result.FromCache {
+							reviewCapacity.Usage = outcome.Result.Usage
+							reviewCapacity.ProviderRequests = outcome.Result.ProviderRequests
+						}
 						source := "live"
 						if outcome.Result.FromCache {
 							source = "cached"
+						} else if outcome.Result.ProviderRequests > 0 {
+							source = "live; " + qualificationRunAccounting(outcome.Result)
 						}
 						if _, err := fmt.Fprintf(progressWriter, "Model compatibility: compatible (%s check; not a quality or legal approval).\n\n", source); err != nil {
 							return fmt.Errorf("write model qualification result: %w", err)
@@ -802,7 +813,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						}
 					}
 					if isRemoteReviewProvider(cfg.AI.Provider) {
-						disclosure := "Remote review sends every structurally selected candidate file as one or more bounded, redacted code-evidence requests, then may send bounded synthesis and finding records; independent source batches can run concurrently within observed provider limits, and request count and provider cost grow with the candidate set."
+						disclosure := fmt.Sprintf("Remote review sends every structurally selected candidate file as one or more bounded, redacted code-evidence requests, then may send bounded synthesis and finding records; independent source and synthesis batches can run concurrently using complete reported request/token capacity where available or a conservative hosted slow-start otherwise, and request count and provider cost grow with the candidate set (up to the repository-review safety ceiling of %d provider requests).", repositoryanalysis.MaxProviderRequestsPerRun)
 						if deepRepositoryAnalysis {
 							disclosure = "Remote deep review may send substantially more eligible redacted repository text, plus bounded finding records, to the selected provider; usage may incur cost."
 						} else if !repositoryAnalysisRequested {
@@ -824,7 +835,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 					}
 					repositoryReview, reviewErr := reviewRepositoryWithProvider(
 						cmd.Context(), cfg.AI, aiReviewRepository, frameworkEvidenceReports(frameworkResults), cfg.Systems, cfg.Ownership,
-						confirmedAIUseReviewContexts, refreshReview, reviewRateLimits, progressWriter,
+						confirmedAIUseReviewContexts, refreshReview, reviewCapacity, progressWriter,
 					)
 					if reviewErr != nil {
 						aiReviewIncomplete = true
@@ -849,15 +860,19 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						aiUseInventory = aiuse.BuildSnapshotWithRepository(aiUseManifest, aiInventory, result.FullRepository, &repositoryReview, changedSince != "")
 						reportValue.AIUseInventory = &aiUseInventory
 						reportValue.AIUseMappings = buildAIUseMappings(aiUseManifest, cfg.Systems, frameworkResults, aiInventory, &repositoryReview)
-						completionDetail := fmt.Sprintf("%d file-excerpt submission(s)", repositoryReview.Coverage.FilesSubmitted)
+						completionDetail := fmt.Sprintf("%d source-bearing submission attempt(s)", repositoryReview.Coverage.FilesSubmitted)
 						if repositoryReview.Coverage.Mode == providers.RepositoryAnalysisTargeted && repositoryReview.Coverage.FilesSubmitted == 0 {
 							completionDetail = "no structural candidate; no source sent for repository AI review"
 						} else if repositoryReview.CacheHit {
-							completionDetail = fmt.Sprintf("cached evidence coverage: %d original file-excerpt submission(s); current run: 0 model transfers", repositoryReview.Coverage.FilesSubmitted)
+							completionDetail = fmt.Sprintf("cached evidence coverage: %d original file-excerpt submission(s); current run: 0 repository-layer source transfers", repositoryReview.Coverage.FilesSubmitted)
+							if reviewCapacity.ProviderRequests > 0 {
+								completionDetail += fmt.Sprintf("; %d source-free compatibility request(s), %d input / %d output token(s), %d reasoning", reviewCapacity.ProviderRequests, reviewCapacity.Usage.PromptTokens, reviewCapacity.Usage.CompletionTokens, reviewCapacity.Usage.ReasoningTokens)
+							}
 						} else if repositoryReview.Coverage.Subsystems > 0 {
 							completionDetail += fmt.Sprintf(", %d bounded source batch(es) plus synthesis", repositoryReview.Coverage.Subsystems)
-						} else if repositoryReview.Coverage.Mode == providers.RepositoryAnalysisTargeted {
-							completionDetail += ", one or more model calls"
+						}
+						if repositoryReview.Coverage.ProviderRequests > 0 && !repositoryReview.CacheHit {
+							completionDetail += fmt.Sprintf(", %d provider request(s)", repositoryReview.Coverage.ProviderRequests)
 						}
 						if repositoryReview.Usage.PromptTokens > 0 || repositoryReview.Usage.CompletionTokens > 0 {
 							completionDetail += fmt.Sprintf(", %d input / %d output token(s), %d reasoning", repositoryReview.Usage.PromptTokens, repositoryReview.Usage.CompletionTokens, repositoryReview.Usage.ReasoningTokens)
@@ -886,17 +901,24 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 							}
 						}
 						review, reviewErr := reviewFindingsWithProvider(cmd.Context(), progressWriter, cfg.AI, target, aiReviewFindings)
+						reportValue.Review = &review
 						if reviewErr != nil {
 							aiReviewIncomplete = true
-							warning := fmt.Sprintf("%s finding review was incomplete after %s: %v. Deterministic findings remain unchanged.", reviewProviderLabel(cfg.AI.Provider), formatElapsed(time.Since(findingReviewStarted)), reviewErr)
+							warning := fmt.Sprintf("%s finding review was incomplete after %s: %v. Attempt accounting: %s. Deterministic findings remain unchanged.", reviewProviderLabel(cfg.AI.Provider), formatElapsed(time.Since(findingReviewStarted)), reviewErr, findingReviewRunAccounting(review))
 							reportValue.Warnings = append(reportValue.Warnings, warning)
 							if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
 								return fmt.Errorf("write review warning: %w", err)
 							}
+						} else if !findingReviewComplete(review) {
+							aiReviewIncomplete = true
+							warning := fmt.Sprintf("%s finding review was incomplete after %s: the model reviewed %d of %d finding(s). Attempt accounting: %s. Deterministic findings remain unchanged.", reviewProviderLabel(cfg.AI.Provider), formatElapsed(time.Since(findingReviewStarted)), review.Reviewed, review.InputFindings, findingReviewRunAccounting(review))
+							reportValue.Warnings = append(reportValue.Warnings, warning)
+							if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
+								return fmt.Errorf("write incomplete finding review warning: %w", err)
+							}
 						} else {
-							reportValue.Review = &review
 							if len(aiReviewFindings) > 0 {
-								if _, err := fmt.Fprintf(progressWriter, "Finding review completed in %s.\n", formatElapsed(time.Since(findingReviewStarted))); err != nil {
+								if _, err := fmt.Fprintf(progressWriter, "Finding review completed in %s (%s).\n", formatElapsed(time.Since(findingReviewStarted)), findingReviewRunAccounting(review)); err != nil {
 									return fmt.Errorf("write finding review completion: %w", err)
 								}
 							}
@@ -913,26 +935,31 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 					}
 					technicalReview, reviewErr := reviewTechnicalWithProvider(
 						cmd.Context(), cfg.AI, frameworkResults[index].TechnicalEvidence, investigationRequests[index], aiReviewRepository,
-						refreshReview, progressWriter, technicalReviewProgress(progressWriter, cfg.AI.Provider, technicalReviewStarted, time.Now),
+						refreshReview, reviewCapacity.ModelDigest, progressWriter, technicalReviewProgress(progressWriter, cfg.AI.Provider, technicalReviewStarted, time.Now),
 					)
-					if reviewErr != nil {
+					technicalReviewIncomplete := reviewErr != nil || !technicalReviewComplete(technicalReview)
+					if technicalReviewIncomplete {
 						aiReviewIncomplete = true
-						warning := fmt.Sprintf("%s technical evidence review for %s was incomplete after %s: %v. Deterministic evidence remains available.", reviewProviderLabel(cfg.AI.Provider), frameworkResults[index].Name, formatElapsed(time.Since(technicalReviewStarted)), reviewErr)
+						detail := fmt.Sprintf("reviewed %d of %d requested target(s)", technicalReview.Reviewed, technicalReview.InputCandidates)
+						if reviewErr != nil {
+							detail = reviewErr.Error()
+						}
+						warning := fmt.Sprintf("%s technical evidence review for %s was incomplete after %s: %s. Validated partial observations and deterministic evidence remain available.", reviewProviderLabel(cfg.AI.Provider), frameworkResults[index].Name, formatElapsed(time.Since(technicalReviewStarted)), detail)
 						reportValue.Warnings = append(reportValue.Warnings, warning)
 						if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
 							return fmt.Errorf("write technical review warning: %w", err)
 						}
-						continue
-					}
-					if len(investigationRequests[index].Candidates) > 0 {
+					} else if len(investigationRequests[index].Candidates) > 0 {
 						if _, err := fmt.Fprintf(progressWriter, "%s evidence investigation completed in %s.\n", frameworkResults[index].Name, formatElapsed(time.Since(technicalReviewStarted))); err != nil {
 							return fmt.Errorf("write technical review completion: %w", err)
 						}
 					}
-					frameworkResults[index].TechnicalReview = &technicalReview
-					reconciliation.AttachTechnicalInvestigations(&frameworkResults[index].Reconciliation, technicalReview)
-					if frameworkResults[index].TechnicalEvidence.Pack.ID == framework.EUAIActTechnicalEvidencePackID {
-						reportValue.TechnicalReview = &technicalReview
+					if technicalReview.Provider != providers.None || technicalReview.InputCandidates > 0 || technicalReview.Reviewed > 0 || len(technicalReview.Notes) > 0 {
+						frameworkResults[index].TechnicalReview = &technicalReview
+						reconciliation.AttachTechnicalInvestigations(&frameworkResults[index].Reconciliation, technicalReview)
+						if frameworkResults[index].TechnicalEvidence.Pack.ID == framework.EUAIActTechnicalEvidencePackID {
+							reportValue.TechnicalReview = &technicalReview
+						}
 					}
 					reportValue.Frameworks = frameworkResults
 					reportValue.AIUseMappings = buildAIUseMappings(aiUseManifest, cfg.Systems, frameworkResults, aiInventory, completedRepositoryAnalysis(reportValue))
@@ -1187,12 +1214,16 @@ func reviewFindingsWithProvider(
 	findingContext, cancelFindings := context.WithTimeout(ctx, timeout)
 	defer cancelFindings()
 	activity := startConfiguredLLMActivity(activityOutput, settings, "review findings", "Finding-review response received", "Finding-review request failed")
-	findingResult, err := reviewer.Review(findingContext, providers.ReviewRequest{
+	findingResult, err := reviewFindingsWithRetry(findingContext, reviewer, providers.ReviewRequest{
 		RepositoryRoot: target, Findings: findings,
+	}, findingReviewRetryPolicy{
+		MaximumAttempts: maximumFindingReviewAttempts,
+		InitialWait:     initialFindingReviewRetryWait,
+		MaximumWait:     maximumFindingReviewRetryWait,
 	})
 	activity.Finish(err)
 	if err != nil {
-		return providers.ReviewResult{}, fmt.Errorf("%s advisory review: %w", reviewProviderLabel(settings.Provider), err)
+		return findingResult, fmt.Errorf("%s advisory review: %w", reviewProviderLabel(settings.Provider), err)
 	}
 	return findingResult, nil
 }
@@ -1208,7 +1239,7 @@ func reviewRepositoryWithProvider(
 	ownershipRules []ownership.Rule,
 	confirmedAIUses []providers.RepositoryConfirmedAIUse,
 	refresh bool,
-	initialRateLimits providers.RateLimitSnapshot,
+	initialCapacity repositoryanalysis.CapacityProbeResult,
 	progressWriter io.Writer,
 ) (providers.RepositoryAnalysisResult, error) {
 	mode := repositoryanalysis.Mode(settings.RepositoryAnalysis.Mode)
@@ -1218,7 +1249,7 @@ func reviewRepositoryWithProvider(
 	kind := providers.Kind(settings.Provider)
 	model := configuredReviewModel(settings)
 	identity := repositoryanalysis.CacheIdentity{
-		Provider: kind, Model: model, PromptVersion: providers.RepositoryAnalysisPromptVersion,
+		Provider: kind, Model: model, ModelDigest: initialCapacity.ModelDigest, PromptVersion: providers.RepositoryAnalysisPromptVersion,
 		EndpointDigest: repositoryanalysis.DigestEndpoint(repositoryAnalysisEndpointIdentity(settings)),
 	}
 	inputDigest, digestErr := repositoryanalysis.RepositoryInputDigest(
@@ -1242,6 +1273,12 @@ func reviewRepositoryWithProvider(
 			cacheWarning = lookupErr
 			repositoryCache = nil
 		} else if found {
+			if initialCapacity.ProviderRequests > 0 {
+				cached.Notes = append(cached.Notes, fmt.Sprintf(
+					"This scan made %d live source-free model compatibility request(s) before reusing the repository-analysis cache (%d input, %d output, %d reasoning token(s)). It sent no repository source; those compatibility costs are separate from the cached repository-layer coverage and usage totals.",
+					initialCapacity.ProviderRequests, initialCapacity.Usage.PromptTokens, initialCapacity.Usage.CompletionTokens, initialCapacity.Usage.ReasoningTokens,
+				))
+			}
 			if _, err := fmt.Fprintln(progressWriter, "Repository AI reasoning reused a matching private cache entry; no model request was made for this layer."); err != nil {
 				return providers.RepositoryAnalysisResult{}, err
 			}
@@ -1254,22 +1291,27 @@ func reviewRepositoryWithProvider(
 	}
 	model = configuredModel
 	kind = configuredKind
-	var probeRateLimits func(context.Context) (providers.RateLimitSnapshot, error)
-	if kind == providers.OpenAI && !initialRateLimits.Available() {
-		probeRateLimits = func(probeContext context.Context) (providers.RateLimitSnapshot, error) {
+	var probeRateLimits func(context.Context) (repositoryanalysis.CapacityProbeResult, error)
+	// A live qualification request is already the source-free capacity probe.
+	// Repeat it only when compatibility came from cache and therefore supplied
+	// neither current-run request accounting nor a live capacity snapshot.
+	if kind != providers.None && kind != providers.Ollama && !initialCapacity.RateLimits.Available() && initialCapacity.ProviderRequests == 0 {
+		probeRateLimits = func(probeContext context.Context) (repositoryanalysis.CapacityProbeResult, error) {
 			outcome, probeErr := qualifyConfiguredModel(probeContext, settings, true)
-			if probeErr != nil {
-				return providers.RateLimitSnapshot{}, probeErr
-			}
-			return outcome.Result.RateLimits, nil
+			return repositoryanalysis.CapacityProbeResult{
+				RateLimits: outcome.Result.RateLimits, Usage: outcome.Result.Usage, ProviderRequests: outcome.Result.ProviderRequests,
+				ModelDigest: outcome.Result.Identity.ModelDigest,
+			}, probeErr
 		}
 	}
 	liveCountdown := llmActivityAvailable(progressWriter)
 	result, err := repositoryanalysis.Run(ctx, reviewer, repository, evidence, systems, repositoryanalysis.Options{
 		Mode: mode, MaxInputTokens: settings.RepositoryAnalysis.MaxInputTokens, Provider: kind, Model: model,
 		Ownership: ownershipRules, ConfirmedAIUses: confirmedAIUses,
-		InitialRateLimits: initialRateLimits,
-		ProbeRateLimits:   probeRateLimits,
+		InitialRateLimits:       initialCapacity.RateLimits,
+		InitialUsage:            initialCapacity.Usage,
+		InitialProviderRequests: initialCapacity.ProviderRequests,
+		ProbeRateLimits:         probeRateLimits,
 		OnProgress: func(progress repositoryanalysis.Progress) error {
 			switch progress.Stage {
 			case "targeted-batch-queue":
@@ -1279,16 +1321,22 @@ func reviewRepositoryWithProvider(
 				_, err := fmt.Fprintf(progressWriter, "Starting AI evidence batch %d/%d: %s\n", progress.Completed, progress.Total, progress.Scope)
 				return err
 			case "targeted-batch-concurrency":
-				_, err := fmt.Fprintf(progressWriter, "Provider capacity detected: running %d source batches concurrently (%s).\n", progress.Completed, progress.Detail)
+				_, err := fmt.Fprintf(progressWriter, "Adaptive provider scheduler: running %d source batches concurrently (%s).\n", progress.Completed, progress.Detail)
+				return err
+			case "synthesis-concurrency":
+				_, err := fmt.Fprintf(progressWriter, "Adaptive provider scheduler: running %d independent synthesis groups concurrently (%s).\n", progress.Completed, progress.Detail)
+				return err
+			case "synthesis-start":
+				_, err := fmt.Fprintf(progressWriter, "Starting synthesis group %d/%d: %s\n", progress.Completed, progress.Total, progress.Scope)
 				return err
 			case "rate-limit-probe":
-				_, err := fmt.Fprintln(progressWriter, "Checking live OpenAI request/token capacity with a source-free request...")
+				_, err := fmt.Fprintf(progressWriter, "Checking live %s request/token capacity with source-free compatibility contracts (normally two requests, at most four including retries)...\n", reviewProviderLabel(settings.Provider))
 				return err
 			case "rate-limit-probe-complete":
-				_, err := fmt.Fprintf(progressWriter, "Live OpenAI capacity detected: %s.\n", progress.Detail)
+				_, err := fmt.Fprintf(progressWriter, "Live %s compatibility/capacity check completed: %s.\n", reviewProviderLabel(settings.Provider), progress.Detail)
 				return err
 			case "rate-limit-probe-fallback":
-				_, err := fmt.Fprintf(progressWriter, "Live OpenAI capacity unavailable; %s.\n", progress.Detail)
+				_, err := fmt.Fprintf(progressWriter, "Live %s capacity unavailable; %s.\n", reviewProviderLabel(settings.Provider), progress.Detail)
 				return err
 			case "batch-capacity-wait":
 				if progress.Wait != progress.OriginalWait {
@@ -1304,6 +1352,15 @@ func reviewRepositoryWithProvider(
 				return err
 			case "adaptive-limit-retry":
 				_, err := fmt.Fprintf(progressWriter, "Provider limit requires a smaller response; retrying %s without dropping evidence (%s).\n", progress.Scope, progress.Detail)
+				return err
+			case "validation-repair":
+				_, err := fmt.Fprintf(progressWriter, "Provider response failed strict local validation; regenerating %s from the same evidence (%d/%d).\n", progress.Scope, progress.Completed, progress.Total)
+				return err
+			case "validation-split":
+				_, err := fmt.Fprintf(progressWriter, "Structured output stayed invalid after bounded repair; splitting %s and continuing (%s).\n", progress.Scope, progress.Detail)
+				return err
+			case "synthesis-context-split":
+				_, err := fmt.Fprintf(progressWriter, "Synthesis context is still too large; dividing validated summaries without changing their identities (%s).\n", progress.Detail)
 				return err
 			case "targeted-selection":
 				_, err := fmt.Fprintf(progressWriter, "Local structural selection complete: %s; %d byte(s) of code and graph context prepared.\n", progress.Detail, progress.InputBytes)
@@ -1401,6 +1458,10 @@ func frameworkEvidenceReports(results []report.FrameworkResult) []framework.Tech
 	return evidence
 }
 
+func technicalReviewComplete(result providers.TechnicalReviewResult) bool {
+	return result.Reviewed == result.InputCandidates && len(result.Observations) == result.Reviewed
+}
+
 func reviewTechnicalWithProvider(
 	ctx context.Context,
 	settings config.AIConfig,
@@ -1408,6 +1469,7 @@ func reviewTechnicalWithProvider(
 	investigationRequest providers.TechnicalReviewRequest,
 	repository discovery.Repository,
 	refresh bool,
+	modelDigest string,
 	activityOutput io.Writer,
 	onProgress func(technicalreview.Progress) error,
 ) (providers.TechnicalReviewResult, error) {
@@ -1415,7 +1477,7 @@ func reviewTechnicalWithProvider(
 	if err != nil {
 		return providers.TechnicalReviewResult{}, err
 	}
-	return runTechnicalReview(ctx, reviewer, settings, evidence, investigationRequest, repository, refresh, maxFindings, model, kind, activityOutput, onProgress)
+	return runTechnicalReview(ctx, reviewer, settings, evidence, investigationRequest, repository, refresh, maxFindings, model, modelDigest, kind, activityOutput, onProgress)
 }
 
 func runTechnicalReview(
@@ -1428,6 +1490,7 @@ func runTechnicalReview(
 	refresh bool,
 	maxFindings int,
 	model string,
+	modelDigest string,
 	kind providers.Kind,
 	activityOutput io.Writer,
 	onProgress func(technicalreview.Progress) error,
@@ -1448,7 +1511,7 @@ func runTechnicalReview(
 	activeReviewer := &technicalActivityReviewer{reviewer: reviewer, output: activityOutput, settings: settings}
 	technicalResult, err := technicalreview.Run(ctx, activeReviewer, investigationRequest, technicalreview.Options{
 		Identity: technicalreview.Identity{
-			Provider: kind, Model: model, PromptVersion: providers.TechnicalReviewPromptVersion,
+			Provider: kind, Model: model, ModelDigest: modelDigest, PromptVersion: providers.TechnicalReviewPromptVersion,
 			PackID: evidence.Pack.ID, PackVersion: evidence.Pack.Version, PackDigest: evidence.Pack.Digest,
 		},
 		Cache: cache, Refresh: refresh, MaxCandidates: maxFindings, MaxPerObjective: 2, OnProgress: onProgress,
@@ -1456,16 +1519,18 @@ func runTechnicalReview(
 			return reviewcontext.ApplyFollowUp(candidate, plan, repository)
 		},
 	})
-	if err != nil {
-		return providers.TechnicalReviewResult{}, fmt.Errorf("%s technical evidence investigation: %w", reviewProviderLabel(settings.Provider), err)
-	}
 	if cacheUnavailable {
 		technicalResult.Notes = append(technicalResult.Notes, "The local technical review cache was unavailable; review continued without cache reuse.")
+	}
+	if err != nil {
+		return technicalResult, fmt.Errorf("%s technical evidence investigation: %w", reviewProviderLabel(settings.Provider), err)
 	}
 	return technicalResult, nil
 }
 
-func configuredReviewer(settings config.AIConfig) (*providers.OllamaProvider, time.Duration, int, string, providers.Kind, error) {
+var configuredReviewer = newConfiguredReviewer
+
+func newConfiguredReviewer(settings config.AIConfig) (*providers.OllamaProvider, time.Duration, int, string, providers.Kind, error) {
 	if settings.Provider == "ollama" {
 		timeout := time.Duration(settings.Ollama.TimeoutSeconds) * time.Second
 		reviewer, err := providers.NewOllama(providers.OllamaOptions{
@@ -1556,6 +1621,14 @@ func technicalReviewProgress(output io.Writer, provider string, started time.Tim
 				return nil
 			}
 			_, err := fmt.Fprintf(output, "\r\x1b[2KCooldown complete · starting retry %d...\n", progress.Attempt)
+			return err
+		}
+		if progress.Stage == technicalreview.ProgressStageOutputRecovery {
+			_, err := fmt.Fprintf(output, "Model output was truncated; retrying technical target %d/%d with a larger bounded output allowance...\n", progress.Current, progress.Total)
+			return err
+		}
+		if progress.Stage == technicalreview.ProgressStageValidationRepair {
+			_, err := fmt.Fprintf(output, "Structured technical response failed local binding; regenerating target %d/%d from the same bounded evidence...\n", progress.Current, progress.Total)
 			return err
 		}
 		status := "reviewing with " + reviewProviderLabel(provider)

@@ -58,13 +58,19 @@ func TestBatchedRepositoryCompletionWordingIncludesSourceBatchesAndSynthesis(t *
 		t.Fatal(err)
 	}
 	text := string(source)
+	start := strings.Index(text, `completionDetail := fmt.Sprintf("%d source-bearing submission attempt(s)"`)
+	end := strings.Index(text, `Repository AI reasoning completed in %s using %s context (%s).\n`)
+	if start < 0 || end <= start {
+		t.Fatal("could not isolate repository-analysis completion wording")
+	}
+	text = text[start:end]
 	batchBranch := strings.Index(text, "repositoryReview.Coverage.Subsystems > 0")
 	batchWording := strings.Index(text, "%d bounded source batch(es) plus synthesis")
 	singleCallBranch := strings.Index(text, "else if repositoryReview.Coverage.Mode == providers.RepositoryAnalysisTargeted")
 	if batchBranch < 0 || batchWording < 0 {
 		t.Fatal("CLI completion no longer reports bounded source batches plus synthesis")
 	}
-	if singleCallBranch < 0 || batchBranch > singleCallBranch || batchWording > singleCallBranch {
+	if singleCallBranch >= 0 && (batchBranch > singleCallBranch || batchWording > singleCallBranch) {
 		t.Fatal("single targeted-call wording can run before the batched source-plus-synthesis wording")
 	}
 }
@@ -75,7 +81,7 @@ func TestTargetedRepositoryCompletionDoesNotClaimAnExactModelCallCount(t *testin
 		t.Fatal(err)
 	}
 	text := string(source)
-	start := strings.Index(text, `completionDetail := fmt.Sprintf("%d file-excerpt submission(s)"`)
+	start := strings.Index(text, `completionDetail := fmt.Sprintf("%d source-bearing submission attempt(s)"`)
 	endMarker := `Repository AI reasoning completed in %s using %s context (%s).\n`
 	end := strings.Index(text, endMarker)
 	if start < 0 || end <= start {
@@ -89,20 +95,22 @@ func TestTargetedRepositoryCompletionDoesNotClaimAnExactModelCallCount(t *testin
 	}
 }
 
-func TestTargetedRepositoryCompletionHandlesZeroSubmissionBeforeModelCallWording(t *testing.T) {
+func TestTargetedRepositoryCompletionDoesNotClaimModelCallsForZeroSubmission(t *testing.T) {
 	source, err := os.ReadFile("cli.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(source)
 	zero := strings.Index(text, "repositoryReview.Coverage.FilesSubmitted == 0")
-	modelCalls := strings.Index(text, "one or more model calls")
-	if zero < 0 || modelCalls < 0 || zero > modelCalls {
-		t.Fatalf("zero-submission completion does not precede generic model-call wording")
+	if zero < 0 {
+		t.Fatal("zero-submission completion branch is missing")
 	}
-	block := text[zero:modelCalls]
+	block := text[zero:]
 	if !strings.Contains(block, "no structural candidate; no source sent for repository AI review") {
 		t.Fatalf("zero-submission completion lacks truthful no-call wording:\n%s", block)
+	}
+	if strings.Contains(block, "one or more model calls") {
+		t.Fatalf("zero-submission completion contains an unsupported model-call claim:\n%s", block)
 	}
 }
 

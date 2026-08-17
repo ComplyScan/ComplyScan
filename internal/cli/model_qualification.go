@@ -22,6 +22,7 @@ type modelQualificationOutcome struct {
 var (
 	modelQualificationDefaultPath = modelqualification.DefaultPath
 	modelQualificationNow         = time.Now
+	modelQualificationReviewer    = configuredModelQualificationReviewer
 	lookupConfiguredQualification = lookupModelQualification
 	qualifyConfiguredModel        = runModelQualification
 )
@@ -64,7 +65,7 @@ func runModelQualification(ctx context.Context, settings config.AIConfig, refres
 			return modelQualificationOutcome{Result: result, CacheWarning: cacheWarning}, nil
 		}
 	}
-	reviewer, timeout, _, _, _, err := configuredReviewer(settings)
+	reviewer, timeout, err := modelQualificationReviewer(settings)
 	if err != nil {
 		return modelQualificationOutcome{}, err
 	}
@@ -75,7 +76,7 @@ func runModelQualification(ctx context.Context, settings config.AIConfig, refres
 	defer cancel()
 	result, err := modelqualification.Qualify(probeContext, reviewer, identity, modelQualificationNow())
 	if err != nil {
-		return modelQualificationOutcome{}, err
+		return modelQualificationOutcome{Result: result, CacheWarning: cacheWarning}, err
 	}
 	if cache != nil {
 		if storeErr := cache.Store(result); storeErr != nil {
@@ -83,6 +84,11 @@ func runModelQualification(ctx context.Context, settings config.AIConfig, refres
 		}
 	}
 	return modelQualificationOutcome{Result: result, CacheWarning: cacheWarning}, nil
+}
+
+func configuredModelQualificationReviewer(settings config.AIConfig) (modelqualification.Reviewer, time.Duration, error) {
+	reviewer, timeout, _, _, _, err := configuredReviewer(settings)
+	return reviewer, timeout, err
 }
 
 func configuredQualificationIdentity(ctx context.Context, settings config.AIConfig) (modelqualification.Identity, error) {
@@ -114,7 +120,7 @@ func finishSetupModelQualification(ctx context.Context, output interface {
 		_, err := fmt.Fprintln(output, "Model configured but not contacted during non-interactive setup. Run `complyscan doctor --probe-review` or pass `--qualify-model` to check it automatically.")
 		return true, err
 	}
-	if _, err := fmt.Fprintf(output, "Checking %s model %q with a small synthetic compatibility request (no repository data)...\n", reviewProviderLabel(settings.Provider), configuredReviewModel(settings)); err != nil {
+	if _, err := fmt.Fprintf(output, "Checking %s model %q with bounded synthetic finding and repository compatibility requests (no repository data; at most %d provider requests including retries)...\n", reviewProviderLabel(settings.Provider), configuredReviewModel(settings), modelqualification.MaximumProviderRequests); err != nil {
 		return false, err
 	}
 	qualificationStarted := time.Now()
@@ -122,7 +128,11 @@ func finishSetupModelQualification(ctx context.Context, output interface {
 	outcome, err := qualifyConfiguredModel(ctx, settings, false)
 	activity.Finish(err)
 	if err != nil {
-		if _, writeErr := fmt.Fprintf(output, "Model qualification failed after %s: %v\nDeterministic setup will continue; choose another model or retry with `complyscan doctor --probe-review`.\n", formatElapsed(time.Since(qualificationStarted)), err); writeErr != nil {
+		accounting := qualificationRunAccounting(outcome.Result)
+		if accounting != "" {
+			accounting = "\nCompatibility attempt accounting: " + accounting + "."
+		}
+		if _, writeErr := fmt.Fprintf(output, "Model qualification failed after %s: %v%s\nDeterministic setup will continue; choose another model or retry with `complyscan doctor --probe-review`.\n", formatElapsed(time.Since(qualificationStarted)), err, accounting); writeErr != nil {
 			return false, writeErr
 		}
 		return false, nil
@@ -130,6 +140,8 @@ func finishSetupModelQualification(ctx context.Context, output interface {
 	source := "live check"
 	if outcome.Result.FromCache {
 		source = "cached check"
+	} else if outcome.Result.ProviderRequests > 0 {
+		source = "live check; " + qualificationRunAccounting(outcome.Result)
 	}
 	if _, err := fmt.Fprintf(output, "Model status: compatible in %s (%s; expires %s). This checks the ComplyScan contract, not model accuracy or legal correctness.\n", formatElapsed(time.Since(qualificationStarted)), source, outcome.Result.ExpiresAt.Format("2006-01-02")); err != nil {
 		return false, err
@@ -140,4 +152,12 @@ func finishSetupModelQualification(ctx context.Context, output interface {
 		}
 	}
 	return true, nil
+}
+
+func qualificationRunAccounting(result modelqualification.Result) string {
+	if result.ProviderRequests <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d provider request(s), %d input / %d output / %d reasoning token(s)",
+		result.ProviderRequests, result.Usage.PromptTokens, result.Usage.CompletionTokens, result.Usage.ReasoningTokens)
 }

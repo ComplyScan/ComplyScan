@@ -50,7 +50,7 @@ func newDoctorCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 		},
 	}
 	command.Flags().StringVar(&configPath, "config", "", "configuration file (defaults to <path>/.complyscan.yml)")
-	command.Flags().BoolVar(&probeReview, "probe-review", false, "send a small synthetic structured-output request to the configured reviewer (remote providers may charge)")
+	command.Flags().BoolVar(&probeReview, "probe-review", false, "send bounded synthetic finding and repository compatibility requests to the configured reviewer (normally two, at most four including retries; remote providers may charge)")
 	return command
 }
 
@@ -225,11 +225,21 @@ func runDoctor(ctx context.Context, stdout io.Writer, build BuildInfo, target, c
 			outcome, qualificationErr := qualifyConfiguredModel(ctx, cfg.AI, true)
 			activity.Finish(qualificationErr)
 			if qualificationErr != nil {
-				if writeErr := output.write("FAIL", "review compatibility", qualificationErr.Error()); writeErr != nil {
+				detail := qualificationErr.Error()
+				if accounting := qualificationRunAccounting(outcome.Result); accounting != "" {
+					detail += "; compatibility attempt accounting: " + accounting
+				}
+				if writeErr := output.write("FAIL", "review compatibility", detail); writeErr != nil {
 					return writeErr
 				}
-			} else if err := output.write("PASS", "review compatibility", fmt.Sprintf("compatible; checked with synthetic input and cached until %s", outcome.Result.ExpiresAt.Format("2006-01-02"))); err != nil {
-				return err
+			} else {
+				detail := fmt.Sprintf("compatible; checked with synthetic input and cached until %s", outcome.Result.ExpiresAt.Format("2006-01-02"))
+				if accounting := qualificationRunAccounting(outcome.Result); accounting != "" {
+					detail += "; " + accounting
+				}
+				if err := output.write("PASS", "review compatibility", detail); err != nil {
+					return err
+				}
 			}
 			if qualificationErr == nil && outcome.CacheWarning != nil {
 				if err := output.write("WARN", "qualification cache", outcome.CacheWarning.Error()); err != nil {

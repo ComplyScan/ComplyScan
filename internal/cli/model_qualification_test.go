@@ -15,6 +15,27 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/providers"
 )
 
+type qualificationReviewFunc func(context.Context, providers.ReviewRequest) (providers.ReviewResult, error)
+
+func (function qualificationReviewFunc) Review(ctx context.Context, request providers.ReviewRequest) (providers.ReviewResult, error) {
+	return function(ctx, request)
+}
+
+type qualificationRepositoryReviewFunc func(context.Context, providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error)
+
+type qualificationReviewerStub struct {
+	review     qualificationReviewFunc
+	repository qualificationRepositoryReviewFunc
+}
+
+func (reviewer qualificationReviewerStub) Review(ctx context.Context, request providers.ReviewRequest) (providers.ReviewResult, error) {
+	return reviewer.review(ctx, request)
+}
+
+func (reviewer qualificationReviewerStub) ReviewRepository(ctx context.Context, request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
+	return reviewer.repository(ctx, request)
+}
+
 func TestFinishSetupModelQualificationUsesAutomaticCompatibleResult(t *testing.T) {
 	previous := qualifyConfiguredModel
 	qualifyConfiguredModel = func(context.Context, config.AIConfig, bool) (modelQualificationOutcome, error) {
@@ -30,7 +51,7 @@ func TestFinishSetupModelQualificationUsesAutomaticCompatibleResult(t *testing.T
 	if err != nil || !ready {
 		t.Fatalf("ready=%t err=%v output=%s", ready, err, output.String())
 	}
-	for _, expected := range []string{"small synthetic compatibility request", "Model status: compatible", "cached check", "not model accuracy or legal correctness"} {
+	for _, expected := range []string{"bounded synthetic finding and repository compatibility requests", "at most 4 provider requests", "Model status: compatible", "cached check", "not model accuracy or legal correctness"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("output missing %q:\n%s", expected, output.String())
 		}
@@ -40,7 +61,10 @@ func TestFinishSetupModelQualificationUsesAutomaticCompatibleResult(t *testing.T
 func TestFinishSetupModelQualificationFallsBackDeterministically(t *testing.T) {
 	previous := qualifyConfiguredModel
 	qualifyConfiguredModel = func(context.Context, config.AIConfig, bool) (modelQualificationOutcome, error) {
-		return modelQualificationOutcome{}, errors.New("schema unsupported")
+		return modelQualificationOutcome{Result: modelqualification.Result{
+			ProviderRequests: 2,
+			Usage:            providers.Usage{PromptTokens: 9, CompletionTokens: 4, ReasoningTokens: 1},
+		}}, errors.New("schema unsupported")
 	}
 	t.Cleanup(func() { qualifyConfiguredModel = previous })
 	settings := config.Default().AI
@@ -50,7 +74,7 @@ func TestFinishSetupModelQualificationFallsBackDeterministically(t *testing.T) {
 	if err != nil || ready {
 		t.Fatalf("ready=%t err=%v output=%s", ready, err, output.String())
 	}
-	if !strings.Contains(output.String(), "Deterministic setup will continue") {
+	if !strings.Contains(output.String(), "Deterministic setup will continue") || !strings.Contains(output.String(), "2 provider request(s), 9 input / 4 output / 1 reasoning token(s)") {
 		t.Fatalf("fallback output:\n%s", output.String())
 	}
 }
@@ -112,6 +136,76 @@ func TestConfiguredQualificationIdentitySeparatesCompatibleEndpoints(t *testing.
 	}
 	if identity.ModelDigest == other.ModelDigest {
 		t.Fatalf("endpoint identity was reused: %#v %#v", identity, other)
+	}
+}
+
+func TestRunModelQualificationRetriesAndCachesExactLiveAccounting(t *testing.T) {
+	settings := config.Default().AI
+	settings.Provider = "openai-compatible"
+	settings.Remote = config.RemoteConfig{
+		ProviderName: "Acme", BaseURL: "https://models.example.test/v1", Model: "test-model",
+		APIKeyEnv: "COMPLYSCAN_QUALIFICATION_RETRY_KEY", TimeoutSeconds: 5, MaxFindings: 1,
+	}
+	findingCalls, repositoryCalls := 0, 0
+	previousReviewer := modelQualificationReviewer
+	modelQualificationReviewer = func(config.AIConfig) (modelqualification.Reviewer, time.Duration, error) {
+		return qualificationReviewerStub{
+			review: func(_ context.Context, request providers.ReviewRequest) (providers.ReviewResult, error) {
+				findingCalls++
+				finding := request.Findings[0]
+				result := providers.ReviewResult{
+					Provider: providers.Compatible, Model: "test-model", InputFindings: 1,
+					Usage: providers.Usage{PromptTokens: 10 + findingCalls, CompletionTokens: findingCalls},
+				}
+				if findingCalls == 1 {
+					return result, &providers.RemoteTransientError{Provider: "Acme", StatusCode: http.StatusServiceUnavailable}
+				}
+				result.Reviewed = 1
+				result.Observations = []providers.Observation{{Fingerprint: finding.Fingerprint, RuleID: finding.RuleID}}
+				result.RateLimits = providers.RateLimitSnapshot{RequestsKnown: true, LimitRequests: 500, RemainingRequests: 498}
+				return result, nil
+			},
+			repository: func(_ context.Context, request providers.RepositoryAnalysisRequest) (providers.RepositoryAnalysisResult, error) {
+				repositoryCalls++
+				return providers.RepositoryAnalysisResult{
+					Provider: providers.Compatible, Model: "test-model",
+					Coverage: providers.RepositoryCoverage{Mode: request.Mode, FilesSubmitted: len(request.Files)},
+					Result: providers.RepositorySectionResult{
+						AIUses: []providers.RepositoryAIUse{},
+						AIUseFacts: []providers.RepositoryAIUseFactSet{{
+							AIUseID: request.ConfirmedAIUses[0].ID, Facts: []providers.RepositoryAIUseFact{}, UnresolvedQuestions: []string{"Runtime operation is intentionally unknown."},
+						}},
+						ObjectiveObservations: []providers.RepositoryObjectiveObservation{},
+						UnmappedObservations:  []providers.RepositoryUnmappedObservation{},
+						UnresolvedQuestions:   []string{"Synthetic evidence cannot establish production use."},
+					},
+					Usage:      providers.Usage{PromptTokens: 20, CompletionTokens: 4, ReasoningTokens: 2},
+					RateLimits: providers.RateLimitSnapshot{RequestsKnown: true, LimitRequests: 500, RemainingRequests: 497},
+				}, nil
+			},
+		}, 5 * time.Second, nil
+	}
+	t.Cleanup(func() { modelQualificationReviewer = previousReviewer })
+	previousPath := modelQualificationDefaultPath
+	qualificationPath := filepath.Join(t.TempDir(), "qualification.json")
+	modelQualificationDefaultPath = func() (string, error) {
+		return qualificationPath, nil
+	}
+	t.Cleanup(func() { modelQualificationDefaultPath = previousPath })
+
+	outcome, err := runModelQualification(context.Background(), settings, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findingCalls != 2 || repositoryCalls != 1 || outcome.Result.ProviderRequests != 3 || outcome.Result.Usage.PromptTokens != 43 || outcome.Result.Usage.CompletionTokens != 7 || outcome.Result.Usage.ReasoningTokens != 2 || outcome.Result.RateLimits.RemainingRequests != 497 {
+		t.Fatalf("live outcome=%#v finding calls=%d repository calls=%d, want three exact attempts and cumulative accounting", outcome.Result, findingCalls, repositoryCalls)
+	}
+	cached, err := runModelQualification(context.Background(), settings, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cached.Result.FromCache || cached.Result.ProviderRequests != 0 || findingCalls != 2 || repositoryCalls != 1 {
+		t.Fatalf("cached outcome=%#v finding calls=%d repository calls=%d, want no current-run provider request", cached.Result, findingCalls, repositoryCalls)
 	}
 }
 

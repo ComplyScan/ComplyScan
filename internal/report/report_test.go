@@ -65,7 +65,7 @@ func TestWriteJSON(t *testing.T) {
 	}, Uses: []usemapping.UseResult{{UseID: "assistant", UseName: "Assistant"}}}
 	value.RepositoryAnalysisRun = RepositoryAnalysisCompleted
 	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{Coverage: providers.RepositoryCoverage{
-		Mode: providers.RepositoryAnalysisTargeted, Subsystems: 2, SourceBatchesCompleted: 2, SourceBatchesTotal: 2,
+		Mode: providers.RepositoryAnalysisTargeted, Subsystems: 2, SourceBatchesStarted: 2, SourceBatchesCompleted: 2, SourceBatchesTotal: 2, ProviderRequests: 3,
 	}, Result: providers.RepositorySectionResult{
 		AIUses: []providers.RepositoryAIUse{{
 			ID: "inferred-use-example", Name: "Inferred assistant", Purpose: "Draft replies", Confidence: "medium",
@@ -85,7 +85,7 @@ func TestWriteJSON(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 12 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
+	if decoded.SchemaVersion != 13 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
 		t.Fatalf("unexpected tool: %#v", decoded.Tool)
 	}
 	if decoded.RepositoryAnalysisRun != RepositoryAnalysisCompleted {
@@ -107,13 +107,16 @@ func TestWriteJSON(t *testing.T) {
 		t.Fatalf("use-scoped repository observation was not serialized: %#v", decoded.RepositoryAnalysis)
 	}
 	if len(decoded.RepositoryAnalysis.Result.AIUses) != 1 || !reflect.DeepEqual(decoded.RepositoryAnalysis.Result.AIUses[0].MemberObservationIDs, []string{"observation-a", "observation-b"}) {
-		t.Fatalf("schema-version 12 inferred-use observation membership was not serialized: %#v", decoded.RepositoryAnalysis.Result.AIUses)
+		t.Fatalf("schema-version 13 inferred-use observation membership was not serialized: %#v", decoded.RepositoryAnalysis.Result.AIUses)
 	}
-	if decoded.RepositoryAnalysis.Coverage.SourceBatchesCompleted != 2 || decoded.RepositoryAnalysis.Coverage.SourceBatchesTotal != 2 {
-		t.Fatalf("schema-version 12 batch coverage was not serialized: %#v", decoded.RepositoryAnalysis.Coverage)
+	if decoded.RepositoryAnalysis.Coverage.SourceBatchesStarted != 2 || decoded.RepositoryAnalysis.Coverage.SourceBatchesCompleted != 2 || decoded.RepositoryAnalysis.Coverage.SourceBatchesTotal != 2 || decoded.RepositoryAnalysis.Coverage.ProviderRequests != 3 {
+		t.Fatalf("schema-version 13 batch coverage was not serialized: %#v", decoded.RepositoryAnalysis.Coverage)
+	}
+	if !strings.Contains(output.String(), `"source_batches_started": 2`) || !strings.Contains(output.String(), `"provider_requests": 3`) {
+		t.Fatalf("schema-version 13 request/start counters are missing from JSON:\n%s", output.String())
 	}
 	if !strings.Contains(output.String(), `"ai_use_id": "assistant"`) {
-		t.Fatalf("schema-version 12 AI-use attribution is missing:\n%s", output.String())
+		t.Fatalf("schema-version 13 AI-use attribution is missing:\n%s", output.String())
 	}
 	if !strings.Contains(output.String(), `"framework_system_contexts": 1`) ||
 		!strings.Contains(output.String(), `"with_in_scope_code_evidence": 1`) ||
@@ -158,7 +161,7 @@ func TestIncompleteRepositoryAnalysisWithPartialCoverageIsNotReportedAsCompleted
 	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{
 		Coverage: providers.RepositoryCoverage{
 			Mode: providers.RepositoryAnalysisTargeted, RepositoryFiles: 20, FilesSubmitted: 4, Subsystems: 1,
-			SourceBatchesCompleted: 1, SourceBatchesTotal: 3,
+			SourceBatchesStarted: 3, SourceBatchesCompleted: 1, SourceBatchesTotal: 3, ProviderRequests: 4,
 		},
 		Result: providers.RepositorySectionResult{
 			Scope: ".", AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{},
@@ -168,7 +171,7 @@ func TestIncompleteRepositoryAnalysisWithPartialCoverageIsNotReportedAsCompleted
 	if label := developerAnalysisSummaryLabel(value); !strings.Contains(label, "incomplete") {
 		t.Fatalf("analysis summary = %q, want incomplete", label)
 	}
-	if label := developerRepositoryAnalysisLabel(value); !strings.Contains(label, "incomplete after 1 of 3 bounded code batch") {
+	if label := developerRepositoryAnalysisLabel(value); !strings.Contains(label, "3 source batch(es) started a provider request and 1 of 3 produced validated responses") {
 		t.Fatalf("repository analysis label = %q", label)
 	}
 	var concise bytes.Buffer
@@ -181,7 +184,7 @@ func TestIncompleteRepositoryAnalysisWithPartialCoverageIsNotReportedAsCompleted
 	}
 	for name, output := range map[string]string{"concise": concise.String(), "detailed": detailed.String()} {
 		lowerOutput := strings.ToLower(output)
-		if !strings.Contains(lowerOutput, "1 of 3 bounded source batch") || !strings.Contains(lowerOutput, "no unsynthesized model conclusions") {
+		if !strings.Contains(lowerOutput, "3 distinct source batch") || !strings.Contains(lowerOutput, "1 of 3") || !strings.Contains(lowerOutput, "no unsynthesized model conclusions") {
 			t.Fatalf("%s incomplete report lacks truthful partial coverage:\n%s", name, output)
 		}
 		if strings.Contains(output, "No AI implementation was identified") || strings.Contains(output, "did not suggest a specific AI use") {
@@ -205,7 +208,7 @@ func TestWriteJSONUsesCurrentEvidenceInvestigationContract(t *testing.T) {
 	if err := WriteJSON(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), `"schema_version": 12`) || !strings.Contains(output.String(), `"repository_analysis_run": "not-requested"`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
+	if !strings.Contains(output.String(), `"schema_version": 13`) || !strings.Contains(output.String(), `"repository_analysis_run": "not-requested"`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
 		t.Fatalf("unexpected current-schema investigation JSON:\n%s", output.String())
 	}
 }
@@ -570,7 +573,7 @@ func TestRepositoryAnalysisIsRenderedAsAdvisoryEvidence(t *testing.T) {
 	value := New(".", "dev", nil, nil, 0)
 	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{
 		Provider: providers.OpenAI, Model: "test-model",
-		Coverage:           providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted, RepositoryFiles: 20, FilesSubmitted: 2, CitationsChecked: 1},
+		Coverage:           providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted, RepositoryFiles: 20, FilesSubmitted: 2, CitationsChecked: 1, ProviderRequests: 3},
 		FollowUpRequested:  true,
 		FollowUpExcerpts:   1,
 		OutputRecoveryUsed: true,
@@ -584,7 +587,7 @@ func TestRepositoryAnalysisIsRenderedAsAdvisoryEvidence(t *testing.T) {
 	if err := WriteTerminalCompletion(&terminal, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(terminal.String(), "Repository AI code analysis") || !strings.Contains(terminal.String(), "2 file-excerpt submission(s) from 20 discovered file(s)") || !strings.Contains(terminal.String(), "Follow-up: 1 bounded excerpt(s)") || !strings.Contains(terminal.String(), "Recovery: the initial output limit was reached") || !strings.Contains(terminal.String(), "Tokens: 200 input, 100 output (40 reasoning)") || !strings.Contains(terminal.String(), "main.go:12") {
+	if !strings.Contains(terminal.String(), "Repository AI code analysis") || !strings.Contains(terminal.String(), "2 file-excerpt submission(s) from 20 discovered file(s), 3 provider request(s)") || !strings.Contains(terminal.String(), "Follow-up: 1 bounded excerpt(s)") || !strings.Contains(terminal.String(), "Recovery: the initial output limit was reached") || !strings.Contains(terminal.String(), "Tokens: 200 input, 100 output (40 reasoning)") || !strings.Contains(terminal.String(), "main.go:12") {
 		t.Fatalf("repository analysis missing from terminal:\n%s", terminal.String())
 	}
 	var markdown bytes.Buffer
@@ -598,9 +601,85 @@ func TestRepositoryAnalysisIsRenderedAsAdvisoryEvidence(t *testing.T) {
 	if err := WriteDetailedMarkdown(&detailed, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(detailed.String(), "source-content byte(s)") {
+	if !strings.Contains(detailed.String(), "source-content byte(s), 3 provider request(s)") {
 		t.Fatalf("detailed report presents source bytes as total external-transfer bytes:\n%s", detailed.String())
 	}
+}
+
+func TestCurrentRunCompatibilityAccountingIsRenderedForFreshRepositoryAnalysis(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{
+		Provider: providers.OpenAI, Model: "test-model",
+		Notes:    []string{"Provider request and token totals include the live source-free model compatibility request that supplied this run's initial capacity snapshot."},
+		Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted, FilesSubmitted: 1, ProviderRequests: 2},
+		Usage:    providers.Usage{PromptTokens: 120, CompletionTokens: 30},
+		Result:   providers.RepositorySectionResult{AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{}, ObjectiveObservations: []providers.RepositoryObjectiveObservation{}, UnmappedObservations: []providers.RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{}},
+	}
+	var concise bytes.Buffer
+	if err := WriteMarkdown(&concise, value); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(concise.String(), "Current-run compatibility accounting") || !strings.Contains(concise.String(), "source-free model compatibility request") {
+		t.Fatalf("concise report omitted fresh compatibility accounting:\n%s", concise.String())
+	}
+}
+
+func TestConciseRepositoryAccountingDistinguishesFreshAndCachedRuns(t *testing.T) {
+	newReport := func() Report {
+		value := New(".", "dev", nil, nil, 0)
+		value.RepositoryAnalysisRun = RepositoryAnalysisCompleted
+		value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{
+			Provider: providers.Gemini, Model: "gemini-test",
+			Coverage: providers.RepositoryCoverage{
+				Mode: providers.RepositoryAnalysisTargeted, RepositoryFiles: 20, FilesSubmitted: 13,
+				SourceBatchesStarted: 13, SourceBatchesCompleted: 13, SourceBatchesTotal: 13, ProviderRequests: 17,
+			},
+			Result: providers.RepositorySectionResult{
+				AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{},
+				ObjectiveObservations: []providers.RepositoryObjectiveObservation{}, UnmappedObservations: []providers.RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{},
+			},
+		}
+		return value
+	}
+
+	t.Run("fresh review", func(t *testing.T) {
+		value := newReport()
+		var output bytes.Buffer
+		if err := WriteMarkdown(&output, value); err != nil {
+			t.Fatal(err)
+		}
+		for _, expected := range []string{
+			"Repository review provider/model: **Google Gemini / `gemini-test`**",
+			"Repository review accounting: **17 provider request(s) in this run; 13 distinct source batch(es) started, 13 of 13 validated**",
+		} {
+			if !strings.Contains(output.String(), expected) {
+				t.Errorf("fresh concise report missing %q:\n%s", expected, output.String())
+			}
+		}
+	})
+
+	t.Run("cached review", func(t *testing.T) {
+		value := newReport()
+		value.RepositoryAnalysis.CacheHit = true
+		value.RepositoryAnalysis.Notes = []string{
+			"This scan made 2 live source-free model compatibility request(s) before reusing the repository-analysis cache (100 input, 20 output, 3 reasoning token(s)). It sent no repository source; those compatibility costs are separate from the cached repository-layer coverage and usage totals.",
+		}
+		var output bytes.Buffer
+		if err := WriteMarkdown(&output, value); err != nil {
+			t.Fatal(err)
+		}
+		for _, expected := range []string{
+			"Repository review accounting: **cached review used 17 provider request(s); 13 distinct source batch(es) started, 13 of 13 validated; current run sent no repository source**",
+			"Current-run compatibility accounting (source-free): **This scan made 2 live source-free model compatibility request(s)",
+		} {
+			if !strings.Contains(output.String(), expected) {
+				t.Errorf("cached concise report missing %q:\n%s", expected, output.String())
+			}
+		}
+		if strings.Contains(output.String(), "17 provider request(s) in this run") {
+			t.Fatalf("cached historical requests were presented as current-run requests:\n%s", output.String())
+		}
+	})
 }
 
 func TestChangedReviewCoverageExplainsModelBoundary(t *testing.T) {
@@ -610,6 +689,7 @@ func TestChangedReviewCoverageExplainsModelBoundary(t *testing.T) {
 	}, time.Now(), nil, nil, 0)
 	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{
 		Provider: providers.OpenAI, Model: "test-model", CacheHit: true,
+		Notes: []string{"This scan made 1 live source-free model compatibility request(s) before reusing the repository-analysis cache (100 input, 20 output, 3 reasoning token(s)). It sent no repository source; those compatibility costs are separate from the cached repository-layer coverage and usage totals."},
 		Coverage: providers.RepositoryCoverage{
 			Mode: providers.RepositoryAnalysisTargeted, ReviewScope: providers.RepositoryReviewScopeChanged,
 			RepositoryFiles: 50, ScopeFiles: 3, ChangedFiles: 1, ConnectedFiles: 2, FilesSubmitted: 2,
@@ -631,7 +711,7 @@ func TestChangedReviewCoverageExplainsModelBoundary(t *testing.T) {
 	if err := WriteDetailedMarkdown(&markdown, value); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"AI review scope: changed-plus-connected", "matching private cache entry", "1 changed eligible file(s) plus 2 connected file(s)", "Changed-code review boundary"} {
+	for _, expected := range []string{"AI review scope: changed-plus-connected", "matching private cache entry", "1 changed eligible file(s) plus 2 connected file(s)", "Changed-code review boundary", "Current-run compatibility accounting", "100 input, 20 output, 3 reasoning"} {
 		if !strings.Contains(markdown.String(), expected) {
 			t.Errorf("Markdown changed scope missing %q:\n%s", expected, markdown.String())
 		}
@@ -640,7 +720,7 @@ func TestChangedReviewCoverageExplainsModelBoundary(t *testing.T) {
 	if err := WriteMarkdown(&concise, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(concise.String(), "reused private cache") {
+	if !strings.Contains(concise.String(), "reused private cache") || !strings.Contains(concise.String(), "Current-run compatibility accounting") || !strings.Contains(concise.String(), "100 input, 20 output, 3 reasoning") {
 		t.Fatalf("concise report omitted repository cache reuse:\n%s", concise.String())
 	}
 }
@@ -862,6 +942,24 @@ func TestTerminalCompletionSeparatesAdvisoryReview(t *testing.T) {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("terminal output missing %q:\n%s", expected, output.String())
 		}
+	}
+}
+
+func TestTerminalCompletionNamesConfiguredReviewProviders(t *testing.T) {
+	value := New(".", "0.2.0", nil, nil, 0)
+	value.Review = &providers.ReviewResult{Provider: providers.OpenAI, Model: "gpt-4.1", InputFindings: 1, Reviewed: 1}
+	value.TechnicalReview = &providers.TechnicalReviewResult{Provider: providers.Anthropic, Model: "claude-sonnet", InputCandidates: 1, Reviewed: 1}
+	var output bytes.Buffer
+	if err := WriteTerminalCompletion(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"OpenAI advisory review (gpt-4.1)", "Anthropic technical evidence investigation (claude-sonnet)"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("terminal output missing %q:\n%s", expected, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "Ollama advisory review") || strings.Contains(output.String(), "Ollama technical evidence investigation") {
+		t.Fatalf("terminal output mislabeled a hosted provider as Ollama:\n%s", output.String())
 	}
 }
 

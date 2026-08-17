@@ -102,9 +102,44 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report, evidenceBundle
 			return err
 		}
 	}
+	attentionParts := len(value.Warnings)
+	if developerRepositoryAnalysisIncomplete(value) && attentionParts == 0 {
+		attentionParts = 1
+	}
 	if _, err := fmt.Fprintf(writer, "\n- Repository AI review: **%s**\n- Parts of the scan that need attention: **%d**\n- Scan ID: %s\n- Full technical results: %s\n",
-		markdownText(view.repositoryAnalysis), len(value.Warnings), inlineCode(value.Scan.ID), inlineCode(view.evidenceBundle)); err != nil {
+		markdownText(view.repositoryAnalysis), attentionParts, inlineCode(value.Scan.ID), inlineCode(view.evidenceBundle)); err != nil {
 		return err
+	}
+	if value.RepositoryAnalysis != nil {
+		analysis := value.RepositoryAnalysis
+		if analysis.Provider != providers.None || strings.TrimSpace(analysis.Model) != "" {
+			if _, err := fmt.Fprintf(writer, "- Repository review provider/model: **%s / %s**\n",
+				markdownText(providerDisplayName(analysis.Provider)), inlineCode(analysis.Model)); err != nil {
+				return err
+			}
+		}
+		accounting := fmt.Sprintf("%d provider request(s) in this run", analysis.Coverage.ProviderRequests)
+		if analysis.CacheHit {
+			accounting = fmt.Sprintf("cached review used %d provider request(s); current run sent no repository source", analysis.Coverage.ProviderRequests)
+		}
+		if analysis.Coverage.SourceBatchesTotal > 0 {
+			batchCoverage := fmt.Sprintf("%d distinct source batch(es) started, %d of %d validated",
+				analysis.Coverage.SourceBatchesStarted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal)
+			if analysis.CacheHit {
+				accounting = fmt.Sprintf("cached review used %d provider request(s); %s; current run sent no repository source",
+					analysis.Coverage.ProviderRequests, batchCoverage)
+			} else {
+				accounting += "; " + batchCoverage
+			}
+		}
+		if _, err := fmt.Fprintf(writer, "- Repository review accounting: **%s**\n", markdownText(accounting)); err != nil {
+			return err
+		}
+		if note := repositoryCurrentRunCompatibilityNote(*analysis); note != "" {
+			if _, err := fmt.Fprintf(writer, "- Current-run compatibility accounting (source-free): **%s**\n", markdownText(note)); err != nil {
+				return err
+			}
+		}
 	}
 	if view.verificationPassed+view.verificationFailed > 0 {
 		if _, err := fmt.Fprintf(writer, "- Isolated execution checks: **%d passed, %d failed**\n", view.verificationPassed, view.verificationFailed); err != nil {
@@ -301,6 +336,13 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 			next: "Resolve the warning and rerun the scan before relying on the result.", evidence: "Scan warning",
 		})
 	}
+	if developerRepositoryAnalysisIncomplete(value) && len(value.Warnings) == 0 {
+		addAction("repository-analysis-incomplete", developerAction{
+			priority: "Review", issue: "AI code review incomplete",
+			why:  "No globally synthesized model conclusion was retained; deterministic scan results remain available.",
+			next: "Rerun the scan after checking provider availability and limits before relying on the AI review layer.", evidence: "Repository AI review",
+		})
+	}
 
 	sort.SliceStable(view.actions, func(left, right int) bool {
 		return developerPriorityRank(view.actions[left].priority) > developerPriorityRank(view.actions[right].priority)
@@ -424,7 +466,7 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 	if developerRepositoryAnalysisIncomplete(value) {
 		detail := "The deterministic scan completed, but the AI code review did not finish. Deterministic findings remain valid; no unsynthesized model conclusions were retained."
 		if value.RepositoryAnalysis != nil && value.RepositoryAnalysis.Coverage.SourceBatchesTotal > 0 {
-			detail = fmt.Sprintf("The deterministic scan completed, but the AI code review did not finish. %d of %d bounded source batch(es) completed; no unsynthesized model conclusions were retained.", value.RepositoryAnalysis.Coverage.SourceBatchesCompleted, value.RepositoryAnalysis.Coverage.SourceBatchesTotal)
+			detail = fmt.Sprintf("The deterministic scan completed, but the AI code review did not finish. %d distinct source batch(es) started a provider request and %d of %d produced validated responses; no unsynthesized model conclusions were retained.", value.RepositoryAnalysis.Coverage.SourceBatchesStarted, value.RepositoryAnalysis.Coverage.SourceBatchesCompleted, value.RepositoryAnalysis.Coverage.SourceBatchesTotal)
 		}
 		if _, err := fmt.Fprintln(writer, "\n"+detail); err != nil {
 			return err
@@ -1679,7 +1721,7 @@ func developerHasBoundedAIReview(value Report) bool {
 func developerRepositoryAnalysisLabel(value Report) string {
 	if developerRepositoryAnalysisIncomplete(value) {
 		if value.RepositoryAnalysis != nil && value.RepositoryAnalysis.Coverage.SourceBatchesTotal > 0 {
-			return fmt.Sprintf("incomplete after %d of %d bounded code batch(es); deterministic results are available", value.RepositoryAnalysis.Coverage.SourceBatchesCompleted, value.RepositoryAnalysis.Coverage.SourceBatchesTotal)
+			return fmt.Sprintf("incomplete after %d source batch(es) started a provider request and %d of %d produced validated responses; deterministic results are available", value.RepositoryAnalysis.Coverage.SourceBatchesStarted, value.RepositoryAnalysis.Coverage.SourceBatchesCompleted, value.RepositoryAnalysis.Coverage.SourceBatchesTotal)
 		}
 		if value.RepositoryAnalysis != nil && value.RepositoryAnalysis.Coverage.Subsystems > 0 {
 			return fmt.Sprintf("incomplete after %d bounded code batch(es); deterministic results are available", value.RepositoryAnalysis.Coverage.Subsystems)
@@ -1726,7 +1768,7 @@ func developerRepositoryAnalysisIncomplete(value Report) bool {
 	}
 	for _, warning := range value.Warnings {
 		normalized := strings.ToLower(warning)
-		if strings.Contains(normalized, "repository analysis was incomplete") || strings.Contains(normalized, "repository-wide analysis was incomplete") || strings.Contains(normalized, "review was incomplete because model qualification failed") {
+		if strings.Contains(normalized, "repository analysis was incomplete") || strings.Contains(normalized, "repository-wide analysis was incomplete") {
 			return true
 		}
 	}

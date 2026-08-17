@@ -2,7 +2,7 @@
 
 ComplyScan's explicit configuration and automation interfaces accept arbitrary exact Ollama tags and model IDs supported by its native or OpenAI-compatible hosted adapters. Standard interactive setup intentionally exposes only a small cloud shortlist; everything outside that list is an experimental configuration and receives no maintained quality claim.
 
-Before an unseen model receives repository context, ComplyScan sends one small synthetic record through the configured provider. The record contains no repository data and includes instruction-shaped untrusted text. A model is marked **compatible** only when it returns the required structured object, preserves the trusted record binding, and does not create an extra record from the untrusted instruction.
+Before an unseen model receives repository context, ComplyScan exercises two small source-free synthetic contracts through the configured provider. The first verifies finding-record binding. The second uses a fake one-line file and confirmed-use record to exercise the actual repository-analysis schema and binding rules without sending repository data. Both contain instruction-shaped untrusted text. A model is marked **compatible** only when both structured responses preserve their trusted bindings and do not invent a record or positive fact. Cautious unresolved questions remain valid. The two phases normally use two requests and share a maximum of four requests including retries; a successful first phase is not resent when only the repository-shaped phase needs retrying.
 
 Interactive setup runs this check automatically after the selected local model is installed or the selected remote credential is available. A later `complyscan scan` also runs it when `ai.review-on-scan: true` has matching private trust on that machine and the configured model has no valid cached result. The trust identity binds provider, endpoint, model, and credential environment-variable name. Repository intent alone—such as a freshly cloned configuration—does not trigger qualification or source transfer. Explicit provider/model/endpoint/refresh/deep/review options provide one-run consent. `complyscan scan --deterministic-only` never performs qualification or contacts a provider. Non-interactive setup does not contact a provider unless `--qualify-model` is explicitly supplied; remote qualification may incur a small provider charge.
 
@@ -10,9 +10,10 @@ Successful results are cached under the operating system's private user-cache di
 
 - provider and exact model ID;
 - the Ollama model digest when the local service exposes it, or a hash of the configured compatible endpoint; and
-- the finding-review, profile-draft, and technical-review prompt contract versions.
+- the finding-review, profile-draft, repository-analysis, and technical-review prompt contract versions; and
+- qualification contract version 2.
 
-A changed model, digest, or prompt contract therefore requires a new check. Failed checks are not cached because availability, credentials, rate limits, and provider behavior can recover. The cache contains only identity, timestamps, token counts, and the fixed compatibility description; it contains no credential, synthetic response text, repository source, or human profile answer.
+A changed model, digest, prompt contract, or qualification contract therefore requires a new check. Cache schema 4 is stored as `model-qualification-v4.json`; older finding-only results cannot be reused. Failed checks are not cached because availability, credentials, rate limits, and provider behavior can recover. The cache contains only identity, timestamps, token counts, and the fixed compatibility description; it contains no credential, synthetic response text, repository source, or human profile answer.
 
 Use the configured model's cached status with:
 

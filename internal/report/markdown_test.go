@@ -29,6 +29,40 @@ func TestWriteMarkdownKeepsReviewerDiagnosticsOutOfDeveloperSummary(t *testing.T
 	}
 }
 
+func TestDetailedMarkdownNamesConfiguredReviewProviders(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	value.Review = &providers.ReviewResult{Provider: providers.Gemini, Model: "gemini-test"}
+	value.TechnicalReview = &providers.TechnicalReviewResult{Provider: providers.OpenRouter, Model: "router-test"}
+	var output bytes.Buffer
+	if err := WriteDetailedMarkdown(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"## Google Gemini advisory review", "## OpenRouter technical evidence investigation"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("detailed Markdown missing %q:\n%s", expected, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "## Ollama advisory review") || strings.Contains(output.String(), "## Ollama technical evidence investigation") {
+		t.Fatalf("detailed Markdown mislabeled a hosted provider as Ollama:\n%s", output.String())
+	}
+}
+
+func TestBoundedOnlyQualificationFailureDoesNotClaimRepositoryReviewRan(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	value.RepositoryAnalysisRun = RepositoryAnalysisNotRequested
+	value.Warnings = []string{"AI review was incomplete because model qualification failed: temporary provider failure"}
+	if developerRepositoryAnalysisIncomplete(value) {
+		t.Fatal("bounded-only qualification failure was misclassified as an incomplete repository analysis")
+	}
+	var output bytes.Buffer
+	if err := WriteMarkdown(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "AI code review incomplete") || strings.Contains(output.String(), "repository model review") {
+		t.Fatalf("bounded-only report falsely claimed a repository review ran:\n%s", output.String())
+	}
+}
+
 func TestWriteDetailedMarkdownRendersScannerEvidenceTrace(t *testing.T) {
 	pack, err := framework.LoadBuiltin(framework.EUAIActTechnicalEvidencePackID)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/framework"
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 	"github.com/ComplyScan/ComplyScan/internal/providers"
+	"github.com/ComplyScan/ComplyScan/internal/repositoryanalysis"
 )
 
 func TestWriteSectionTitleUsesBoldOnlyWhenEnabled(t *testing.T) {
@@ -1277,7 +1279,11 @@ func TestEverySetupQuestionHasDeveloperGuidance(t *testing.T) {
 
 func TestRemoteDisclosureExplainsPersistentScanConsent(t *testing.T) {
 	disclosure := strings.Join(setupQuestionHelp["remote-disclosure"], " ")
-	for _, expected := range []string{"Later cloud-assisted `complyscan scan` runs", "Setup itself does not send repository source", "one or more bounded source requests", "variable cost", "future scans without another prompt", "--deterministic-only"} {
+	for _, expected := range []string{
+		"Later cloud-assisted `complyscan scan` runs", "Setup itself does not send repository source", "one or more bounded source requests",
+		"source and synthesis batches may run concurrently", fmt.Sprintf("%d provider requests", repositoryanalysis.MaxProviderRequestsPerRun),
+		"variable cost", "future scans without another prompt", "--deterministic-only",
+	} {
 		if !strings.Contains(disclosure, expected) {
 			t.Fatalf("remote disclosure is missing %q: %s", expected, disclosure)
 		}
