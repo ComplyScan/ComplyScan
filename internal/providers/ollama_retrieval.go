@@ -34,14 +34,19 @@ func (provider *OllamaProvider) PlanTechnicalSearch(ctx context.Context, candida
 		Stream: false, Format: ollamaTechnicalSearchSchema(), Think: false, KeepAlive: "5m",
 		Options: map[string]any{"temperature": 0, "num_predict": 300},
 	})
+	usage := Usage{PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount, ReasoningTokens: response.ReasoningCount, TotalDurationNS: response.TotalDuration}
 	if err != nil {
-		return TechnicalSearchPlan{}, Usage{}, err
+		if incomplete, ok := AsRemoteIncompleteError(err); ok && usage.PromptTokens == 0 && usage.CompletionTokens == 0 && usage.ReasoningTokens == 0 {
+			usage.PromptTokens = incomplete.InputTokens
+			usage.CompletionTokens = incomplete.OutputTokens
+			usage.ReasoningTokens = incomplete.ReasoningTokens
+		}
+		return TechnicalSearchPlan{}, usage, err
 	}
 	var payload ollamaTechnicalSearchPayload
 	if err := json.Unmarshal([]byte(response.Message.Content), &payload); err != nil {
-		return TechnicalSearchPlan{}, Usage{}, fmt.Errorf("decode %s structured technical search plan: %w", provider.label, err)
+		return TechnicalSearchPlan{}, usage, fmt.Errorf("decode %s structured technical search plan: %w", provider.label, err)
 	}
-	usage := Usage{PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount, ReasoningTokens: response.ReasoningCount, TotalDurationNS: response.TotalDuration}
 	plan, err := validateTechnicalSearchPlan(payload.Plan)
 	if err != nil {
 		return TechnicalSearchPlan{

@@ -69,6 +69,104 @@ func TestOllamaReviewUsesStructuredLocalRequestAndRedactsEvidence(t *testing.T) 
 	}
 }
 
+func TestOllamaChatTreatsLengthAsTypedIncompleteAndStopAsSuccess(t *testing.T) {
+	for _, testCase := range []struct {
+		name           string
+		doneReason     string
+		wantIncomplete bool
+	}{
+		{name: "length is incomplete", doneReason: "length", wantIncomplete: true},
+		{name: "stop is complete", doneReason: "stop"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return testJSONResponse(http.StatusOK, map[string]any{
+					"message": map[string]string{"content": `{}`}, "done": true, "done_reason": testCase.doneReason,
+					"prompt_eval_count": 321, "eval_count": 45, "total_duration": 987,
+				}), nil
+			})}
+			provider, err := NewOllama(OllamaOptions{
+				Endpoint: "http://127.0.0.1:11434", Model: "test", Timeout: time.Second, MaxFindings: 1, HTTPClient: client,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := provider.chat(context.Background(), ollamaChatRequest{Model: "test"})
+			if testCase.wantIncomplete {
+				incomplete, ok := AsRemoteIncompleteError(err)
+				if !ok || incomplete.Provider != "Ollama" || incomplete.Reason != "max_output_tokens" || incomplete.InputTokens != 321 || incomplete.OutputTokens != 45 {
+					t.Fatalf("Ollama length response = %#v, typed error %#v", response, err)
+				}
+				if response.PromptEvalCount != 321 || response.EvalCount != 45 || response.TotalDuration != 987 {
+					t.Fatalf("Ollama length response lost metered usage: %#v", response)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Ollama stop response failed: %v", err)
+			}
+			if !response.Done || response.DoneReason != "stop" || response.PromptEvalCount != 321 || response.EvalCount != 45 {
+				t.Fatalf("Ollama stop response = %#v", response)
+			}
+		})
+	}
+}
+
+func TestOllamaHTTPStatusClassificationSupportsRetryCoordinator(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		status int
+		check  func(*testing.T, error)
+	}{
+		{
+			name: "429 is rate limited", status: http.StatusTooManyRequests,
+			check: func(t *testing.T, err error) {
+				rateLimit, ok := AsRemoteRateLimitError(err)
+				if !ok || rateLimit.Provider != "Ollama" || rateLimit.Message != "temporary local queue limit" || rateLimit.Permanent || rateLimit.RequestTooLarge {
+					t.Fatalf("Ollama 429 classification = %#v", err)
+				}
+			},
+		},
+		{
+			name: "503 is transient", status: http.StatusServiceUnavailable,
+			check: func(t *testing.T, err error) {
+				transient, ok := AsRemoteTransientError(err)
+				if !ok || transient.Provider != "Ollama" || transient.StatusCode != http.StatusServiceUnavailable || transient.Message != "temporary local queue limit" {
+					t.Fatalf("Ollama 503 classification = %#v", err)
+				}
+			},
+		},
+		{
+			name: "400 is not retryable", status: http.StatusBadRequest,
+			check: func(t *testing.T, err error) {
+				if _, ok := AsRemoteRateLimitError(err); ok {
+					t.Fatalf("Ollama 400 was classified as a rate limit: %#v", err)
+				}
+				if _, ok := AsRemoteTransientError(err); ok {
+					t.Fatalf("Ollama 400 was classified as transient: %#v", err)
+				}
+				if err == nil || !strings.Contains(err.Error(), "HTTP 400: temporary local queue limit") {
+					t.Fatalf("Ollama 400 error = %v", err)
+				}
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return testJSONResponse(testCase.status, map[string]string{"error": "temporary local queue limit"}), nil
+			})}
+			provider, err := NewOllama(OllamaOptions{
+				Endpoint: "http://127.0.0.1:11434", Model: "test", Timeout: time.Second, MaxFindings: 1, HTTPClient: client,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = provider.chat(context.Background(), ollamaChatRequest{Model: "test"})
+			testCase.check(t, err)
+		})
+	}
+}
+
 func TestOllamaReviewRejectsUnboundObservation(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 		content, _ := json.Marshal(ollamaReviewPayload{Observations: []ollamaObservation{{
@@ -182,7 +280,8 @@ func TestOllamaReviewHonorsHTTPTimeout(t *testing.T) {
 	var timeoutError interface{ Timeout() bool }
 	deadlineExceeded := errors.Is(err, context.DeadlineExceeded)
 	timedOut := errors.As(err, &timeoutError) && timeoutError.Timeout()
-	if err == nil || (!deadlineExceeded && !timedOut) {
+	_, retryableTransport := AsRemoteTransientError(err)
+	if err == nil || (!deadlineExceeded && !timedOut && !retryableTransport) {
 		t.Fatalf("got error %v", err)
 	}
 }

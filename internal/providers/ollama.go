@@ -70,6 +70,7 @@ type ollamaChatResponse struct {
 	} `json:"message"`
 	Error           string            `json:"error"`
 	Done            bool              `json:"done"`
+	DoneReason      string            `json:"done_reason"`
 	TotalDuration   int64             `json:"total_duration"`
 	PromptEvalCount int               `json:"prompt_eval_count"`
 	EvalCount       int               `json:"eval_count"`
@@ -186,28 +187,43 @@ func (provider *OllamaProvider) Review(ctx context.Context, request ReviewReques
 		Options: map[string]any{"temperature": 0, "num_predict": findingReviewTokenBudget(len(inputs))},
 	}
 	response, err := provider.chat(ctx, requestBody)
-	if err != nil {
-		return ReviewResult{}, err
-	}
-	var payload ollamaReviewPayload
-	if err := json.Unmarshal([]byte(response.Message.Content), &payload); err != nil {
-		return ReviewResult{}, fmt.Errorf("decode %s structured review: %w", provider.label, err)
-	}
-	observations, err := validateOllamaObservations(payload.Observations, wanted)
-	if err != nil {
-		return ReviewResult{}, err
-	}
-	result.Observations = observations
-	result.Reviewed = len(observations)
 	result.Usage = Usage{
 		PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount,
 		ReasoningTokens: response.ReasoningCount, TotalDurationNS: response.TotalDuration,
 	}
 	result.RateLimits = response.RateLimits
+	if err != nil {
+		if incomplete, ok := AsRemoteIncompleteError(err); ok && result.Usage.PromptTokens == 0 && result.Usage.CompletionTokens == 0 && result.Usage.ReasoningTokens == 0 {
+			result.Usage.PromptTokens = incomplete.InputTokens
+			result.Usage.CompletionTokens = incomplete.OutputTokens
+			result.Usage.ReasoningTokens = incomplete.ReasoningTokens
+		}
+		return result, err
+	}
+	var payload ollamaReviewPayload
+	if err := json.Unmarshal([]byte(response.Message.Content), &payload); err != nil {
+		return result, newStructuredOutputValidationError(fmt.Errorf("decode %s structured review: %w", provider.label, err))
+	}
+	observations, err := validateOllamaObservations(payload.Observations, wanted)
+	if err != nil {
+		return result, newStructuredOutputValidationError(err)
+	}
+	result.Observations = observations
+	result.Reviewed = len(observations)
 	if result.Reviewed < len(selected) {
-		result.Notes = append(result.Notes, fmt.Sprintf("%s returned %d valid observation(s) for %d submitted findings.", provider.label, result.Reviewed, len(selected)))
+		result.Observations = []Observation{}
+		result.Reviewed = 0
+		return result, newStructuredOutputValidationError(fmt.Errorf("%s returned %d valid observation(s) for %d submitted findings", provider.label, len(observations), len(selected)))
 	}
 	return result, nil
+}
+
+func newStructuredOutputValidationError(err error) *StructuredOutputValidationError {
+	diagnostic := cleanReviewText(err.Error(), maxReviewMessageChars)
+	if diagnostic == "" {
+		diagnostic = "The structured model response failed local validation."
+	}
+	return &StructuredOutputValidationError{Diagnostic: diagnostic, cause: err}
 }
 
 func findingReviewTokenBudget(findings int) int {
@@ -222,6 +238,14 @@ func (provider *OllamaProvider) chat(ctx context.Context, requestBody ollamaChat
 	if provider.completion != nil {
 		return provider.completion(ctx, requestBody)
 	}
+	options := make(map[string]any, len(requestBody.Options)+1)
+	for key, value := range requestBody.Options {
+		options[key] = value
+	}
+	if _, configured := options["num_ctx"]; !configured {
+		options["num_ctx"] = ollamaRequestContextTokens(requestBody)
+	}
+	requestBody.Options = options
 	body, err := json.Marshal(requestBody)
 	if err != nil {
 		return ollamaChatResponse{}, fmt.Errorf("encode Ollama request: %w", err)
@@ -233,30 +257,77 @@ func (provider *OllamaProvider) chat(ctx context.Context, requestBody ollamaChat
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpResponse, err := provider.client.Do(httpRequest)
 	if err != nil {
-		return ollamaChatResponse{}, fmt.Errorf("review with Ollama at %s: %w", provider.chatURL, err)
+		if ctx.Err() != nil {
+			return ollamaChatResponse{}, ctx.Err()
+		}
+		return ollamaChatResponse{}, &RemoteTransientError{Provider: "Ollama", Message: cleanReviewText(err.Error(), maxReviewMessageChars)}
 	}
 	defer httpResponse.Body.Close()
 	responseBody, err := readLimited(httpResponse.Body, maxOllamaResponseBytes)
 	if err != nil {
-		return ollamaChatResponse{}, fmt.Errorf("read Ollama response: %w", err)
+		if ctx.Err() != nil {
+			return ollamaChatResponse{}, ctx.Err()
+		}
+		if strings.Contains(err.Error(), "response exceeds") {
+			return ollamaChatResponse{}, fmt.Errorf("read Ollama response: %w", err)
+		}
+		return ollamaChatResponse{}, &RemoteTransientError{Provider: "Ollama", Message: cleanReviewText("read response: "+err.Error(), maxReviewMessageChars)}
 	}
 	if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
 		return ollamaChatResponse{}, ollamaStatusError(httpResponse.StatusCode, responseBody)
 	}
 	var response ollamaChatResponse
 	if err := json.Unmarshal(responseBody, &response); err != nil {
-		return ollamaChatResponse{}, fmt.Errorf("decode Ollama response: %w", err)
+		return ollamaChatResponse{}, &RemoteTransientError{
+			Provider: "Ollama", Message: cleanReviewText("decode response: "+err.Error(), maxReviewMessageChars),
+		}
 	}
 	if response.Error != "" {
-		return ollamaChatResponse{}, fmt.Errorf("Ollama review failed: %s", cleanReviewText(response.Error, maxReviewMessageChars))
+		return response, fmt.Errorf("Ollama review failed: %s", cleanReviewText(response.Error, maxReviewMessageChars))
 	}
 	if !response.Done {
-		return ollamaChatResponse{}, errors.New("Ollama review returned an incomplete non-streaming response")
+		return response, &RemoteTransientError{Provider: "Ollama", Message: "incomplete non-streaming response"}
+	}
+	if strings.EqualFold(strings.TrimSpace(response.DoneReason), "length") {
+		return response, &RemoteIncompleteError{
+			Provider: provider.label, Status: "incomplete", Reason: "max_output_tokens",
+			InputTokens: response.PromptEvalCount, OutputTokens: response.EvalCount,
+		}
 	}
 	if strings.TrimSpace(response.Message.Content) == "" {
-		return ollamaChatResponse{}, errors.New("Ollama review returned an empty structured response")
+		return response, &RemoteTransientError{Provider: "Ollama", Message: "empty structured response"}
 	}
 	return response, nil
+}
+
+func ollamaRequestContextTokens(request ollamaChatRequest) int {
+	characters := 0
+	for _, message := range request.Messages {
+		characters += len(message.Role) + len(message.Content)
+	}
+	// Ollama consumes the structured-output schema in the same context window.
+	// Repository schemas are materially larger than the source prompt itself in
+	// small batches, so omitting this would still allow silent prompt truncation.
+	if format, err := json.Marshal(request.Format); err == nil {
+		characters += len(format)
+	}
+	// Repository analysis budgets source and prompt text at three characters per
+	// token. Use the same conservative estimate, retain explicit output space,
+	// and add a fixed envelope margin so Ollama cannot silently fall back to its
+	// hardware-dependent 4K default and truncate a larger reviewed package.
+	inputTokens := (characters + 2) / 3
+	outputTokens := request.MaxOutputTokens
+	if outputTokens <= 0 {
+		if configured, ok := request.Options["num_predict"].(int); ok {
+			outputTokens = configured
+		}
+	}
+	contextTokens := inputTokens + max(0, outputTokens) + 2048
+	if contextTokens < 4096 {
+		contextTokens = 4096
+	}
+	// Round up so equivalent requests reuse an Ollama runner allocation.
+	return ((contextTokens + 1023) / 1024) * 1024
 }
 
 func validateOllamaObservations(values []ollamaObservation, wanted map[string]string) ([]Observation, error) {
@@ -342,8 +413,18 @@ func ollamaStatusError(status int, body []byte) error {
 	var response struct {
 		Error string `json:"error"`
 	}
-	if json.Unmarshal(body, &response) == nil && response.Error != "" {
-		return fmt.Errorf("Ollama review failed with HTTP %d: %s", status, cleanReviewText(response.Error, maxReviewMessageChars))
+	message := ""
+	if json.Unmarshal(body, &response) == nil {
+		message = cleanReviewText(response.Error, maxReviewMessageChars)
+	}
+	if status == http.StatusTooManyRequests {
+		return &RemoteRateLimitError{Provider: "Ollama", Message: message}
+	}
+	if remoteTransientStatus(status, nil) {
+		return &RemoteTransientError{Provider: "Ollama", StatusCode: status, Message: message}
+	}
+	if message != "" {
+		return fmt.Errorf("Ollama review failed with HTTP %d: %s", status, message)
 	}
 	return fmt.Errorf("Ollama review failed with HTTP %d", status)
 }

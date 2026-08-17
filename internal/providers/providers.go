@@ -5,6 +5,7 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/ComplyScan/ComplyScan/internal/profile"
@@ -78,14 +79,18 @@ func (value RateLimitSnapshot) Available() bool {
 }
 
 type ReviewResult struct {
-	Provider      Kind              `json:"provider"`
-	Model         string            `json:"model"`
-	InputFindings int               `json:"input_findings"`
-	Reviewed      int               `json:"reviewed"`
-	Observations  []Observation     `json:"observations"`
-	Notes         []string          `json:"notes,omitempty"`
-	Usage         Usage             `json:"usage,omitempty"`
-	RateLimits    RateLimitSnapshot `json:"-"`
+	Provider      Kind          `json:"provider"`
+	Model         string        `json:"model"`
+	InputFindings int           `json:"input_findings"`
+	Reviewed      int           `json:"reviewed"`
+	Observations  []Observation `json:"observations"`
+	Notes         []string      `json:"notes,omitempty"`
+	Usage         Usage         `json:"usage,omitempty"`
+	// ProviderRequests is live-run accounting. Reports retain the count in a
+	// human-readable note so this runtime field does not change the evidence
+	// schema contract.
+	ProviderRequests int               `json:"-"`
+	RateLimits       RateLimitSnapshot `json:"-"`
 }
 
 // Provider reviews deterministic findings in an explicitly enabled layer.
@@ -97,7 +102,8 @@ type Provider interface {
 // review. Each candidate remains bound to an existing objective and evidence
 // fingerprint.
 type TechnicalReviewRequest struct {
-	Candidates []TechnicalCandidate
+	Candidates      []TechnicalCandidate
+	MaxOutputTokens int `json:"-"`
 }
 
 type TechnicalCandidate struct {
@@ -240,6 +246,9 @@ type TechnicalReviewResult struct {
 	Observations    []TechnicalObservation `json:"observations"`
 	Notes           []string               `json:"notes,omitempty"`
 	Usage           Usage                  `json:"usage,omitempty"`
+	// ProviderRequests is live-run accounting only. A report note retains the
+	// aggregate without changing the persisted technical-evidence schema.
+	ProviderRequests int `json:"-"`
 }
 
 // RepositoryAnalysisMode records which repository context strategy was
@@ -351,6 +360,7 @@ type RepositoryAnalysisRequest struct {
 	RepositoryFiles    int                        `json:"repository_files"`
 	RepositoryBytes    int64                      `json:"repository_bytes"`
 	MaxOutputTokens    int                        `json:"-"`
+	ValidationFeedback string                     `json:"-"`
 	AllowFollowUp      bool                       `json:"allow_follow_up,omitempty"`
 	OutputRecovery     bool                       `json:"output_recovery,omitempty"`
 	Files              []RepositorySourceFile     `json:"files,omitempty"`
@@ -360,6 +370,80 @@ type RepositoryAnalysisRequest struct {
 	ConfirmedAIUses    []RepositoryConfirmedAIUse `json:"confirmed_ai_uses,omitempty"`
 	Graph              RepositoryGraphContext     `json:"repository_graph,omitempty"`
 	SubsystemSummaries []RepositorySectionResult  `json:"subsystem_summaries,omitempty"`
+}
+
+// RepositoryValidationError identifies a metered provider response that was
+// successfully received but rejected by ComplyScan's local structured-output
+// and evidence-boundary checks. Diagnostic is safe to send back as untrusted
+// corrective feedback; the rejected raw provider response is never retained.
+type RepositoryValidationError struct {
+	Diagnostic string
+	cause      error
+}
+
+func (value *RepositoryValidationError) Error() string {
+	return value.Diagnostic
+}
+
+func (value *RepositoryValidationError) Unwrap() error {
+	return value.cause
+}
+
+// AsRepositoryValidationError lets orchestration retry a rejected response
+// without parsing user-facing error text or weakening validation.
+func AsRepositoryValidationError(err error) (*RepositoryValidationError, bool) {
+	var value *RepositoryValidationError
+	if !errors.As(err, &value) {
+		return nil, false
+	}
+	return value, true
+}
+
+// RepositoryRepresentationError identifies already validated synthesis input
+// that cannot fit into one locally enforceable structured result without
+// losing trusted identity or evidence semantics. It occurs before a provider
+// transfer, so orchestration can split the synthesis group or retain the
+// validated child results without treating it as a malformed model response.
+type RepositoryRepresentationError struct {
+	Diagnostic string
+	cause      error
+}
+
+func (value *RepositoryRepresentationError) Error() string {
+	return value.Diagnostic
+}
+
+func (value *RepositoryRepresentationError) Unwrap() error {
+	return value.cause
+}
+
+// AsRepositoryRepresentationError lets orchestration select an
+// identity-preserving split or fallback without parsing diagnostic text.
+func AsRepositoryRepresentationError(err error) (*RepositoryRepresentationError, bool) {
+	var value *RepositoryRepresentationError
+	if !errors.As(err, &value) {
+		return nil, false
+	}
+	return value, true
+}
+
+// StructuredOutputValidationError marks a metered model response that could
+// not be decoded or bound to the trusted finding/technical input. Callers may
+// request a bounded full replacement; they must never retain partial output.
+type StructuredOutputValidationError struct {
+	Diagnostic string
+	cause      error
+}
+
+func (value *StructuredOutputValidationError) Error() string { return value.Diagnostic }
+func (value *StructuredOutputValidationError) Unwrap() error { return value.cause }
+
+func AsStructuredOutputValidationError(err error) (*StructuredOutputValidationError, bool) {
+	var value *StructuredOutputValidationError
+	if !errors.As(err, &value) {
+		return nil, false
+	}
+	return value, true
 }
 
 type RepositoryCitation struct {
@@ -479,11 +563,17 @@ type RepositoryCoverage struct {
 	FilesSubmitted  int                    `json:"files_submitted"`
 	// BytesSubmitted is source-content bytes only. It deliberately excludes
 	// paths, JSON escaping, graph metadata, prompts, schemas, and synthesis.
-	BytesSubmitted         int64 `json:"bytes_submitted"`
-	Subsystems             int   `json:"subsystems,omitempty"`
-	SourceBatchesCompleted int   `json:"source_batches_completed,omitempty"`
-	SourceBatchesTotal     int   `json:"source_batches_total,omitempty"`
-	CitationsChecked       int   `json:"citations_checked"`
+	BytesSubmitted int64 `json:"bytes_submitted"`
+	// ProviderRequests counts locally initiated provider call attempts,
+	// including retries and calls that fail before a response is received.
+	ProviderRequests int `json:"provider_requests,omitempty"`
+	Subsystems       int `json:"subsystems,omitempty"`
+	// SourceBatchesStarted counts current logical leaf batches for which at
+	// least one provider call was initiated; it is not proof of receipt.
+	SourceBatchesStarted   int `json:"source_batches_started,omitempty"`
+	SourceBatchesCompleted int `json:"source_batches_completed,omitempty"`
+	SourceBatchesTotal     int `json:"source_batches_total,omitempty"`
+	CitationsChecked       int `json:"citations_checked"`
 }
 
 type RepositoryReviewScope string

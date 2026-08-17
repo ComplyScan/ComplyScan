@@ -91,12 +91,21 @@ func (provider *OllamaProvider) DraftProfile(ctx context.Context, request Profil
 		Options: map[string]any{"temperature": 0, "num_predict": 2048},
 	}
 	response, err := provider.chat(ctx, requestBody)
+	result.Usage = Usage{
+		PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount,
+		ReasoningTokens: response.ReasoningCount, TotalDurationNS: response.TotalDuration,
+	}
 	if err != nil {
-		return ProfileDraftResult{}, err
+		if incomplete, ok := AsRemoteIncompleteError(err); ok && result.Usage.PromptTokens == 0 && result.Usage.CompletionTokens == 0 && result.Usage.ReasoningTokens == 0 {
+			result.Usage.PromptTokens = incomplete.InputTokens
+			result.Usage.CompletionTokens = incomplete.OutputTokens
+			result.Usage.ReasoningTokens = incomplete.ReasoningTokens
+		}
+		return result, err
 	}
 	var payload profileDraftPayload
 	if err := json.Unmarshal([]byte(response.Message.Content), &payload); err != nil {
-		return ProfileDraftResult{}, fmt.Errorf("decode %s structured profile draft: %w", provider.label, err)
+		return result, fmt.Errorf("decode %s structured profile draft: %w", provider.label, err)
 	}
 	cleanedSuggestions, discarded := discardUnsupportedProfileSuggestions(payload.Suggestions)
 	coalescedSuggestions, combined := coalesceProfileSuggestions(cleanedSuggestions)
@@ -109,13 +118,9 @@ func (provider *OllamaProvider) DraftProfile(ctx context.Context, request Profil
 	}
 	suggestions, err := validateProfileSuggestions(payload.Suggestions, sanitized)
 	if err != nil {
-		return ProfileDraftResult{}, err
+		return result, err
 	}
 	result.Suggestions = suggestions
-	result.Usage = Usage{
-		PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount,
-		ReasoningTokens: response.ReasoningCount, TotalDurationNS: response.TotalDuration,
-	}
 	return result, nil
 }
 
