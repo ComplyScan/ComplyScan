@@ -628,7 +628,7 @@ func TestLoadAIUseReportRejectsUnsupportedSchemaAndLifecycleMismatch(t *testing.
 		value   report.Report
 		wantErr string
 	}{
-		{name: "future schema", value: report.Report{SchemaVersion: 14, RepositoryAnalysisRun: report.RepositoryAnalysisCompleted, RepositoryAnalysis: &providers.RepositoryAnalysisResult{}}, wantErr: "unsupported schema version 14"},
+		{name: "future schema", value: report.Report{SchemaVersion: 15, RepositoryAnalysisRun: report.RepositoryAnalysisCompleted, RepositoryAnalysis: &providers.RepositoryAnalysisResult{}}, wantErr: "unsupported schema version 15"},
 		{name: "missing completed result", value: report.Report{SchemaVersion: 9, RepositoryAnalysisRun: report.RepositoryAnalysisCompleted}, wantErr: "has no result"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

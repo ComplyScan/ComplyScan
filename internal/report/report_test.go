@@ -76,6 +76,11 @@ func TestWriteJSON(t *testing.T) {
 			ObjectiveID: "pack/human-review", AIUseID: "assistant", SystemID: "assistant",
 			Strength: providers.StrengthPartial, Confidence: "high", Rationale: "A review path is present but incomplete.",
 		}},
+		ResolvedEvidenceGaps: []providers.RepositoryResolvedEvidenceGap{{
+			GapID: "gap-review-call", Kind: "objective-missing", OriginalText: "The provider call was outside one source batch.",
+			ResolvingObservationIDs: []string{"observation-b"}, Evidence: []providers.RepositoryCitation{{Path: "assistant.go", Line: 12, Summary: "The connected provider call."}},
+			Reason: "Another validated member contains the provider call.",
+		}},
 	}}
 	var output bytes.Buffer
 	if err := WriteJSON(&output, value); err != nil {
@@ -85,7 +90,7 @@ func TestWriteJSON(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 13 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
+	if decoded.SchemaVersion != 14 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
 		t.Fatalf("unexpected tool: %#v", decoded.Tool)
 	}
 	if decoded.RepositoryAnalysisRun != RepositoryAnalysisCompleted {
@@ -107,16 +112,19 @@ func TestWriteJSON(t *testing.T) {
 		t.Fatalf("use-scoped repository observation was not serialized: %#v", decoded.RepositoryAnalysis)
 	}
 	if len(decoded.RepositoryAnalysis.Result.AIUses) != 1 || !reflect.DeepEqual(decoded.RepositoryAnalysis.Result.AIUses[0].MemberObservationIDs, []string{"observation-a", "observation-b"}) {
-		t.Fatalf("schema-version 13 inferred-use observation membership was not serialized: %#v", decoded.RepositoryAnalysis.Result.AIUses)
+		t.Fatalf("schema-version 14 inferred-use observation membership was not serialized: %#v", decoded.RepositoryAnalysis.Result.AIUses)
+	}
+	if len(decoded.RepositoryAnalysis.Result.ResolvedEvidenceGaps) != 1 || decoded.RepositoryAnalysis.Result.ResolvedEvidenceGaps[0].GapID != "gap-review-call" {
+		t.Fatalf("schema-version 14 cross-batch resolution audit was not serialized: %#v", decoded.RepositoryAnalysis.Result.ResolvedEvidenceGaps)
 	}
 	if decoded.RepositoryAnalysis.Coverage.SourceBatchesStarted != 2 || decoded.RepositoryAnalysis.Coverage.SourceBatchesCompleted != 2 || decoded.RepositoryAnalysis.Coverage.SourceBatchesTotal != 2 || decoded.RepositoryAnalysis.Coverage.ProviderRequests != 3 {
-		t.Fatalf("schema-version 13 batch coverage was not serialized: %#v", decoded.RepositoryAnalysis.Coverage)
+		t.Fatalf("schema-version 14 batch coverage was not serialized: %#v", decoded.RepositoryAnalysis.Coverage)
 	}
 	if !strings.Contains(output.String(), `"source_batches_started": 2`) || !strings.Contains(output.String(), `"provider_requests": 3`) {
-		t.Fatalf("schema-version 13 request/start counters are missing from JSON:\n%s", output.String())
+		t.Fatalf("schema-version 14 request/start counters are missing from JSON:\n%s", output.String())
 	}
 	if !strings.Contains(output.String(), `"ai_use_id": "assistant"`) {
-		t.Fatalf("schema-version 13 AI-use attribution is missing:\n%s", output.String())
+		t.Fatalf("schema-version 14 AI-use attribution is missing:\n%s", output.String())
 	}
 	if !strings.Contains(output.String(), `"framework_system_contexts": 1`) ||
 		!strings.Contains(output.String(), `"with_in_scope_code_evidence": 1`) ||
@@ -137,6 +145,39 @@ func TestWriteJSON(t *testing.T) {
 	}
 	if decoded.Suppressed != 2 {
 		t.Fatalf("suppressed = %d", decoded.Suppressed)
+	}
+}
+
+func TestDeveloperObjectiveNextStepUsesDeveloperActionsInsteadOfBatchJargon(t *testing.T) {
+	tests := []struct {
+		missing string
+		want    string
+	}{
+		{
+			missing: "Only test-side evidence is submitted; validation implementation is outside this batch.",
+			want:    "Complete this safeguard: The reviewed evidence only shows tests; validation implementation is not established by the reviewed code. Then rerun ComplyScan",
+		},
+		{
+			missing: "No retry or fallback behavior is shown in this submitted flow.",
+			want:    "Complete this safeguard: Add retry and fallback handling to the production AI call path. Then rerun ComplyScan",
+		},
+		{
+			missing: "No submitted code shows benchmark execution or pass/fail evaluation.",
+			want:    "Show where this safeguard is enforced: Run the benchmark in CI or another executable workflow and enforce its pass/fail result. Then rerun ComplyScan",
+		},
+	}
+	for index, testCase := range tests {
+		observation := providers.RepositoryObjectiveObservation{
+			Strength: providers.StrengthPartial, Confidence: "medium", MissingEvidence: []string{testCase.missing},
+			SupportingEvidence: []providers.RepositoryCitation{{Path: "safeguard.go", Line: 10, Summary: "Partial implementation."}},
+		}
+		if index == 2 {
+			observation.Strength = providers.StrengthUncertain
+			observation.Confidence = "low"
+		}
+		if got := developerObjectiveNextStep(observation, "latest.json"); got != testCase.want {
+			t.Fatalf("developer action = %q, want %q", got, testCase.want)
+		}
 	}
 }
 
@@ -208,7 +249,7 @@ func TestWriteJSONUsesCurrentEvidenceInvestigationContract(t *testing.T) {
 	if err := WriteJSON(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), `"schema_version": 13`) || !strings.Contains(output.String(), `"repository_analysis_run": "not-requested"`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
+	if !strings.Contains(output.String(), `"schema_version": 14`) || !strings.Contains(output.String(), `"repository_analysis_run": "not-requested"`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
 		t.Fatalf("unexpected current-schema investigation JSON:\n%s", output.String())
 	}
 }

@@ -1407,14 +1407,14 @@ func developerObjectiveNextStep(observation providers.RepositoryObjectiveObserva
 	} else if len(observation.UnresolvedQuestions) > 0 {
 		followUp = developerListPreview(observation.UnresolvedQuestions, 1)
 	}
-	followUp = strings.TrimRight(strings.TrimSpace(followUp), ".;: ")
+	followUp = developerPlainLanguage(strings.TrimRight(strings.TrimSpace(followUp), ".;: "))
 	switch observation.DerivedTechnicalVerdict() {
 	case providers.RepositoryVerdictNotImplemented:
-		return "Address: " + followUp + ". If this safeguard applies to the product, implement it and rerun ComplyScan"
+		return "Implement this safeguard: " + followUp + ". Then rerun ComplyScan"
 	case providers.RepositoryVerdictCannotDetermine:
-		return "Add evidence for: " + followUp + ", then rerun ComplyScan"
+		return "Show where this safeguard is enforced: " + followUp + ". Then rerun ComplyScan"
 	case providers.RepositoryVerdictPartial:
-		return "Address: " + followUp + ", then rerun ComplyScan"
+		return "Complete this safeguard: " + followUp + ". Then rerun ComplyScan"
 	default:
 		return fmt.Sprintf("Review the supporting evidence in %s.", evidenceBundle)
 	}
@@ -1658,6 +1658,18 @@ func developerPlainQuestion(question string) string {
 
 func developerPlainLanguage(value string) string {
 	replacer := strings.NewReplacer(
+		"Only test-side evidence is submitted", "The reviewed evidence only shows tests",
+		"only test-side evidence is submitted", "the reviewed evidence only shows tests",
+		"No retry or fallback behavior is shown in this submitted flow", "Add retry and fallback handling to the production AI call path",
+		"no retry or fallback behavior is shown in this submitted flow", "add retry and fallback handling to the production AI call path",
+		"No submitted code shows benchmark execution or pass/fail evaluation", "Run the benchmark in CI or another executable workflow and enforce its pass/fail result",
+		"no submitted code shows benchmark execution or pass/fail evaluation", "run the benchmark in CI or another executable workflow and enforce its pass/fail result",
+		"submitted executable flow", "reviewed executable flow",
+		"submitted flow", "reviewed flow",
+		"submitted code", "reviewed code",
+		"submitted slice", "reviewed code",
+		"submitted segment", "reviewed code",
+		"submitted excerpt", "reviewed code",
 		"candidate evidence", "possible matching code",
 		"Candidate evidence", "Possible matching code",
 		"technical objective", "code safeguard",
