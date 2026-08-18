@@ -737,7 +737,7 @@ func TestRepositoryAnalysisIsRenderedAsAdvisoryEvidence(t *testing.T) {
 	if err := WriteTerminalCompletion(&terminal, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(terminal.String(), "Repository AI code analysis") || !strings.Contains(terminal.String(), "2 file-excerpt submission(s) from 20 discovered file(s), 3 provider request(s)") || !strings.Contains(terminal.String(), "Follow-up: 1 bounded excerpt(s)") || !strings.Contains(terminal.String(), "Recovery: the initial output limit was reached") || !strings.Contains(terminal.String(), "Tokens: 200 input, 100 output (40 reasoning)") || !strings.Contains(terminal.String(), "main.go:12") {
+	if !strings.Contains(terminal.String(), "Repository AI code analysis") || !strings.Contains(terminal.String(), "2 code-excerpt transfer(s) from 20 discovered file(s), 3 provider request(s)") || !strings.Contains(terminal.String(), "Follow-up: 1 bounded excerpt(s)") || !strings.Contains(terminal.String(), "Recovery: the initial output limit was reached") || !strings.Contains(terminal.String(), "Tokens: 200 input, 100 output (40 reasoning)") || !strings.Contains(terminal.String(), "main.go:12") {
 		t.Fatalf("repository analysis missing from terminal:\n%s", terminal.String())
 	}
 	var markdown bytes.Buffer
@@ -751,7 +751,7 @@ func TestRepositoryAnalysisIsRenderedAsAdvisoryEvidence(t *testing.T) {
 	if err := WriteDetailedMarkdown(&detailed, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(detailed.String(), "source-content byte(s), 3 provider request(s)") {
+	if !strings.Contains(detailed.String(), "source-content byte(s), across 3 provider request(s)") {
 		t.Fatalf("detailed report presents source bytes as total external-transfer bytes:\n%s", detailed.String())
 	}
 }
@@ -851,7 +851,7 @@ func TestChangedReviewCoverageExplainsModelBoundary(t *testing.T) {
 	if err := WriteTerminalRepositoryAnalysis(&terminal, *value.RepositoryAnalysis); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"reused matching private cache", "Cached reviewed context: 2 original file-excerpt submission(s); current run transferred no source", "1 changed eligible + 2 connected file(s)", "full 50-file repository governance remained local"} {
+	for _, expected := range []string{"reused matching private cache", "Cached reviewed context: 2 original code-excerpt transfer(s); current run transferred no source", "1 changed eligible + 2 connected file(s)", "full 50-file repository governance remained local"} {
 		if !strings.Contains(terminal.String(), expected) {
 			t.Errorf("terminal changed scope missing %q:\n%s", expected, terminal.String())
 		}

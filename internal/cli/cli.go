@@ -861,11 +861,11 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						aiUseInventory = aiuse.BuildSnapshotWithRepository(aiUseManifest, aiInventory, result.FullRepository, &repositoryReview, changedSince != "")
 						reportValue.AIUseInventory = &aiUseInventory
 						reportValue.AIUseMappings = buildAIUseMappings(aiUseManifest, cfg.Systems, frameworkResults, aiInventory, &repositoryReview)
-						completionDetail := fmt.Sprintf("%d source-bearing submission attempt(s)", repositoryReview.Coverage.FilesSubmitted)
+						completionDetail := fmt.Sprintf("%d code-excerpt transfer(s)", repositoryReview.Coverage.FilesSubmitted)
 						if repositoryReview.Coverage.Mode == providers.RepositoryAnalysisTargeted && repositoryReview.Coverage.FilesSubmitted == 0 {
 							completionDetail = "no structural candidate; no source sent for repository AI review"
 						} else if repositoryReview.CacheHit {
-							completionDetail = fmt.Sprintf("cached evidence coverage: %d original file-excerpt submission(s); current run: 0 repository-layer source transfers", repositoryReview.Coverage.FilesSubmitted)
+							completionDetail = fmt.Sprintf("cached evidence coverage: %d original code-excerpt transfer(s); current run: 0 repository-layer source transfers", repositoryReview.Coverage.FilesSubmitted)
 							if reviewCapacity.ProviderRequests > 0 {
 								completionDetail += fmt.Sprintf("; %d source-free compatibility request(s), %d input / %d output token(s), %d reasoning", reviewCapacity.ProviderRequests, reviewCapacity.Usage.PromptTokens, reviewCapacity.Usage.CompletionTokens, reviewCapacity.Usage.ReasoningTokens)
 							}

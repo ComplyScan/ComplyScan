@@ -300,21 +300,21 @@ func writeRepositoryAnalysisMarkdown(writer io.Writer, analysis providers.Reposi
 	}
 	if analysis.CacheHit {
 		if analysis.Coverage.SourceBatchesTotal > 0 {
-			if _, err := fmt.Fprintf(writer, "- Cached reviewed context: %d original file-excerpt submission(s), %d source-content byte(s); %d distinct source batch(es) started, %d of %d validated, %d provider request(s) in the cached review; current run transferred no source\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.SourceBatchesStarted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal, analysis.Coverage.ProviderRequests); err != nil {
+			if _, err := fmt.Fprintf(writer, "- Cached reviewed context: %d original code-excerpt transfer(s), %d source-content byte(s); %d distinct source batch(es) started, %d of %d validated, %d provider request(s) in the cached review; current run transferred no source\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.SourceBatchesStarted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal, analysis.Coverage.ProviderRequests); err != nil {
 				return err
 			}
-		} else if _, err := fmt.Fprintf(writer, "- Cached reviewed context: %d original file-excerpt submission(s), %d source-content byte(s); current run transferred no source\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted); err != nil {
+		} else if _, err := fmt.Fprintf(writer, "- Cached reviewed context: %d original code-excerpt transfer(s), %d source-content byte(s); current run transferred no source\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted); err != nil {
 			return err
 		}
 	} else if analysis.Coverage.Mode == providers.RepositoryAnalysisTargeted {
 		if analysis.Coverage.SourceBatchesTotal > 0 {
-			if _, err := fmt.Fprintf(writer, "- Candidate-context attempts: %d source-bearing submission attempt(s), %d source-content byte(s); %d distinct source batch(es) started, %d of %d validated, %d provider request(s)\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.SourceBatchesStarted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal, analysis.Coverage.ProviderRequests); err != nil {
+			if _, err := fmt.Fprintf(writer, "- Code-excerpt transfers: %d, containing %d source-content byte(s); %d distinct source batch(es) started, %d of %d validated, %d provider request(s)\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.SourceBatchesStarted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal, analysis.Coverage.ProviderRequests); err != nil {
 				return err
 			}
-		} else if _, err := fmt.Fprintf(writer, "- Source-bearing submission attempts: %d file excerpt(s), %d source-content byte(s), %d provider request(s)\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.ProviderRequests); err != nil {
+		} else if _, err := fmt.Fprintf(writer, "- Code-excerpt transfers: %d, containing %d source-content byte(s), across %d provider request(s)\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.ProviderRequests); err != nil {
 			return err
 		}
-	} else if _, err := fmt.Fprintf(writer, "- Source-bearing submission attempts: %d file excerpt(s), %d source-content byte(s), %d subsystem(s), %d provider request(s)\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.Subsystems, analysis.Coverage.ProviderRequests); err != nil {
+	} else if _, err := fmt.Fprintf(writer, "- Code-excerpt transfers: %d, containing %d source-content byte(s), across %d subsystem(s) and %d provider request(s)\n", analysis.Coverage.FilesSubmitted, analysis.Coverage.BytesSubmitted, analysis.Coverage.Subsystems, analysis.Coverage.ProviderRequests); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(writer, "- Deterministically checked citations: %d\n", analysis.Coverage.CitationsChecked); err != nil {

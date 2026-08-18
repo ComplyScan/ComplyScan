@@ -58,7 +58,7 @@ func TestBatchedRepositoryCompletionWordingIncludesSourceBatchesAndSynthesis(t *
 		t.Fatal(err)
 	}
 	text := string(source)
-	start := strings.Index(text, `completionDetail := fmt.Sprintf("%d source-bearing submission attempt(s)"`)
+	start := strings.Index(text, `completionDetail := fmt.Sprintf("%d code-excerpt transfer(s)"`)
 	end := strings.Index(text, `Repository AI reasoning completed in %s using %s context (%s).\n`)
 	if start < 0 || end <= start {
 		t.Fatal("could not isolate repository-analysis completion wording")
@@ -81,7 +81,7 @@ func TestTargetedRepositoryCompletionDoesNotClaimAnExactModelCallCount(t *testin
 		t.Fatal(err)
 	}
 	text := string(source)
-	start := strings.Index(text, `completionDetail := fmt.Sprintf("%d source-bearing submission attempt(s)"`)
+	start := strings.Index(text, `completionDetail := fmt.Sprintf("%d code-excerpt transfer(s)"`)
 	endMarker := `Repository AI reasoning completed in %s using %s context (%s).\n`
 	end := strings.Index(text, endMarker)
 	if start < 0 || end <= start {

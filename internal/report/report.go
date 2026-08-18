@@ -502,11 +502,11 @@ func WriteTerminalRepositoryAnalysis(w io.Writer, analysis providers.RepositoryA
 	}
 	if analysis.CacheHit {
 		if analysis.Coverage.SourceBatchesTotal > 0 {
-			if _, err := fmt.Fprintf(w, "        Cached reviewed context: %d original file-excerpt submission(s), %d source batch(es) started, %d/%d validated, %d provider request(s); current run transferred no source\n",
+			if _, err := fmt.Fprintf(w, "        Cached reviewed context: %d original code-excerpt transfer(s), %d source batch(es) started, %d/%d validated, %d provider request(s); current run transferred no source\n",
 				analysis.Coverage.FilesSubmitted, analysis.Coverage.SourceBatchesStarted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal, analysis.Coverage.ProviderRequests); err != nil {
 				return err
 			}
-		} else if _, err := fmt.Fprintf(w, "        Cached reviewed context: %d original file-excerpt submission(s); current run transferred no source\n", analysis.Coverage.FilesSubmitted); err != nil {
+		} else if _, err := fmt.Fprintf(w, "        Cached reviewed context: %d original code-excerpt transfer(s); current run transferred no source\n", analysis.Coverage.FilesSubmitted); err != nil {
 			return err
 		}
 	} else if analysis.Coverage.Mode == providers.RepositoryAnalysisTargeted {
@@ -515,23 +515,23 @@ func WriteTerminalRepositoryAnalysis(w io.Writer, analysis providers.RepositoryA
 				return err
 			}
 		} else if analysis.Coverage.SourceBatchesTotal > 0 {
-			if _, err := fmt.Fprintf(w, "        Context: %d source-bearing submission attempt(s), %d distinct source batch(es) started, %d/%d validated, %d provider request(s), %d verified citation(s)\n",
+			if _, err := fmt.Fprintf(w, "        Context: %d code-excerpt transfer(s); %d distinct source batch(es) started, %d/%d validated, %d provider request(s), %d verified citation(s)\n",
 				analysis.Coverage.FilesSubmitted, analysis.Coverage.SourceBatchesStarted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal, analysis.Coverage.ProviderRequests, analysis.Coverage.CitationsChecked); err != nil {
 				return err
 			}
 		} else if analysis.Coverage.ReviewScope == providers.RepositoryReviewScopeChanged {
-			if _, err := fmt.Fprintf(w, "        Context: %d file-excerpt submission(s) from %d eligible review-scope file(s), %d provider request(s), %d verified citation(s)\n",
+			if _, err := fmt.Fprintf(w, "        Context: %d code-excerpt transfer(s) from %d eligible review-scope file(s), %d provider request(s), %d verified citation(s)\n",
 				analysis.Coverage.FilesSubmitted, analysis.Coverage.ScopeFiles, analysis.Coverage.ProviderRequests, analysis.Coverage.CitationsChecked); err != nil {
 				return err
 			}
 		} else {
-			if _, err := fmt.Fprintf(w, "        Context: %d file-excerpt submission(s) from %d discovered file(s), %d provider request(s), %d verified citation(s)\n",
+			if _, err := fmt.Fprintf(w, "        Context: %d code-excerpt transfer(s) from %d discovered file(s), %d provider request(s), %d verified citation(s)\n",
 				analysis.Coverage.FilesSubmitted, analysis.Coverage.RepositoryFiles, analysis.Coverage.ProviderRequests, analysis.Coverage.CitationsChecked); err != nil {
 				return err
 			}
 		}
 	} else {
-		if _, err := fmt.Fprintf(w, "        Context: %d source-bearing submission attempt(s) across a %d-file discovered repository, %d subsystem(s), %d provider request(s), %d verified citation(s)\n",
+		if _, err := fmt.Fprintf(w, "        Context: %d code-excerpt transfer(s) across a %d-file discovered repository, %d subsystem(s), %d provider request(s), %d verified citation(s)\n",
 			analysis.Coverage.FilesSubmitted, analysis.Coverage.RepositoryFiles, analysis.Coverage.Subsystems, analysis.Coverage.ProviderRequests, analysis.Coverage.CitationsChecked); err != nil {
 			return err
 		}
