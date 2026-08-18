@@ -612,6 +612,21 @@ type RepositoryCoverage struct {
 	CitationsChecked       int `json:"citations_checked"`
 }
 
+// RepositoryRequestDiagnostic records one repository-layer provider attempt.
+// It deliberately excludes prompts, source content, file lists, response
+// bodies, and request IDs. The report can therefore explain latency and retry
+// amplification without retaining another copy of submitted code.
+type RepositoryRequestDiagnostic struct {
+	Phase       string `json:"phase"`
+	Scope       string `json:"scope"`
+	Attempt     int    `json:"attempt"`
+	DurationNS  int64  `json:"duration_ns"`
+	Outcome     string `json:"outcome"`
+	RetryReason string `json:"retry_reason,omitempty"`
+	InputFiles  int    `json:"input_files,omitempty"`
+	InputBytes  int64  `json:"input_bytes,omitempty"`
+}
+
 type RepositoryReviewScope string
 
 const (
@@ -619,17 +634,18 @@ const (
 )
 
 type RepositoryAnalysisResult struct {
-	Provider           Kind                    `json:"provider"`
-	Model              string                  `json:"model"`
-	CacheHit           bool                    `json:"cache_hit,omitempty"`
-	Coverage           RepositoryCoverage      `json:"coverage"`
-	Result             RepositorySectionResult `json:"result"`
-	Notes              []string                `json:"notes,omitempty"`
-	Usage              Usage                   `json:"usage,omitempty"`
-	RateLimits         RateLimitSnapshot       `json:"-"`
-	FollowUpRequested  bool                    `json:"follow_up_requested,omitempty"`
-	FollowUpQueries    []string                `json:"follow_up_queries,omitempty"`
-	FollowUpExcerpts   int                     `json:"follow_up_excerpts,omitempty"`
-	OutputRecoveryUsed bool                    `json:"output_recovery_used,omitempty"`
-	FollowUpPlan       TechnicalSearchPlan     `json:"-"`
+	Provider           Kind                          `json:"provider"`
+	Model              string                        `json:"model"`
+	CacheHit           bool                          `json:"cache_hit,omitempty"`
+	Coverage           RepositoryCoverage            `json:"coverage"`
+	Result             RepositorySectionResult       `json:"result"`
+	Notes              []string                      `json:"notes,omitempty"`
+	Usage              Usage                         `json:"usage,omitempty"`
+	RequestDiagnostics []RepositoryRequestDiagnostic `json:"request_diagnostics,omitempty"`
+	RateLimits         RateLimitSnapshot             `json:"-"`
+	FollowUpRequested  bool                          `json:"follow_up_requested,omitempty"`
+	FollowUpQueries    []string                      `json:"follow_up_queries,omitempty"`
+	FollowUpExcerpts   int                           `json:"follow_up_excerpts,omitempty"`
+	OutputRecoveryUsed bool                          `json:"output_recovery_used,omitempty"`
+	FollowUpPlan       TechnicalSearchPlan           `json:"-"`
 }

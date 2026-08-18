@@ -22,9 +22,9 @@ import (
 )
 
 const (
-	repositoryCacheSchemaVersion  = 6
-	repositoryCacheContextVersion = "12"
-	repositoryCacheFileName       = "repository-analysis-v6.json"
+	repositoryCacheSchemaVersion  = 7
+	repositoryCacheContextVersion = "13"
+	repositoryCacheFileName       = "repository-analysis-v7.json"
 	maxRepositoryCacheBytes       = 32 << 20
 	maxRepositoryCacheEntries     = 40
 	maxRepositoryCacheEntryBytes  = 2 << 20
@@ -248,6 +248,14 @@ func validateRepositoryCacheEntry(entry repositoryCacheEntry) error {
 	}
 	if result.Usage.PromptTokens < 0 || result.Usage.CompletionTokens < 0 || result.Usage.ReasoningTokens < 0 || result.Usage.TotalDurationNS < 0 {
 		return errors.New("repository analysis result contains negative usage")
+	}
+	if len(result.RequestDiagnostics) > result.Coverage.ProviderRequests || len(result.RequestDiagnostics) > MaxProviderRequestsPerRun {
+		return errors.New("repository analysis result contains impossible request diagnostics")
+	}
+	for _, diagnostic := range result.RequestDiagnostics {
+		if strings.TrimSpace(diagnostic.Phase) == "" || strings.TrimSpace(diagnostic.Scope) == "" || diagnostic.Attempt <= 0 || diagnostic.DurationNS < 0 || strings.TrimSpace(diagnostic.Outcome) == "" || diagnostic.InputFiles < 0 || diagnostic.InputBytes < 0 || len(diagnostic.Scope) > 300 || len(diagnostic.RetryReason) > 100 {
+			return errors.New("repository analysis result contains an invalid request diagnostic")
+		}
 	}
 	if len(result.Result.AIUses) > 100 || len(result.Result.AIUseFacts) > 600 || len(result.Result.ObjectiveObservations) > 500 || len(result.Result.UnmappedObservations) > 100 || len(result.Result.UnresolvedQuestions) > 100 || len(result.Result.ResolvedEvidenceGaps) > 100 || len(result.Result.EvidenceGaps) != 0 || len(result.Notes) > 100 {
 		return errors.New("repository analysis result exceeds cache item limits")

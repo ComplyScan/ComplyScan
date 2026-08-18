@@ -1311,13 +1311,27 @@ func reviewRepositoryWithProvider(
 	kind = configuredKind
 	liveCountdown := llmActivityAvailable(progressWriter)
 	result, err := repositoryanalysis.Run(ctx, reviewer, repository, evidence, systems, repositoryanalysis.Options{
-		Mode: mode, MaxInputTokens: settings.RepositoryAnalysis.MaxInputTokens, Provider: kind, Model: model,
+		Mode: mode, MaxInputTokens: settings.RepositoryAnalysis.MaxInputTokens,
+		ModelContextTokens: providers.RepositoryModelCapabilities(kind, model).ContextWindowTokens,
+		Provider:           kind, Model: model,
 		Ownership: ownershipRules, ConfirmedAIUses: confirmedAIUses,
 		InitialRateLimits:       initialCapacity.RateLimits,
 		InitialUsage:            initialCapacity.Usage,
 		InitialProviderRequests: initialCapacity.ProviderRequests,
 		OnProgress: func(progress repositoryanalysis.Progress) error {
 			switch progress.Stage {
+			case "provider-request-complete":
+				outcome, retryReason := progress.Detail, ""
+				if separator := strings.Index(outcome, ":"); separator >= 0 {
+					retryReason = outcome[separator+1:]
+					outcome = outcome[:separator]
+				}
+				if retryReason == "" {
+					_, err := fmt.Fprintf(progressWriter, "Provider %s request %d completed in %s (%s).\n", progress.Scope, progress.Completed, conciseDuration(progress.Duration), outcome)
+					return err
+				}
+				_, err := fmt.Fprintf(progressWriter, "Provider %s request %d returned %s after %s; adaptive recovery will decide the next step.\n", progress.Scope, progress.Completed, strings.ReplaceAll(retryReason, "-", " "), conciseDuration(progress.Duration))
+				return err
 			case "targeted-batch-queue":
 				_, err := fmt.Fprintf(progressWriter, "Local evidence queue prepared: %d bounded AI review batch(es). No candidate file will be dropped to fit one request.\n", progress.Total)
 				return err
@@ -1646,6 +1660,13 @@ func technicalReviewProgress(output io.Writer, provider string, started time.Tim
 		_, err := fmt.Fprintf(output, "Evidence investigation %d/%d [elapsed %s]: %s — %s [%s] (%s)\n", progress.Current, progress.Total, formatElapsed(now().Sub(started)), progress.Candidate.ObjectiveID, progress.Candidate.Path, scope, status)
 		return err
 	}
+}
+
+func conciseDuration(value time.Duration) string {
+	if value < time.Second {
+		return value.Round(time.Millisecond).String()
+	}
+	return value.Round(100 * time.Millisecond).String()
 }
 
 func rateLimitCountdownMessage(retry int, remaining, original time.Duration) string {

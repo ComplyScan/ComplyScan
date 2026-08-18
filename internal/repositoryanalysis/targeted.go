@@ -21,14 +21,18 @@ const (
 	targetedMaximumFileBytes    = 6_000
 	targetedContextLines        = 60
 	targetedMaxFollowUpExcerpts = 3
-	// Hosted targeted review still treats this as a per-request ceiling, not a
-	// repository-wide budget. A larger default keeps coherent candidate evidence
-	// together and avoids paying for many tiny extraction calls; provider capacity
-	// preflight and encoded-size partitioning still reduce or split requests when
-	// the configured/model boundary is smaller.
-	targetedRemoteInputTokens  = 24_000
-	targetedLocalInputTokens   = 16_000
-	targetedRemoteOutputTokens = 4_096
+	// Hosted source planning targets a latency-efficient request size rather
+	// than a fixed repository-wide budget. Known large-context models may use
+	// larger connected bundles; unknown adapters stay closer to the historical
+	// conservative boundary and still split automatically on provider feedback.
+	targetedRemoteMinimumInputTokens  = 24_000
+	targetedRemoteFallbackInputTokens = 32_000
+	targetedRemoteLatencyInputTokens  = 64_000
+	targetedRemoteSingleInputTokens   = 32_000
+	targetedLocalInputTokens          = 16_000
+	targetedRemoteOutputTokens        = 4_096
+	targetedPreferredSourceBatches    = 2
+	targetedBatchPlanningHeadroom     = 20
 )
 
 type targetedCandidate struct {
@@ -110,17 +114,6 @@ func runTargeted(
 	budget int64,
 	options Options,
 ) (providers.RepositoryAnalysisResult, error) {
-	targetTokens := targetedRemoteInputTokens
-	if options.Provider == providers.Ollama {
-		targetTokens = targetedLocalInputTokens
-	}
-	if options.MaxInputTokens > 0 && options.MaxInputTokens < targetTokens {
-		targetTokens = options.MaxInputTokens
-	}
-	targetBudget := sourceBudget(targetTokens, objectives, systems, confirmedUses)
-	if targetBudget < budget {
-		budget = targetBudget
-	}
 	selected, considered := targetedRepositoryCandidateFiles(repository, graph, evidence, confirmedUses)
 	if len(selected) == 0 {
 		return providers.RepositoryAnalysisResult{
@@ -140,6 +133,11 @@ func runTargeted(
 			},
 		}, nil
 	}
+	targetTokens := targetedSourceInputTokens(options, selected)
+	targetBudget := sourceBudget(targetTokens, objectives, systems, confirmedUses)
+	if targetBudget < budget {
+		budget = targetBudget
+	}
 	// Source that already exceeds one encoded request can never be made to fit
 	// by trimming optional graph metadata. Enter the bounded batch queue before
 	// constructing the all-candidate graph, avoiding quadratic trimming work on
@@ -156,6 +154,7 @@ func runTargeted(
 		result, err := runHierarchical(ctx, reviewer, repository, graph, selected, objectives, systems, confirmedUses, budget, batchOptions)
 		result.Notes = append(result.Notes,
 			fmt.Sprintf("Targeted analysis queued all %d structural candidate file excerpt(s) instead of treating one model request as a repository-wide evidence cap.", considered),
+			fmt.Sprintf("Adaptive source planning used a %d-token per-request target based on model context, configured limits, and observed token capacity.", targetTokens),
 			"Source bundles prefer graph-connected evidence when it fits; these request boundaries are context management, not deterministic AI-use classifications.",
 			"Each source batch stayed within the provider request boundary; files outside the deterministic candidate set were not reviewed by the model.",
 		)
@@ -185,6 +184,7 @@ func runTargeted(
 		audit.Coverage.BytesSubmitted += value.Coverage.BytesSubmitted
 		audit.Coverage.ProviderRequests += value.Coverage.ProviderRequests
 		addUsage(&audit.Usage, value.Usage)
+		audit.RequestDiagnostics = append(audit.RequestDiagnostics, value.RequestDiagnostics...)
 		audit.Coverage.CitationsChecked += value.Coverage.CitationsChecked
 		if value.RateLimits.Available() {
 			audit.RateLimits = latestRateLimitSnapshot(audit.RateLimits, value.RateLimits)
@@ -195,6 +195,7 @@ func runTargeted(
 		audit.Coverage.BytesSubmitted += value.Coverage.BytesSubmitted
 		audit.Coverage.ProviderRequests += value.Coverage.ProviderRequests
 		addUsage(&audit.Usage, value.Usage)
+		audit.RequestDiagnostics = append(audit.RequestDiagnostics, value.RequestDiagnostics...)
 		if incomplete, ok := providers.AsRemoteIncompleteError(err); ok && usageIsZero(value.Usage) {
 			addUsage(&audit.Usage, usageFromIncomplete(incomplete))
 		}
@@ -222,6 +223,7 @@ func runTargeted(
 		value.Coverage.ProviderRequests = audit.Coverage.ProviderRequests
 		value.Coverage.CitationsChecked = audit.Coverage.CitationsChecked
 		value.Usage = audit.Usage
+		value.RequestDiagnostics = append([]providers.RepositoryRequestDiagnostic(nil), audit.RequestDiagnostics...)
 		return value
 	}
 	fallBackToBatches := func(files []providers.RepositorySourceFile, cause error) (providers.RepositoryAnalysisResult, error) {
@@ -246,6 +248,7 @@ func runTargeted(
 		batched.Coverage.ProviderRequests += audit.Coverage.ProviderRequests
 		batched.Coverage.CitationsChecked += audit.Coverage.CitationsChecked
 		addUsage(&batched.Usage, audit.Usage)
+		batched.RequestDiagnostics = append(append([]providers.RepositoryRequestDiagnostic(nil), audit.RequestDiagnostics...), batched.RequestDiagnostics...)
 		batched.Notes = append(batched.Notes, "The initial compact package could not produce a valid bounded result, so ComplyScan continued with smaller source batches instead of dropping selected evidence.")
 		if batchErr != nil {
 			return batched, fmt.Errorf("continue targeted review after compact-package failure (%v): %w", cause, batchErr)
@@ -457,6 +460,7 @@ func runTargeted(
 	result.Coverage.Mode = providers.RepositoryAnalysisTargeted
 	result.Notes = append(result.Notes,
 		fmt.Sprintf("Targeted analysis selected %d of %d structural candidate file(s) from %d discovered repository file(s).", len(selected), considered, len(repository.Files)),
+		fmt.Sprintf("Adaptive source planning used a %d-token per-request target based on model context, configured limits, and observed token capacity.", targetTokens),
 		"Selection prioritized executable AI call paths, their bounded caller and safeguard neighborhood, technical-objective matches, confirmed AI-use paths, and then passive provider references.",
 		"Files outside the evidence package were not reviewed by the model; absence of model evidence is not proof that an implementation is absent.",
 	)
@@ -465,6 +469,72 @@ func runTargeted(
 		return partialFailure("complete targeted repository analysis", err)
 	}
 	return result, nil
+}
+
+// targetedSourceInputTokens chooses a per-request source target that balances
+// request overhead against inference latency. It aims for one modest request
+// when the selected evidence is small and roughly two connected requests for a
+// medium hosted review. Larger repositories continue to partition exhaustively.
+// Model context and rolling provider capacity remain separate constraints.
+func targetedSourceInputTokens(options Options, files []providers.RepositorySourceFile) int {
+	configuredLimit := options.MaxInputTokens
+	if configuredLimit <= 0 {
+		configuredLimit = DefaultRemoteInputTokens
+		if options.Provider == providers.Ollama {
+			configuredLimit = DefaultLocalInputTokens
+		}
+	}
+	if options.Provider == providers.Ollama {
+		return min(configuredLimit, targetedLocalInputTokens)
+	}
+
+	maximum := targetedRemoteFallbackInputTokens
+	if options.ModelContextTokens > 0 {
+		// Keep generous room for the fixed prompt, structured-output schema,
+		// output, and provider tokenization differences. The latency ceiling is
+		// deliberately far below modern long-context model maxima.
+		contextAvailable := options.ModelContextTokens - targetedRemoteOutputTokens - sourceBatchTokenOverhead
+		if contextAvailable > 0 {
+			maximum = min(targetedRemoteLatencyInputTokens, contextAvailable*80/100)
+		}
+	}
+	maximum = min(maximum, configuredLimit)
+	if maximum < minimumInputTokens {
+		return maximum
+	}
+
+	encodedBytes := requestContextBytes(files, providers.RepositoryGraphContext{})
+	estimatedSourceTokens := int((encodedBytes + charactersPerToken - 1) / charactersPerToken)
+	// sourceBudget reserves another 20% for the prompt envelope and supplied
+	// objectives. Inflate the source-only estimate so the planned number of
+	// chunks remains stable after that reserve is applied.
+	reservedTokens := (estimatedSourceTokens*100 + (100 - contextReservePercent) - 1) / (100 - contextReservePercent)
+	target := maximum
+	if reservedTokens <= min(maximum, targetedRemoteSingleInputTokens) {
+		target = max(targetedRemoteMinimumInputTokens, reservedTokens)
+	} else {
+		perBatch := (reservedTokens + targetedPreferredSourceBatches - 1) / targetedPreferredSourceBatches
+		// The source-only estimate does not yet include each batch's graph slice,
+		// paths, JSON envelope, and confirmed-use bindings. Without modest
+		// headroom, two bundles that fit arithmetically can each cross the encoded
+		// boundary and be split again, doubling otherwise unnecessary calls.
+		perBatch = (perBatch*(100+targetedBatchPlanningHeadroom) + 99) / 100
+		target = max(targetedRemoteMinimumInputTokens, perBatch)
+		if target > maximum {
+			target = maximum
+		}
+	}
+
+	// A complete live TPM snapshot can further reduce the target before any
+	// source is transferred. Reserve two concurrent requests when the window can
+	// support them; the shared scheduler still decides the actual wave width.
+	if options.InitialRateLimits.TokensKnown && options.InitialRateLimits.LimitTokens > 0 {
+		windowInput := options.InitialRateLimits.LimitTokens/targetedPreferredSourceBatches - targetedRemoteOutputTokens - sourceBatchTokenOverhead
+		if windowInput >= minimumInputTokens && windowInput < target {
+			target = windowInput
+		}
+	}
+	return max(minimumInputTokens, min(target, maximum))
 }
 
 func targetedCapacityRequiresQueue(snapshot providers.RateLimitSnapshot, estimatedTokens int) bool {

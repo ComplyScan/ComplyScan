@@ -66,17 +66,21 @@ const (
 )
 
 type Options struct {
-	Mode              Mode
-	MaxInputTokens    int
-	Provider          providers.Kind
-	Model             string
-	Ownership         []ownership.Rule
-	ConfirmedAIUses   []providers.RepositoryConfirmedAIUse
-	TargetedBatches   bool
-	OnProgress        func(Progress) error
-	Wait              func(context.Context, time.Duration) error
-	InitialRateLimits providers.RateLimitSnapshot
-	InitialUsage      providers.Usage
+	Mode           Mode
+	MaxInputTokens int
+	// ModelContextTokens is the provider/model's stable per-request context
+	// ceiling when it can be identified confidently. It is distinct from the
+	// rolling TPM capacity carried by InitialRateLimits.
+	ModelContextTokens int
+	Provider           providers.Kind
+	Model              string
+	Ownership          []ownership.Rule
+	ConfirmedAIUses    []providers.RepositoryConfirmedAIUse
+	TargetedBatches    bool
+	OnProgress         func(Progress) error
+	Wait               func(context.Context, time.Duration) error
+	InitialRateLimits  providers.RateLimitSnapshot
+	InitialUsage       providers.Usage
 	// InitialProviderRequests accounts for a live, source-free compatibility
 	// request whose capacity snapshot is reused by this repository run.
 	InitialProviderRequests int
@@ -141,6 +145,7 @@ type Progress struct {
 	InputBytes   int64
 	Wait         time.Duration
 	OriginalWait time.Duration
+	Duration     time.Duration
 	Detail       string
 }
 
@@ -303,13 +308,17 @@ func mergeRepositoryAttemptAccounting(target *providers.RepositoryAnalysisResult
 	target.Coverage.ProviderRequests += attempt.Coverage.ProviderRequests
 	target.Coverage.CitationsChecked += attempt.Coverage.CitationsChecked
 	addUsage(&target.Usage, attempt.Usage)
+	target.RequestDiagnostics = append(target.RequestDiagnostics, attempt.RequestDiagnostics...)
 }
 
 func runHierarchical(ctx context.Context, reviewer Reviewer, repository discovery.Repository, graph codegraph.Graph, files []providers.RepositorySourceFile, objectives []providers.RepositoryObjective, systems []providers.RepositorySystemContext, confirmedUses []providers.RepositoryConfirmedAIUse, budget int64, options Options) (providers.RepositoryAnalysisResult, error) {
 	var chunks []repositoryChunk
 	var err error
 	if options.TargetedBatches {
-		chunks, err = partitionTargetedRepository(repository, graph, files, confirmedUses, budget*80/100, options.separateTargetedFiles)
+		// sourceBudget already reserves 20% for the prompt envelope. Reapplying
+		// that reserve here created unnecessary extra batches; actual encoded
+		// requests are measured below and split again if graph metadata expands.
+		chunks, err = partitionTargetedRepository(repository, graph, files, confirmedUses, budget, options.separateTargetedFiles)
 	} else {
 		chunks, err = partitionRepository(files, budget*80/100)
 	}
@@ -596,6 +605,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		aggregate.Coverage.FilesSubmitted += result.Coverage.FilesSubmitted
 		aggregate.Coverage.BytesSubmitted += result.Coverage.BytesSubmitted
 		aggregate.Coverage.ProviderRequests += result.Coverage.ProviderRequests
+		aggregate.RequestDiagnostics = append(aggregate.RequestDiagnostics, result.RequestDiagnostics...)
 		if err != nil {
 			addUsage(&aggregate.Usage, result.Usage)
 			incomplete, isIncomplete := providers.AsRemoteIncompleteError(err)
@@ -862,6 +872,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			}
 			result, err := batchResponse.result, batchResponse.err
 			aggregate.Coverage.ProviderRequests += result.Coverage.ProviderRequests
+			aggregate.RequestDiagnostics = append(aggregate.RequestDiagnostics, result.RequestDiagnostics...)
 			if err != nil {
 				addUsage(&aggregate.Usage, result.Usage)
 				incomplete, isIncomplete := providers.AsRemoteIncompleteError(err)
@@ -1048,6 +1059,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 			}
 			result, err = reviewRepositoryWithRetry(ctx, reviewer, request, options)
 			aggregate.Coverage.ProviderRequests += result.Coverage.ProviderRequests
+			aggregate.RequestDiagnostics = append(aggregate.RequestDiagnostics, result.RequestDiagnostics...)
 			if err == nil {
 				break
 			}
@@ -1388,6 +1400,7 @@ func mergeRepositorySourceRecovery(original, recovery repositorySourceBatchRespo
 	result.Coverage.BytesSubmitted += original.result.Coverage.BytesSubmitted
 	result.Coverage.ProviderRequests += original.result.Coverage.ProviderRequests
 	addUsage(&result.Usage, original.result.Usage)
+	result.RequestDiagnostics = append(append([]providers.RepositoryRequestDiagnostic(nil), original.result.RequestDiagnostics...), result.RequestDiagnostics...)
 	result.RateLimits = latestRateLimitSnapshot(original.result.RateLimits, result.RateLimits)
 	if result.Provider == providers.None {
 		result.Provider = original.result.Provider
@@ -1456,6 +1469,7 @@ func mergeRepositorySynthesisAccounting(target *providers.RepositoryAnalysisResu
 	target.Coverage.ProviderRequests += result.Coverage.ProviderRequests
 	target.Coverage.CitationsChecked += result.Coverage.CitationsChecked
 	addUsage(&target.Usage, result.Usage)
+	target.RequestDiagnostics = append(target.RequestDiagnostics, result.RequestDiagnostics...)
 }
 
 func drainRepositorySynthesisPrefetch(target *providers.RepositoryAnalysisResult, pending map[int]repositorySynthesisResponse) {
@@ -2267,6 +2281,70 @@ func repositoryUnmappedIdentity(value providers.RepositoryUnmappedObservation) s
 	return strings.Join(parts, "\x00")
 }
 
+func repositoryRequestPhase(request providers.RepositoryAnalysisRequest) string {
+	if request.CompactSynthesis || request.Mode == providers.RepositoryAnalysisSynthesis {
+		return "synthesis"
+	}
+	if request.CompactSource || request.Mode == providers.RepositoryAnalysisSubsystem {
+		return "source"
+	}
+	if request.Mode == providers.RepositoryAnalysisFull {
+		return "full"
+	}
+	return "targeted"
+}
+
+func repositoryRequestOutcome(err error) (string, string) {
+	if err == nil {
+		return "completed", ""
+	}
+	if _, ok := providers.AsRepositoryValidationError(err); ok {
+		return "retryable-error", "structured-validation"
+	}
+	if value, ok := providers.AsRemoteRateLimitError(err); ok {
+		switch {
+		case value.RequestTooLarge:
+			return "retryable-error", "request-too-large"
+		case value.Permanent:
+			return "failed", "permanent-quota"
+		default:
+			return "retryable-error", "rate-limit"
+		}
+	}
+	if _, ok := providers.AsRemoteTransientError(err); ok {
+		return "retryable-error", "transient-provider"
+	}
+	if value, ok := providers.AsRemoteIncompleteError(err); ok {
+		reason := strings.TrimSpace(value.Reason)
+		if reason == "" {
+			reason = "incomplete-output"
+		}
+		return "retryable-error", reason
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return "failed", "cancelled"
+	}
+	return "failed", "provider-error"
+}
+
+func requestDiagnosticDetail(reason string) string {
+	if strings.TrimSpace(reason) == "" {
+		return ""
+	}
+	return ":" + reason
+}
+
+func repositoryRequestDiagnosticBytes(request providers.RepositoryAnalysisRequest) int64 {
+	encoded, err := json.Marshal(request)
+	if err == nil {
+		return int64(len(encoded))
+	}
+	if request.Mode == providers.RepositoryAnalysisSynthesis {
+		return summaryBytes(request.SubsystemSummaries)
+	}
+	return requestContextBytes(request.Files, request.Graph)
+}
+
 func inferredCandidateID(sortedObservationIDs []string) string {
 	digest := sha256.Sum256([]byte(strings.Join(sortedObservationIDs, "\x00")))
 	return fmt.Sprintf("inferred-use-%x", digest[:16])
@@ -2275,6 +2353,7 @@ func inferredCandidateID(sortedObservationIDs []string) string {
 func reviewRepositoryWithRetry(ctx context.Context, reviewer Reviewer, request providers.RepositoryAnalysisRequest, options Options) (providers.RepositoryAnalysisResult, error) {
 	totalWait := time.Duration(0)
 	var attemptedUsage providers.Usage
+	var diagnostics []providers.RepositoryRequestDiagnostic
 	attemptedFiles := 0
 	var attemptedSourceBytes int64
 	providerRequests := 0
@@ -2291,7 +2370,7 @@ func reviewRepositoryWithRetry(ctx context.Context, reviewer Reviewer, request p
 				return providers.RepositoryAnalysisResult{
 					Provider: options.Provider, Model: options.Model,
 					Coverage: providers.RepositoryCoverage{FilesSubmitted: attemptedFiles, BytesSubmitted: attemptedSourceBytes, ProviderRequests: providerRequests},
-					Usage:    attemptedUsage, RateLimits: latestLimits,
+					Usage:    attemptedUsage, RequestDiagnostics: diagnostics, RateLimits: latestLimits,
 				}, ctx.Err()
 			}
 		}
@@ -2302,13 +2381,15 @@ func reviewRepositoryWithRetry(ctx context.Context, reviewer Reviewer, request p
 			return providers.RepositoryAnalysisResult{
 				Provider: options.Provider, Model: options.Model,
 				Coverage: providers.RepositoryCoverage{FilesSubmitted: attemptedFiles, BytesSubmitted: attemptedSourceBytes, ProviderRequests: providerRequests},
-				Usage:    attemptedUsage, RateLimits: latestLimits,
+				Usage:    attemptedUsage, RequestDiagnostics: diagnostics, RateLimits: latestLimits,
 			}, fmt.Errorf("repository review reached the safety ceiling of %d provider requests", MaxProviderRequestsPerRun)
 		}
 		attemptedFiles += len(request.Files)
 		attemptedSourceBytes += repositorySourceContentBytes(request.Files)
 		providerRequests++
+		started := time.Now()
 		result, err := reviewer.ReviewRepository(ctx, request)
+		duration := time.Since(started)
 		if gateHeld {
 			<-options.retryGate
 		}
@@ -2325,6 +2406,7 @@ func reviewRepositoryWithRetry(ctx context.Context, reviewer Reviewer, request p
 			result.Coverage.FilesSubmitted = attemptedFiles
 			result.Coverage.BytesSubmitted = attemptedSourceBytes
 			result.Coverage.ProviderRequests = providerRequests
+			result.RequestDiagnostics = append([]providers.RepositoryRequestDiagnostic(nil), diagnostics...)
 			return result, err
 		}
 		addUsage(&attemptedUsage, result.Usage)
@@ -2335,11 +2417,24 @@ func reviewRepositoryWithRetry(ctx context.Context, reviewer Reviewer, request p
 		result.Coverage.FilesSubmitted = attemptedFiles
 		result.Coverage.BytesSubmitted = attemptedSourceBytes
 		result.Coverage.ProviderRequests = providerRequests
+		outcome, retryReason := repositoryRequestOutcome(err)
+		diagnostics = append(diagnostics, providers.RepositoryRequestDiagnostic{
+			Phase: repositoryRequestPhase(request), Scope: request.Scope, Attempt: providerRequests,
+			DurationNS: duration.Nanoseconds(), Outcome: outcome, RetryReason: retryReason,
+			InputFiles: len(request.Files), InputBytes: repositoryRequestDiagnosticBytes(request),
+		})
+		result.RequestDiagnostics = append([]providers.RepositoryRequestDiagnostic(nil), diagnostics...)
 		if result.RateLimits.Available() {
 			latestLimits = latestRateLimitSnapshot(latestLimits, result.RateLimits)
 			result.RateLimits = latestLimits
 		} else if latestLimits.Available() {
 			result.RateLimits = latestLimits
+		}
+		if progressErr := progress(options, Progress{
+			Stage: "provider-request-complete", Completed: providerRequests, Scope: request.Scope,
+			Duration: duration, Detail: outcome + requestDiagnosticDetail(retryReason),
+		}); progressErr != nil {
+			return result, progressErr
 		}
 		if err == nil {
 			return result, nil

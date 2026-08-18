@@ -21,7 +21,7 @@ import (
 const (
 	schemaVersion                = 1
 	maxRecordBytes               = 64 << 10
-	reviewContextContractVersion = "adaptive-provider-pipeline-v4"
+	reviewContextContractVersion = "adaptive-provider-pipeline-v5"
 )
 
 // Store persists review approvals outside the scanned repository. Directory

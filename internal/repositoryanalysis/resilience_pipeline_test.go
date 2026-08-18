@@ -118,7 +118,13 @@ func TestReviewRepositoryWithRetryRepairsValidationWithoutChangingEvidenceAndCou
 	if !reflect.DeepEqual(first, repaired) {
 		t.Fatalf("corrective regeneration changed trusted evidence\nfirst: %#v\nrepair: %#v", first, repaired)
 	}
-	if len(progressEvents) != 1 || progressEvents[0].Stage != "validation-repair" || progressEvents[0].Completed != 1 || progressEvents[0].Total != maxValidationRepairRetries {
+	var repairEvents []Progress
+	for _, event := range progressEvents {
+		if event.Stage == "validation-repair" {
+			repairEvents = append(repairEvents, event)
+		}
+	}
+	if len(repairEvents) != 1 || repairEvents[0].Completed != 1 || repairEvents[0].Total != maxValidationRepairRetries {
 		t.Fatalf("validation repair was not scheduler-visible: %#v", progressEvents)
 	}
 	wantUsage := providers.Usage{PromptTokens: 300, CompletionTokens: 30, ReasoningTokens: 3, TotalDurationNS: 3}
@@ -592,7 +598,7 @@ func TestRunHierarchicalStripsOversizedNonGroupingDetailBeforeSynthesis(t *testi
 		t.Fatalf("fixture partitions = %d, want exactly two source summaries", len(chunks))
 	}
 	reviewer := &compactingSynthesisReviewer{}
-	result, err := runHierarchical(context.Background(), reviewer, repository, codegraph.Build(repository), files, nil, nil, nil, 16_000, Options{
+	result, err := runHierarchical(context.Background(), reviewer, repository, codegraph.Build(repository), files, nil, nil, nil, 16_000*80/100, Options{
 		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", TargetedBatches: true,
 	})
 	if err != nil {

@@ -235,7 +235,7 @@ func TestRunTargetedReviewsEveryCandidateAcrossBoundedBatches(t *testing.T) {
 		t.Fatalf("completed targeted batch counters = %d/%d, want %d/%d: %#v", result.Coverage.SourceBatchesCompleted, result.Coverage.SourceBatchesTotal, reviewer.sourceRequests, reviewer.sourceRequests, result.Coverage)
 	}
 
-	perRequestBudget := sourceBudget(targetedRemoteInputTokens, nil, nil, nil)
+	perRequestBudget := sourceBudget(8_000, nil, nil, nil)
 	for index, request := range reviewer.requests {
 		if len(request.Files) == 0 {
 			continue
@@ -271,8 +271,11 @@ func TestRunTargetedUsesLargerHostedEvidenceBundlesByDefault(t *testing.T) {
 	if reviewer.sourceRequests > 2 {
 		t.Fatalf("default hosted review used %d source requests for %d small candidates, want at most 2 coherent evidence bundles", reviewer.sourceRequests, len(expectedPaths))
 	}
-	if targetedRemoteInputTokens != 24_000 {
-		t.Fatalf("default hosted evidence target = %d tokens, want 24000", targetedRemoteInputTokens)
+	target := targetedSourceInputTokens(Options{
+		Provider: providers.OpenAI, MaxInputTokens: DefaultRemoteInputTokens, ModelContextTokens: 1_050_000,
+	}, nil)
+	if target < targetedRemoteMinimumInputTokens || target > targetedRemoteLatencyInputTokens {
+		t.Fatalf("adaptive hosted evidence target = %d tokens, want %d-%d", target, targetedRemoteMinimumInputTokens, targetedRemoteLatencyInputTokens)
 	}
 }
 
@@ -415,7 +418,7 @@ func TestRunTargetedSplitsEscapeHeavyCandidatesByEncodedRequestSize(t *testing.T
 		t.Fatal(err)
 	}
 
-	budget := sourceBudget(targetedRemoteInputTokens, nil, nil, nil)
+	budget := sourceBudget(8_000, nil, nil, nil)
 	seen := make(map[string]bool, len(expectedPaths))
 	submissions := make(map[string]int, len(expectedPaths))
 	sourceRequests := 0

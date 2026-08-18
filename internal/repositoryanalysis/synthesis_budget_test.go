@@ -114,7 +114,7 @@ func synthesisBudgetRepository() discovery.Repository {
 func runWideSynthesisBudgetFixture(repository discovery.Repository, reviewer *wideSynthesisBudgetReviewer) (providers.RepositoryAnalysisResult, error) {
 	// Keep many source summaries so this remains a synthesis-growth test rather
 	// than depending on the product's default hosted bundle size.
-	sourceRequestBudget := sourceBudget(6_500, nil, nil, nil)
+	sourceRequestBudget := sourceBudget(6_500, nil, nil, nil) * 80 / 100
 	return runHierarchical(context.Background(), reviewer, repository, codegraph.Build(repository), repositoryFiles(repository), nil, nil, nil, sourceRequestBudget, Options{
 		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", TargetedBatches: true, MaxInputTokens: DefaultRemoteInputTokens,
 		InitialRateLimits: providers.RateLimitSnapshot{

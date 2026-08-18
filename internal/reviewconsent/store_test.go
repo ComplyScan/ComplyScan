@@ -119,8 +119,8 @@ func TestConsentInvalidatesImmediatePriorAdaptiveProviderContextContract(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reviewContextContractVersion != "adaptive-provider-pipeline-v4" {
-		t.Fatalf("current review context contract = %q, want adaptive-provider-pipeline-v4", reviewContextContractVersion)
+	if reviewContextContractVersion != "adaptive-provider-pipeline-v5" {
+		t.Fatalf("current review context contract = %q, want adaptive-provider-pipeline-v5", reviewContextContractVersion)
 	}
 
 	current := normalizedAI{
@@ -138,7 +138,7 @@ func TestConsentInvalidatesImmediatePriorAdaptiveProviderContextContract(t *test
 	}
 
 	prior := current
-	prior.ContextContract = "adaptive-provider-pipeline-v3"
+	prior.ContextContract = "adaptive-provider-pipeline-v4"
 	priorDigest := normalizedTestDigest(t, prior)
 	if priorDigest == currentDigest {
 		t.Fatalf("immediate prior context contract %q still authorizes current contract %q", prior.ContextContract, current.ContextContract)
