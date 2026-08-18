@@ -169,8 +169,8 @@ func TestWriteMarkdownExplainsTestOnlyComponentsAndQuickScan(t *testing.T) {
 		"Scan status: **deterministic checks only**",
 		"Repository AI review: **not run — deterministic checks only**",
 		"This scan used deterministic checks only",
-		"**AI libraries or configuration found:** OpenAI",
-		"not that they are active in the deployed product",
+		"Additional provider or configuration references: **OpenAI**",
+		"not treated as separate deployed AI functions",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
@@ -260,24 +260,26 @@ func TestWriteMarkdownPrioritizesDeveloperDecisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"## Summary", "**Action required**", "## 1. What to do next", "Possible secret exposure", "Human oversight",
-		"## 2. What ComplyScan found", "Answer generation",
-		"### Code-level safeguard decisions", "Implemented in the reviewed code", "audit.go:11",
-		"## 3. Open questions", "Where will this AI feature be offered or used?",
-		"<summary>Legal and technical details</summary>", "Article 12",
-		"## How this scan was performed", "Full technical results: `latest.json`",
+		"## Result", "**Action required**", "## What to do next", "Possible secret exposure", "**Do:** Remove the credential from the request", "Human oversight",
+		"## What the code shows", "Implemented in the reviewed code", "audit.go:11",
+		"## AI functionality found", "Answer generation",
+		"## What code cannot determine", "Where will this AI feature be offered or used?",
+		"## Scan coverage", "Full evidence and dashboard data: `latest.json`",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
 		}
 	}
-	if actionIndex, findingsIndex := strings.Index(output.String(), "## 1. What to do next"), strings.Index(output.String(), "## 2. What ComplyScan found"); actionIndex < 0 || findingsIndex < 0 || actionIndex > findingsIndex {
+	if actionIndex, findingsIndex := strings.Index(output.String(), "## What to do next"), strings.Index(output.String(), "## What the code shows"); actionIndex < 0 || findingsIndex < 0 || actionIndex > findingsIndex {
 		t.Fatalf("actionable next steps did not precede supporting scan detail:\n%s", output.String())
 	}
-	for _, excluded := range []string{"## Technical checklist", "## AI advisory review", "No evidence detected for", "not-substantiated", "Candidate evidence", "technical objective", "| high |", "a person still needs to check it"} {
+	for _, excluded := range []string{"## Technical checklist", "## AI advisory review", "No evidence detected for", "not-substantiated", "Candidate evidence", "technical objective", "Possible roles indicated", "Legal and technical details", "a person still needs to check it"} {
 		if strings.Contains(output.String(), excluded) {
 			t.Errorf("developer summary contains diagnostic detail %q:\n%s", excluded, output.String())
 		}
+	}
+	if lines := strings.Count(output.String(), "\n"); lines > 75 {
+		t.Fatalf("developer report has %d lines, want at most 75:\n%s", lines, output.String())
 	}
 }
 

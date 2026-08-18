@@ -162,15 +162,15 @@ func TestDeveloperObjectiveNextStepUsesDeveloperActionsInsteadOfBatchJargon(t *t
 	}{
 		{
 			missing: "Only test-side evidence is submitted; validation implementation is outside this batch.",
-			want:    "Complete this safeguard: The reviewed evidence only shows tests; validation implementation is not established by the reviewed code. Then rerun ComplyScan",
+			want:    "Complete or test the missing part, then rerun the scan. Missing: The reviewed evidence only shows tests; validation implementation is not established by the reviewed code",
 		},
 		{
 			missing: "No retry or fallback behavior is shown in this submitted flow.",
-			want:    "Complete this safeguard: Add retry and fallback handling to the production AI call path. Then rerun ComplyScan",
+			want:    "Add retry and fallback handling to the production AI call path. Then rerun the scan",
 		},
 		{
 			missing: "No submitted code shows benchmark execution or pass/fail evaluation.",
-			want:    "Show where this safeguard is enforced: Run the benchmark in CI or another executable workflow and enforce its pass/fail result. Then rerun ComplyScan",
+			want:    "Run the benchmark in CI or another executable workflow and enforce its pass/fail result. Then rerun the scan",
 		},
 	}
 	for index, testCase := range tests {
@@ -185,6 +185,13 @@ func TestDeveloperObjectiveNextStepUsesDeveloperActionsInsteadOfBatchJargon(t *t
 		if got := developerObjectiveNextStep(observation, "latest.json"); got != testCase.want {
 			t.Fatalf("developer action = %q, want %q", got, testCase.want)
 		}
+	}
+	retryObservation := providers.RepositoryObjectiveObservation{
+		Strength: providers.StrengthUncertain, Confidence: "low",
+		MissingEvidence: []string{"No test evidence in this batch verifies retry outcomes."},
+	}
+	if got, want := developerObjectiveNextStep(retryObservation, "latest.json"), "Add a test that verifies retry outcomes. Then rerun the scan"; got != want {
+		t.Fatalf("retry action = %q, want %q", got, want)
 	}
 }
 
@@ -355,14 +362,11 @@ func TestConciseMarkdownSeparatesSavedSuggestedAndUngroupedAIUses(t *testing.T) 
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"Organising code into confirmed AI uses is optional", "you can act on this report without doing it",
-		"#### Confirmed AI-use scopes", "Confirmed generation", "#### Draft AI-use scopes (optional)", "Draft ranking",
-		"#### Retired AI uses", "Retired classifier", "Current signals match retired AI use", "Matching local technical signal found", "No matching signal was observed in this scan",
-		"#### Suggested workflows and components", "Suggested assistant", "**Other AI-related code signals (1):** OpenAI at unowned.py:4",
-		"##### What code indicates for Confirmed generation", "Model provider integration", "Human control", "required (high confidence)",
-		"The route calls an approval gate.",
-		"Possible roles indicated by the repository", "Deployer", "Organisation context that repository code cannot establish",
-		"These unknowns are report context only. They do not create a setup task or block the code scan.",
+		"## AI functionality found", "Confirmed scope", "Confirmed generation", "runtime/\\*\\*",
+		"Optional draft", "Draft ranking", "ranking/\\*\\*",
+		"Suggested — AI workflow", "Suggested assistant", "assistant.go:12",
+		"Additional provider or configuration references", "1 underlying signal(s) are retained in `latest.json`",
+		"## What code cannot determine",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("concise Markdown missing %q:\n%s", expected, output.String())
@@ -371,7 +375,10 @@ func TestConciseMarkdownSeparatesSavedSuggestedAndUngroupedAIUses(t *testing.T) 
 	if strings.Contains(output.String(), "AI features found") {
 		t.Fatalf("concise Markdown retained misleading feature count:\n%s", output.String())
 	}
-	for _, unwanted := range []string{"draft AI-use record still needs confirmation", "AI-use suggestion needs a developer decision", "Run `complyscan ai-uses setup`"} {
+	for _, unwanted := range []string{
+		"draft AI-use record still needs confirmation", "AI-use suggestion needs a developer decision", "Run `complyscan ai-uses setup`",
+		"What code indicates for Confirmed generation", "Possible roles indicated by the repository", "Organisation context that repository code cannot establish",
+	} {
 		if strings.Contains(output.String(), unwanted) {
 			t.Fatalf("optional AI-use enrichment was presented as required work %q:\n%s", unwanted, output.String())
 		}
@@ -393,9 +400,11 @@ func TestConciseMarkdownExplainsEmptyPerUseFactReview(t *testing.T) {
 	if err := WriteMarkdown(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "The reviewed code supported no positive per-use facts") ||
-		!strings.Contains(output.String(), "does not establish that a fact is false") {
-		t.Fatalf("empty fact review was not explained honestly:\n%s", output.String())
+	if !strings.Contains(output.String(), "Confirmed scope") || !strings.Contains(output.String(), "Assistant") {
+		t.Fatalf("confirmed use was omitted from the compact report:\n%s", output.String())
+	}
+	if strings.Contains(output.String(), "positive per-use facts") || strings.Contains(output.String(), "fact is false") {
+		t.Fatalf("dashboard-level empty fact detail leaked into the compact report:\n%s", output.String())
 	}
 }
 
@@ -427,7 +436,7 @@ func TestConciseMarkdownOptionalAIUseGroupingDoesNotChangeCleanOutcome(t *testin
 	if !strings.Contains(output.String(), "**Scan completed — no urgent code changes identified**") {
 		t.Fatalf("optional AI-use organization changed the scan outcome:\n%s", output.String())
 	}
-	if !strings.Contains(output.String(), "AI-reviewed safeguards: **no code-level decisions returned**") {
+	if !strings.Contains(output.String(), "AI-reviewed code controls: **no decisions returned**") {
 		t.Fatalf("empty completed review was not described honestly:\n%s", output.String())
 	}
 	if strings.Contains(output.String(), "| **Review** |") {
@@ -470,21 +479,21 @@ func TestDeveloperReportSeparatesTechnicalFollowUpFromLegalApplicability(t *test
 	text := output.String()
 	for _, expected := range []string{
 		"**Scan completed — technical follow-up recommended**",
-		"High/medium deterministic findings: **0**",
-		"Safeguards needing follow-up or more evidence: **4**",
-		"Legal applicability: **not determined from repository code**",
-		"Missing evidence: Adversarial-input tests",
-		"Missing evidence: Retry-exhaustion test; Fallback outcome",
+		"High/medium code findings: **0**",
+		"Recommended developer follow-ups: **4**",
+		"What code cannot determine",
+		"Missing: Adversarial-input tests",
+		"Missing: Retry-exhaustion test",
 		"| safe-stop | Could not determine from the reviewed code",
-		"| AI workflow | Repository technical review |",
-		"| Supporting infrastructure | Remote model inference adapters |",
-		"| Evaluation/test tooling | Repository benchmark evaluation |",
+		"| Suggested — AI workflow | Repository technical review |",
+		"| Suggested — Supporting infrastructure | Remote model inference adapters |",
+		"| Suggested — Evaluation/test tooling | Repository benchmark evaluation |",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Errorf("developer report missing %q:\n%s", expected, text)
 		}
 	}
-	if count := strings.Count(text, "| **Review** |"); count != maxDeveloperActions {
+	if count := strings.Count(text, "- **Do:**"); count != maxDeveloperActions {
 		t.Fatalf("top action count = %d, want %d:\n%s", count, maxDeveloperActions, text)
 	}
 	if strings.Contains(text, "Review the helper") {
@@ -568,9 +577,9 @@ func TestConciseMarkdownAndTerminalMapRequirementsPerConfirmedAIUse(t *testing.T
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"### Requirements and code evidence by confirmed AI use", "Support answer generation", "Support (support)",
-		"Human review gate", "Likely required from declared context", "Partially implemented in the reviewed code", "apps/support/review.go:12",
-		"Unlinked classifier", "No configured system association", "Cannot determine from saved context",
+		"### Checks within confirmed AI uses", "Support answer generation",
+		"Human review gate", "Partially implemented in the reviewed code", "apps/support/review.go:12",
+		"Unlinked classifier", "Safe stop", "No matching code signal found in this use's saved paths",
 		"AI use has no configured system context", "Which configured system contains the AI use Unlinked classifier?",
 		"Repository-level, not assigned to one confirmed AI use: Safe stop", "shared/stop.go:7",
 		"Support answer generation: Is human review enforced?",
@@ -585,7 +594,7 @@ func TestConciseMarkdownAndTerminalMapRequirementsPerConfirmedAIUse(t *testing.T
 	if strings.Contains(markdown.String(), "| **Review** | Human review gate |") {
 		t.Fatalf("covered repository observation produced a duplicate generic action:\n%s", markdown.String())
 	}
-	if strings.Contains(markdown.String(), "### Code-level safeguard decisions") || !strings.Contains(markdown.String(), "### Other code-level evidence") {
+	if strings.Count(markdown.String(), "Repository-level, not assigned to one confirmed AI use: Safe stop") != 1 {
 		t.Fatalf("per-use decisions were duplicated in the generic evidence section:\n%s", markdown.String())
 	}
 	var terminal bytes.Buffer
@@ -744,7 +753,7 @@ func TestRepositoryAnalysisIsRenderedAsAdvisoryEvidence(t *testing.T) {
 	if err := WriteMarkdown(&markdown, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(markdown.String(), "## 2. What ComplyScan found") || !strings.Contains(markdown.String(), "Summary generation") || !strings.Contains(markdown.String(), "cannot decide on its own whether your product complies with a law") {
+	if !strings.Contains(markdown.String(), "## AI functionality found") || !strings.Contains(markdown.String(), "Summary generation") || !strings.Contains(markdown.String(), "not a legal compliance decision") {
 		t.Fatalf("repository analysis boundary missing from Markdown:\n%s", markdown.String())
 	}
 	var detailed bytes.Buffer
