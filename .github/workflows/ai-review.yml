@@ -1,0 +1,51 @@
+name: ComplyScan advisory AI review
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Exact OpenAI model ID for this trusted full-repository review.
+        required: true
+        default: gpt-5.6-sol
+        type: string
+      refresh-review:
+        description: Ignore private review caches and request fresh inference.
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: complyscan-advisory-ai-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    name: Full advisory AI review
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Configure this environment with the OPENAI_API_KEY secret and, when
+    # desired, required reviewers. This workflow never runs for pull requests.
+    environment: ai-review
+    steps:
+      - name: Check out ComplyScan
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: main
+      - name: Run a trusted full-repository AI review
+        uses: ./
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        with:
+          scope: full
+          ai-review: openai
+          model: ${{ inputs.model }}
+          api-key-env: OPENAI_API_KEY
+          require-ai-review: "true"
+          refresh-review: ${{ inputs.refresh-review }}
+          upload-results: "false"
+          fail-on-findings: "false"

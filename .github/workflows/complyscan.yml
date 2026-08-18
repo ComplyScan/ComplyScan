@@ -24,3 +24,6 @@ jobs:
         uses: ./
         with:
           severity: medium
+          # Fork pull requests receive a read-only token. They still get the
+          # deterministic scan and job summary, but cannot upload SARIF.
+          upload-results: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}

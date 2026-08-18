@@ -236,6 +236,11 @@ func TestGitHubActionPublishesConciseReportAndExposesLocalBundles(t *testing.T) 
 	if !strings.Contains(summaryCommand, `cat "$COMPLYSCAN_MARKDOWN_REPORT" >> "$GITHUB_STEP_SUMMARY"`) || strings.Contains(summaryCommand, "JSON") {
 		t.Fatalf("job summary must append only the concise Markdown report:\n%s", summaryCommand)
 	}
+	for _, expected := range []string{"Pull-request scope", "changed and locally connected code", "Repository-wide governance checks"} {
+		if !strings.Contains(summaryCommand, expected) {
+			t.Fatalf("job summary does not explain PR-versus-repository scope; missing %q:\n%s", expected, summaryCommand)
+		}
+	}
 	if summaryIndex < 0 || completionIndex < 0 || summaryIndex >= completionIndex {
 		t.Fatalf("report summary must publish before completion enforcement: summary=%d completion=%d", summaryIndex, completionIndex)
 	}
@@ -252,6 +257,44 @@ func TestSelfScanWorkflowLetsActionChoosePullRequestScope(t *testing.T) {
 	}
 	if strings.Contains(workflow, "changed-since:") {
 		t.Fatalf("self-scan workflow bypasses the Action's automatic scope selection:\n%s", workflow)
+	}
+	for _, expected := range []string{
+		"upload-results:",
+		"github.event_name == 'push'",
+		"github.event.pull_request.head.repo.full_name == github.repository",
+	} {
+		if !strings.Contains(workflow, expected) {
+			t.Fatalf("self-scan workflow does not keep fork PR scanning separate from SARIF upload; missing %q:\n%s", expected, workflow)
+		}
+	}
+}
+
+func TestManualAIReviewWorkflowUsesAnExplicitTrustedBoundary(t *testing.T) {
+	data, err := os.ReadFile("../../.github/workflows/ai-review.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(data)
+	for _, expected := range []string{
+		"workflow_dispatch:",
+		"github.ref == 'refs/heads/main'",
+		"environment: ai-review",
+		"ref: main",
+		"OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}",
+		"scope: full",
+		"ai-review: openai",
+		"require-ai-review: \"true\"",
+		"upload-results: \"false\"",
+		"fail-on-findings: \"false\"",
+	} {
+		if !strings.Contains(workflow, expected) {
+			t.Fatalf("manual AI-review workflow is missing trusted boundary %q:\n%s", expected, workflow)
+		}
+	}
+	for _, unexpected := range []string{"pull_request:", "pull_request_target:", "push:"} {
+		if strings.Contains(workflow, unexpected) {
+			t.Fatalf("manual source-bearing AI review must not run automatically via %q:\n%s", unexpected, workflow)
+		}
 	}
 }
 

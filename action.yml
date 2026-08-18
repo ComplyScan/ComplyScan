@@ -335,8 +335,13 @@ runs:
       if: ${{ always() && inputs.publish-summary == 'true' && steps.scan.outputs.markdown-report-ready == 'true' }}
       shell: bash
       env:
+        COMPLYSCAN_EVENT_NAME: ${{ github.event_name }}
         COMPLYSCAN_MARKDOWN_REPORT: ${{ steps.scan.outputs.markdown-report }}
+        COMPLYSCAN_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
       run: |
+        if [[ "$COMPLYSCAN_EVENT_NAME" == "pull_request" ]]; then
+          printf '> Pull-request scope: changed and locally connected code was reviewed against base `%s`. Repository-wide governance checks still used the complete checked-out repository.\n\n' "$COMPLYSCAN_PR_BASE_SHA" >> "$GITHUB_STEP_SUMMARY"
+        fi
         cat "$COMPLYSCAN_MARKDOWN_REPORT" >> "$GITHUB_STEP_SUMMARY"
 
     - name: Upload SARIF
