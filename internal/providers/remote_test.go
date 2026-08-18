@@ -410,7 +410,11 @@ func TestOpenAITargetedRepositoryReviewUsesCompactReasoningAndSchema(t *testing.
 					t.Fatalf("compact source extraction instructions were omitted: %s", input)
 				}
 				encoded, _ := json.Marshal(textConfig["format"])
-				if !strings.Contains(string(encoded), `"maxItems":12`) || !strings.Contains(string(encoded), `"maxLength":320`) {
+				wantLength := `"maxLength":320`
+				if testCase.compactSource {
+					wantLength = `"maxLength":180`
+				}
+				if !strings.Contains(string(encoded), `"maxItems":12`) || !strings.Contains(string(encoded), wantLength) {
 					t.Fatalf("targeted schema was not bounded: %s", encoded)
 				}
 				if strings.Contains(string(encoded), `"oneOf"`) || !strings.Contains(string(encoded), `"anyOf"`) {

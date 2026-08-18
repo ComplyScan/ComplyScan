@@ -12,7 +12,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 )
 
-const RepositoryAnalysisPromptVersion = "15"
+const RepositoryAnalysisPromptVersion = "16"
 
 const (
 	maxRepositoryUses         = 100
@@ -25,6 +25,10 @@ const (
 	targetedMaximumQuestions  = 6
 	targetedMaximumCitations  = 3
 	targetedMaximumTextChars  = 320
+	compactSourceQuestions    = 3
+	compactSourceUnmapped     = 4
+	compactSourceCitations    = 2
+	compactSourceTextChars    = 180
 	maxRepositoryFactValues   = 8
 )
 
@@ -1675,6 +1679,16 @@ func repositoryAnalysisSchema(request RepositoryAnalysisRequest, allowFollowUp b
 	objectiveCount := repositoryObservationLimit(request)
 	factSetCount := repositoryFactSetLimit(request)
 	targeted := mode == RepositoryAnalysisTargeted
+	textLimit := targetedMaximumTextChars
+	questionLimit := targetedMaximumQuestions
+	citationLimit := targetedMaximumCitations
+	unmappedLimit := targetedMaximumUnmapped
+	if request.CompactSource {
+		textLimit = compactSourceTextChars
+		questionLimit = compactSourceQuestions
+		citationLimit = compactSourceCitations
+		unmappedLimit = compactSourceUnmapped
+	}
 	stringValue := func(limit int) map[string]any {
 		value := map[string]any{"type": "string"}
 		if targeted && limit > 0 {
@@ -1709,7 +1723,7 @@ func repositoryAnalysisSchema(request RepositoryAnalysisRequest, allowFollowUp b
 	citation := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"path": stringValue(300), "line": map[string]any{"type": "integer"}, "summary": stringValue(targetedMaximumTextChars),
+			"path": stringValue(300), "line": map[string]any{"type": "integer"}, "summary": stringValue(textLimit),
 		},
 		"required": []string{"path", "line", "summary"}, "additionalProperties": false,
 	}
@@ -1728,16 +1742,16 @@ func repositoryAnalysisSchema(request RepositoryAnalysisRequest, allowFollowUp b
 				"properties": map[string]any{
 					"path":    map[string]any{"type": "string", "const": file.Path},
 					"line":    map[string]any{"type": "integer", "minimum": start, "maximum": end},
-					"summary": stringValue(targetedMaximumTextChars),
+					"summary": stringValue(textLimit),
 				},
 				"required": []string{"path", "line", "summary"}, "additionalProperties": false,
 			})
 		}
 		citation = map[string]any{"anyOf": variants}
 	}
-	citations := func() map[string]any { return arrayValue(citation, targetedMaximumCitations) }
+	citations := func() map[string]any { return arrayValue(citation, citationLimit) }
 	stringsArray := func() map[string]any {
-		return arrayValue(stringValue(targetedMaximumTextChars), targetedMaximumQuestions)
+		return arrayValue(stringValue(textLimit), questionLimit)
 	}
 	confidence := map[string]any{"type": "string", "enum": []string{"low", "medium", "high"}}
 	strength := map[string]any{"type": "string", "enum": []string{string(StrengthStrong), string(StrengthPartial), string(StrengthWeak), string(StrengthUncertain), string(StrengthNotSupported)}}
@@ -1769,7 +1783,7 @@ func repositoryAnalysisSchema(request RepositoryAnalysisRequest, allowFollowUp b
 					"type": "array", "items": valueItems, "minItems": 1, "maxItems": maxRepositoryFactValues,
 				},
 				"confidence": confidence,
-				"rationale":  stringValue(targetedMaximumTextChars),
+				"rationale":  stringValue(textLimit),
 				"evidence":   factEvidence,
 			},
 			"required": []string{"field", "values", "confidence", "rationale", "evidence"}, "additionalProperties": false,
@@ -1791,7 +1805,7 @@ func repositoryAnalysisSchema(request RepositoryAnalysisRequest, allowFollowUp b
 	useCitations := citations()
 	useCitations["minItems"] = 1
 	useProperties := map[string]any{
-		"id": stringValue(120), "name": stringValue(160), "purpose": stringValue(targetedMaximumTextChars),
+		"id": stringValue(120), "name": stringValue(160), "purpose": stringValue(textLimit),
 		"lifecycle": stringValue(100), "confidence": confidence, "evidence": useCitations, "unresolved_questions": stringsArray(),
 	}
 	useRequired := []string{"id", "name", "purpose", "lifecycle", "confidence", "evidence", "unresolved_questions"}
@@ -1819,16 +1833,16 @@ func repositoryAnalysisSchema(request RepositoryAnalysisRequest, allowFollowUp b
 				"objective_observations": arrayValue(map[string]any{
 					"type": "object", "properties": map[string]any{
 						"objective_id": enumStringValue(objectiveIDs, 300), "ai_use_id": enumStringValue(confirmedUseIDs, 200), "system_id": enumStringValue(systemIDs, 200), "strength": strength,
-						"confidence": confidence, "rationale": stringValue(targetedMaximumTextChars), "supporting_evidence": citations(),
+						"confidence": confidence, "rationale": stringValue(textLimit), "supporting_evidence": citations(),
 						"contradictory_evidence": citations(), "missing_evidence": stringsArray(), "unresolved_questions": stringsArray(),
 					}, "required": []string{"objective_id", "ai_use_id", "system_id", "strength", "confidence", "rationale", "supporting_evidence", "contradictory_evidence", "missing_evidence", "unresolved_questions"}, "additionalProperties": false,
 				}, objectiveCount),
 				"unmapped_observations": arrayValue(map[string]any{
 					"type": "object", "properties": map[string]any{
-						"summary": stringValue(targetedMaximumTextChars), "reason": stringValue(targetedMaximumTextChars), "confidence": confidence,
-						"evidence": citations(), "suggested_review": stringValue(targetedMaximumTextChars),
+						"summary": stringValue(textLimit), "reason": stringValue(textLimit), "confidence": confidence,
+						"evidence": citations(), "suggested_review": stringValue(textLimit),
 					}, "required": []string{"summary", "reason", "confidence", "evidence", "suggested_review"}, "additionalProperties": false,
-				}, targetedMaximumUnmapped),
+				}, unmappedLimit),
 				"unresolved_questions": stringsArray(),
 			},
 			"required": []string{"scope", "ai_uses", "ai_use_facts", "objective_observations", "unmapped_observations", "unresolved_questions"}, "additionalProperties": false,
