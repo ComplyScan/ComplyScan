@@ -548,6 +548,32 @@ type RepositoryUnmappedObservation struct {
 	SuggestedReview string               `json:"suggested_review,omitempty"`
 }
 
+// RepositoryEvidenceGap is a scan-local question or missing-evidence claim
+// emitted by one independently reviewed source batch. Compact synthesis may
+// resolve it only by binding the claim to checked evidence from another
+// observation in the same model-proposed technical use. It is orchestration
+// input and is not retained in the completed report.
+type RepositoryEvidenceGap struct {
+	ID                   string   `json:"id"`
+	Kind                 string   `json:"kind"`
+	Text                 string   `json:"text"`
+	OriginObservationIDs []string `json:"origin_observation_ids"`
+}
+
+// RepositoryResolvedEvidenceGap records a global synthesis decision that a
+// batch-local gap was answered by another validated source observation. The
+// model decides the semantic relationship; local validation checks the claim,
+// observation membership, and every cited source location before this audit
+// record can enter the report JSON.
+type RepositoryResolvedEvidenceGap struct {
+	GapID                   string               `json:"gap_id"`
+	Kind                    string               `json:"kind,omitempty"`
+	OriginalText            string               `json:"original_text,omitempty"`
+	ResolvingObservationIDs []string             `json:"resolving_observation_ids"`
+	Evidence                []RepositoryCitation `json:"evidence"`
+	Reason                  string               `json:"reason"`
+}
+
 // RepositorySectionResult is returned for a complete repository, one
 // subsystem, or the synthesis of multiple subsystems.
 type RepositorySectionResult struct {
@@ -557,6 +583,8 @@ type RepositorySectionResult struct {
 	ObjectiveObservations []RepositoryObjectiveObservation `json:"objective_observations"`
 	UnmappedObservations  []RepositoryUnmappedObservation  `json:"unmapped_observations"`
 	UnresolvedQuestions   []string                         `json:"unresolved_questions"`
+	EvidenceGaps          []RepositoryEvidenceGap          `json:"evidence_gaps,omitempty"`
+	ResolvedEvidenceGaps  []RepositoryResolvedEvidenceGap  `json:"resolved_evidence_gaps,omitempty"`
 }
 
 type RepositoryCoverage struct {

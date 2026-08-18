@@ -1733,7 +1733,7 @@ func emptyRepositoryGroupingResult(scope string) providers.RepositorySectionResu
 	return providers.RepositorySectionResult{
 		Scope: scope, AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{},
 		ObjectiveObservations: []providers.RepositoryObjectiveObservation{}, UnmappedObservations: []providers.RepositoryUnmappedObservation{},
-		UnresolvedQuestions: []string{},
+		UnresolvedQuestions: []string{}, EvidenceGaps: []providers.RepositoryEvidenceGap{}, ResolvedEvidenceGaps: []providers.RepositoryResolvedEvidenceGap{},
 	}
 }
 
@@ -1778,8 +1778,89 @@ func compactRepositoryGroupingSummaries(summaries []providers.RepositorySectionR
 			}
 			compact.AIUseFacts = append(compact.AIUseFacts, copySet)
 		}
+		gapIDs := make(map[string]struct{})
+		for _, gap := range append(repositoryEvidenceGaps(summary), summary.EvidenceGaps...) {
+			if _, duplicate := gapIDs[gap.ID]; duplicate {
+				continue
+			}
+			gapIDs[gap.ID] = struct{}{}
+			compact.EvidenceGaps = append(compact.EvidenceGaps, gap)
+		}
+		compact.ResolvedEvidenceGaps = append([]providers.RepositoryResolvedEvidenceGap(nil), summary.ResolvedEvidenceGaps...)
 		result = append(result, compact)
 	}
+	return result
+}
+
+const (
+	repositoryGapUseQuestion        = "use-question"
+	repositoryGapFactQuestion       = "fact-question"
+	repositoryGapObjectiveMissing   = "objective-missing"
+	repositoryGapObjectiveQuestion  = "objective-question"
+	repositoryGapRepositoryQuestion = "repository-question"
+)
+
+func repositoryEvidenceGaps(summary providers.RepositorySectionResult) []providers.RepositoryEvidenceGap {
+	useMembers := make(map[string][]string, len(summary.AIUses))
+	allMembers := make([]string, 0)
+	citationMembers := make(map[string][]string)
+	for _, use := range summary.AIUses {
+		members := append([]string(nil), use.MemberObservationIDs...)
+		sort.Strings(members)
+		useMembers[use.ID] = members
+		allMembers = append(allMembers, members...)
+		for _, citation := range use.Evidence {
+			key := filepath.ToSlash(citation.Path) + "\x00" + fmt.Sprint(citation.Line)
+			citationMembers[key] = append(citationMembers[key], members...)
+		}
+	}
+	allMembers = uniqueRepositoryStrings(allMembers, 0)
+	result := make([]providers.RepositoryEvidenceGap, 0)
+	add := func(kind, text string, origins []string) {
+		text = strings.TrimSpace(text)
+		origins = uniqueRepositoryStrings(append([]string(nil), origins...), 0)
+		sort.Strings(origins)
+		if text == "" || len(origins) == 0 {
+			return
+		}
+		seed := summary.Scope + "\x00" + kind + "\x00" + text + "\x00" + strings.Join(origins, "\x00")
+		digest := sha256.Sum256([]byte(seed))
+		result = append(result, providers.RepositoryEvidenceGap{
+			ID: fmt.Sprintf("gap-%x", digest[:12]), Kind: kind, Text: text, OriginObservationIDs: origins,
+		})
+	}
+	for _, use := range summary.AIUses {
+		for _, question := range use.UnresolvedQuestions {
+			add(repositoryGapUseQuestion, question, useMembers[use.ID])
+		}
+	}
+	for _, factSet := range summary.AIUseFacts {
+		for _, question := range factSet.UnresolvedQuestions {
+			add(repositoryGapFactQuestion, question, useMembers[factSet.AIUseID])
+		}
+	}
+	for _, observation := range summary.ObjectiveObservations {
+		origins := append([]string(nil), useMembers[observation.AIUseID]...)
+		if len(origins) == 0 {
+			for _, citation := range append(append([]providers.RepositoryCitation(nil), observation.SupportingEvidence...), observation.ContradictoryEvidence...) {
+				key := filepath.ToSlash(citation.Path) + "\x00" + fmt.Sprint(citation.Line)
+				origins = append(origins, citationMembers[key]...)
+			}
+		}
+		if len(origins) == 0 {
+			origins = allMembers
+		}
+		for _, missing := range observation.MissingEvidence {
+			add(repositoryGapObjectiveMissing, missing, origins)
+		}
+		for _, question := range observation.UnresolvedQuestions {
+			add(repositoryGapObjectiveQuestion, question, origins)
+		}
+	}
+	for _, question := range summary.UnresolvedQuestions {
+		add(repositoryGapRepositoryQuestion, question, allMembers)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
 }
 
@@ -1807,6 +1888,26 @@ func attachRepositoryGroupingHints(grouped providers.RepositorySectionResult, in
 	grouped.ObjectiveObservations = []providers.RepositoryObjectiveObservation{}
 	grouped.UnmappedObservations = []providers.RepositoryUnmappedObservation{}
 	grouped.UnresolvedQuestions = []string{}
+	resolved := make(map[string]struct{})
+	for _, input := range inputs {
+		for _, resolution := range input.ResolvedEvidenceGaps {
+			if _, duplicate := resolved[resolution.GapID]; duplicate {
+				continue
+			}
+			resolved[resolution.GapID] = struct{}{}
+			grouped.ResolvedEvidenceGaps = append(grouped.ResolvedEvidenceGaps, resolution)
+		}
+	}
+	for _, resolution := range grouped.ResolvedEvidenceGaps {
+		resolved[resolution.GapID] = struct{}{}
+	}
+	for _, input := range inputs {
+		for _, gap := range input.EvidenceGaps {
+			if _, answered := resolved[gap.ID]; !answered {
+				grouped.EvidenceGaps = append(grouped.EvidenceGaps, gap)
+			}
+		}
+	}
 	for index := range grouped.AIUses {
 		use := &grouped.AIUses[index]
 		var citations []providers.RepositoryCitation
@@ -1828,6 +1929,32 @@ func attachRepositoryGroupingHints(grouped providers.RepositorySectionResult, in
 }
 
 func hydrateRepositoryGroupingResult(grouped providers.RepositorySectionResult, sources []providers.RepositorySectionResult, confirmedUses []providers.RepositoryConfirmedAIUse) (providers.RepositorySectionResult, error) {
+	knownGaps := make(map[string]providers.RepositoryEvidenceGap)
+	for _, source := range sources {
+		for _, gap := range repositoryEvidenceGaps(source) {
+			knownGaps[gap.ID] = gap
+		}
+	}
+	resolvedGapIDs := make(map[string]struct{}, len(grouped.ResolvedEvidenceGaps))
+	resolutions := make([]providers.RepositoryResolvedEvidenceGap, 0, len(grouped.ResolvedEvidenceGaps))
+	for _, resolution := range grouped.ResolvedEvidenceGaps {
+		gap, exists := knownGaps[resolution.GapID]
+		if !exists {
+			return providers.RepositorySectionResult{}, fmt.Errorf("repository grouping resolved unknown evidence gap %q", resolution.GapID)
+		}
+		if _, duplicate := resolvedGapIDs[resolution.GapID]; duplicate {
+			continue
+		}
+		resolvedGapIDs[resolution.GapID] = struct{}{}
+		resolution.Kind = gap.Kind
+		resolution.OriginalText = gap.Text
+		resolutions = append(resolutions, resolution)
+	}
+	filteredSources := make([]providers.RepositorySectionResult, 0, len(sources))
+	for _, source := range sources {
+		filteredSources = append(filteredSources, filterResolvedRepositoryEvidenceGaps(source, resolvedGapIDs))
+	}
+	sources = filteredSources
 	byObservation := make(map[string]providers.RepositoryAIUse)
 	factsByObservation := make(map[string]providers.RepositoryAIUseFactSet)
 	confirmed := make(map[string]struct{}, len(confirmedUses))
@@ -1858,6 +1985,7 @@ func hydrateRepositoryGroupingResult(grouped providers.RepositorySectionResult, 
 	}
 
 	result := emptyRepositoryGroupingResult(grouped.Scope)
+	result.ResolvedEvidenceGaps = resolutions
 	usedObservations := make(map[string]struct{}, len(byObservation))
 	for _, groupedUse := range grouped.AIUses {
 		use := groupedUse
@@ -1935,6 +2063,93 @@ func hydrateRepositoryGroupingResult(grouped providers.RepositorySectionResult, 
 	}
 	result.UnresolvedQuestions = uniqueRepositoryStrings(result.UnresolvedQuestions, 100)
 	return result, nil
+}
+
+func filterResolvedRepositoryEvidenceGaps(summary providers.RepositorySectionResult, resolved map[string]struct{}) providers.RepositorySectionResult {
+	if len(resolved) == 0 {
+		return summary
+	}
+	isResolved := func(kind, text string, origins []string) bool {
+		copySummary := emptyRepositoryGroupingResult(summary.Scope)
+		copySummary.AIUses = append([]providers.RepositoryAIUse(nil), summary.AIUses...)
+		switch kind {
+		case repositoryGapUseQuestion:
+			copySummary.AIUses = []providers.RepositoryAIUse{{ID: "gap", MemberObservationIDs: origins, UnresolvedQuestions: []string{text}}}
+		case repositoryGapFactQuestion:
+			copySummary.AIUses = []providers.RepositoryAIUse{{ID: "gap", MemberObservationIDs: origins}}
+			copySummary.AIUseFacts = []providers.RepositoryAIUseFactSet{{AIUseID: "gap", Facts: []providers.RepositoryAIUseFact{}, UnresolvedQuestions: []string{text}}}
+		default:
+			return false
+		}
+		for _, gap := range repositoryEvidenceGaps(copySummary) {
+			if _, ok := resolved[gap.ID]; ok {
+				return true
+			}
+		}
+		return false
+	}
+	members := make(map[string][]string, len(summary.AIUses))
+	for _, use := range summary.AIUses {
+		members[use.ID] = append([]string(nil), use.MemberObservationIDs...)
+	}
+	for index := range summary.AIUses {
+		questions := summary.AIUses[index].UnresolvedQuestions[:0]
+		for _, question := range summary.AIUses[index].UnresolvedQuestions {
+			if !isResolved(repositoryGapUseQuestion, question, members[summary.AIUses[index].ID]) {
+				questions = append(questions, question)
+			}
+		}
+		summary.AIUses[index].UnresolvedQuestions = questions
+	}
+	for index := range summary.AIUseFacts {
+		questions := summary.AIUseFacts[index].UnresolvedQuestions[:0]
+		for _, question := range summary.AIUseFacts[index].UnresolvedQuestions {
+			if !isResolved(repositoryGapFactQuestion, question, members[summary.AIUseFacts[index].AIUseID]) {
+				questions = append(questions, question)
+			}
+		}
+		summary.AIUseFacts[index].UnresolvedQuestions = questions
+	}
+	allGaps := repositoryEvidenceGaps(summary)
+	type gapCounts struct{ total, resolved int }
+	resolvedText := make(map[string]gapCounts)
+	for _, gap := range allGaps {
+		key := gap.Kind + "\x00" + gap.Text
+		counts := resolvedText[key]
+		counts.total++
+		if _, ok := resolved[gap.ID]; ok {
+			counts.resolved++
+		}
+		resolvedText[key] = counts
+	}
+	fullyResolved := func(kind, text string) bool {
+		counts := resolvedText[kind+"\x00"+text]
+		return counts.total > 0 && counts.total == counts.resolved
+	}
+	for index := range summary.ObjectiveObservations {
+		missing := summary.ObjectiveObservations[index].MissingEvidence[:0]
+		for _, value := range summary.ObjectiveObservations[index].MissingEvidence {
+			if !fullyResolved(repositoryGapObjectiveMissing, value) {
+				missing = append(missing, value)
+			}
+		}
+		summary.ObjectiveObservations[index].MissingEvidence = missing
+		questions := summary.ObjectiveObservations[index].UnresolvedQuestions[:0]
+		for _, value := range summary.ObjectiveObservations[index].UnresolvedQuestions {
+			if !fullyResolved(repositoryGapObjectiveQuestion, value) {
+				questions = append(questions, value)
+			}
+		}
+		summary.ObjectiveObservations[index].UnresolvedQuestions = questions
+	}
+	questions := summary.UnresolvedQuestions[:0]
+	for _, value := range summary.UnresolvedQuestions {
+		if !fullyResolved(repositoryGapRepositoryQuestion, value) {
+			questions = append(questions, value)
+		}
+	}
+	summary.UnresolvedQuestions = questions
+	return summary
 }
 
 func mergeRepositoryFactSets(useID string, sets []providers.RepositoryAIUseFactSet, retainEvidence bool) (providers.RepositoryAIUseFactSet, error) {

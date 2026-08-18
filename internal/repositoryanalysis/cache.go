@@ -23,7 +23,7 @@ import (
 
 const (
 	repositoryCacheSchemaVersion  = 6
-	repositoryCacheContextVersion = "9"
+	repositoryCacheContextVersion = "10"
 	repositoryCacheFileName       = "repository-analysis-v6.json"
 	maxRepositoryCacheBytes       = 32 << 20
 	maxRepositoryCacheEntries     = 40
@@ -249,7 +249,7 @@ func validateRepositoryCacheEntry(entry repositoryCacheEntry) error {
 	if result.Usage.PromptTokens < 0 || result.Usage.CompletionTokens < 0 || result.Usage.ReasoningTokens < 0 || result.Usage.TotalDurationNS < 0 {
 		return errors.New("repository analysis result contains negative usage")
 	}
-	if len(result.Result.AIUses) > 100 || len(result.Result.AIUseFacts) > 600 || len(result.Result.ObjectiveObservations) > 500 || len(result.Result.UnmappedObservations) > 100 || len(result.Result.UnresolvedQuestions) > 100 || len(result.Notes) > 100 {
+	if len(result.Result.AIUses) > 100 || len(result.Result.AIUseFacts) > 600 || len(result.Result.ObjectiveObservations) > 500 || len(result.Result.UnmappedObservations) > 100 || len(result.Result.UnresolvedQuestions) > 100 || len(result.Result.ResolvedEvidenceGaps) > 100 || len(result.Result.EvidenceGaps) != 0 || len(result.Notes) > 100 {
 		return errors.New("repository analysis result exceeds cache item limits")
 	}
 	candidateEvidencePaths := make(map[string]map[string]struct{}, len(result.Result.AIUses))
@@ -292,6 +292,29 @@ func validateRepositoryCacheEntry(entry repositoryCacheEntry) error {
 			paths[filepath.ToSlash(strings.TrimSpace(citation.Path))] = struct{}{}
 		}
 		candidateEvidencePaths[use.ID] = paths
+	}
+	seenGapIDs := make(map[string]struct{}, len(result.Result.ResolvedEvidenceGaps))
+	for _, resolution := range result.Result.ResolvedEvidenceGaps {
+		if strings.TrimSpace(resolution.GapID) == "" || strings.TrimSpace(resolution.GapID) != resolution.GapID || strings.TrimSpace(resolution.Kind) == "" || strings.TrimSpace(resolution.OriginalText) == "" || strings.TrimSpace(resolution.Reason) == "" || len(resolution.ResolvingObservationIDs) == 0 || len(resolution.Evidence) == 0 {
+			return errors.New("repository analysis cache contains an invalid resolved evidence gap")
+		}
+		if _, duplicate := seenGapIDs[resolution.GapID]; duplicate {
+			return errors.New("repository analysis cache contains a duplicate resolved evidence gap")
+		}
+		seenGapIDs[resolution.GapID] = struct{}{}
+		seenResolvers := make(map[string]struct{}, len(resolution.ResolvingObservationIDs))
+		for _, observationID := range resolution.ResolvingObservationIDs {
+			if _, exists := seenObservationIDs[observationID]; !exists {
+				return errors.New("repository analysis cache contains a resolved gap with an unknown observation")
+			}
+			if _, duplicate := seenResolvers[observationID]; duplicate {
+				return errors.New("repository analysis cache contains a resolved gap with a duplicate observation")
+			}
+			seenResolvers[observationID] = struct{}{}
+		}
+		if err := validateRepositoryCitations(resolution.Evidence); err != nil {
+			return err
+		}
 	}
 	seenFactSets := make(map[string]struct{}, len(result.Result.AIUseFacts))
 	for _, factSet := range result.Result.AIUseFacts {

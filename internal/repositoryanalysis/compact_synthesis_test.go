@@ -50,6 +50,25 @@ func (reviewer *groupingOnlySynthesisReviewer) ReviewRepository(_ context.Contex
 			ID: "temporary-group", Name: "Support reply drafting", Purpose: "Draft replies requested by the support route",
 			Lifecycle: "development", Confidence: "high", MemberObservationIDs: members,
 		}}
+		for _, summary := range request.SubsystemSummaries {
+			for _, gap := range summary.EvidenceGaps {
+				if gap.Text != "The provider call is outside this source batch." {
+					continue
+				}
+				for _, resolverSummary := range request.SubsystemSummaries {
+					for _, use := range resolverSummary.AIUses {
+						if len(use.MemberObservationIDs) == 0 || len(use.Evidence) == 0 || use.MemberObservationIDs[0] == gap.OriginObservationIDs[0] {
+							continue
+						}
+						section.ResolvedEvidenceGaps = append(section.ResolvedEvidenceGaps, providers.RepositoryResolvedEvidenceGap{
+							GapID: gap.ID, ResolvingObservationIDs: []string{use.MemberObservationIDs[0]}, Evidence: []providers.RepositoryCitation{use.Evidence[0]},
+							Reason: "The connected source member contains the provider call.",
+						})
+						break
+					}
+				}
+			}
+		}
 	} else {
 		index := reviewer.sourceCalls
 		reviewer.sourceCalls++
@@ -74,6 +93,9 @@ func (reviewer *groupingOnlySynthesisReviewer) ReviewRepository(_ context.Contex
 			ObjectiveID: "OBJ", Strength: providers.StrengthStrong, Confidence: "high", Rationale: "The submitted flow contains direct evidence.",
 			SupportingEvidence: []providers.RepositoryCitation{citation}, ContradictoryEvidence: []providers.RepositoryCitation{}, MissingEvidence: []string{}, UnresolvedQuestions: []string{},
 		}}
+		if index == 0 {
+			section.ObjectiveObservations[0].MissingEvidence = []string{"The provider call is outside this source batch."}
+		}
 		section.UnmappedObservations = []providers.RepositoryUnmappedObservation{{
 			Summary: fmt.Sprintf("Unmapped signal %d", index+1), Reason: "Needs product context", Confidence: "medium", Evidence: []providers.RepositoryCitation{citation}, SuggestedReview: "Review deployment context",
 		}}
@@ -111,6 +133,9 @@ func TestCompactSynthesisGroupsOnceAndReattachesValidatedEvidenceLocally(t *test
 	}
 	if len(result.Result.ObjectiveObservations) != 1 || len(result.Result.ObjectiveObservations[0].SupportingEvidence) != 2 {
 		t.Fatalf("validated objective evidence was not reattached: %#v", result.Result.ObjectiveObservations)
+	}
+	if len(result.Result.ObjectiveObservations[0].MissingEvidence) != 0 || len(result.Result.ResolvedEvidenceGaps) != 1 {
+		t.Fatalf("cross-batch resolution was not validated and applied: observation=%#v resolved=%#v", result.Result.ObjectiveObservations[0], result.Result.ResolvedEvidenceGaps)
 	}
 	if len(result.Result.UnmappedObservations) != 2 || len(result.Result.UnresolvedQuestions) != 2 {
 		t.Fatalf("validated residual evidence was not reattached: unmapped=%#v questions=%#v", result.Result.UnmappedObservations, result.Result.UnresolvedQuestions)
