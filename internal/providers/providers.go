@@ -268,6 +268,11 @@ const (
 // analysis. Paths and line counts are retained so citations can be verified
 // deterministically after the model responds.
 type RepositorySourceFile struct {
+	// BlockID is a request-local identity assigned by ComplyScan. Compact source
+	// responses cite this identity instead of repeating repository paths, which
+	// removes path spelling and cross-field candidate-ID bookkeeping from the
+	// model contract. It is never a durable repository or AI-use identity.
+	BlockID          string `json:"block_id,omitempty"`
 	Path             string `json:"path"`
 	Kind             string `json:"kind"`
 	LineCount        int    `json:"line_count"`
@@ -460,6 +465,85 @@ type RepositoryCitation struct {
 	Summary string `json:"summary"`
 }
 
+// RepositoryEvidenceReference is the compact source-stage citation contract.
+// The provider returns only a trusted request-local block identity and an
+// original source line. ComplyScan resolves it to RepositoryCitation locally
+// before the existing evidence and report validators run.
+type RepositoryEvidenceReference struct {
+	BlockID string `json:"block_id"`
+	Line    int    `json:"line"`
+	Summary string `json:"summary"`
+}
+
+// RepositoryEvidenceFact is a positive fact nested directly under the source
+// observation that supports it. It deliberately has no model-authored AI-use
+// ID; local orchestration assigns observation identity after validation.
+type RepositoryEvidenceFact struct {
+	Field      profile.CodeFactField         `json:"field"`
+	Values     []string                      `json:"values"`
+	Confidence string                        `json:"confidence"`
+	Rationale  string                        `json:"rationale"`
+	Evidence   []RepositoryEvidenceReference `json:"evidence"`
+}
+
+// RepositoryEvidenceObjective is one code-level objective judgment nested
+// under a source observation. AIUseID is absent by design for model-discovered
+// observations; confirmed operator-owned uses have their own result records.
+type RepositoryEvidenceObjective struct {
+	ObjectiveID           string                        `json:"objective_id"`
+	SystemID              string                        `json:"system_id,omitempty"`
+	Strength              EvidenceStrength              `json:"strength"`
+	Confidence            string                        `json:"confidence"`
+	Rationale             string                        `json:"rationale"`
+	SupportingEvidence    []RepositoryEvidenceReference `json:"supporting_evidence"`
+	ContradictoryEvidence []RepositoryEvidenceReference `json:"contradictory_evidence"`
+	MissingEvidence       []string                      `json:"missing_evidence,omitempty"`
+	UnresolvedQuestions   []string                      `json:"unresolved_questions,omitempty"`
+}
+
+// RepositoryEvidenceObservation is the atomic compact-source result. The
+// model describes one implementation observation and its evidence; it does not
+// invent a join key or coordinate a separate fact-set record.
+type RepositoryEvidenceObservation struct {
+	Name                string                        `json:"name"`
+	Purpose             string                        `json:"purpose"`
+	Lifecycle           string                        `json:"lifecycle"`
+	Confidence          string                        `json:"confidence"`
+	Evidence            []RepositoryEvidenceReference `json:"evidence"`
+	Facts               []RepositoryEvidenceFact      `json:"facts"`
+	UnresolvedQuestions []string                      `json:"unresolved_questions,omitempty"`
+}
+
+// RepositoryConfirmedEvidenceResult carries source-stage records for a
+// human-owned stable AI-use ID. Stable confirmed IDs are the only AI-use IDs
+// the source model may repeat.
+type RepositoryConfirmedEvidenceResult struct {
+	AIUseID               string                        `json:"ai_use_id"`
+	Facts                 []RepositoryEvidenceFact      `json:"facts"`
+	ObjectiveObservations []RepositoryEvidenceObjective `json:"objective_observations"`
+	UnresolvedQuestions   []string                      `json:"unresolved_questions,omitempty"`
+}
+
+type RepositoryEvidenceUnmappedObservation struct {
+	Summary         string                        `json:"summary"`
+	Reason          string                        `json:"reason"`
+	Confidence      string                        `json:"confidence"`
+	Evidence        []RepositoryEvidenceReference `json:"evidence"`
+	SuggestedReview string                        `json:"suggested_review,omitempty"`
+}
+
+// RepositorySourceObservationResult is returned only by compact source-stage
+// requests. It is converted locally into RepositorySectionResult before any
+// orchestration, synthesis, cache, report, or dashboard consumer sees it.
+type RepositorySourceObservationResult struct {
+	Scope                 string                                  `json:"scope"`
+	Observations          []RepositoryEvidenceObservation         `json:"observations"`
+	ConfirmedAIUses       []RepositoryConfirmedEvidenceResult     `json:"confirmed_ai_uses"`
+	ObjectiveObservations []RepositoryEvidenceObjective           `json:"objective_observations"`
+	UnmappedObservations  []RepositoryEvidenceUnmappedObservation `json:"unmapped_observations"`
+	UnresolvedQuestions   []string                                `json:"unresolved_questions"`
+}
+
 // RepositoryAIUseFactSet binds positive, repository-evident profile facts to
 // one exact model-discovered candidate ID or operator-confirmed AI-use ID.
 // These facts remain advisory drafts and never establish legal applicability,
@@ -588,15 +672,16 @@ type RepositorySectionResult struct {
 }
 
 type RepositoryCoverage struct {
-	Mode            RepositoryAnalysisMode `json:"mode"`
-	ReviewScope     RepositoryReviewScope  `json:"review_scope,omitempty"`
-	RepositoryFiles int                    `json:"repository_files"`
-	RepositoryBytes int64                  `json:"repository_bytes"`
-	ScopeFiles      int                    `json:"scope_files,omitempty"`
-	ScopeBytes      int64                  `json:"scope_bytes,omitempty"`
-	ChangedFiles    int                    `json:"changed_files,omitempty"`
-	ConnectedFiles  int                    `json:"connected_files,omitempty"`
-	FilesSubmitted  int                    `json:"files_submitted"`
+	Mode            RepositoryAnalysisMode   `json:"mode"`
+	GroupingStatus  RepositoryGroupingStatus `json:"grouping_status,omitempty"`
+	ReviewScope     RepositoryReviewScope    `json:"review_scope,omitempty"`
+	RepositoryFiles int                      `json:"repository_files"`
+	RepositoryBytes int64                    `json:"repository_bytes"`
+	ScopeFiles      int                      `json:"scope_files,omitempty"`
+	ScopeBytes      int64                    `json:"scope_bytes,omitempty"`
+	ChangedFiles    int                      `json:"changed_files,omitempty"`
+	ConnectedFiles  int                      `json:"connected_files,omitempty"`
+	FilesSubmitted  int                      `json:"files_submitted"`
 	// BytesSubmitted is source-content bytes only. It deliberately excludes
 	// paths, JSON escaping, graph metadata, prompts, schemas, and synthesis.
 	BytesSubmitted int64 `json:"bytes_submitted"`
@@ -611,6 +696,17 @@ type RepositoryCoverage struct {
 	SourceBatchesTotal     int `json:"source_batches_total,omitempty"`
 	CitationsChecked       int `json:"citations_checked"`
 }
+
+// RepositoryGroupingStatus separates evidence-review completion from the
+// optional global organization of validated observations into inferred uses.
+// A grouping failure must not erase source-level technical conclusions.
+type RepositoryGroupingStatus string
+
+const (
+	RepositoryGroupingNotNeeded  RepositoryGroupingStatus = "not-needed"
+	RepositoryGroupingComplete   RepositoryGroupingStatus = "complete"
+	RepositoryGroupingIncomplete RepositoryGroupingStatus = "incomplete"
+)
 
 // RepositoryRequestDiagnostic records one repository-layer provider attempt.
 // It deliberately excludes prompts, source content, file lists, response

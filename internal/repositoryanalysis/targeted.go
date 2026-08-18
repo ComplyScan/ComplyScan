@@ -120,7 +120,8 @@ func runTargeted(
 		return providers.RepositoryAnalysisResult{
 			Provider: options.Provider, Model: options.Model,
 			Coverage: providers.RepositoryCoverage{
-				Mode: providers.RepositoryAnalysisTargeted, RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository),
+				Mode: providers.RepositoryAnalysisTargeted, GroupingStatus: providers.RepositoryGroupingNotNeeded,
+				RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository),
 			},
 			Result: providers.RepositorySectionResult{
 				Scope: ".", AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{}, ObjectiveObservations: []providers.RepositoryObjectiveObservation{},
@@ -172,7 +173,7 @@ func runTargeted(
 		RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository),
 		Files: selected, Objectives: objectives, Systems: systems,
 		ConfirmedAIUses: bindConfirmedAIUses(confirmedUses, sourceFilePaths(selected)), Graph: graphContext, AllowFollowUp: true,
-		MaxOutputTokens: targetedOutputTokens(options.Provider),
+		MaxOutputTokens: targetedOutputTokens(options.Provider), CompactSource: true,
 	}
 	audit := providers.RepositoryAnalysisResult{
 		Provider: options.Provider, Model: options.Model,
@@ -459,6 +460,7 @@ func runTargeted(
 	}
 	result.Result = grouped
 	result.Coverage.Mode = providers.RepositoryAnalysisTargeted
+	result.Coverage.GroupingStatus = providers.RepositoryGroupingNotNeeded
 	result.Notes = append(result.Notes,
 		fmt.Sprintf("Targeted analysis selected %d of %d structural candidate file(s) from %d discovered repository file(s).", len(selected), considered, len(repository.Files)),
 		fmt.Sprintf("Adaptive source planning used a %d-token per-request target based on model context, configured limits, and observed token capacity.", targetTokens),

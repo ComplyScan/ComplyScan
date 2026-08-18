@@ -406,7 +406,7 @@ func TestOpenAITargetedRepositoryReviewUsesCompactReasoningAndSchema(t *testing.
 				}
 				encodedInput, _ := json.Marshal(body["input"])
 				input := string(encodedInput)
-				if testCase.compactSource && (!strings.Contains(input, "independent source-evidence batch") || !strings.Contains(input, "Omit routine off-topic or merely uncertain objective records")) {
+				if testCase.compactSource && (!strings.Contains(input, "atomic technical evidence observations") || !strings.Contains(input, "Global AI-use grouping happens after all source observations pass local block and line validation")) {
 					t.Fatalf("compact source extraction instructions were omitted: %s", input)
 				}
 				encoded, _ := json.Marshal(textConfig["format"])
@@ -421,6 +421,9 @@ func TestOpenAITargetedRepositoryReviewUsesCompactReasoningAndSchema(t *testing.
 					t.Fatalf("targeted schema used an unsupported Structured Outputs union: %s", encoded)
 				}
 				result := `{"result":{"scope":".","ai_uses":[],"ai_use_facts":[],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`
+				if testCase.compactSource {
+					result = `{"source_result":{"scope":".","observations":[],"confirmed_ai_uses":[],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`
+				}
 				response := testJSONResponse(http.StatusOK, map[string]any{
 					"status": "completed",
 					"output": []any{map[string]any{"type": "message", "content": []any{map[string]any{"type": "output_text", "text": result}}}},

@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	cacheSchemaVersion = 4
-	cacheFileName      = "model-qualification-v4.json"
+	cacheSchemaVersion = 5
+	cacheFileName      = "model-qualification-v5.json"
 	maxCacheBytes      = 128 << 10
 	maxCacheEntries    = 100
 )

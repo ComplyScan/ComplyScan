@@ -20,7 +20,7 @@ const (
 	// check exercises a materially different provider contract. It is part of
 	// the cache identity so a result from an older, narrower probe cannot be
 	// reused for a newer scan pipeline.
-	QualificationContractVersion     = 2
+	QualificationContractVersion     = 3
 	MaximumProviderRequests          = 4
 	maximumQualificationAttempts     = MaximumProviderRequests
 	initialQualificationRetryWait    = 500 * time.Millisecond
@@ -198,6 +198,7 @@ func qualifyRepositoryOnce(ctx context.Context, reviewer Reviewer, identity Iden
 		RepositoryFiles: 1,
 		RepositoryBytes: int64(len(content)),
 		MaxOutputTokens: 4096,
+		CompactSource:   true,
 		Files: []providers.RepositorySourceFile{{
 			Path: path, Kind: "synthetic-text", LineCount: 1, ContentStartLine: 1, Content: content,
 		}},

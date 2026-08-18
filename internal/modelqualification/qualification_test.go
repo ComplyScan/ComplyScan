@@ -428,7 +428,7 @@ func TestCacheBindsIdentityExpiresAndUsesPrivatePermissions(t *testing.T) {
 	if _, _, err := reopened.Lookup(legacy, now.Add(time.Hour)); err == nil || !strings.Contains(err.Error(), "unsupported qualification contract version") {
 		t.Fatalf("legacy qualification contract lookup error = %v, want invalidated identity", err)
 	}
-	if cacheSchemaVersion != 4 || cacheFileName != "model-qualification-v4.json" {
+	if cacheSchemaVersion != 5 || cacheFileName != "model-qualification-v5.json" {
 		t.Fatalf("qualification cache contract = schema %d file %q", cacheSchemaVersion, cacheFileName)
 	}
 	if _, found, err := reopened.Lookup(identity, result.ExpiresAt); err != nil || found {
