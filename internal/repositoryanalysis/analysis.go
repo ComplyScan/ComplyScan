@@ -83,6 +83,7 @@ type Options struct {
 	ProbeRateLimits         func(context.Context) (CapacityProbeResult, error)
 	retryGate               chan struct{}
 	requestBudget           *providerRequestBudget
+	separateTargetedFiles   bool
 }
 
 // CapacityProbeResult records a source-free request used to discover live
@@ -305,7 +306,13 @@ func mergeRepositoryAttemptAccounting(target *providers.RepositoryAnalysisResult
 }
 
 func runHierarchical(ctx context.Context, reviewer Reviewer, repository discovery.Repository, graph codegraph.Graph, files []providers.RepositorySourceFile, objectives []providers.RepositoryObjective, systems []providers.RepositorySystemContext, confirmedUses []providers.RepositoryConfirmedAIUse, budget int64, options Options) (providers.RepositoryAnalysisResult, error) {
-	chunks, err := partitionRepository(files, budget*80/100)
+	var chunks []repositoryChunk
+	var err error
+	if options.TargetedBatches {
+		chunks, err = partitionTargetedRepository(repository, graph, files, confirmedUses, budget*80/100, options.separateTargetedFiles)
+	} else {
+		chunks, err = partitionRepository(files, budget*80/100)
+	}
 	if err != nil {
 		return providers.RepositoryAnalysisResult{}, err
 	}
@@ -2784,6 +2791,181 @@ func partitionRepository(files []providers.RepositorySourceFile, budget int64) (
 	}
 	for index := range chunks {
 		chunks[index].id = fmt.Sprintf("source-%06d", index+1)
+	}
+	return chunks, nil
+}
+
+// partitionTargetedRepository keeps structurally connected evidence together
+// when it fits. These are request-context bundles, not inferred AI-use
+// boundaries: the model remains responsible for semantic grouping after every
+// source response has passed local validation.
+func partitionTargetedRepository(repository discovery.Repository, graph codegraph.Graph, files []providers.RepositorySourceFile, confirmedUses []providers.RepositoryConfirmedAIUse, budget int64, separateFiles bool) ([]repositoryChunk, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+	parent := make(map[string]string, len(files))
+	order := make(map[string]int, len(files))
+	selected := make(map[string]struct{}, len(files))
+	for index, file := range files {
+		path := filepath.ToSlash(file.Path)
+		if _, exists := selected[path]; exists {
+			continue
+		}
+		selected[path] = struct{}{}
+		parent[path] = path
+		order[path] = index
+	}
+	var find func(string) string
+	find = func(path string) string {
+		root := parent[path]
+		if root != path {
+			root = find(root)
+			parent[path] = root
+		}
+		return root
+	}
+	union := func(left, right string) {
+		left = filepath.ToSlash(left)
+		right = filepath.ToSlash(right)
+		if _, ok := selected[left]; !ok {
+			return
+		}
+		if _, ok := selected[right]; !ok {
+			return
+		}
+		leftRoot, rightRoot := find(left), find(right)
+		if leftRoot == rightRoot {
+			return
+		}
+		if order[leftRoot] <= order[rightRoot] {
+			parent[rightRoot] = leftRoot
+			return
+		}
+		parent[leftRoot] = rightRoot
+	}
+
+	if !separateFiles {
+		symbolPaths := make(map[string]string, len(graph.Symbols))
+		for _, symbol := range graph.Symbols {
+			path := filepath.ToSlash(symbol.Path)
+			if _, ok := selected[path]; ok {
+				symbolPaths[symbol.ID] = path
+			}
+		}
+		for _, edge := range graph.Edges {
+			if !edge.Resolved {
+				continue
+			}
+			from, fromOK := symbolPaths[edge.From]
+			to, toOK := symbolPaths[edge.To]
+			if fromOK && toOK && from != to {
+				union(from, to)
+			}
+		}
+
+		repositoryFiles := make(map[string]discovery.File, len(repository.Files))
+		for _, file := range repository.Files {
+			repositoryFiles[filepath.ToSlash(file.Path)] = file
+		}
+		for _, repositoryImport := range graph.Imports {
+			importer := filepath.ToSlash(repositoryImport.Path)
+			if _, ok := selected[importer]; !ok {
+				continue
+			}
+			for _, imported := range targetedImportedPaths(importer, repositoryImport.ImportedPath, repositoryFiles) {
+				union(importer, imported)
+			}
+		}
+		for _, confirmed := range confirmedUses {
+			definition := aiuse.Use{Paths: append([]string(nil), confirmed.Paths...)}
+			anchor := ""
+			for _, file := range files {
+				path := filepath.ToSlash(file.Path)
+				if !aiuse.UseMatchesPath(definition, path) {
+					continue
+				}
+				if anchor == "" {
+					anchor = path
+					continue
+				}
+				union(anchor, path)
+			}
+		}
+	}
+
+	type component struct {
+		first int
+		files []providers.RepositorySourceFile
+	}
+	byRoot := make(map[string]*component, len(files))
+	for index, file := range files {
+		path := filepath.ToSlash(file.Path)
+		root := find(path)
+		value := byRoot[root]
+		if value == nil {
+			value = &component{first: index}
+			byRoot[root] = value
+		}
+		value.files = append(value.files, file)
+	}
+	components := make([]*component, 0, len(byRoot))
+	for _, value := range byRoot {
+		components = append(components, value)
+	}
+	sort.Slice(components, func(left, right int) bool { return components[left].first < components[right].first })
+
+	var chunks []repositoryChunk
+	current := repositoryChunk{scope: "evidence bundle"}
+	var currentSize int64
+	flush := func() {
+		if len(current.files) == 0 {
+			return
+		}
+		chunks = append(chunks, current)
+		current = repositoryChunk{scope: "evidence bundle"}
+		currentSize = 0
+	}
+	for _, value := range components {
+		segments := make([]providers.RepositorySourceFile, 0, len(value.files))
+		var componentSize int64
+		for _, file := range value.files {
+			fileSegments, segmentErr := repositoryFileSegments(file, budget)
+			if segmentErr != nil {
+				return nil, segmentErr
+			}
+			for _, segment := range fileSegments {
+				segments = append(segments, segment)
+				componentSize += int64(len(segment.Content) + len(segment.Path) + 100)
+			}
+		}
+		if componentSize <= budget {
+			if len(current.files) > 0 && currentSize+componentSize > budget {
+				flush()
+			}
+			current.files = append(current.files, segments...)
+			currentSize += componentSize
+			if separateFiles {
+				flush()
+			}
+			continue
+		}
+		flush()
+		for _, segment := range segments {
+			segmentSize := int64(len(segment.Content) + len(segment.Path) + 100)
+			if len(current.files) > 0 && currentSize+segmentSize > budget {
+				flush()
+			}
+			current.files = append(current.files, segment)
+			currentSize += segmentSize
+		}
+		flush()
+	}
+	flush()
+	for index := range chunks {
+		chunks[index].id = fmt.Sprintf("source-%06d", index+1)
+		if len(chunks) > 1 {
+			chunks[index].scope = fmt.Sprintf("evidence bundle (part %d)", index+1)
+		}
 	}
 	return chunks, nil
 }

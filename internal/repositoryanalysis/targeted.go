@@ -156,6 +156,7 @@ func runTargeted(
 		result, err := runHierarchical(ctx, reviewer, repository, graph, selected, objectives, systems, confirmedUses, budget, batchOptions)
 		result.Notes = append(result.Notes,
 			fmt.Sprintf("Targeted analysis queued all %d structural candidate file excerpt(s) instead of treating one model request as a repository-wide evidence cap.", considered),
+			"Source bundles prefer graph-connected evidence when it fits; these request boundaries are context management, not deterministic AI-use classifications.",
 			"Each source batch stayed within the provider request boundary; files outside the deterministic candidate set were not reviewed by the model.",
 		)
 		return result, err
@@ -226,6 +227,10 @@ func runTargeted(
 	fallBackToBatches := func(files []providers.RepositorySourceFile, cause error) (providers.RepositoryAnalysisResult, error) {
 		batchOptions := options
 		batchOptions.TargetedBatches = true
+		// Persistent compact validation means the combined package was not usable.
+		// Retry each selected file independently so the fallback is genuinely
+		// smaller even when a graph component would otherwise fit in one bundle.
+		batchOptions.separateTargetedFiles = true
 		if audit.RateLimits.Available() {
 			batchOptions.InitialRateLimits = audit.RateLimits
 		}

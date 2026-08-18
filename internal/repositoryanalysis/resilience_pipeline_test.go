@@ -509,7 +509,7 @@ func (reviewer *requestCeilingReviewer) ReviewRepository(_ context.Context, requ
 	reviewer.mu.Unlock()
 
 	result := targetedSuccessfulResult(request, providers.Usage{PromptTokens: 1, CompletionTokens: 2}, true)
-	if request.Scope == "scope000" {
+	if request.Scope == "evidence bundle (part 1)" {
 		switch attempt {
 		case 1, 3:
 			return result, &providers.RepositoryValidationError{Diagnostic: fmt.Sprintf("discard invalid structured response %d", attempt)}
@@ -538,9 +538,10 @@ func TestHierarchicalRunNeverExceedsProviderRequestSafetyCeiling(t *testing.T) {
 	reviewer := &requestCeilingReviewer{attempts: make(map[string]int)}
 	result, err := runHierarchical(context.Background(), reviewer, repository, codegraph.Build(repository), files, nil, nil, nil, 8_000, Options{
 		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", TargetedBatches: true,
-		Wait:          func(context.Context, time.Duration) error { return nil },
-		retryGate:     make(chan struct{}, 1),
-		requestBudget: &providerRequestBudget{limit: MaxProviderRequestsPerRun},
+		Wait:                  func(context.Context, time.Duration) error { return nil },
+		retryGate:             make(chan struct{}, 1),
+		requestBudget:         &providerRequestBudget{limit: MaxProviderRequestsPerRun},
+		separateTargetedFiles: true,
 		InitialRateLimits: providers.RateLimitSnapshot{
 			RequestsKnown: true, LimitRequests: 10_000, RemainingRequests: 10_000,
 			TokensKnown: true, LimitTokens: 100_000_000, RemainingTokens: 100_000_000,
@@ -571,8 +572,8 @@ func TestHierarchicalRunNeverExceedsProviderRequestSafetyCeiling(t *testing.T) {
 	if len(result.Result.UnresolvedQuestions) == 0 || len(result.Notes) == 0 || result.Coverage.SourceBatchesCompleted >= result.Coverage.SourceBatchesTotal {
 		t.Fatalf("request-ceiling result is not explicitly incomplete: %#v", result)
 	}
-	if reviewer.attempts["scope000"] != 5 {
-		t.Fatalf("mixed validation/transient retry fixture made %d scope000 attempts, want 5", reviewer.attempts["scope000"])
+	if reviewer.attempts["evidence bundle (part 1)"] != 5 {
+		t.Fatalf("mixed validation/transient retry fixture made %d first-bundle attempts, want 5", reviewer.attempts["evidence bundle (part 1)"])
 	}
 }
 

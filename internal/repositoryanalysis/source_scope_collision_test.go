@@ -129,7 +129,7 @@ func TestConcurrentSourcePrefetchUsesStableIdentityWhenDisplayScopesCollide(t *t
 	}
 	reviewer := &sourceScopeCollisionReviewer{limits: limits, initialSourceWave: make(chan struct{})}
 	result, err := runHierarchical(context.Background(), reviewer, repository, codegraph.Graph{}, preparedFiles, nil, nil, nil, 8_000, Options{
-		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", TargetedBatches: true, InitialRateLimits: limits,
+		Mode: ModeHierarchical, Provider: providers.OpenAI, Model: "test", InitialRateLimits: limits,
 	})
 	if err != nil {
 		t.Fatal(err)
