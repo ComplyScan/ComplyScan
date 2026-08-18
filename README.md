@@ -1,6 +1,6 @@
 # ComplyScan
 
-> ComplyScan is a developer-first scanner that discovers AI implementations, checks code-level safeguards, and detects governance regressions before code reaches production.
+> ComplyScan is a developer-first scanner that assesses how far an AI codebase satisfies selected code-checkable compliance objectives, shows the supporting repository evidence, and separates code findings from questions only people can answer.
 
 ComplyScan is an open-source, offline-capable CLI for finding technical signals that deserve review against selected AI governance sources. Ordinary guided setup asks only for the optional model/provider and technical evidence packs; the scan infers code-visible facts, while organisation-only unknowns stay in the report for a future compliance-owner workflow. A framework-neutral control layer maps code and configuration signals to both EU AI Act technical objectives and voluntary NIST AI RMF practices. `complyscan scan` is the single normal workflow: it always runs the local deterministic checks and, when repository intent is backed by matching private trust recorded by guided setup on this machine, follows them with bounded advisory AI reasoning. Local structural analysis selects best-effort-redacted candidate excerpts for the configured OpenAI, Anthropic, Gemini, or experimental Ollama provider; small queues fit one package, while larger queues use multiple bounded source requests plus synthesis. Use `complyscan scan --deterministic-only` to guarantee that no model or provider credential is used.
 
@@ -8,7 +8,7 @@ ComplyScan does **not** interpret a complete system, determine an EU AI Act clas
 
 ## Install
 
-> Current release: v0.1.7. This README follows unreleased development on `main`, including the unified scan workflow. For behavior available in v0.1.7, use the documentation attached to that release.
+> Current release: v0.2.0.
 
 macOS and Linux users can install ComplyScan and immediately start guided setup with one command:
 
@@ -19,7 +19,7 @@ curl -fsSL https://complyscan.github.io/ComplyScan/install.sh | sh
 The installer is published from this repository through GitHub Pages. It detects the operating system and CPU architecture, downloads the matching release archive, verifies its published SHA-256 checksum, installs `complyscan` into `~/.local/bin`, and launches `complyscan setup` through the terminal. It does not use `sudo`. Pass `--no-setup` for automation or pin both the installer and binary version:
 
 ```bash
-curl -fsSL https://github.com/ComplyScan/ComplyScan/releases/download/v0.1.7/install.sh | sh -s -- --version v0.1.7 --no-setup
+curl -fsSL https://github.com/ComplyScan/ComplyScan/releases/download/v0.2.0/install.sh | sh -s -- --version v0.2.0 --no-setup
 ```
 
 Prebuilt archives for macOS, Linux, and Windows are also available on [GitHub Releases](https://github.com/ComplyScan/ComplyScan/releases). The current stable release can be installed with Go 1.22 or newer:
@@ -39,7 +39,7 @@ go build -o complyscan ./cmd/complyscan
 Release builds can inject metadata with `-ldflags`:
 
 ```bash
-go build -ldflags "-X main.version=0.1.7 -X main.commit=$(git rev-parse --short HEAD) -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o complyscan ./cmd/complyscan
+go build -ldflags "-X main.version=0.2.0 -X main.commit=$(git rev-parse --short HEAD) -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o complyscan ./cmd/complyscan
 ```
 
 ## Quick start
@@ -441,8 +441,7 @@ steps:
   - uses: actions/checkout@v6
     with:
       fetch-depth: 0
-  # Use @main to test the unreleased unified workflow; pin the next release tag after publication.
-  - uses: ComplyScan/ComplyScan@main
+  - uses: ComplyScan/ComplyScan@v0.2.0
     with:
       severity: medium
 ```
@@ -456,7 +455,7 @@ The concise Markdown report is appended to the GitHub job summary by default, in
 By default the Action fails after publishing available outputs when deterministic findings meet `fail-on`. Set `fail-on-findings: false` to publish alerts without failing the job, or `upload-results: false` when code-scanning upload is not available. `ai-review` accepts `none`, `configured`, `ollama`, `openai`, `anthropic`, `gemini`, `xai`, `groq`, `mistral`, `openrouter`, or `openai-compatible`. Model, endpoint, and routing inputs are supported one-run overrides. Native OpenAI, Anthropic, and Gemini use their fixed credential environment names unless `api-key-env` overrides one. xAI, Groq, Mistral, and OpenRouter require an explicit workflow credential name and use ComplyScan's known provider base unless `base-url` overrides it; custom `openai-compatible` additionally requires both `base-url` and `provider-name`. The old `review` input remains only as a deprecated alias and conflicts with a non-default `ai-review`. Credential values belong in GitHub Actions secrets exposed through `env`—never in an action input or committed YAML.
 
 ```yaml
-- uses: ComplyScan/ComplyScan@main
+- uses: ComplyScan/ComplyScan@v0.2.0
   env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   with:
@@ -465,7 +464,7 @@ By default the Action fails after publishing available outputs when deterministi
     api-key-env: OPENAI_API_KEY
 ```
 
-Pin the provider and model in a protected workflow and review configuration changes like code. `ai-review: configured` is shorter, but deliberately trusts the provider identity stored in the checked-out repository. The current stable v0.1.7 Action retains the older explicit-review behavior; the unified scope and scan behavior above remain unreleased until the next tag is published.
+Pin the Action tag, provider, and model in a protected workflow and review configuration changes like code. `ai-review: configured` is shorter, but deliberately trusts the provider identity stored in the checked-out repository.
 
 ## Privacy and security guarantees
 

@@ -3,10 +3,10 @@
 | Field | Value |
 | --- | --- |
 | Product | ComplyScan |
-| Version assessed | Unreleased `main` after v0.1.7 |
-| Assessment date | 2026-08-17 |
+| Version assessed | v0.2.0 |
+| Assessment date | 2026-08-18 |
 | Owner | ComplyScan maintainers |
-| Status | Updated for unreleased `main`, including the unified scan, the `adaptive-provider-pipeline-v5` consent contract, model-aware source sizing, compact source responses, adaptive concurrency, per-request timing/retry diagnostics, finite validation repair, provider-specific structured-output portability, and private review caches; not legal advice |
+| Status | Reviewed for the v0.2.0 release, including the unified scan, the `adaptive-provider-pipeline-v5` consent contract, model-aware source sizing, compact source responses, adaptive concurrency, per-request timing/retry diagnostics, finite validation repair, provider-specific structured-output portability, and private review caches; not legal advice |
 | Next review | Required before publishing the next release, before promoting any model review from experimental status, and before any reassessment trigger below |
 
 ## Intended purpose
