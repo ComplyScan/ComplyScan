@@ -1713,6 +1713,28 @@ func repositoryAnalysisSchema(request RepositoryAnalysisRequest, allowFollowUp b
 		},
 		"required": []string{"path", "line", "summary"}, "additionalProperties": false,
 	}
+	// Targeted requests contain bounded excerpts rather than whole files. Put the
+	// exact path/range pairs into the constrained-output schema so hosted models
+	// cannot select a neighboring line that ComplyScan did not submit. Local
+	// validation remains authoritative, including for providers that support a
+	// smaller JSON Schema dialect and therefore strip numeric bounds on the wire.
+	if targeted && len(request.Files) > 0 {
+		variants := make([]any, 0, len(request.Files))
+		for _, file := range request.Files {
+			start := max(1, file.ContentStartLine)
+			end := start + countSourceLines(file.Content) - 1
+			variants = append(variants, map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":    map[string]any{"type": "string", "const": file.Path},
+					"line":    map[string]any{"type": "integer", "minimum": start, "maximum": end},
+					"summary": stringValue(targetedMaximumTextChars),
+				},
+				"required": []string{"path", "line", "summary"}, "additionalProperties": false,
+			})
+		}
+		citation = map[string]any{"anyOf": variants}
+	}
 	citations := func() map[string]any { return arrayValue(citation, targetedMaximumCitations) }
 	stringsArray := func() map[string]any {
 		return arrayValue(stringValue(targetedMaximumTextChars), targetedMaximumQuestions)

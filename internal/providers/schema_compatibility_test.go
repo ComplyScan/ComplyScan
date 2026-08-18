@@ -69,6 +69,36 @@ func TestRepositoryAnalysisSchemaBindsObjectiveObservationIDs(t *testing.T) {
 	assertSchemaEnum(t, observationProperties, "ai_use_id", []string{""})
 }
 
+func TestTargetedRepositoryCitationSchemaBindsSubmittedPathRanges(t *testing.T) {
+	schema := repositoryAnalysisSchema(RepositoryAnalysisRequest{
+		Mode: RepositoryAnalysisTargeted,
+		Files: []RepositorySourceFile{
+			{Path: "internal/review.go", ContentStartLine: 238, LineCount: 400, Content: "first\nsecond\nthird"},
+			{Path: "cmd/main.go", ContentStartLine: 1, LineCount: 2, Content: "package main\nfunc main() {}"},
+		},
+	}, false)
+	use := repositoryAIUseItemSchema(t, schema)
+	properties := use["properties"].(map[string]any)
+	evidence := properties["evidence"].(map[string]any)
+	items := evidence["items"].(map[string]any)
+	variants, ok := items["anyOf"].([]any)
+	if !ok || len(variants) != 2 {
+		t.Fatalf("targeted citation variants = %#v", items)
+	}
+	assertCitationVariant := func(index int, path string, start, end int) {
+		t.Helper()
+		variant := variants[index].(map[string]any)
+		fields := variant["properties"].(map[string]any)
+		pathSchema := fields["path"].(map[string]any)
+		lineSchema := fields["line"].(map[string]any)
+		if pathSchema["const"] != path || lineSchema["minimum"] != start || lineSchema["maximum"] != end {
+			t.Fatalf("citation variant %d = %#v, want %s:%d-%d", index, fields, path, start, end)
+		}
+	}
+	assertCitationVariant(0, "internal/review.go", 238, 240)
+	assertCitationVariant(1, "cmd/main.go", 1, 2)
+}
+
 func TestRepositoryAnalysisSchemaBindsSynthesisObservationMembership(t *testing.T) {
 	sourceUse := repositoryAIUseItemSchema(t, repositoryAnalysisSchema(RepositoryAnalysisRequest{Mode: RepositoryAnalysisTargeted}, false))
 	sourceProperties := sourceUse["properties"].(map[string]any)
