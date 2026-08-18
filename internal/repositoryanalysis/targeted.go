@@ -27,6 +27,7 @@ const (
 	// conservative boundary and still split automatically on provider feedback.
 	targetedRemoteMinimumInputTokens  = 24_000
 	targetedRemoteFallbackInputTokens = 32_000
+	targetedRemoteBalancedInputTokens = 48_000
 	targetedRemoteLatencyInputTokens  = 64_000
 	targetedRemoteSingleInputTokens   = 32_000
 	targetedLocalInputTokens          = 16_000
@@ -519,6 +520,15 @@ func targetedSourceInputTokens(options Options, files []providers.RepositorySour
 		// headroom, two bundles that fit arithmetically can each cross the encoded
 		// boundary and be split again, doubling otherwise unnecessary calls.
 		perBatch = (perBatch*(100+targetedBatchPlanningHeadroom) + 99) / 100
+		// Source-only sizing systematically underestimates a real hosted request:
+		// every batch also carries the structured schema, instructions, graph
+		// slice, objectives, and typed bindings. For a confidently known
+		// long-context model, keep medium evidence at a balanced 48K target.
+		// This usually produces about two useful source calls without stretching
+		// each request to the slower 64K latency ceiling.
+		if options.ModelContextTokens > 0 && maximum >= targetedRemoteBalancedInputTokens {
+			perBatch = max(perBatch, targetedRemoteBalancedInputTokens)
+		}
 		target = max(targetedRemoteMinimumInputTokens, perBatch)
 		if target > maximum {
 			target = maximum

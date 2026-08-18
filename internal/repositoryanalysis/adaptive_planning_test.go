@@ -18,8 +18,8 @@ func TestTargetedSourceInputTokensUsesModelContextAndLiveTokenCapacity(t *testin
 	known := targetedSourceInputTokens(Options{
 		Provider: providers.OpenAI, MaxInputTokens: DefaultRemoteInputTokens, ModelContextTokens: 1_050_000,
 	}, selected)
-	if known <= targetedRemoteMinimumInputTokens || known > targetedRemoteLatencyInputTokens {
-		t.Fatalf("known large-context target = %d, want adaptive %d-%d", known, targetedRemoteMinimumInputTokens+1, targetedRemoteLatencyInputTokens)
+	if known < targetedRemoteBalancedInputTokens || known > targetedRemoteLatencyInputTokens {
+		t.Fatalf("known large-context target = %d, want balanced %d-%d", known, targetedRemoteBalancedInputTokens, targetedRemoteLatencyInputTokens)
 	}
 	unknown := targetedSourceInputTokens(Options{
 		Provider: providers.Compatible, MaxInputTokens: DefaultRemoteInputTokens,

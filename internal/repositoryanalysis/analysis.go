@@ -3009,6 +3009,39 @@ func partitionTargetedRepository(repository discovery.Repository, graph codegrap
 	}
 	sort.Slice(components, func(left, right int) bool { return components[left].first < components[right].first })
 
+	type plannedComponent struct {
+		segments []providers.RepositorySourceFile
+		size     int64
+	}
+	planned := make([]plannedComponent, 0, len(components))
+	var totalSize int64
+	for _, value := range components {
+		item := plannedComponent{segments: make([]providers.RepositorySourceFile, 0, len(value.files))}
+		for _, file := range value.files {
+			fileSegments, segmentErr := repositoryFileSegments(file, budget)
+			if segmentErr != nil {
+				return nil, segmentErr
+			}
+			for _, segment := range fileSegments {
+				item.segments = append(item.segments, segment)
+				item.size += int64(len(segment.Content) + len(segment.Path) + 100)
+			}
+		}
+		planned = append(planned, item)
+		totalSize += item.size
+	}
+
+	// Greedy packing to the hard ceiling can leave one almost-full chunk and a
+	// tiny remainder. If the first chunk then grows after JSON/graph encoding,
+	// adaptive splitting turns two planned calls into three. Balance the whole
+	// candidate queue across the minimum raw-size chunk count first, while still
+	// keeping each connected component intact whenever it fits the hard budget.
+	packingTarget := budget
+	if !separateFiles && budget > 0 && totalSize > budget {
+		parts := (totalSize + budget - 1) / budget
+		packingTarget = (totalSize + parts - 1) / parts
+	}
+
 	var chunks []repositoryChunk
 	current := repositoryChunk{scope: "evidence bundle"}
 	var currentSize int64
@@ -3020,32 +3053,20 @@ func partitionTargetedRepository(repository discovery.Repository, graph codegrap
 		current = repositoryChunk{scope: "evidence bundle"}
 		currentSize = 0
 	}
-	for _, value := range components {
-		segments := make([]providers.RepositorySourceFile, 0, len(value.files))
-		var componentSize int64
-		for _, file := range value.files {
-			fileSegments, segmentErr := repositoryFileSegments(file, budget)
-			if segmentErr != nil {
-				return nil, segmentErr
-			}
-			for _, segment := range fileSegments {
-				segments = append(segments, segment)
-				componentSize += int64(len(segment.Content) + len(segment.Path) + 100)
-			}
-		}
-		if componentSize <= budget {
-			if len(current.files) > 0 && currentSize+componentSize > budget {
+	for _, value := range planned {
+		if value.size <= budget {
+			if len(current.files) > 0 && currentSize+value.size > packingTarget {
 				flush()
 			}
-			current.files = append(current.files, segments...)
-			currentSize += componentSize
+			current.files = append(current.files, value.segments...)
+			currentSize += value.size
 			if separateFiles {
 				flush()
 			}
 			continue
 		}
 		flush()
-		for _, segment := range segments {
+		for _, segment := range value.segments {
 			segmentSize := int64(len(segment.Content) + len(segment.Path) + 100)
 			if len(current.files) > 0 && currentSize+segmentSize > budget {
 				flush()
