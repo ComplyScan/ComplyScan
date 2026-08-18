@@ -11,9 +11,9 @@ Successful results are cached under the operating system's private user-cache di
 - provider and exact model ID;
 - the Ollama model digest when the local service exposes it, or a hash of the configured compatible endpoint; and
 - the finding-review, profile-draft, repository-analysis, and technical-review prompt contract versions; and
-- qualification contract version 2.
+- qualification contract version 3.
 
-A changed model, digest, prompt contract, or qualification contract therefore requires a new check. Cache schema 4 is stored as `model-qualification-v4.json`; older finding-only results cannot be reused. Failed checks are not cached because availability, credentials, rate limits, and provider behavior can recover. The cache contains only identity, timestamps, token counts, and the fixed compatibility description; it contains no credential, synthetic response text, repository source, or human profile answer.
+A changed model, digest, prompt contract, or qualification contract therefore requires a new check. Cache schema 5 is stored as `model-qualification-v5.json`; older finding-only or model-authored candidate-ID repository contracts cannot be reused. Failed checks are not cached because availability, credentials, rate limits, and provider behavior can recover. The cache contains only identity, timestamps, token counts, and the fixed compatibility description; it contains no credential, synthetic response text, repository source, or human profile answer.
 
 Use the configured model's cached status with:
 
