@@ -1291,19 +1291,6 @@ func reviewRepositoryWithProvider(
 	}
 	model = configuredModel
 	kind = configuredKind
-	var probeRateLimits func(context.Context) (repositoryanalysis.CapacityProbeResult, error)
-	// A live qualification request is already the source-free capacity probe.
-	// Repeat it only when compatibility came from cache and therefore supplied
-	// neither current-run request accounting nor a live capacity snapshot.
-	if kind != providers.None && kind != providers.Ollama && !initialCapacity.RateLimits.Available() && initialCapacity.ProviderRequests == 0 {
-		probeRateLimits = func(probeContext context.Context) (repositoryanalysis.CapacityProbeResult, error) {
-			outcome, probeErr := qualifyConfiguredModel(probeContext, settings, true)
-			return repositoryanalysis.CapacityProbeResult{
-				RateLimits: outcome.Result.RateLimits, Usage: outcome.Result.Usage, ProviderRequests: outcome.Result.ProviderRequests,
-				ModelDigest: outcome.Result.Identity.ModelDigest,
-			}, probeErr
-		}
-	}
 	liveCountdown := llmActivityAvailable(progressWriter)
 	result, err := repositoryanalysis.Run(ctx, reviewer, repository, evidence, systems, repositoryanalysis.Options{
 		Mode: mode, MaxInputTokens: settings.RepositoryAnalysis.MaxInputTokens, Provider: kind, Model: model,
@@ -1311,7 +1298,6 @@ func reviewRepositoryWithProvider(
 		InitialRateLimits:       initialCapacity.RateLimits,
 		InitialUsage:            initialCapacity.Usage,
 		InitialProviderRequests: initialCapacity.ProviderRequests,
-		ProbeRateLimits:         probeRateLimits,
 		OnProgress: func(progress repositoryanalysis.Progress) error {
 			switch progress.Stage {
 			case "targeted-batch-queue":
