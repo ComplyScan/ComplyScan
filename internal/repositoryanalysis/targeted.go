@@ -21,9 +21,14 @@ const (
 	targetedMaximumFileBytes    = 6_000
 	targetedContextLines        = 60
 	targetedMaxFollowUpExcerpts = 3
-	targetedRemoteInputTokens   = 6_500
-	targetedLocalInputTokens    = 16_000
-	targetedRemoteOutputTokens  = 4_096
+	// Hosted targeted review still treats this as a per-request ceiling, not a
+	// repository-wide budget. A larger default keeps coherent candidate evidence
+	// together and avoids paying for many tiny extraction calls; provider capacity
+	// preflight and encoded-size partitioning still reduce or split requests when
+	// the configured/model boundary is smaller.
+	targetedRemoteInputTokens  = 24_000
+	targetedLocalInputTokens   = 16_000
+	targetedRemoteOutputTokens = 4_096
 )
 
 type targetedCandidate struct {

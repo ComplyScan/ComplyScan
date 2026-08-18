@@ -203,9 +203,11 @@ func TestRunTargetedRunsLimitedWavesAndWaitsForProviderReset(t *testing.T) {
 	if maximum != 3 {
 		t.Fatalf("maximum concurrent source calls = %d, want provider allowance 3", maximum)
 	}
-	wantWaits := (calls - 1) / 3
+	// The same three-request allowance also gates the final synthesis request.
+	// When source calls exactly consume a wave, synthesis waits for the next reset.
+	wantWaits := calls / 3
 	if waits != wantWaits {
-		t.Fatalf("capacity waits = %d, want %d for %d source calls in waves of 3", waits, wantWaits, calls)
+		t.Fatalf("capacity waits = %d, want %d for %d source calls plus synthesis in waves of 3", waits, wantWaits, calls)
 	}
 	if result.Coverage.SourceBatchesCompleted != calls || result.Coverage.SourceBatchesTotal != calls {
 		t.Fatalf("batch coverage = %d/%d, source calls = %d", result.Coverage.SourceBatchesCompleted, result.Coverage.SourceBatchesTotal, calls)

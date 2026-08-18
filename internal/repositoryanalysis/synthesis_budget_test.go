@@ -45,7 +45,7 @@ func (reviewer *wideSynthesisBudgetReviewer) ReviewRepository(_ context.Context,
 	} else {
 		reviewer.sourceRequests++
 		// Reproduce the real failure shape: every bounded source result is
-		// individually too large for the 6,500-token source-request budget, but
+		// individually too large for this fixture's deliberately small source-request budget, but
 		// all thirteen validated summaries fit the configured model context.
 		section.UnresolvedQuestions = []string{strings.Repeat("validated source detail ", 650)}
 	}
@@ -112,7 +112,9 @@ func synthesisBudgetRepository() discovery.Repository {
 }
 
 func runWideSynthesisBudgetFixture(repository discovery.Repository, reviewer *wideSynthesisBudgetReviewer) (providers.RepositoryAnalysisResult, error) {
-	sourceRequestBudget := sourceBudget(targetedRemoteInputTokens, nil, nil, nil)
+	// Keep many source summaries so this remains a synthesis-growth test rather
+	// than depending on the product's default hosted bundle size.
+	sourceRequestBudget := sourceBudget(6_500, nil, nil, nil)
 	return runHierarchical(context.Background(), reviewer, repository, codegraph.Build(repository), repositoryFiles(repository), nil, nil, nil, sourceRequestBudget, Options{
 		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", TargetedBatches: true, MaxInputTokens: DefaultRemoteInputTokens,
 		InitialRateLimits: providers.RateLimitSnapshot{

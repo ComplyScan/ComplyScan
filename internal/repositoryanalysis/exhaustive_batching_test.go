@@ -252,6 +252,30 @@ func TestRunTargetedReviewsEveryCandidateAcrossBoundedBatches(t *testing.T) {
 	}
 }
 
+func TestRunTargetedUsesLargerHostedEvidenceBundlesByDefault(t *testing.T) {
+	repository, expectedPaths := exhaustiveCandidateRepository(20)
+	reviewer := &exhaustiveBatchReviewer{}
+
+	_, err := Run(context.Background(), reviewer, repository, nil, nil, Options{
+		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test",
+		InitialRateLimits: providers.RateLimitSnapshot{
+			RequestsKnown: true, LimitRequests: 500, RemainingRequests: 500,
+			TokensKnown: true, LimitTokens: 1_000_000, RemainingTokens: 1_000_000,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertExhaustiveSourceCoverage(t, reviewer.requests, expectedPaths)
+	if reviewer.sourceRequests > 2 {
+		t.Fatalf("default hosted review used %d source requests for %d small candidates, want at most 2 coherent evidence bundles", reviewer.sourceRequests, len(expectedPaths))
+	}
+	if targetedRemoteInputTokens != 24_000 {
+		t.Fatalf("default hosted evidence target = %d tokens, want 24000", targetedRemoteInputTokens)
+	}
+}
+
 func TestRunTargetedDropsBulkyNonGroupingFieldsBeforeOneSynthesis(t *testing.T) {
 	repository, expectedPaths := exhaustiveCandidateRepository(10)
 	reviewer := &compactingSynthesisReviewer{}
@@ -558,7 +582,10 @@ func exhaustiveCandidateRepository(count int) (discovery.Repository, []string) {
 	for index := 0; index < count; index++ {
 		path := fmt.Sprintf("ai/use_%02d.py", index)
 		paths = append(paths, path)
-		repository.Files = append(repository.Files, oversizedInvocationFile(path, 24))
+		// Keep the shared fixture above an explicit 8,000-token test budget so
+		// resilience tests continue to exercise the multi-batch path independently
+		// of the product's larger default hosted bundle target.
+		repository.Files = append(repository.Files, oversizedInvocationFile(path, 40))
 	}
 	return repository, paths
 }
