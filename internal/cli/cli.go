@@ -1354,7 +1354,7 @@ func reviewRepositoryWithProvider(
 				_, err := fmt.Fprintf(progressWriter, "Provider limit requires a smaller response; retrying %s without dropping evidence (%s).\n", progress.Scope, progress.Detail)
 				return err
 			case "validation-repair":
-				_, err := fmt.Fprintf(progressWriter, "Provider response failed strict local validation; regenerating %s from the same evidence (%d/%d).\n", progress.Scope, progress.Completed, progress.Total)
+				_, err := fmt.Fprintf(progressWriter, "Provider response failed strict local validation; regenerating %s from the same evidence (%d/%d). Reason: %s\n", progress.Scope, progress.Completed, progress.Total, progress.Detail)
 				return err
 			case "validation-split":
 				_, err := fmt.Fprintf(progressWriter, "Structured output stayed invalid after bounded repair; splitting %s and continuing (%s).\n", progress.Scope, progress.Detail)

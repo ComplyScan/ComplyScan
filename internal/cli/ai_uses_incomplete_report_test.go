@@ -158,3 +158,23 @@ func TestProviderLimitRetryProgressExplainsThatEvidenceIsPreserved(t *testing.T)
 		t.Fatalf("provider-limit retry does not explain the bounded retry:\n%s", block)
 	}
 }
+
+func TestRepositoryValidationRepairProgressShowsSafeLocalReason(t *testing.T) {
+	source, err := os.ReadFile("cli.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	start := strings.Index(text, `case "validation-repair":`)
+	if start < 0 {
+		t.Fatal("CLI has no repository validation-repair progress case")
+	}
+	next := strings.Index(text[start+1:], `case "`)
+	if next < 0 {
+		t.Fatal("could not isolate repository validation-repair progress case")
+	}
+	block := text[start : start+1+next]
+	if !strings.Contains(block, "Reason: %s") || !strings.Contains(block, "progress.Detail") {
+		t.Fatalf("repository validation repair hides its safe local diagnostic:\n%s", block)
+	}
+}
