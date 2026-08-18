@@ -136,6 +136,11 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report, evidenceBundle
 		if _, err := fmt.Fprintf(writer, "- Repository review accounting: **%s**\n", markdownText(accounting)); err != nil {
 			return err
 		}
+		if analysis.Coverage.GroupingStatus == providers.RepositoryGroupingIncomplete {
+			if _, err := fmt.Fprintln(writer, "- AI-use organization: **global grouping did not complete; every validated technical observation was retained separately**"); err != nil {
+				return err
+			}
+		}
 		if note := repositoryCurrentRunCompatibilityNote(*analysis); note != "" {
 			if _, err := fmt.Fprintf(writer, "- Current-run compatibility accounting (source-free): **%s**\n", markdownText(note)); err != nil {
 				return err
@@ -436,6 +441,11 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 	}
 	if value.AIUseInventory != nil && (value.AIUseInventory.Summary.Draft > 0 || value.AIUseInventory.Summary.Suggested > 0 || value.AIUseInventory.Summary.UngroupedSignals > 0) {
 		if _, err := fmt.Fprintln(writer, "\n> Organising code into confirmed AI uses is optional. It improves per-feature safeguard mapping in later scans, but you can act on this report without doing it."); err != nil {
+			return err
+		}
+	}
+	if value.RepositoryAnalysis != nil && value.RepositoryAnalysis.Coverage.GroupingStatus == providers.RepositoryGroupingIncomplete {
+		if _, err := fmt.Fprintln(writer, "\n> The source review completed, but global AI-use grouping did not. The entries below are validated technical observations kept separately; they may describe different parts of the same workflow and can be reorganized later in the dashboard."); err != nil {
 			return err
 		}
 	}

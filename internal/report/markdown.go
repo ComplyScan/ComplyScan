@@ -320,6 +320,11 @@ func writeRepositoryAnalysisMarkdown(writer io.Writer, analysis providers.Reposi
 	if _, err := fmt.Fprintf(writer, "- Deterministically checked citations: %d\n", analysis.Coverage.CitationsChecked); err != nil {
 		return err
 	}
+	if analysis.Coverage.GroupingStatus == providers.RepositoryGroupingIncomplete {
+		if _, err := fmt.Fprintln(writer, "- AI-use organization: global grouping did not complete; validated technical observations were retained separately and may span the same workflow"); err != nil {
+			return err
+		}
+	}
 	if analysis.FollowUpRequested {
 		if _, err := fmt.Fprintf(writer, "- Bounded follow-up: %d excerpt(s) retrieved in one additional review\n", analysis.FollowUpExcerpts); err != nil {
 			return err

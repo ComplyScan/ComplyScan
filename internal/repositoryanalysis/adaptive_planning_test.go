@@ -95,7 +95,10 @@ func TestRepositoryRequestDiagnosticsRecordEveryAttemptAndRetryCause(t *testing.
 	if first.Phase != "targeted" || first.Outcome != "retryable-error" || first.RetryReason != "structured-validation" || first.InputFiles != 1 || first.InputBytes == 0 || first.DurationNS < 0 {
 		t.Fatalf("first request diagnostic = %#v", first)
 	}
-	if second.Outcome != "completed" || second.RetryReason != "" || second.Attempt != 2 || second.DurationNS < 0 {
+	if first.InputTokens != 100 || first.OutputTokens != 10 || first.ReasoningTokens != 1 {
+		t.Fatalf("first request token diagnostic = %#v", first)
+	}
+	if second.Outcome != "completed" || second.RetryReason != "" || second.Attempt != 2 || second.DurationNS < 0 || second.InputTokens != 200 || second.OutputTokens != 20 || second.ReasoningTokens != 2 {
 		t.Fatalf("repair diagnostic = %#v", second)
 	}
 }

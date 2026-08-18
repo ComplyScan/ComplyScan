@@ -65,10 +65,11 @@ func TestWriteJSON(t *testing.T) {
 	}, Uses: []usemapping.UseResult{{UseID: "assistant", UseName: "Assistant"}}}
 	value.RepositoryAnalysisRun = RepositoryAnalysisCompleted
 	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{Coverage: providers.RepositoryCoverage{
-		Mode: providers.RepositoryAnalysisTargeted, Subsystems: 2, SourceBatchesStarted: 2, SourceBatchesCompleted: 2, SourceBatchesTotal: 2, ProviderRequests: 3,
+		Mode: providers.RepositoryAnalysisTargeted, GroupingStatus: providers.RepositoryGroupingComplete,
+		Subsystems: 2, SourceBatchesStarted: 2, SourceBatchesCompleted: 2, SourceBatchesTotal: 2, ProviderRequests: 3,
 	}, RequestDiagnostics: []providers.RepositoryRequestDiagnostic{
-		{Phase: "source", Scope: "evidence bundle (part 1)", Attempt: 1, DurationNS: int64(2 * time.Second), Outcome: "completed", InputFiles: 3, InputBytes: 2048},
-		{Phase: "source", Scope: "evidence bundle (part 2)", Attempt: 1, DurationNS: int64(3 * time.Second), Outcome: "retryable-error", RetryReason: "rate-limit", InputFiles: 2, InputBytes: 1024},
+		{Phase: "source", Scope: "evidence bundle (part 1)", Attempt: 1, DurationNS: int64(2 * time.Second), Outcome: "completed", InputFiles: 3, InputBytes: 2048, InputTokens: 120, OutputTokens: 30, ReasoningTokens: 8},
+		{Phase: "source", Scope: "evidence bundle (part 2)", Attempt: 1, DurationNS: int64(3 * time.Second), Outcome: "retryable-error", RetryReason: "rate-limit", InputFiles: 2, InputBytes: 1024, InputTokens: 90, OutputTokens: 10},
 	}, Result: providers.RepositorySectionResult{
 		AIUses: []providers.RepositoryAIUse{{
 			ID: "inferred-use-example", Name: "Inferred assistant", Purpose: "Draft replies", Confidence: "medium",
@@ -93,7 +94,7 @@ func TestWriteJSON(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.SchemaVersion != 15 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
+	if decoded.SchemaVersion != 16 || decoded.Tool.Name != "ComplyScan" || decoded.Tool.Version != "0.1.0" || decoded.Tool.Commit != "abc123" {
 		t.Fatalf("unexpected tool: %#v", decoded.Tool)
 	}
 	if decoded.RepositoryAnalysisRun != RepositoryAnalysisCompleted {
@@ -120,17 +121,17 @@ func TestWriteJSON(t *testing.T) {
 	if len(decoded.RepositoryAnalysis.Result.ResolvedEvidenceGaps) != 1 || decoded.RepositoryAnalysis.Result.ResolvedEvidenceGaps[0].GapID != "gap-review-call" {
 		t.Fatalf("schema-version 14 cross-batch resolution audit was not serialized: %#v", decoded.RepositoryAnalysis.Result.ResolvedEvidenceGaps)
 	}
-	if decoded.RepositoryAnalysis.Coverage.SourceBatchesStarted != 2 || decoded.RepositoryAnalysis.Coverage.SourceBatchesCompleted != 2 || decoded.RepositoryAnalysis.Coverage.SourceBatchesTotal != 2 || decoded.RepositoryAnalysis.Coverage.ProviderRequests != 3 {
-		t.Fatalf("schema-version 15 batch coverage was not serialized: %#v", decoded.RepositoryAnalysis.Coverage)
+	if decoded.RepositoryAnalysis.Coverage.SourceBatchesStarted != 2 || decoded.RepositoryAnalysis.Coverage.SourceBatchesCompleted != 2 || decoded.RepositoryAnalysis.Coverage.SourceBatchesTotal != 2 || decoded.RepositoryAnalysis.Coverage.ProviderRequests != 3 || decoded.RepositoryAnalysis.Coverage.GroupingStatus != providers.RepositoryGroupingComplete {
+		t.Fatalf("schema-version 16 batch/grouping coverage was not serialized: %#v", decoded.RepositoryAnalysis.Coverage)
 	}
-	if len(decoded.RepositoryAnalysis.RequestDiagnostics) != 2 || decoded.RepositoryAnalysis.RequestDiagnostics[1].RetryReason != "rate-limit" || decoded.RepositoryAnalysis.RequestDiagnostics[0].DurationNS != int64(2*time.Second) {
-		t.Fatalf("schema-version 15 request diagnostics were not serialized: %#v", decoded.RepositoryAnalysis.RequestDiagnostics)
+	if len(decoded.RepositoryAnalysis.RequestDiagnostics) != 2 || decoded.RepositoryAnalysis.RequestDiagnostics[1].RetryReason != "rate-limit" || decoded.RepositoryAnalysis.RequestDiagnostics[0].DurationNS != int64(2*time.Second) || decoded.RepositoryAnalysis.RequestDiagnostics[0].InputTokens != 120 || decoded.RepositoryAnalysis.RequestDiagnostics[0].OutputTokens != 30 || decoded.RepositoryAnalysis.RequestDiagnostics[0].ReasoningTokens != 8 {
+		t.Fatalf("schema-version 16 request diagnostics were not serialized: %#v", decoded.RepositoryAnalysis.RequestDiagnostics)
 	}
-	if !strings.Contains(output.String(), `"source_batches_started": 2`) || !strings.Contains(output.String(), `"provider_requests": 3`) || !strings.Contains(output.String(), `"request_diagnostics"`) {
-		t.Fatalf("schema-version 15 request/start diagnostics are missing from JSON:\n%s", output.String())
+	if !strings.Contains(output.String(), `"source_batches_started": 2`) || !strings.Contains(output.String(), `"provider_requests": 3`) || !strings.Contains(output.String(), `"request_diagnostics"`) || !strings.Contains(output.String(), `"input_tokens": 120`) || !strings.Contains(output.String(), `"reasoning_tokens": 8`) {
+		t.Fatalf("schema-version 16 request/start diagnostics are missing from JSON:\n%s", output.String())
 	}
 	if !strings.Contains(output.String(), `"ai_use_id": "assistant"`) {
-		t.Fatalf("schema-version 15 AI-use attribution is missing:\n%s", output.String())
+		t.Fatalf("schema-version 16 AI-use attribution is missing:\n%s", output.String())
 	}
 	if !strings.Contains(output.String(), `"framework_system_contexts": 1`) ||
 		!strings.Contains(output.String(), `"with_in_scope_code_evidence": 1`) ||
@@ -240,6 +241,51 @@ func TestIncompleteRepositoryAnalysisWithPartialCoverageIsNotReportedAsCompleted
 	}
 }
 
+func TestCompletedSourceReviewReportsIncompleteGroupingWithoutDiscardingObservations(t *testing.T) {
+	value := New(".", "test", nil, nil, 0)
+	value.RepositoryAnalysisRun = RepositoryAnalysisCompleted
+	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{
+		Provider: providers.OpenAI, Model: "test-model",
+		Coverage: providers.RepositoryCoverage{
+			Mode: providers.RepositoryAnalysisTargeted, GroupingStatus: providers.RepositoryGroupingIncomplete,
+			RepositoryFiles: 20, FilesSubmitted: 2, ProviderRequests: 3,
+			SourceBatchesStarted: 2, SourceBatchesCompleted: 2, SourceBatchesTotal: 2, Subsystems: 2,
+		},
+		Result: providers.RepositorySectionResult{
+			Scope: ".", AIUses: []providers.RepositoryAIUse{{
+				ID: "inferred-use-one", Name: "Repository review observation", Purpose: "Send bounded evidence to a model", Confidence: "high",
+				Evidence: []providers.RepositoryCitation{{Path: "review.go", Line: 20, Summary: "The model request is sent."}}, MemberObservationIDs: []string{"observation-one"},
+			}},
+			AIUseFacts:            []providers.RepositoryAIUseFactSet{{AIUseID: "inferred-use-one", Facts: []providers.RepositoryAIUseFact{}, UnresolvedQuestions: []string{}}},
+			ObjectiveObservations: []providers.RepositoryObjectiveObservation{}, UnmappedObservations: []providers.RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{},
+		},
+	}
+	if developerRepositoryAnalysisIncomplete(value) {
+		t.Fatal("completed source evidence was incorrectly classified as an incomplete repository review")
+	}
+	var concise bytes.Buffer
+	if err := WriteMarkdown(&concise, value); err != nil {
+		t.Fatal(err)
+	}
+	var detailed bytes.Buffer
+	if err := WriteDetailedMarkdown(&detailed, value); err != nil {
+		t.Fatal(err)
+	}
+	var terminal bytes.Buffer
+	if err := WriteTerminalRepositoryAnalysis(&terminal, *value.RepositoryAnalysis); err != nil {
+		t.Fatal(err)
+	}
+	for name, output := range map[string]string{"concise": concise.String(), "detailed": detailed.String(), "terminal": terminal.String()} {
+		lower := strings.ToLower(output)
+		if !strings.Contains(lower, "group") || !strings.Contains(lower, "validated technical observation") || !strings.Contains(lower, "retained separately") {
+			t.Fatalf("%s output omitted the evidence-complete/grouping-incomplete boundary:\n%s", name, output)
+		}
+		if strings.Contains(lower, "no unsynthesized model conclusions were retained") {
+			t.Fatalf("%s output falsely says validated observations were discarded:\n%s", name, output)
+		}
+	}
+}
+
 func TestWriteJSONUsesCurrentEvidenceInvestigationContract(t *testing.T) {
 	value := New(".", "dev", nil, nil, 0)
 	value.TechnicalReview = &providers.TechnicalReviewResult{
@@ -255,7 +301,7 @@ func TestWriteJSONUsesCurrentEvidenceInvestigationContract(t *testing.T) {
 	if err := WriteJSON(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), `"schema_version": 15`) || !strings.Contains(output.String(), `"repository_analysis_run": "not-requested"`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
+	if !strings.Contains(output.String(), `"schema_version": 16`) || !strings.Contains(output.String(), `"repository_analysis_run": "not-requested"`) || !strings.Contains(output.String(), `"evidence_investigation"`) || !strings.Contains(output.String(), `"system_id": "ranking"`) || !strings.Contains(output.String(), `"repository_files": 42`) || strings.Contains(output.String(), `"technical_review"`) {
 		t.Fatalf("unexpected current-schema investigation JSON:\n%s", output.String())
 	}
 }

@@ -1447,10 +1447,12 @@ func reviewRepositoryWithProvider(
 	if err != nil {
 		return result, err
 	}
-	if repositoryCache != nil {
+	if repositoryCache != nil && result.Coverage.GroupingStatus != providers.RepositoryGroupingIncomplete {
 		if storeErr := repositoryCache.Store(identity, inputDigest, result); storeErr != nil {
 			cacheWarning = storeErr
 		}
+	} else if result.Coverage.GroupingStatus == providers.RepositoryGroupingIncomplete {
+		result.Notes = append(result.Notes, "The source evidence result was not cached because global AI-use grouping was incomplete; a later scan will retry the repository review without requiring --refresh-review.")
 	}
 	if cacheWarning != nil {
 		result.Notes = append(result.Notes, "The private repository-analysis cache was unavailable; review continued without cache reuse.")

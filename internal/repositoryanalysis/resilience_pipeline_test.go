@@ -223,13 +223,13 @@ func TestAdaptiveParentSplitDoesNotLeakObsoleteStartedBatchIntoLeafCoverage(t *t
 	reviewer := &parentSplitCoverageReviewer{}
 	result, err := runHierarchical(context.Background(), reviewer, repository, codegraph.Build(repository), files, nil, nil, nil, 100_000, Options{
 		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", TargetedBatches: true,
-		retryGate: make(chan struct{}, 1), requestBudget: &providerRequestBudget{limit: 4},
+		retryGate: make(chan struct{}, 1), requestBudget: &providerRequestBudget{limit: 3},
 	})
 	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("safety ceiling of %d provider requests", MaxProviderRequestsPerRun)) {
 		t.Fatalf("adaptive child failure = %v, want provider request safety-ceiling failure", err)
 	}
-	if calls := reviewer.callCount(); calls != 4 {
-		t.Fatalf("reviewer calls = %d, want three rejected parent attempts plus one completed child", calls)
+	if calls := reviewer.callCount(); calls != 3 {
+		t.Fatalf("reviewer calls = %d, want two rejected parent attempts plus one completed child", calls)
 	}
 	if result.Coverage.SourceBatchesStarted != 1 || result.Coverage.SourceBatchesCompleted != 1 || result.Coverage.SourceBatchesTotal != 2 {
 		t.Fatalf("adaptive leaf coverage = %#v, want started/completed/total 1/1/2", result.Coverage)
@@ -578,8 +578,8 @@ func TestHierarchicalRunNeverExceedsProviderRequestSafetyCeiling(t *testing.T) {
 	if len(result.Result.UnresolvedQuestions) == 0 || len(result.Notes) == 0 || result.Coverage.SourceBatchesCompleted >= result.Coverage.SourceBatchesTotal {
 		t.Fatalf("request-ceiling result is not explicitly incomplete: %#v", result)
 	}
-	if reviewer.attempts["evidence bundle (part 1)"] != 5 {
-		t.Fatalf("mixed validation/transient retry fixture made %d first-bundle attempts, want 5", reviewer.attempts["evidence bundle (part 1)"])
+	if reviewer.attempts["evidence bundle (part 1)"] != 3 {
+		t.Fatalf("mixed validation/transient retry fixture made %d first-bundle attempts, want one repair plus one transient retry before the terminal invalid response", reviewer.attempts["evidence bundle (part 1)"])
 	}
 }
 

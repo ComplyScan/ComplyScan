@@ -132,7 +132,7 @@ func NewWithMetadata(target string, tool Tool, scope ScanScope, createdAt time.T
 	created := createdAt.UTC().Format(time.RFC3339Nano)
 	identifier := sha256.Sum256([]byte(strings.Join([]string{target, tool.Version, tool.Commit, created}, "\x00")))
 	return Report{
-		SchemaVersion:         15,
+		SchemaVersion:         16,
 		RepositoryAnalysisRun: RepositoryAnalysisNotRequested,
 		Tool:                  tool,
 		Scan: ScanMetadata{
@@ -539,6 +539,11 @@ func WriteTerminalRepositoryAnalysis(w io.Writer, analysis providers.RepositoryA
 	if analysis.Coverage.ReviewScope == providers.RepositoryReviewScopeChanged {
 		if _, err := fmt.Fprintf(w, "        Changed scope: %d changed eligible + %d connected file(s); full %d-file repository governance remained local\n",
 			analysis.Coverage.ChangedFiles, analysis.Coverage.ConnectedFiles, analysis.Coverage.RepositoryFiles); err != nil {
+			return err
+		}
+	}
+	if analysis.Coverage.GroupingStatus == providers.RepositoryGroupingIncomplete {
+		if _, err := fmt.Fprintln(w, "        Grouping: global AI-use organization did not complete; validated technical observations were retained separately"); err != nil {
 			return err
 		}
 	}

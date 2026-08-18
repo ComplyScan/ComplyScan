@@ -502,8 +502,8 @@ func TestRunTargetedSynthesisFailureDistinguishesCompleteSourceCoverage(t *testi
 	result, err := Run(context.Background(), reviewer, repository, nil, nil, Options{
 		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
 	})
-	if err == nil {
-		t.Fatal("expected synthesis failure")
+	if err != nil {
+		t.Fatalf("validated source evidence should survive optional synthesis failure: %v", err)
 	}
 	sourceRequests := 0
 	for _, request := range reviewer.requests {
@@ -517,9 +517,9 @@ func TestRunTargetedSynthesisFailureDistinguishesCompleteSourceCoverage(t *testi
 	if result.Coverage.SourceBatchesCompleted != sourceRequests || result.Coverage.SourceBatchesTotal != sourceRequests {
 		t.Fatalf("synthesis-failed source batch counters = %d/%d, want %d/%d: %#v", result.Coverage.SourceBatchesCompleted, result.Coverage.SourceBatchesTotal, sourceRequests, sourceRequests, result.Coverage)
 	}
-	status := err.Error() + " " + strings.Join(result.Notes, " ") + " " + strings.Join(result.Result.UnresolvedQuestions, " ")
-	if !strings.Contains(status, "all candidate evidence batches were reviewed") || !strings.Contains(status, "synthesis did not complete") {
-		t.Fatalf("synthesis failure did not distinguish complete source coverage: %s", status)
+	status := strings.Join(result.Notes, " ") + " " + strings.Join(result.Result.UnresolvedQuestions, " ")
+	if result.Coverage.GroupingStatus != providers.RepositoryGroupingIncomplete || !strings.Contains(status, "global AI-use grouping did not complete") || !strings.Contains(status, "validated observation was retained") {
+		t.Fatalf("synthesis fallback did not distinguish complete source evidence from incomplete grouping: %s / %#v", status, result.Coverage)
 	}
 	if strings.Contains(status, "remaining candidate evidence was not reviewed") {
 		t.Fatalf("synthesis failure falsely reports unreviewed candidate evidence: %s", status)

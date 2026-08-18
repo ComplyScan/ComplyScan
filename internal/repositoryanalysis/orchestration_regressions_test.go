@@ -100,11 +100,11 @@ func assertPersistentCompactValidationAttempts(t *testing.T, requests []provider
 		}
 		rejected = append(rejected, request)
 	}
-	if len(rejected) != 3 {
-		t.Fatalf("persistent compact validation attempts = %d, want initial response plus two repairs; requests=%#v", len(rejected), requests)
+	if len(rejected) != 2 {
+		t.Fatalf("persistent compact validation attempts = %d, want initial response plus one repair; requests=%#v", len(rejected), requests)
 	}
-	if rejected[0].ValidationFeedback != "" || rejected[1].ValidationFeedback != diagnostic || rejected[2].ValidationFeedback != diagnostic {
-		t.Fatalf("compact validation feedback = %q, %q, %q", rejected[0].ValidationFeedback, rejected[1].ValidationFeedback, rejected[2].ValidationFeedback)
+	if rejected[0].ValidationFeedback != "" || rejected[1].ValidationFeedback != diagnostic {
+		t.Fatalf("compact validation feedback = %q, %q", rejected[0].ValidationFeedback, rejected[1].ValidationFeedback)
 	}
 	for index := 1; index < len(rejected); index++ {
 		left, right := rejected[0], rejected[index]

@@ -22,9 +22,9 @@ import (
 )
 
 const (
-	repositoryCacheSchemaVersion  = 7
-	repositoryCacheContextVersion = "13"
-	repositoryCacheFileName       = "repository-analysis-v7.json"
+	repositoryCacheSchemaVersion  = 8
+	repositoryCacheContextVersion = "14"
+	repositoryCacheFileName       = "repository-analysis-v8.json"
 	maxRepositoryCacheBytes       = 32 << 20
 	maxRepositoryCacheEntries     = 40
 	maxRepositoryCacheEntryBytes  = 2 << 20
@@ -240,6 +240,12 @@ func validateRepositoryCacheEntry(entry repositoryCacheEntry) error {
 	if !validRepositoryAnalysisMode(result.Coverage.Mode) || result.Coverage.ReviewScope != "" && result.Coverage.ReviewScope != providers.RepositoryReviewScopeChanged {
 		return errors.New("repository analysis result contains an invalid review mode or scope")
 	}
+	if result.Coverage.GroupingStatus != providers.RepositoryGroupingNotNeeded && result.Coverage.GroupingStatus != providers.RepositoryGroupingComplete && result.Coverage.GroupingStatus != providers.RepositoryGroupingIncomplete {
+		return errors.New("repository analysis result contains an invalid grouping status")
+	}
+	if result.Coverage.GroupingStatus == providers.RepositoryGroupingIncomplete {
+		return errors.New("repository analysis cache accepts only results with completed or unnecessary grouping")
+	}
 	if result.Coverage.RepositoryFiles < 0 || result.Coverage.RepositoryBytes < 0 || result.Coverage.FilesSubmitted < 0 || result.Coverage.BytesSubmitted < 0 || result.Coverage.ProviderRequests < 0 || result.Coverage.Subsystems < 0 || result.Coverage.SourceBatchesStarted < 0 || result.Coverage.SourceBatchesCompleted < 0 || result.Coverage.SourceBatchesTotal < 0 || result.Coverage.SourceBatchesCompleted != result.Coverage.SourceBatchesTotal || result.Coverage.SourceBatchesTotal > 0 && (result.Coverage.Subsystems != result.Coverage.SourceBatchesTotal || result.Coverage.SourceBatchesStarted < result.Coverage.SourceBatchesTotal || result.Coverage.ProviderRequests < result.Coverage.SourceBatchesStarted) || result.Coverage.CitationsChecked < 0 {
 		return errors.New("repository analysis result contains invalid coverage counters")
 	}
@@ -253,7 +259,7 @@ func validateRepositoryCacheEntry(entry repositoryCacheEntry) error {
 		return errors.New("repository analysis result contains impossible request diagnostics")
 	}
 	for _, diagnostic := range result.RequestDiagnostics {
-		if strings.TrimSpace(diagnostic.Phase) == "" || strings.TrimSpace(diagnostic.Scope) == "" || diagnostic.Attempt <= 0 || diagnostic.DurationNS < 0 || strings.TrimSpace(diagnostic.Outcome) == "" || diagnostic.InputFiles < 0 || diagnostic.InputBytes < 0 || len(diagnostic.Scope) > 300 || len(diagnostic.RetryReason) > 100 {
+		if strings.TrimSpace(diagnostic.Phase) == "" || strings.TrimSpace(diagnostic.Scope) == "" || diagnostic.Attempt <= 0 || diagnostic.DurationNS < 0 || strings.TrimSpace(diagnostic.Outcome) == "" || diagnostic.InputFiles < 0 || diagnostic.InputBytes < 0 || diagnostic.InputTokens < 0 || diagnostic.OutputTokens < 0 || diagnostic.ReasoningTokens < 0 || len(diagnostic.Scope) > 300 || len(diagnostic.RetryReason) > 100 {
 			return errors.New("repository analysis result contains an invalid request diagnostic")
 		}
 	}

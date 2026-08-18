@@ -74,11 +74,13 @@ func TestRunTargetedCountsBilledUsageWhenSynthesisAttributionValidationFails(t *
 	result, err := Run(context.Background(), reviewer, repository, nil, attributionFailureSystems(), Options{
 		Mode: ModeTargeted, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
 	})
-	if err == nil || !strings.Contains(err.Error(), "attributed system") {
-		t.Fatalf("synthesis attribution error = %v", err)
+	if err != nil {
+		t.Fatalf("source evidence should survive synthesis attribution failure: %v", err)
 	}
 	assertUsageEquals(t, result.Usage, reviewer.totalUsage, "billed synthesis attribution rejection")
-	assertIncompleteNonSemanticResult(t, result)
+	if result.Coverage.GroupingStatus != providers.RepositoryGroupingIncomplete {
+		t.Fatalf("grouping status = %q, want incomplete with validated source evidence retained", result.Coverage.GroupingStatus)
+	}
 }
 
 func TestRunTargetedRequestTooLargeRetriesSameSourcePackageWithReducedOutput(t *testing.T) {
@@ -189,7 +191,8 @@ func TestRepositoryCacheRejectsIncompleteSourceBatchCounters(t *testing.T) {
 	base := providers.RepositoryAnalysisResult{
 		Provider: providers.OpenAI, Model: "test-model",
 		Coverage: providers.RepositoryCoverage{
-			Mode: providers.RepositoryAnalysisTargeted, Subsystems: 2, SourceBatchesStarted: 2, SourceBatchesCompleted: 2, SourceBatchesTotal: 2, ProviderRequests: 3,
+			Mode: providers.RepositoryAnalysisTargeted, GroupingStatus: providers.RepositoryGroupingComplete,
+			Subsystems: 2, SourceBatchesStarted: 2, SourceBatchesCompleted: 2, SourceBatchesTotal: 2, ProviderRequests: 3,
 		},
 		Result: providers.RepositorySectionResult{
 			Scope: ".", AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{},
@@ -200,9 +203,9 @@ func TestRepositoryCacheRejectsIncompleteSourceBatchCounters(t *testing.T) {
 		t.Fatalf("complete batch counters were rejected: %v", err)
 	}
 	invalid := []providers.RepositoryCoverage{
-		{Mode: providers.RepositoryAnalysisTargeted, Subsystems: 1, SourceBatchesStarted: 1, SourceBatchesCompleted: 1, SourceBatchesTotal: 2, ProviderRequests: 1},
-		{Mode: providers.RepositoryAnalysisTargeted, Subsystems: 2, SourceBatchesStarted: 2, SourceBatchesCompleted: 3, SourceBatchesTotal: 2, ProviderRequests: 2},
-		{Mode: providers.RepositoryAnalysisTargeted, Subsystems: 1, SourceBatchesStarted: 2, SourceBatchesCompleted: 2, SourceBatchesTotal: 2, ProviderRequests: 2},
+		{Mode: providers.RepositoryAnalysisTargeted, GroupingStatus: providers.RepositoryGroupingComplete, Subsystems: 1, SourceBatchesStarted: 1, SourceBatchesCompleted: 1, SourceBatchesTotal: 2, ProviderRequests: 1},
+		{Mode: providers.RepositoryAnalysisTargeted, GroupingStatus: providers.RepositoryGroupingComplete, Subsystems: 2, SourceBatchesStarted: 2, SourceBatchesCompleted: 3, SourceBatchesTotal: 2, ProviderRequests: 2},
+		{Mode: providers.RepositoryAnalysisTargeted, GroupingStatus: providers.RepositoryGroupingComplete, Subsystems: 1, SourceBatchesStarted: 2, SourceBatchesCompleted: 2, SourceBatchesTotal: 2, ProviderRequests: 2},
 	}
 	for index, coverage := range invalid {
 		value := base

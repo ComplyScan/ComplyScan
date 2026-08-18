@@ -33,7 +33,7 @@ const (
 	contextReservePercent      = 20
 	minimumRateLimitCooldown   = time.Second
 	maxRateLimitTotalWait      = 10 * time.Minute
-	maxValidationRepairRetries = 2
+	maxValidationRepairRetries = 1
 	maxTransientRetryAttempts  = 8
 	minimumAdaptiveOutput      = 1024
 	minimumRecoveryOutput      = 4096
@@ -189,7 +189,7 @@ func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository
 	if len(files) == 0 {
 		return providers.RepositoryAnalysisResult{
 			Provider: options.Provider, Model: options.Model,
-			Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted, RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository)},
+			Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted, GroupingStatus: providers.RepositoryGroupingNotNeeded, RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository)},
 			Result:   providers.RepositorySectionResult{Scope: ".", AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{}, ObjectiveObservations: []providers.RepositoryObjectiveObservation{}, UnmappedObservations: []providers.RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{}},
 			Notes:    []string{"No eligible text files were available for repository model analysis."},
 		}, nil
@@ -266,6 +266,7 @@ func Run(ctx context.Context, reviewer Reviewer, repository discovery.Repository
 			return incompleteRepositoryAttempt(result, options, repository, "The broad repository response could not be assigned trusted inferred-use identities, so no model-authored conclusion was retained."), err
 		}
 		result.Result = grouped
+		result.Coverage.GroupingStatus = providers.RepositoryGroupingNotNeeded
 		if err := progress(options, Progress{Stage: "full-repository", Completed: 1, Total: 1, Scope: ".", InputBytes: fullBytes}); err != nil {
 			return incompleteRepositoryAttempt(result, options, repository, "The broad repository review completed at the provider but local completion was interrupted, so no model-authored conclusion was retained."), err
 		}
@@ -340,6 +341,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 	sourceBatchesStarted := make(map[string]struct{}, len(chunks))
 	prefetched := make(map[string]repositorySourceBatchResponse)
 	synthesisPrefetched := make(map[int]repositorySynthesisResponse)
+	var sourceEvidenceSummaries []providers.RepositorySectionResult
 	partialFailure := func(scope string, cause error) (providers.RepositoryAnalysisResult, error) {
 		for key, response := range prefetched {
 			mergeRepositoryAttemptAccounting(&aggregate, response.result)
@@ -351,6 +353,30 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 		aggregate.Coverage.SourceBatchesCompleted = sourceBatchesCompleted
 		aggregate.Coverage.SourceBatchesTotal = len(chunks)
 		detail := fmt.Sprintf("repository model review validated %d of %d bounded source batch(es); %d distinct source batch(es) started a provider request", sourceBatchesCompleted, len(chunks), len(sourceBatchesStarted))
+		if sourceBatchesCompleted == len(chunks) && len(sourceEvidenceSummaries) > 0 && !errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) && ctx.Err() == nil {
+			ungrouped, fallbackErr := retainUngroupedRepositoryEvidence(sourceEvidenceSummaries, confirmedUses)
+			if fallbackErr == nil {
+				fallbackErr = validateSystemAttribution(ungrouped, profileSystems(systems), options.Ownership, confirmedUses)
+			}
+			if fallbackErr == nil {
+				if options.TargetedBatches {
+					aggregate.Coverage.Mode = providers.RepositoryAnalysisTargeted
+				} else {
+					aggregate.Coverage.Mode = providers.RepositoryAnalysisSynthesis
+				}
+				aggregate.Coverage.GroupingStatus = providers.RepositoryGroupingIncomplete
+				aggregate.Coverage.Subsystems = len(chunks)
+				ungrouped.Scope = "."
+				aggregate.Result = ungrouped
+				aggregate.Notes = append(aggregate.Notes,
+					detail+"; global AI-use grouping did not complete, so every validated observation was retained separately instead of being discarded.",
+					"Safeguard evidence, positive facts, citations, and unresolved questions remain available. Inferred-use organization is incomplete and may be edited later in the dashboard.",
+					"Grouping cause: "+cause.Error(),
+				)
+				return aggregate, nil
+			}
+			cause = fmt.Errorf("%w; retaining validated source observations also failed: %v", cause, fallbackErr)
+		}
 		status := detail + "; remaining candidate evidence did not reach a validated response and completed batches were not globally synthesized"
 		if len(sourceBatchesStarted) >= len(chunks) && sourceBatchesCompleted < len(chunks) {
 			status = detail + "; every planned source batch started a provider request, but one or more responses could not be validated and no global synthesis was retained"
@@ -702,7 +728,7 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 	// Synthesis receives a much smaller grouping view and decides only which
 	// scan-local observations belong together. The full facts and citations are
 	// retained here and reattached after final membership validation.
-	sourceEvidenceSummaries := append([]providers.RepositorySectionResult(nil), summaries...)
+	sourceEvidenceSummaries = append([]providers.RepositorySectionResult(nil), summaries...)
 	summaries = compactRepositoryGroupingSummaries(summaries)
 	// Targeted source batches deliberately stay small so each model request sees
 	// a focused code excerpt. The resulting validated summaries contain no raw
@@ -1152,6 +1178,11 @@ func runHierarchical(ctx context.Context, reviewer Reviewer, repository discover
 	aggregate.Coverage.SourceBatchesStarted = len(sourceBatchesStarted)
 	aggregate.Coverage.SourceBatchesCompleted = len(chunks)
 	aggregate.Coverage.SourceBatchesTotal = len(chunks)
+	if usedValidatedSourceFallback {
+		aggregate.Coverage.GroupingStatus = providers.RepositoryGroupingIncomplete
+	} else {
+		aggregate.Coverage.GroupingStatus = providers.RepositoryGroupingComplete
+	}
 	aggregate.Result = summaries[0]
 	aggregate.Result.Scope = "."
 	if options.TargetedBatches {
@@ -1236,7 +1267,7 @@ func prepareRepositorySourceBatch(chunk repositoryChunk, repository discovery.Re
 		Mode: requestMode, Scope: chunk.scope,
 		RepositoryFiles: len(repository.Files), RepositoryBytes: repositorySize(repository), Files: chunk.files,
 		Objectives: objectives, Systems: systems, ConfirmedAIUses: bindConfirmedAIUses(confirmedUses, sourceFilePaths(chunk.files)), Graph: chunkGraph, MaxOutputTokens: maxOutputTokens,
-		CompactSource: options.TargetedBatches,
+		CompactSource: true,
 	}
 	requestBytes := inputBytes
 	if encoded, err := json.Marshal(request); err == nil {
@@ -1756,6 +1787,32 @@ func emptyRepositoryGroupingResult(scope string) providers.RepositorySectionResu
 		ObjectiveObservations: []providers.RepositoryObjectiveObservation{}, UnmappedObservations: []providers.RepositoryUnmappedObservation{},
 		UnresolvedQuestions: []string{}, EvidenceGaps: []providers.RepositoryEvidenceGap{}, ResolvedEvidenceGaps: []providers.RepositoryResolvedEvidenceGap{},
 	}
+}
+
+// retainUngroupedRepositoryEvidence preserves every already validated source
+// observation when optional global grouping cannot complete. Each observation
+// remains its own explicitly ungrouped report item; no local semantic merge is
+// invented. Facts, objectives, citations, and questions are reattached through
+// the same trusted path used after successful model grouping.
+func retainUngroupedRepositoryEvidence(sources []providers.RepositorySectionResult, confirmedUses []providers.RepositoryConfirmedAIUse) (providers.RepositorySectionResult, error) {
+	grouped := emptyRepositoryGroupingResult(".")
+	for _, source := range sources {
+		for _, use := range source.AIUses {
+			members := append([]string(nil), use.MemberObservationIDs...)
+			if len(members) == 0 {
+				return providers.RepositorySectionResult{}, fmt.Errorf("validated source observation %q has no trusted membership identity", use.ID)
+			}
+			grouped.AIUses = append(grouped.AIUses, providers.RepositoryAIUse{
+				ID: use.ID, Name: use.Name, Purpose: use.Purpose, Lifecycle: use.Lifecycle,
+				Confidence: use.Confidence, MemberObservationIDs: members,
+			})
+		}
+	}
+	assigned, err := assignSynthesisCandidateIDs(grouped, confirmedUses)
+	if err != nil {
+		return providers.RepositorySectionResult{}, err
+	}
+	return hydrateRepositoryGroupingResult(assigned, sources, confirmedUses)
 }
 
 func repositoryGroupingObservationCount(summaries []providers.RepositorySectionResult) int {
@@ -2409,10 +2466,11 @@ func reviewRepositoryWithRetry(ctx context.Context, reviewer Reviewer, request p
 			result.RequestDiagnostics = append([]providers.RepositoryRequestDiagnostic(nil), diagnostics...)
 			return result, err
 		}
-		addUsage(&attemptedUsage, result.Usage)
-		if incomplete, ok := providers.AsRemoteIncompleteError(err); ok && usageIsZero(result.Usage) {
-			addUsage(&attemptedUsage, usageFromIncomplete(incomplete))
+		attemptUsage := result.Usage
+		if incomplete, ok := providers.AsRemoteIncompleteError(err); ok && usageIsZero(attemptUsage) {
+			attemptUsage = usageFromIncomplete(incomplete)
 		}
+		addUsage(&attemptedUsage, attemptUsage)
 		result.Usage = attemptedUsage
 		result.Coverage.FilesSubmitted = attemptedFiles
 		result.Coverage.BytesSubmitted = attemptedSourceBytes
@@ -2422,6 +2480,7 @@ func reviewRepositoryWithRetry(ctx context.Context, reviewer Reviewer, request p
 			Phase: repositoryRequestPhase(request), Scope: request.Scope, Attempt: providerRequests,
 			DurationNS: duration.Nanoseconds(), Outcome: outcome, RetryReason: retryReason,
 			InputFiles: len(request.Files), InputBytes: repositoryRequestDiagnosticBytes(request),
+			InputTokens: attemptUsage.PromptTokens, OutputTokens: attemptUsage.CompletionTokens, ReasoningTokens: attemptUsage.ReasoningTokens,
 		})
 		result.RequestDiagnostics = append([]providers.RepositoryRequestDiagnostic(nil), diagnostics...)
 		if result.RateLimits.Available() {

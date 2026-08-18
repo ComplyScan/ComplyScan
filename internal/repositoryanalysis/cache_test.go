@@ -35,7 +35,7 @@ func TestRepositoryAnalysisCacheRoundTripAndInvalidation(t *testing.T) {
 	result := providers.RepositoryAnalysisResult{
 		Provider: providers.OpenAI,
 		Model:    "test-model",
-		Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted, RepositoryFiles: 2, RepositoryBytes: 30, FilesSubmitted: 1, BytesSubmitted: 18},
+		Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted, GroupingStatus: providers.RepositoryGroupingNotNeeded, RepositoryFiles: 2, RepositoryBytes: 30, FilesSubmitted: 1, BytesSubmitted: 18},
 		Result: providers.RepositorySectionResult{
 			Scope: ".", AIUses: []providers.RepositoryAIUse{}, AIUseFacts: []providers.RepositoryAIUseFactSet{}, ObjectiveObservations: []providers.RepositoryObjectiveObservation{},
 			UnmappedObservations: []providers.RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{},
@@ -130,7 +130,7 @@ func TestRepositoryAnalysisCacheValidatesTypedAIUseFacts(t *testing.T) {
 		candidateID := inferredCandidateID(members)
 		return providers.RepositoryAnalysisResult{
 			Provider: providers.OpenAI, Model: "test-model",
-			Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted},
+			Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted, GroupingStatus: providers.RepositoryGroupingComplete},
 			Result: providers.RepositorySectionResult{
 				Scope: ".",
 				AIUses: []providers.RepositoryAIUse{{
@@ -202,6 +202,12 @@ func TestRepositoryAnalysisCacheValidatesTypedAIUseFacts(t *testing.T) {
 			result.Coverage.SourceBatchesTotal = 2
 			result.Coverage.Subsystems = 1
 		}},
+		{name: "incomplete grouping is not reusable", mutate: func(result *providers.RepositoryAnalysisResult) {
+			result.Coverage.GroupingStatus = providers.RepositoryGroupingIncomplete
+		}},
+		{name: "unknown grouping status", mutate: func(result *providers.RepositoryAnalysisResult) {
+			result.Coverage.GroupingStatus = providers.RepositoryGroupingStatus("unknown")
+		}},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -225,7 +231,7 @@ func TestDefaultRepositoryAnalysisCacheUsesCurrentFileVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.Base(path) != "repository-analysis-v7.json" || repositoryCacheContextVersion != "13" || repositoryCacheSchemaVersion != 7 {
+	if filepath.Base(path) != "repository-analysis-v8.json" || repositoryCacheContextVersion != "14" || repositoryCacheSchemaVersion != 8 {
 		t.Fatalf("cache version = path %q context %q schema %d", path, repositoryCacheContextVersion, repositoryCacheSchemaVersion)
 	}
 }

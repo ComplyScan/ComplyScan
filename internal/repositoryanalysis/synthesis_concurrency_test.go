@@ -359,8 +359,8 @@ func TestRunTargetedConcurrentSynthesisFailureRetainsEveryAttemptButNoUnsynthesi
 	reviewer.semanticInput = true
 
 	result, err := runSynthesisConcurrencyFixture(t, reviewer, limits)
-	if err == nil || !strings.Contains(err.Error(), "simulated concurrent synthesis failure") {
-		t.Fatalf("concurrent synthesis error = %v", err)
+	if err != nil {
+		t.Fatalf("validated source observations should survive concurrent synthesis failure: %v", err)
 	}
 	snapshot := reviewer.snapshot()
 	if snapshot.levelOneCalls < 2 || snapshot.maximumLevelOne < 2 {
@@ -375,10 +375,10 @@ func TestRunTargetedConcurrentSynthesisFailureRetainsEveryAttemptButNoUnsynthesi
 	if !reflect.DeepEqual(result.Usage, snapshot.totalUsage) {
 		t.Fatalf("attempted usage = %#v, want every concurrent response %#v", result.Usage, snapshot.totalUsage)
 	}
-	if len(result.Result.AIUses) != 0 || len(result.Result.AIUseFacts) != 0 || len(result.Result.ObjectiveObservations) != 0 || len(result.Result.UnmappedObservations) != 0 {
-		t.Fatalf("partial failure leaked unsynthesized semantics: %#v", result.Result)
+	if len(result.Result.AIUses) == 0 || len(result.Result.AIUseFacts) == 0 {
+		t.Fatalf("grouping fallback discarded validated source semantics: %#v", result.Result)
 	}
-	if len(result.Result.UnresolvedQuestions) == 0 || !strings.Contains(result.Result.UnresolvedQuestions[0], "synthesis") {
-		t.Fatalf("partial failure did not expose incomplete synthesis status: %#v", result.Result.UnresolvedQuestions)
+	if result.Coverage.GroupingStatus != providers.RepositoryGroupingIncomplete || !strings.Contains(strings.Join(result.Notes, " "), "global AI-use grouping did not complete") {
+		t.Fatalf("completed source review did not expose incomplete grouping status: %#v / %#v", result.Coverage, result.Notes)
 	}
 }

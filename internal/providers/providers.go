@@ -710,17 +710,21 @@ const (
 
 // RepositoryRequestDiagnostic records one repository-layer provider attempt.
 // It deliberately excludes prompts, source content, file lists, response
-// bodies, and request IDs. The report can therefore explain latency and retry
+// bodies, and request IDs. Token counts are provider-reported and remain zero
+// when unavailable. The report can therefore explain latency and retry
 // amplification without retaining another copy of submitted code.
 type RepositoryRequestDiagnostic struct {
-	Phase       string `json:"phase"`
-	Scope       string `json:"scope"`
-	Attempt     int    `json:"attempt"`
-	DurationNS  int64  `json:"duration_ns"`
-	Outcome     string `json:"outcome"`
-	RetryReason string `json:"retry_reason,omitempty"`
-	InputFiles  int    `json:"input_files,omitempty"`
-	InputBytes  int64  `json:"input_bytes,omitempty"`
+	Phase           string `json:"phase"`
+	Scope           string `json:"scope"`
+	Attempt         int    `json:"attempt"`
+	DurationNS      int64  `json:"duration_ns"`
+	Outcome         string `json:"outcome"`
+	RetryReason     string `json:"retry_reason,omitempty"`
+	InputFiles      int    `json:"input_files,omitempty"`
+	InputBytes      int64  `json:"input_bytes,omitempty"`
+	InputTokens     int    `json:"input_tokens,omitempty"`
+	OutputTokens    int    `json:"output_tokens,omitempty"`
+	ReasoningTokens int    `json:"reasoning_tokens,omitempty"`
 }
 
 type RepositoryReviewScope string

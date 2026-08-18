@@ -44,7 +44,7 @@ func TestRepositoryReviewReusesCacheWithoutProviderCredential(t *testing.T) {
 	}
 	cachedResult := providers.RepositoryAnalysisResult{
 		Provider: providers.OpenAI, Model: "cached-model",
-		Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted, RepositoryFiles: 1, RepositoryBytes: 20, FilesSubmitted: 1, BytesSubmitted: 20},
+		Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted, GroupingStatus: providers.RepositoryGroupingNotNeeded, RepositoryFiles: 1, RepositoryBytes: 20, FilesSubmitted: 1, BytesSubmitted: 20},
 		Result: providers.RepositorySectionResult{
 			Scope: ".", AIUses: []providers.RepositoryAIUse{}, ObjectiveObservations: []providers.RepositoryObjectiveObservation{},
 			UnmappedObservations: []providers.RepositoryUnmappedObservation{}, UnresolvedQuestions: []string{},

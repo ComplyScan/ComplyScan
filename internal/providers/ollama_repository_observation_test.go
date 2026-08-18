@@ -106,3 +106,29 @@ func TestCompactSourceRejectsUnknownOrOutOfRangeBlockEvidence(t *testing.T) {
 		})
 	}
 }
+
+func TestCompactSourcePreservesExactConfirmedUseBindingWithoutCandidateID(t *testing.T) {
+	provider := &OllamaProvider{
+		kind: OpenAI, label: "OpenAI", model: "test-model",
+		completion: func(context.Context, ollamaChatRequest) (ollamaChatResponse, error) {
+			var response ollamaChatResponse
+			response.Done = true
+			response.Message.Content = `{"source_result":{"scope":"qualification","observations":[],"confirmed_ai_uses":[{"ai_use_id":"owned-use","facts":[],"objective_observations":[],"unresolved_questions":[]}],"objective_observations":[],"unmapped_observations":[],"unresolved_questions":[]}}`
+			return response, nil
+		},
+	}
+	result, err := provider.ReviewRepository(context.Background(), RepositoryAnalysisRequest{
+		Mode: RepositoryAnalysisTargeted, Scope: "qualification", RepositoryFiles: 1, CompactSource: true,
+		Files: []RepositorySourceFile{{Path: "fixture.txt", Kind: "text", Content: "synthetic fixture\n"}},
+		ConfirmedAIUses: []RepositoryConfirmedAIUse{{
+			ID: "owned-use", Name: "Owned use", Paths: []string{"fixture.txt"}, SubmittedFiles: []string{"fixture.txt"},
+			SystemIDs: []string{}, Objectives: []RepositoryAIUseObjectiveContext{},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Result.AIUses) != 0 || len(result.Result.AIUseFacts) != 1 || result.Result.AIUseFacts[0].AIUseID != "owned-use" {
+		t.Fatalf("confirmed binding = %#v", result.Result)
+	}
+}
