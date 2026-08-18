@@ -587,9 +587,10 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 				changedReviewScope = &scope
 			}
 			visible := report.FilterByMinimum(result.Findings, minimumSeverity)
-			aiReviewFindings := visible
+			aiReviewFindings := findingsForAdvisoryReview(visible)
 			if changedReviewScope != nil {
 				aiReviewFindings = findingsWithinReviewRepository(visible, aiReviewRepository)
+				aiReviewFindings = findingsForAdvisoryReview(aiReviewFindings)
 			}
 			findingsScope := "full-repository"
 			if changedSince != "" {
@@ -1086,6 +1087,20 @@ func findingsWithinReviewRepository(findings []rules.Finding, repository discove
 	return result
 }
 
+func findingsForAdvisoryReview(findings []rules.Finding) []rules.Finding {
+	result := make([]rules.Finding, 0, len(findings))
+	for _, finding := range findings {
+		// AI inventory detections are already deterministic, aggregated, and
+		// explained in the report. Asking a model to restate them adds latency and
+		// cost without changing the finding or the code-level compliance result.
+		if finding.Severity == rules.SeverityInfo && finding.Category == "ai-inventory" {
+			continue
+		}
+		result = append(result, finding)
+	}
+	return result
+}
+
 func configuredVerificationOptions(target string, recipes []config.VerificationRecipe) []verification.Options {
 	result := make([]verification.Options, 0, len(recipes))
 	for _, recipe := range recipes {
@@ -1207,6 +1222,9 @@ func reviewFindingsWithProvider(
 	target string,
 	findings []rules.Finding,
 ) (providers.ReviewResult, error) {
+	if len(findings) == 0 {
+		return providers.ReviewResult{InputFindings: 0, Observations: []providers.Observation{}}, nil
+	}
 	reviewer, timeout, _, _, _, err := configuredReviewer(settings)
 	if err != nil {
 		return providers.ReviewResult{}, err

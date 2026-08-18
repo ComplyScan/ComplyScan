@@ -33,6 +33,9 @@ func reviewFindingsWithRetry(ctx context.Context, reviewer findingReviewer, requ
 		return providers.ReviewResult{}, errors.New("finding review requires a reviewer")
 	}
 	aggregate := providers.ReviewResult{InputFindings: len(request.Findings), Observations: []providers.Observation{}}
+	if len(request.Findings) == 0 {
+		return aggregate, nil
+	}
 	queue := []providers.ReviewRequest{request}
 	for len(queue) > 0 {
 		batch := queue[0]

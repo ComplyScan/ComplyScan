@@ -26,6 +26,29 @@ func (function findingReviewFunc) Review(ctx context.Context, request providers.
 	return function(ctx, request)
 }
 
+func TestFindingReviewSkipsDeterministicInventoryNoticesAndEmptyProviderCall(t *testing.T) {
+	findings := []rules.Finding{
+		{RuleID: "AI-DISC-001", Severity: rules.SeverityInfo, Category: "ai-inventory"},
+		{RuleID: "CODE-001", Severity: rules.SeverityLow, Category: "robustness"},
+	}
+	selected := findingsForAdvisoryReview(findings)
+	if len(selected) != 1 || selected[0].RuleID != "CODE-001" {
+		t.Fatalf("advisory finding selection = %#v, want only the actionable code finding", selected)
+	}
+
+	calls := 0
+	result, err := reviewFindingsWithRetry(context.Background(), findingReviewFunc(func(context.Context, providers.ReviewRequest) (providers.ReviewResult, error) {
+		calls++
+		return providers.ReviewResult{}, nil
+	}), providers.ReviewRequest{}, findingReviewRetryPolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 || result.InputFindings != 0 || result.ProviderRequests != 0 {
+		t.Fatalf("empty finding review made %d provider call(s): %#v", calls, result)
+	}
+}
+
 func TestFindingReviewRetriesTypedTemporaryFailuresWithExactCumulativeAccounting(t *testing.T) {
 	request := providers.ReviewRequest{Findings: []rules.Finding{{RuleID: "one"}, {RuleID: "two"}}}
 	calls := 0
