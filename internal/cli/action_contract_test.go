@@ -238,6 +238,17 @@ func TestGitHubActionPublishesConciseReportAndExposesLocalBundles(t *testing.T) 
 			t.Fatalf("Action report output %q is incomplete: %#v", name, output)
 		}
 	}
+	for name, expected := range map[string]string{
+		"active-actions":   "steps.scan.outputs.active-actions",
+		"new-actions":      "steps.scan.outputs.new-actions",
+		"reopened-actions": "steps.scan.outputs.reopened-actions",
+		"resolved-actions": "steps.scan.outputs.resolved-actions",
+	} {
+		output, exists := action.Outputs[name]
+		if !exists || !strings.Contains(output.Value, expected) || !strings.Contains(strings.ToLower(output.Description), "action") {
+			t.Fatalf("Action developer-action output %q is incomplete: %#v", name, output)
+		}
+	}
 
 	var scanCommand, summaryCondition, summaryCommand string
 	summaryIndex, completionIndex := -1, -1
@@ -264,6 +275,12 @@ func TestGitHubActionPublishesConciseReportAndExposesLocalBundles(t *testing.T) 
 		`"$json_report" -nt "$report_start_marker"`,
 		"markdown-report-ready=true",
 		"json-report-ready=true",
+		`actions list "$target" --status active --format count`,
+		`actions list "$target" --status new --format count`,
+		`actions list "$target" --status reopened --format count`,
+		`actions list "$target" --status resolved --format count`,
+		`git -C "$target" archive --format=tar`,
+		`--action-baseline "$base_report"`,
 	} {
 		if !strings.Contains(scanCommand, expected) {
 			t.Fatalf("Action scan step is missing report output %q:\n%s", expected, scanCommand)
@@ -275,7 +292,7 @@ func TestGitHubActionPublishesConciseReportAndExposesLocalBundles(t *testing.T) 
 	if !strings.Contains(summaryCommand, `cat "$COMPLYSCAN_MARKDOWN_REPORT" >> "$GITHUB_STEP_SUMMARY"`) || strings.Contains(summaryCommand, "JSON") {
 		t.Fatalf("job summary must append only the concise Markdown report:\n%s", summaryCommand)
 	}
-	for _, expected := range []string{"Pull-request scope", "changed and locally connected code", "Repository-wide governance checks"} {
+	for _, expected := range []string{"Pull-request scope", "changed and locally connected code", "Repository-wide governance checks", "Developer action delta", "new-actions", "reopened-actions", "resolved-actions", "active-actions"} {
 		if !strings.Contains(summaryCommand, expected) {
 			t.Fatalf("job summary does not explain PR-versus-repository scope; missing %q:\n%s", expected, summaryCommand)
 		}

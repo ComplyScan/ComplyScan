@@ -101,6 +101,18 @@ outputs:
   json-report:
     description: Absolute path to the latest JSON evidence bundle; the Action does not upload it automatically.
     value: ${{ steps.scan.outputs.json-report }}
+  active-actions:
+    description: Number of active developer actions in the generated evidence bundle.
+    value: ${{ steps.scan.outputs.active-actions }}
+  new-actions:
+    description: Number of developer actions first observed by this scan.
+    value: ${{ steps.scan.outputs.new-actions }}
+  reopened-actions:
+    description: Number of previously resolved developer actions observed again by this scan.
+    value: ${{ steps.scan.outputs.reopened-actions }}
+  resolved-actions:
+    description: Number of baseline developer actions resolved by this scan.
+    value: ${{ steps.scan.outputs.resolved-actions }}
 
 runs:
   using: composite
@@ -303,6 +315,33 @@ runs:
           arguments+=(--config "$config")
         fi
 
+        if [[ "$COMPLYSCAN_EVENT_NAME" == "pull_request" && -n "$changed_since" ]]; then
+          base_checkout="$RUNNER_TEMP/complyscan-action-base"
+          base_archive="$RUNNER_TEMP/complyscan-action-base.tar"
+          base_report="$RUNNER_TEMP/complyscan-action-base.json"
+          mkdir -p "$base_checkout"
+          git -C "$target" archive --format=tar --output="$base_archive" "$changed_since"
+          tar -xf "$base_archive" -C "$base_checkout"
+          target_prefix=$(git -C "$target" rev-parse --show-prefix)
+          base_target="$base_checkout"
+          if [[ -n "$target_prefix" ]]; then
+            base_target="$base_checkout/${target_prefix%/}"
+          fi
+          base_arguments=(scan "$base_target" --format json --deterministic-only --no-report)
+          if [[ -n "$INPUT_CONFIG" ]]; then
+            base_arguments+=(--config "$config")
+          fi
+          set +e
+          "$binary" "${base_arguments[@]}" > "$base_report"
+          base_status=$?
+          set -e
+          if [[ "$base_status" -gt 1 ]]; then
+            echo "ComplyScan could not create the deterministic base action comparison." >&2
+            exit "$base_status"
+          fi
+          arguments+=(--action-baseline "$base_report")
+        fi
+
         markdown_report="$target/.complyscan/reports/latest.md"
         json_report="$target/.complyscan/reports/latest.json"
         report_start_marker="$RUNNER_TEMP/complyscan-report-start"
@@ -329,8 +368,20 @@ runs:
         fi
         if [[ -s "$json_report" && "$json_report" -nt "$report_start_marker" ]]; then
           echo "json-report-ready=true" >> "$GITHUB_OUTPUT"
+          active_actions=$("$binary" actions list "$target" --status active --format count)
+          new_actions=$("$binary" actions list "$target" --status new --format count)
+          reopened_actions=$("$binary" actions list "$target" --status reopened --format count)
+          resolved_actions=$("$binary" actions list "$target" --status resolved --format count)
+          echo "active-actions=$active_actions" >> "$GITHUB_OUTPUT"
+          echo "new-actions=$new_actions" >> "$GITHUB_OUTPUT"
+          echo "reopened-actions=$reopened_actions" >> "$GITHUB_OUTPUT"
+          echo "resolved-actions=$resolved_actions" >> "$GITHUB_OUTPUT"
         else
           echo "json-report-ready=false" >> "$GITHUB_OUTPUT"
+          echo "active-actions=0" >> "$GITHUB_OUTPUT"
+          echo "new-actions=0" >> "$GITHUB_OUTPUT"
+          echo "reopened-actions=0" >> "$GITHUB_OUTPUT"
+          echo "resolved-actions=0" >> "$GITHUB_OUTPUT"
         fi
 
     - name: Publish concise report summary
@@ -343,6 +394,7 @@ runs:
       run: |
         if [[ "$COMPLYSCAN_EVENT_NAME" == "pull_request" ]]; then
           printf '> Pull-request scope: changed and locally connected code was reviewed against base `%s`. Repository-wide governance checks still used the complete checked-out repository.\n\n' "$COMPLYSCAN_PR_BASE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          printf '**Developer action delta:** %s new, %s reopened, %s resolved; %s active in this evidence bundle.\n\n' '${{ steps.scan.outputs.new-actions }}' '${{ steps.scan.outputs.reopened-actions }}' '${{ steps.scan.outputs.resolved-actions }}' '${{ steps.scan.outputs.active-actions }}' >> "$GITHUB_STEP_SUMMARY"
         fi
         cat "$COMPLYSCAN_MARKDOWN_REPORT" >> "$GITHUB_STEP_SUMMARY"
 
