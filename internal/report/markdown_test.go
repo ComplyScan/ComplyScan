@@ -278,8 +278,66 @@ func TestWriteMarkdownPrioritizesDeveloperDecisions(t *testing.T) {
 			t.Errorf("developer summary contains diagnostic detail %q:\n%s", excluded, output.String())
 		}
 	}
-	if lines := strings.Count(output.String(), "\n"); lines > 75 {
-		t.Fatalf("developer report has %d lines, want at most 75:\n%s", lines, output.String())
+	if lines := strings.Count(output.String(), "\n"); lines > 85 {
+		t.Fatalf("developer report has %d lines, want at most 85:\n%s", lines, output.String())
+	}
+}
+
+func TestWriteMarkdownMapsSelectedFrameworksToTechnicalEvidenceWithoutComplianceScore(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	value.Frameworks = []FrameworkResult{
+		{
+			ID: "eu-ai-act", Name: "EU AI Act technical code evidence", Nature: framework.NatureLegislation,
+			TechnicalEvidence: framework.TechnicalEvidenceReport{
+				Coverage: framework.Coverage{Nature: framework.NatureLegislation, Provisions: []string{"Article 12", "Article 14"}},
+				Objectives: []framework.ObjectiveAssessment{
+					{ID: "logging", Title: "Automatic AI event logging", SourceReference: "Article 12", Status: framework.ObjectiveCandidate, Matches: []framework.EvidenceMatch{{Path: "audit.go", StartLine: 12}}},
+					{ID: "oversight", Title: "Human oversight", SourceReference: "Article 14", Status: framework.ObjectiveNotDetected},
+				},
+			},
+			Reconciliation: reconciliation.Report{Systems: []reconciliation.SystemResult{{
+				SystemID: "assistant", SystemName: "Assistant", Objectives: []reconciliation.ObjectiveResult{{
+					ObjectiveID: "oversight", Title: "Human oversight", SourceReference: "Article 14",
+					Requirement: reconciliation.RequirementLikelyRequired, Mapping: reconciliation.MappingRequirementWithoutEvidence,
+				}},
+			}}},
+		},
+		{
+			ID: "nist-ai-rmf", Name: "NIST AI RMF technical code evidence", Nature: framework.NatureVoluntaryFramework,
+			TechnicalEvidence: framework.TechnicalEvidenceReport{
+				Coverage: framework.Coverage{Nature: framework.NatureVoluntaryFramework, Provisions: []string{"MEASURE 2.6", "MANAGE 4.1"}},
+				Objectives: []framework.ObjectiveAssessment{
+					{ID: "robustness", Title: "Robustness and safe failure", SourceReference: "MEASURE 2.6", Status: framework.ObjectiveCandidate, Matches: []framework.EvidenceMatch{{Path: "retry.go", StartLine: 28}}},
+					{ID: "incident", Title: "Incident recovery", SourceReference: "MANAGE 4.1", Status: framework.ObjectiveNotEvaluated},
+				},
+			},
+		},
+	}
+
+	var output bytes.Buffer
+	if err := WriteMarkdown(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	markdown := output.String()
+	for _, expected := range []string{
+		"## Selected framework coverage",
+		"| EU AI Act technical code evidence | Article 12: 1/1 signal(s); Article 14: 0/1 signal(s) | 1 | 1 | 0 |",
+		"| NIST AI RMF technical code evidence (voluntary) | MEASURE 2.6: 1/1 signal(s); MANAGE 4.1: 0/1 signal(s), 1 not fully checked | 1 | 0 | 1 |",
+		"Human oversight (EU AI Act technical code evidence — Article 14)",
+		"| EU AI Act technical code evidence — Article 12 | Automatic AI event logging |",
+		"| NIST AI RMF technical code evidence — MEASURE 2.6 | Robustness and safe failure |",
+		"A signal is not proof that a safeguard works or that a provision applies",
+		"Full evidence and dashboard data: `latest.json`",
+	} {
+		if !strings.Contains(markdown, expected) {
+			t.Errorf("Markdown missing %q:\n%s", expected, markdown)
+		}
+	}
+	frameworkSection := markdown[strings.Index(markdown, "## Selected framework coverage"):strings.Index(markdown, "## What to do next")]
+	for _, unsafe := range []string{"Compliant", "Non-compliant", "Pass", "Fail", "%"} {
+		if strings.Contains(frameworkSection, unsafe) {
+			t.Errorf("framework section contains legal score language %q:\n%s", unsafe, frameworkSection)
+		}
 	}
 }
 

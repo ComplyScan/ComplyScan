@@ -33,11 +33,26 @@ type developerAction struct {
 }
 
 type developerEvidence struct {
+	framework  string
 	title      string
 	assessment string
 	followUp   string
 	evidence   string
 	verdict    providers.RepositoryTechnicalVerdict
+}
+
+type developerFrameworkCoverage struct {
+	name         string
+	areas        string
+	total        int
+	evidence     int
+	notDetected  int
+	notEvaluated int
+}
+
+type developerObjectiveFramework struct {
+	name            string
+	sourceReference string
 }
 
 type developerReportView struct {
@@ -48,6 +63,7 @@ type developerReportView struct {
 	actionTotal        int
 	evidence           []developerEvidence
 	evidenceTotal      int
+	frameworkCoverage  []developerFrameworkCoverage
 	questions          []string
 	questionTotal      int
 	integrationSignals []string
@@ -72,6 +88,9 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report, evidenceBundle
 		return err
 	}
 	if err := writeDeveloperOutcomeMarkdown(writer, value, view); err != nil {
+		return err
+	}
+	if err := writeDeveloperFrameworkCoverageMarkdown(writer, view); err != nil {
 		return err
 	}
 	if err := writeDeveloperActionsMarkdown(writer, view); err != nil {
@@ -169,9 +188,11 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 		}
 	}
 	view.integrationSignals = developerIntegrationSignals(value)
+	view.frameworkCoverage = developerFrameworkCoverageRows(value)
 	view.referenceDetails = developerReferenceDetails(value)
 	view.implemented, view.partial, view.notImplemented, view.cannotDetermine = developerTechnicalVerdictCounts(value)
 	objectiveTitles := developerObjectiveTitles(value)
+	objectiveFrameworks := developerObjectiveFrameworks(value)
 	actionKeys := make(map[string]struct{})
 	addAction := func(key string, action developerAction) {
 		key = strings.ToLower(strings.TrimSpace(key))
@@ -228,6 +249,7 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 							coveredSystemObjectives[context.Association.SystemID+"\x00"+objective.ObjectiveID] = struct{}{}
 						}
 						if action, include := developerUseObjectiveAction(use, context.Association, objective); include {
+							action.issue = developerFrameworkActionIssue(action.issue, frameworkResult.Name, objective.SourceReference)
 							addAction("ai-use-objective/"+use.UseID+"/"+frameworkResult.ID+"/"+context.Association.SystemID+"/"+objective.ObjectiveID, action)
 						}
 						if objective.AIReview != nil {
@@ -271,6 +293,13 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 			if action.evidence == "" {
 				action.evidence = developerEvidenceReferenceText(objective.EvidenceReferences)
 			}
+			if frameworkContext, ok := objectiveFrameworks[objective.ObjectiveID]; ok {
+				sourceReference := objective.SourceReference
+				if sourceReference == "" {
+					sourceReference = frameworkContext.sourceReference
+				}
+				action.issue = developerFrameworkActionIssue(action.issue, frameworkContext.name, sourceReference)
+			}
 			key := "objective/" + system.SystemID + "/" + objective.ObjectiveID
 			addAction(key, action)
 		}
@@ -288,8 +317,9 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 			}
 			why := developerVerdictLabel(verdict) + ". " + compactMarkdownText(observation.Rationale, 150)
 			next := developerObjectiveNextStep(observation, view.evidenceBundle)
+			frameworkContext := objectiveFrameworks[observation.ObjectiveID]
 			addAction("objective/"+observation.SystemID+"/"+rawID, developerAction{
-				priority: "Review", issue: developerObjectiveTitle(rawID, objectiveTitles),
+				priority: "Review", issue: developerFrameworkActionIssue(developerObjectiveTitle(rawID, objectiveTitles), frameworkContext.name, frameworkContext.sourceReference),
 				why: compactMarkdownText(why, 240), next: compactMarkdownText(next, 220),
 				evidence: developerCitationText(observation.SupportingEvidence), control: true,
 			})
@@ -379,6 +409,29 @@ func writeDeveloperOutcomeMarkdown(writer io.Writer, value Report, view develope
 	}
 	_, err := fmt.Fprintf(writer, "- Recommended developer follow-ups: **%d**\n", view.actionTotal)
 	return err
+}
+
+func writeDeveloperFrameworkCoverageMarkdown(writer io.Writer, view developerReportView) error {
+	if len(view.frameworkCoverage) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintln(writer, "\n## Selected framework coverage"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(writer, "\nThis maps the selected framework areas to repository code signals. A signal is not proof that a safeguard works or that a provision applies; no signal is not proof that an implementation is absent.\n\n| Framework | Technical areas (signals / checks) | Code signals found | No matching signal | Not fully checked |\n|---|---|---:|---:|---:|"); err != nil {
+		return err
+	}
+	for _, coverage := range view.frameworkCoverage {
+		areas := coverage.areas
+		if areas == "" {
+			areas = fmt.Sprintf("%d technical code check(s)", coverage.total)
+		}
+		if _, err := fmt.Fprintf(writer, "| %s | %s | %d | %d | %d |\n",
+			markdownTableText(coverage.name), markdownTableText(areas), coverage.evidence, coverage.notDetected, coverage.notEvaluated); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func developerAIInventorySummary(value Report) string {
@@ -688,13 +741,14 @@ func developerRoleLabel(role string) string {
 }
 
 type developerUseCheck struct {
-	framework   string
-	context     string
-	title       string
-	requirement string
-	codeResult  string
-	evidence    string
-	priority    int
+	framework       string
+	sourceReference string
+	context         string
+	title           string
+	requirement     string
+	codeResult      string
+	evidence        string
+	priority        int
 }
 
 func writeDeveloperAIUseMappingsMarkdown(writer io.Writer, value Report, evidenceBundle string, sectionStarted bool) error {
@@ -719,7 +773,7 @@ func writeDeveloperAIUseMappingsMarkdown(writer io.Writer, value Report, evidenc
 			return err
 		}
 	}
-	if _, err := fmt.Fprintln(writer, "\n### Checks within confirmed AI uses\n\n| AI use | Code control | Result | Evidence |\n|---|---|---|---|"); err != nil {
+	if _, err := fmt.Fprintln(writer, "\n### Checks within confirmed AI uses\n\n| AI use | Framework area / code control | Result | Evidence |\n|---|---|---|---|"); err != nil {
 		return err
 	}
 	visible := entries
@@ -727,8 +781,12 @@ func writeDeveloperAIUseMappingsMarkdown(writer io.Writer, value Report, evidenc
 		visible = visible[:maxDeveloperUseChecks]
 	}
 	for _, entry := range visible {
+		control := entry.check.title
+		if area := developerFrameworkArea(entry.check.framework, entry.check.sourceReference); area != "" {
+			control = area + " — " + control
+		}
 		if _, err := fmt.Fprintf(writer, "| %s | %s | %s | %s |\n",
-			markdownTableText(entry.useName), markdownTableText(entry.check.title), markdownTableText(entry.check.codeResult), markdownTableText(entry.check.evidence)); err != nil {
+			markdownTableText(entry.useName), markdownTableText(control), markdownTableText(entry.check.codeResult), markdownTableText(entry.check.evidence)); err != nil {
 			return err
 		}
 	}
@@ -754,7 +812,7 @@ func developerUseChecks(use usemapping.UseResult) []developerUseCheck {
 					continue
 				}
 				result = append(result, developerUseCheck{
-					framework: frameworkName, context: contextName, title: objective.Title,
+					framework: frameworkName, sourceReference: objective.SourceReference, context: contextName, title: objective.Title,
 					requirement: developerUseRequirementLabel(objective.Requirement),
 					codeResult:  developerUseCodeResult(objective), evidence: developerUseEvidence(objective),
 					priority: developerUseCheckPriority(objective),
@@ -1086,7 +1144,7 @@ func writeDeveloperEvidenceMarkdown(writer io.Writer, view developerReportView) 
 	if _, err := fmt.Fprintln(writer, "\n## What the code shows"); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(writer, "\n| Code control | Result | Evidence |\n|---|---|---|"); err != nil {
+	if _, err := fmt.Fprintln(writer, "\n| Framework area | Code control | Result | Evidence |\n|---|---|---|---|"); err != nil {
 		return err
 	}
 	for _, evidence := range view.evidence {
@@ -1094,8 +1152,12 @@ func writeDeveloperEvidenceMarkdown(writer io.Writer, view developerReportView) 
 		if strings.Contains(strings.ToLower(evidence.assessment), "did not evaluate") {
 			result = "Code signal found; not fully reviewed"
 		}
-		if _, err := fmt.Fprintf(writer, "| %s | %s | %s |\n",
-			markdownTableText(developerPlainLanguage(evidence.title)), markdownTableText(result), markdownTableText(evidence.evidence)); err != nil {
+		frameworkArea := evidence.framework
+		if frameworkArea == "" {
+			frameworkArea = "Repository technical objective"
+		}
+		if _, err := fmt.Fprintf(writer, "| %s | %s | %s | %s |\n",
+			markdownTableText(frameworkArea), markdownTableText(developerPlainLanguage(evidence.title)), markdownTableText(result), markdownTableText(evidence.evidence)); err != nil {
 			return err
 		}
 	}
@@ -1219,10 +1281,172 @@ func developerObjectiveTitles(value Report) map[string]string {
 	return titles
 }
 
+func developerFrameworkCoverageRows(value Report) []developerFrameworkCoverage {
+	rows := make([]developerFrameworkCoverage, 0, len(value.Frameworks)+1)
+	add := func(name, nature string, evidence framework.TechnicalEvidenceReport) {
+		if strings.TrimSpace(name) == "" {
+			name = evidence.Pack.Name
+		}
+		if strings.TrimSpace(name) == "" {
+			name = evidence.Pack.ID
+		}
+		if nature == "" {
+			nature = evidence.Coverage.Nature
+		}
+		if nature == framework.NatureVoluntaryFramework && !strings.Contains(strings.ToLower(name), "voluntary") {
+			name += " (voluntary)"
+		}
+		row := developerFrameworkCoverage{name: name}
+		type areaCoverage struct {
+			total        int
+			evidence     int
+			notEvaluated int
+		}
+		areaSeen := make(map[string]struct{})
+		areaOrder := make([]string, 0, len(evidence.Coverage.Provisions))
+		areaCounts := make(map[string]areaCoverage)
+		addArea := func(area string) {
+			area = strings.TrimSpace(area)
+			if area == "" {
+				return
+			}
+			if _, exists := areaSeen[area]; exists {
+				return
+			}
+			areaSeen[area] = struct{}{}
+			areaOrder = append(areaOrder, area)
+		}
+		for _, area := range evidence.Coverage.Provisions {
+			addArea(area)
+		}
+		for _, objective := range evidence.Objectives {
+			row.total++
+			switch objective.Status {
+			case framework.ObjectiveCandidate:
+				row.evidence++
+			case framework.ObjectiveNotEvaluated:
+				row.notEvaluated++
+			default:
+				row.notDetected++
+			}
+			objectiveArea := strings.TrimSpace(objective.SourceReference)
+			matchedArea := false
+			for _, area := range areaOrder {
+				if objectiveArea == "" || !strings.Contains(objectiveArea, area) {
+					continue
+				}
+				count := areaCounts[area]
+				count.total++
+				if objective.Status == framework.ObjectiveCandidate {
+					count.evidence++
+				}
+				if objective.Status == framework.ObjectiveNotEvaluated {
+					count.notEvaluated++
+				}
+				areaCounts[area] = count
+				matchedArea = true
+			}
+			if !matchedArea && objectiveArea != "" {
+				addArea(objectiveArea)
+				count := areaCounts[objectiveArea]
+				count.total++
+				if objective.Status == framework.ObjectiveCandidate {
+					count.evidence++
+				}
+				if objective.Status == framework.ObjectiveNotEvaluated {
+					count.notEvaluated++
+				}
+				areaCounts[objectiveArea] = count
+			}
+		}
+		if row.total == 0 && evidence.Summary.Total > 0 {
+			row.total = evidence.Summary.Total
+			row.evidence = evidence.Summary.CandidateEvidence
+			row.notDetected = evidence.Summary.NotDetected
+			row.notEvaluated = evidence.Summary.NotEvaluated
+		}
+		areas := make([]string, 0, len(areaOrder))
+		for _, area := range areaOrder {
+			count := areaCounts[area]
+			if count.total == 0 {
+				areas = append(areas, area)
+				continue
+			}
+			label := fmt.Sprintf("%s: %d/%d signal(s)", area, count.evidence, count.total)
+			if count.notEvaluated > 0 {
+				label += fmt.Sprintf(", %d not fully checked", count.notEvaluated)
+			}
+			areas = append(areas, label)
+		}
+		row.areas = strings.Join(areas, "; ")
+		rows = append(rows, row)
+	}
+	for _, result := range value.Frameworks {
+		add(result.Name, result.Nature, result.TechnicalEvidence)
+	}
+	if len(value.Frameworks) == 0 && value.TechnicalEvidence != nil {
+		add(value.TechnicalEvidence.Pack.Name, value.TechnicalEvidence.Coverage.Nature, *value.TechnicalEvidence)
+	}
+	return rows
+}
+
+func developerObjectiveFrameworks(value Report) map[string]developerObjectiveFramework {
+	result := make(map[string]developerObjectiveFramework)
+	add := func(frameworkID, frameworkName string, evidence framework.TechnicalEvidenceReport) {
+		if frameworkName == "" {
+			frameworkName = evidence.Pack.Name
+		}
+		if frameworkID == "" {
+			frameworkID = evidence.Pack.ID
+		}
+		for _, objective := range evidence.Objectives {
+			context := developerObjectiveFramework{name: frameworkName, sourceReference: objective.SourceReference}
+			if _, exists := result[objective.ID]; !exists {
+				result[objective.ID] = context
+			}
+			if frameworkID != "" {
+				result[frameworkID+"/"+objective.ID] = context
+			}
+			if evidence.Pack.ID != "" {
+				result[evidence.Pack.ID+"/"+objective.ID] = context
+			}
+		}
+	}
+	for _, frameworkResult := range value.Frameworks {
+		add(frameworkResult.ID, frameworkResult.Name, frameworkResult.TechnicalEvidence)
+	}
+	if len(value.Frameworks) == 0 && value.TechnicalEvidence != nil {
+		add(value.TechnicalEvidence.Pack.ID, value.TechnicalEvidence.Pack.Name, *value.TechnicalEvidence)
+	}
+	return result
+}
+
+func developerFrameworkArea(frameworkName, sourceReference string) string {
+	frameworkName = strings.TrimSpace(frameworkName)
+	sourceReference = strings.TrimSpace(sourceReference)
+	switch {
+	case frameworkName != "" && sourceReference != "":
+		return frameworkName + " — " + sourceReference
+	case frameworkName != "":
+		return frameworkName
+	default:
+		return sourceReference
+	}
+}
+
+func developerFrameworkActionIssue(issue, frameworkName, sourceReference string) string {
+	area := developerFrameworkArea(frameworkName, sourceReference)
+	if area == "" || strings.Contains(issue, area) {
+		return issue
+	}
+	return issue + " (" + area + ")"
+}
+
 func developerSupportingEvidence(value Report, titles map[string]string) ([]developerEvidence, int) {
 	items := make([]developerEvidence, 0)
 	seen := make(map[string]struct{})
 	observations := make(map[string]providers.RepositoryObjectiveObservation)
+	objectiveFrameworks := developerObjectiveFrameworks(value)
 	add := func(key string, item developerEvidence) {
 		if _, exists := seen[key]; exists {
 			return
@@ -1238,7 +1462,9 @@ func developerSupportingEvidence(value Report, titles map[string]string) ([]deve
 				}
 				verdict := observation.DerivedTechnicalVerdict()
 				rawID := developerRawObjectiveID(observation.ObjectiveID)
+				frameworkContext := objectiveFrameworks[observation.ObjectiveID]
 				add("repository-level/"+observation.SystemID+"/"+observation.ObjectiveID, developerEvidence{
+					framework:  developerFrameworkArea(frameworkContext.name, frameworkContext.sourceReference),
 					title:      "Repository-level, not assigned to one confirmed AI use: " + developerObjectiveTitle(rawID, titles),
 					assessment: developerVerdictAssessment(observation), followUp: developerObservationFollowUp(observation),
 					evidence: developerCitationText(observation.SupportingEvidence), verdict: verdict,
@@ -1250,13 +1476,15 @@ func developerSupportingEvidence(value Report, titles map[string]string) ([]deve
 			rawID := developerRawObjectiveID(observation.ObjectiveID)
 			observations[rawID] = observation
 			verdict := observation.DerivedTechnicalVerdict()
+			frameworkContext := objectiveFrameworks[observation.ObjectiveID]
 			add(rawID, developerEvidence{
-				title: developerObjectiveTitle(rawID, titles), assessment: developerVerdictAssessment(observation),
+				framework: developerFrameworkArea(frameworkContext.name, frameworkContext.sourceReference),
+				title:     developerObjectiveTitle(rawID, titles), assessment: developerVerdictAssessment(observation),
 				followUp: developerObservationFollowUp(observation), evidence: developerCitationText(observation.SupportingEvidence), verdict: verdict,
 			})
 		}
 	}
-	addDeterministic := func(evidence framework.TechnicalEvidenceReport) {
+	addDeterministic := func(frameworkName string, evidence framework.TechnicalEvidenceReport) {
 		for _, objective := range evidence.Objectives {
 			if objective.Status != framework.ObjectiveCandidate || len(objective.Matches) == 0 {
 				continue
@@ -1268,7 +1496,10 @@ func developerSupportingEvidence(value Report, titles map[string]string) ([]deve
 				}
 				locations = append(locations, locationText(match.Path, match.StartLine))
 			}
-			item := developerEvidence{title: objective.Title, evidence: strings.Join(locations, ", ")}
+			item := developerEvidence{
+				framework: developerFrameworkArea(frameworkName, objective.SourceReference),
+				title:     objective.Title, evidence: strings.Join(locations, ", "),
+			}
 			if observation, reviewed := observations[objective.ID]; reviewed {
 				item.verdict = observation.DerivedTechnicalVerdict()
 				item.assessment = developerVerdictAssessment(observation)
@@ -1290,10 +1521,10 @@ func developerSupportingEvidence(value Report, titles map[string]string) ([]deve
 	}
 	if value.AIUseMappings == nil {
 		for _, result := range value.Frameworks {
-			addDeterministic(result.TechnicalEvidence)
+			addDeterministic(result.Name, result.TechnicalEvidence)
 		}
 		if len(value.Frameworks) == 0 && value.TechnicalEvidence != nil {
-			addDeterministic(*value.TechnicalEvidence)
+			addDeterministic(value.TechnicalEvidence.Pack.Name, *value.TechnicalEvidence)
 		}
 	}
 	for _, result := range value.ExecutionVerifications {
