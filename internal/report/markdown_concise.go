@@ -24,12 +24,18 @@ const (
 )
 
 type developerAction struct {
-	priority string
-	issue    string
-	why      string
-	next     string
-	evidence string
-	control  bool
+	id         string
+	status     DeveloperActionStatus
+	priority   string
+	category   string
+	issue      string
+	why        string
+	next       string
+	evidence   string
+	locations  []DeveloperActionEvidence
+	frameworks []DeveloperActionFramework
+	humanOnly  bool
+	control    bool
 }
 
 type developerEvidence struct {
@@ -51,6 +57,7 @@ type developerFrameworkCoverage struct {
 }
 
 type developerObjectiveFramework struct {
+	id              string
 	name            string
 	sourceReference string
 }
@@ -60,6 +67,7 @@ type developerReportView struct {
 	importantRisks     int
 	controlsToReview   int
 	actions            []developerAction
+	allActions         []developerAction
 	actionTotal        int
 	evidence           []developerEvidence
 	evidenceTotal      int
@@ -84,6 +92,9 @@ type developerReportView struct {
 
 func writeDeveloperReportMarkdown(writer io.Writer, value Report, evidenceBundle string) error {
 	view := buildDeveloperReportView(value, evidenceBundle)
+	if len(value.DeveloperActions) > 0 {
+		view = applyDeveloperActionLifecycle(view, value.DeveloperActions)
+	}
 	if _, err := fmt.Fprintln(writer, "\n> What the repository code demonstrates, what needs work, and what code cannot establish. This is not a legal compliance decision."); err != nil {
 		return err
 	}
@@ -186,6 +197,38 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report, evidenceBundle
 	return err
 }
 
+func applyDeveloperActionLifecycle(view developerReportView, actions []DeveloperAction) developerReportView {
+	active := make([]developerAction, 0, len(actions))
+	for _, action := range actions {
+		if action.Status != DeveloperActionNew && action.Status != DeveloperActionOpen && action.Status != DeveloperActionReopened {
+			continue
+		}
+		where := ""
+		if len(action.Evidence) > 0 {
+			where = locationText(action.Evidence[0].Path, action.Evidence[0].StartLine)
+			if where == "" {
+				where = action.Evidence[0].Summary
+			}
+		}
+		active = append(active, developerAction{
+			id: action.ID, status: action.Status, priority: action.Priority, category: action.Category,
+			issue: action.Title, why: action.Why, next: action.RecommendedChange, evidence: where,
+			locations:  append([]DeveloperActionEvidence(nil), action.Evidence...),
+			frameworks: append([]DeveloperActionFramework(nil), action.Frameworks...), humanOnly: action.HumanOnly,
+		})
+	}
+	sort.SliceStable(active, func(left, right int) bool {
+		return developerPriorityRank(active[left].priority) > developerPriorityRank(active[right].priority)
+	})
+	view.allActions = append([]developerAction(nil), active...)
+	view.actionTotal = len(active)
+	view.actions = active
+	if len(view.actions) > maxDeveloperActions {
+		view.actions = view.actions[:maxDeveloperActions]
+	}
+	return view
+}
+
 func buildDeveloperReportView(value Report, evidenceBundle string) developerReportView {
 	counts := markdownCounts(value)
 	view := developerReportView{
@@ -216,6 +259,10 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 		if _, exists := actionKeys[key]; exists {
 			return
 		}
+		action.id = key
+		if action.category == "" {
+			action.category = "code-review"
+		}
 		actionKeys[key] = struct{}{}
 		view.actions = append(view.actions, action)
 		if action.control {
@@ -229,7 +276,7 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 				continue
 			}
 			addAction("ai-uses/retired/"+observed.Use.ID, developerAction{
-				priority: "Review", issue: "Current code matches retired AI use: " + observed.Use.Name,
+				priority: "Review", category: "human-context", humanOnly: true, issue: "Current code matches retired AI use: " + observed.Use.Name,
 				why:      "A retired register entry still matches repository evidence in this scan.",
 				next:     "Check whether the use was reactivated or whether its saved repository paths need updating.",
 				evidence: strings.Join(observed.Use.Paths, ", "),
@@ -246,13 +293,13 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 						switch context.Association.Status {
 						case usemapping.AssociationNone:
 							addAction("ai-use-context/"+use.UseID, developerAction{
-								priority: "Review", issue: "AI use has no configured system context: " + use.UseName,
+								priority: "Review", category: "human-context", humanOnly: true, issue: "AI use has no configured system context: " + use.UseName,
 								why:  "Code evidence can be scoped to this use, but ComplyScan cannot screen the context-dependent requirements without a linked system profile.",
 								next: "Associate this use with the relevant configured system in the AI-use register.", evidence: aiuse.DefaultPath,
 							})
 						case usemapping.AssociationMissing:
 							addAction("ai-use-context/"+use.UseID+"/"+context.Association.SystemID, developerAction{
-								priority: "Review", issue: "AI use references a missing configured system: " + use.UseName,
+								priority: "Review", category: "human-context", humanOnly: true, issue: "AI use references a missing configured system: " + use.UseName,
 								why:  "The saved system ID " + context.Association.SystemID + " is not present in the active configuration, so context-dependent applicability cannot be screened reliably.",
 								next: "Correct the system association or restore the configured system before relying on this mapping.", evidence: aiuse.DefaultPath,
 							})
@@ -264,6 +311,8 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 						}
 						if action, include := developerUseObjectiveAction(use, context.Association, objective); include {
 							action.issue = developerFrameworkActionIssue(action.issue, frameworkResult.Name, objective.SourceReference)
+							action.category = "code-control"
+							action.frameworks = []DeveloperActionFramework{{ID: frameworkResult.ID, Name: frameworkResult.Name, SourceReference: objective.SourceReference, ObjectiveID: objective.ObjectiveID}}
 							addAction("ai-use-objective/"+use.UseID+"/"+frameworkResult.ID+"/"+context.Association.SystemID+"/"+objective.ObjectiveID, action)
 						}
 						if objective.AIReview != nil {
@@ -289,9 +338,9 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 			next = "Review the code path and decide whether a change is required."
 		}
 		addAction("finding/"+finding.Fingerprint, developerAction{
-			priority: developerFindingPriority(finding.Severity), issue: finding.Title,
+			priority: developerFindingPriority(finding.Severity), category: "deterministic-finding", issue: finding.Title,
 			why: compactMarkdownText(finding.Message, 180), next: compactMarkdownText(next, 180),
-			evidence: locationText(finding.Path, finding.StartLine),
+			evidence: locationText(finding.Path, finding.StartLine), locations: developerFindingActionEvidence(finding),
 		})
 	}
 
@@ -313,7 +362,10 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 					sourceReference = frameworkContext.sourceReference
 				}
 				action.issue = developerFrameworkActionIssue(action.issue, frameworkContext.name, sourceReference)
+				action.frameworks = []DeveloperActionFramework{{ID: frameworkContext.id, Name: frameworkContext.name, SourceReference: sourceReference, ObjectiveID: objective.ObjectiveID}}
 			}
+			action.category = "code-control"
+			action.locations = developerReferenceActionEvidence(objective.EvidenceReferences)
 			key := "objective/" + system.SystemID + "/" + objective.ObjectiveID
 			addAction(key, action)
 		}
@@ -333,9 +385,10 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 			next := developerObjectiveNextStep(observation, view.evidenceBundle)
 			frameworkContext := objectiveFrameworks[observation.ObjectiveID]
 			addAction("objective/"+observation.SystemID+"/"+rawID, developerAction{
-				priority: "Review", issue: developerFrameworkActionIssue(developerObjectiveTitle(rawID, objectiveTitles), frameworkContext.name, frameworkContext.sourceReference),
+				priority: "Review", category: "code-control", issue: developerFrameworkActionIssue(developerObjectiveTitle(rawID, objectiveTitles), frameworkContext.name, frameworkContext.sourceReference),
 				why: compactMarkdownText(why, 320), next: compactMarkdownText(next, 260),
-				evidence: developerCitationText(observation.SupportingEvidence), control: true,
+				evidence: developerCitationText(observation.SupportingEvidence), locations: developerCitationActionEvidence(observation.SupportingEvidence),
+				frameworks: []DeveloperActionFramework{{ID: frameworkContext.id, Name: frameworkContext.name, SourceReference: frameworkContext.sourceReference, ObjectiveID: rawID}}, control: true,
 			})
 		}
 	}
@@ -347,7 +400,7 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 		}
 		view.verificationFailed++
 		addAction("verification/"+result.RecipeID, developerAction{
-			priority: "High", issue: "Execution check failed: " + result.RecipeID,
+			priority: "High", category: "verification", issue: "Execution check failed: " + result.RecipeID,
 			why:  fmt.Sprintf("The isolated check exited with status %d.", result.ExitCode),
 			next: fmt.Sprintf("Inspect the check output in %s, fix the failure, and rerun the scan.", view.evidenceBundle), evidence: result.RecipeID,
 		})
@@ -358,14 +411,14 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 			warningSummary += fmt.Sprintf(" (%d additional warning(s) are in %s.)", len(value.Warnings)-1, view.evidenceBundle)
 		}
 		addAction("scan-warnings", developerAction{
-			priority: "Review", issue: "Scan incomplete or uncertain",
+			priority: "Review", category: "scan-operation", issue: "Scan incomplete or uncertain",
 			why:  warningSummary,
 			next: "Resolve the warning and rerun the scan before relying on the result.", evidence: "Scan warning",
 		})
 	}
 	if developerRepositoryAnalysisIncomplete(value) && len(value.Warnings) == 0 {
 		addAction("repository-analysis-incomplete", developerAction{
-			priority: "Review", issue: "AI code review incomplete",
+			priority: "Review", category: "scan-operation", issue: "AI code review incomplete",
 			why:  "The AI review stopped before producing a final combined conclusion. Local scan results remain available.",
 			next: "Rerun the scan after checking provider availability and limits before relying on the AI review layer.", evidence: "Repository AI review",
 		})
@@ -374,6 +427,7 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 	sort.SliceStable(view.actions, func(left, right int) bool {
 		return developerPriorityRank(view.actions[left].priority) > developerPriorityRank(view.actions[right].priority)
 	})
+	view.allActions = append([]developerAction(nil), view.actions...)
 	view.actionTotal = len(view.actions)
 	if len(view.actions) > maxDeveloperActions {
 		view.actions = view.actions[:maxDeveloperActions]
@@ -1178,8 +1232,16 @@ func writeDeveloperActionsMarkdown(writer io.Writer, view developerReportView) e
 		if why == "" {
 			why = "The reviewed evidence requires developer confirmation."
 		}
-		if _, err := fmt.Fprintf(writer, "\n### %d. %s\n\n- **Priority:** %s\n- **Do:** %s\n- **Why:** %s\n- **Where:** %s\n",
-			index+1, markdownText(developerPlainLanguage(action.issue)), markdownText(action.priority), markdownText(developerPlainLanguage(action.next)),
+		status := ""
+		if action.status != "" {
+			status = fmt.Sprintf("\n- **Status:** %s", markdownText(string(action.status)))
+		}
+		id := ""
+		if action.id != "" {
+			id = fmt.Sprintf("\n- **Action ID:** %s", inlineCode(action.id))
+		}
+		if _, err := fmt.Fprintf(writer, "\n### %d. %s\n\n- **Priority:** %s%s%s\n- **Do:** %s\n- **Why:** %s\n- **Where:** %s\n",
+			index+1, markdownText(developerPlainLanguage(action.issue)), markdownText(action.priority), status, id, markdownText(developerPlainLanguage(action.next)),
 			markdownText(why), markdownText(where)); err != nil {
 			return err
 		}
@@ -1423,7 +1485,7 @@ func developerObjectiveFrameworks(value Report) map[string]developerObjectiveFra
 			frameworkID = evidence.Pack.ID
 		}
 		for _, objective := range evidence.Objectives {
-			context := developerObjectiveFramework{name: frameworkName, sourceReference: objective.SourceReference}
+			context := developerObjectiveFramework{id: frameworkID, name: frameworkName, sourceReference: objective.SourceReference}
 			if _, exists := result[objective.ID]; !exists {
 				result[objective.ID] = context
 			}

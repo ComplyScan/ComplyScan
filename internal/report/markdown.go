@@ -18,6 +18,7 @@ func WriteMarkdown(writer io.Writer, report Report) error {
 }
 
 func writeMarkdown(writer io.Writer, report Report, evidenceBundle string) error {
+	report = EnsureDeveloperActions(report)
 	if _, err := fmt.Fprintln(writer, "# ComplyScan report"); err != nil {
 		return err
 	}

@@ -28,9 +28,79 @@ type Tool struct {
 }
 
 type ScanMetadata struct {
-	ID        string    `json:"id"`
-	CreatedAt string    `json:"created_at"`
-	Scope     ScanScope `json:"scope"`
+	ID             string                    `json:"id"`
+	CreatedAt      string                    `json:"created_at"`
+	Scope          ScanScope                 `json:"scope"`
+	Repository     *RepositoryProvenance     `json:"repository,omitempty"`
+	ConfigDigest   string                    `json:"config_digest,omitempty"`
+	FrameworkPacks []FrameworkPackProvenance `json:"framework_packs"`
+}
+
+type RepositoryProvenance struct {
+	Commit        string `json:"commit,omitempty"`
+	Branch        string `json:"branch,omitempty"`
+	Dirty         bool   `json:"dirty"`
+	TargetPath    string `json:"target_path,omitempty"`
+	BaseReference string `json:"base_reference,omitempty"`
+	BaseCommit    string `json:"base_commit,omitempty"`
+}
+
+type FrameworkPackProvenance struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	Digest  string `json:"digest"`
+}
+
+type DeveloperActionStatus string
+
+const (
+	DeveloperActionNew      DeveloperActionStatus = "new"
+	DeveloperActionOpen     DeveloperActionStatus = "open"
+	DeveloperActionReopened DeveloperActionStatus = "reopened"
+	DeveloperActionResolved DeveloperActionStatus = "resolved"
+	DeveloperActionAccepted DeveloperActionStatus = "accepted"
+)
+
+// DeveloperAction is the stable developer, dashboard, and coding-agent view of
+// one concrete follow-up. It deliberately contains only report-safe evidence;
+// repository source remains outside the evidence bundle.
+type DeveloperAction struct {
+	ID                 string                      `json:"id"`
+	Status             DeveloperActionStatus       `json:"status"`
+	Priority           string                      `json:"priority"`
+	Category           string                      `json:"category"`
+	Title              string                      `json:"title"`
+	Why                string                      `json:"why"`
+	RecommendedChange  string                      `json:"recommended_change"`
+	AcceptanceCriteria []string                    `json:"acceptance_criteria"`
+	Evidence           []DeveloperActionEvidence   `json:"evidence"`
+	Frameworks         []DeveloperActionFramework  `json:"frameworks,omitempty"`
+	Verification       DeveloperActionVerification `json:"verification"`
+	HumanOnly          bool                        `json:"human_only"`
+	FirstSeenScanID    string                      `json:"first_seen_scan_id"`
+	LastSeenScanID     string                      `json:"last_seen_scan_id"`
+	ResolvedInScanID   string                      `json:"resolved_in_scan_id,omitempty"`
+}
+
+type DeveloperActionEvidence struct {
+	Path      string `json:"path,omitempty"`
+	StartLine int    `json:"start_line,omitempty"`
+	EndLine   int    `json:"end_line,omitempty"`
+	Summary   string `json:"summary,omitempty"`
+}
+
+type DeveloperActionFramework struct {
+	ID              string `json:"id,omitempty"`
+	Name            string `json:"name,omitempty"`
+	SourceReference string `json:"source_reference,omitempty"`
+	ObjectiveID     string `json:"objective_id,omitempty"`
+}
+
+type DeveloperActionVerification struct {
+	Type        string `json:"type"`
+	Description string `json:"description"`
+	Command     string `json:"command,omitempty"`
 }
 
 type ScanScope struct {
@@ -88,6 +158,7 @@ type Report struct {
 	TechnicalReview        *providers.TechnicalReviewResult    `json:"evidence_investigation,omitempty"`
 	ExecutionVerifications []verification.Report               `json:"execution_verification,omitempty"`
 	Frameworks             []FrameworkResult                   `json:"frameworks,omitempty"`
+	DeveloperActions       []DeveloperAction                   `json:"developer_actions"`
 }
 
 // FrameworkResult keeps each framework's applicability, technical evidence,
@@ -132,14 +203,16 @@ func NewWithMetadata(target string, tool Tool, scope ScanScope, createdAt time.T
 	created := createdAt.UTC().Format(time.RFC3339Nano)
 	identifier := sha256.Sum256([]byte(strings.Join([]string{target, tool.Version, tool.Commit, created}, "\x00")))
 	return Report{
-		SchemaVersion:         16,
+		SchemaVersion:         17,
 		RepositoryAnalysisRun: RepositoryAnalysisNotRequested,
 		Tool:                  tool,
 		Scan: ScanMetadata{
 			ID: "scan-" + fmt.Sprintf("%x", identifier[:12]), CreatedAt: created, Scope: scope,
+			FrameworkPacks: []FrameworkPackProvenance{},
 		},
 		Target:  target,
 		Summary: Summarize(findings), Findings: findings, Warnings: warnings, Suppressed: suppressed,
+		DeveloperActions: []DeveloperAction{},
 	}
 }
 
@@ -185,6 +258,7 @@ func WriteJSON(w io.Writer, report Report) error {
 	if report.SchemaVersion >= 7 && report.RepositoryAnalysisRun == "" {
 		report.RepositoryAnalysisRun = RepositoryAnalysisNotRequested
 	}
+	report = EnsureDeveloperActions(report)
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	encoder.SetEscapeHTML(false)
@@ -353,6 +427,7 @@ func WriteTerminalCompletion(w io.Writer, report Report) error {
 // WriteTerminalConciseCompletion closes a streaming scan without repeating the
 // detailed evidence already saved in the Markdown and JSON artifacts.
 func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
+	value = EnsureDeveloperActions(value)
 	if _, err := fmt.Fprintf(w, "Scan complete: %d potential %s\n", value.Summary.Total, issueWord(value.Summary.Total)); err != nil {
 		return err
 	}
@@ -449,6 +524,24 @@ func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
 					return err
 				}
 			}
+		}
+	}
+	activeActions, newActions, reopenedActions := 0, 0, 0
+	for _, action := range value.DeveloperActions {
+		switch action.Status {
+		case DeveloperActionNew:
+			activeActions++
+			newActions++
+		case DeveloperActionOpen:
+			activeActions++
+		case DeveloperActionReopened:
+			activeActions++
+			reopenedActions++
+		}
+	}
+	if activeActions > 0 {
+		if _, err := fmt.Fprintf(w, "Developer actions: %d active (%d new, %d reopened); run `complyscan actions list`\n", activeActions, newActions, reopenedActions); err != nil {
+			return err
 		}
 	}
 	_, err := fmt.Fprintln(w, "Use --verbose for full terminal evidence.")

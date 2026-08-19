@@ -405,8 +405,8 @@ func loadAIUseReport(path string) (reportpkg.Report, error) {
 		}
 		return reportpkg.Report{}, fmt.Errorf("parse ComplyScan report %q: %w", path, err)
 	}
-	if value.SchemaVersion != 6 && value.SchemaVersion != 7 && value.SchemaVersion != 8 && value.SchemaVersion != 9 && value.SchemaVersion != 10 && value.SchemaVersion != 11 && value.SchemaVersion != 12 && value.SchemaVersion != 13 && value.SchemaVersion != 14 && value.SchemaVersion != 15 && value.SchemaVersion != 16 {
-		return reportpkg.Report{}, fmt.Errorf("ComplyScan report %q uses unsupported schema version %d (want 6 through 16)", path, value.SchemaVersion)
+	if value.SchemaVersion != 6 && value.SchemaVersion != 7 && value.SchemaVersion != 8 && value.SchemaVersion != 9 && value.SchemaVersion != 10 && value.SchemaVersion != 11 && value.SchemaVersion != 12 && value.SchemaVersion != 13 && value.SchemaVersion != 14 && value.SchemaVersion != 15 && value.SchemaVersion != 16 && value.SchemaVersion != 17 {
+		return reportpkg.Report{}, fmt.Errorf("ComplyScan report %q uses unsupported schema version %d (want 6 through 17)", path, value.SchemaVersion)
 	}
 	// Schema versions before 7 did not serialize the repository-analysis
 	// lifecycle. A present validated result was necessarily a completed pass,

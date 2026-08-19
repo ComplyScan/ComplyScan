@@ -77,11 +77,15 @@ type sarifRegion struct {
 }
 
 type sarifProperties struct {
-	Category    string       `json:"category,omitempty"`
-	Confidence  string       `json:"confidence,omitempty"`
-	Remediation string       `json:"remediation,omitempty"`
-	Occurrences int          `json:"occurrences,omitempty"`
-	Review      *sarifReview `json:"ollamaReview,omitempty"`
+	Category           string       `json:"category,omitempty"`
+	Confidence         string       `json:"confidence,omitempty"`
+	Remediation        string       `json:"remediation,omitempty"`
+	Occurrences        int          `json:"occurrences,omitempty"`
+	Review             *sarifReview `json:"ollamaReview,omitempty"`
+	ActionID           string       `json:"actionId,omitempty"`
+	ActionStatus       string       `json:"actionStatus,omitempty"`
+	Frameworks         []string     `json:"frameworks,omitempty"`
+	AcceptanceCriteria []string     `json:"acceptanceCriteria,omitempty"`
 }
 
 type sarifReview struct {
@@ -95,9 +99,20 @@ type sarifReview struct {
 
 // WriteSARIF writes a SARIF 2.1.0 log suitable for GitHub code scanning.
 func WriteSARIF(writer io.Writer, report Report) error {
+	report = EnsureDeveloperActions(report)
 	results, err := sarifResults(report.Findings, report.Review)
 	if err != nil {
 		return err
+	}
+	actionResults := sarifActionResults(report.DeveloperActions)
+	results = append(results, actionResults...)
+	rules := sarifRules(report.Findings)
+	if len(actionResults) > 0 {
+		rules = append(rules, sarifRule{
+			ID: "COMPLYSCAN-ACTION", ShortDescription: sarifMessage{Text: "Evidence-backed developer compliance action"},
+			Help:                 sarifMessage{Text: "Inspect the stable action ID in the ComplyScan evidence bundle, implement the recommended change, and verify its acceptance criteria."},
+			DefaultConfiguration: sarifDefaultConfiguration{Level: "warning"},
+		})
 	}
 	log := sarifLog{
 		Schema:  sarifSchema,
@@ -107,7 +122,7 @@ func WriteSARIF(writer io.Writer, report Report) error {
 				Name:           report.Tool.Name,
 				Version:        report.Tool.Version,
 				InformationURI: "https://github.com/ComplyScan/ComplyScan",
-				Rules:          sarifRules(report.Findings),
+				Rules:          rules,
 			}},
 			Results: results,
 		}},
@@ -119,6 +134,58 @@ func WriteSARIF(writer io.Writer, report Report) error {
 		return fmt.Errorf("encode SARIF report: %w", err)
 	}
 	return nil
+}
+
+func sarifActionResults(actions []DeveloperAction) []sarifResult {
+	values := make([]sarifResult, 0, len(actions))
+	for _, action := range actions {
+		if action.Status != DeveloperActionNew && action.Status != DeveloperActionReopened {
+			continue
+		}
+		if action.Category == "deterministic-finding" || action.HumanOnly {
+			continue
+		}
+		locations := make([]sarifLocation, 0, len(action.Evidence))
+		for _, evidence := range action.Evidence {
+			if evidence.Path == "" {
+				continue
+			}
+			locations = append(locations, newSARIFLocation(evidence.Path, evidence.StartLine, evidence.EndLine))
+		}
+		if len(locations) == 0 {
+			continue
+		}
+		frameworks := make([]string, 0, len(action.Frameworks))
+		for _, framework := range action.Frameworks {
+			label := framework.Name
+			if framework.SourceReference != "" {
+				label += " — " + framework.SourceReference
+			}
+			frameworks = append(frameworks, label)
+		}
+		values = append(values, sarifResult{
+			RuleID: "COMPLYSCAN-ACTION", Level: sarifActionLevel(action.Priority),
+			Message: sarifMessage{Text: action.Title + ": " + action.RecommendedChange}, Locations: locations,
+			PartialFingerprints: map[string]string{"complyscanActionId/v1": action.ID},
+			Properties: sarifProperties{
+				Category: action.Category, Remediation: action.RecommendedChange, ActionID: action.ID,
+				ActionStatus: string(action.Status), Frameworks: frameworks,
+				AcceptanceCriteria: append([]string(nil), action.AcceptanceCriteria...),
+			},
+		})
+	}
+	return values
+}
+
+func sarifActionLevel(priority string) string {
+	switch priority {
+	case "Critical", "High":
+		return "error"
+	case "Medium", "Review":
+		return "warning"
+	default:
+		return "note"
+	}
 }
 
 func sarifRules(findings []rules.Finding) []sarifRule {
