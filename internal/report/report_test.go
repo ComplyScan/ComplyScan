@@ -197,6 +197,29 @@ func TestDeveloperObjectiveNextStepUsesDeveloperActionsInsteadOfBatchJargon(t *t
 	if got, want := developerObjectiveNextStep(retryObservation, "latest.json"), "Add a test that verifies retry outcomes. Then rerun the scan"; got != want {
 		t.Fatalf("retry action = %q, want %q", got, want)
 	}
+	retryCompletion := providers.RepositoryObjectiveObservation{
+		Strength: providers.StrengthPartial, Confidence: "medium",
+		MissingEvidence: []string{
+			"Verification of retry exhaustion and final fallback outcome.",
+			"Tests demonstrating retry bounds and terminal failure behavior.",
+		},
+	}
+	if got, want := developerObjectiveNextStep(retryCompletion, "latest.json"), "Add tests proving the retry limit, behavior after retries are exhausted, and the final fallback result. Then rerun the scan"; got != want {
+		t.Fatalf("complete retry action = %q, want %q", got, want)
+	}
+	if got := developerObservationFollowUp(retryCompletion); got != "Add tests proving the retry limit, behavior after retries are exhausted, and the final fallback result" {
+		t.Fatalf("retry evidence follow-up = %q", got)
+	}
+	conflicting := providers.RepositoryObjectiveObservation{
+		Strength: providers.StrengthUncertain, Confidence: "low",
+		Rationale: "Validated source batches returned differing code-level assessments; the combined result remains uncertain.",
+	}
+	if got, want := developerObjectiveNextStep(conflicting, "latest.json"), "Review the cited paths and identify the end-to-end test or enforcement path that establishes the expected behavior, then rerun the scan"; got != want {
+		t.Fatalf("conflicting-evidence action = %q, want %q", got, want)
+	}
+	if got := developerPlainLanguage(conflicting.Rationale); strings.Contains(got, "source batches") || !strings.Contains(got, "cited code supports conflicting conclusions") {
+		t.Fatalf("conflicting-evidence rationale was not developer-facing: %q", got)
+	}
 }
 
 func TestWriteJSONDefaultsSchemaSevenRepositoryAnalysisLifecycle(t *testing.T) {
@@ -489,7 +512,7 @@ func TestDeveloperReportSeparatesTechnicalFollowUpFromLegalApplicability(t *test
 		"Developer actions: **4**",
 		"What code cannot determine",
 		"Missing: Adversarial-input tests",
-		"Missing: Retry-exhaustion test",
+		"Add tests proving the retry limit, behavior after retries are exhausted, and the final fallback result",
 		"| safe-stop | Could not determine from the reviewed code",
 		"| Inferred from code — AI workflow | Repository technical review |",
 		"| Inferred from code — Supporting infrastructure | Remote model inference adapters |",

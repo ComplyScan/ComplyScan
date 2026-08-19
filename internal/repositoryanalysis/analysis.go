@@ -2273,7 +2273,7 @@ func mergeRepositoryObjectiveObservations(left, right providers.RepositoryObject
 	if left.Strength != right.Strength {
 		left.Strength = providers.StrengthUncertain
 		left.Confidence = "low"
-		left.Rationale = "Validated source batches returned differing code-level assessments; the combined result remains uncertain."
+		left.Rationale = "The cited code supports conflicting conclusions, so ComplyScan could not confirm whether this safeguard is implemented."
 	} else {
 		left.Confidence = lowerRepositoryConfidence(left.Confidence, right.Confidence)
 	}

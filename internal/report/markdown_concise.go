@@ -1701,7 +1701,7 @@ func developerVerdictAssessment(observation providers.RepositoryObjectiveObserva
 func developerObjectiveNextStep(observation providers.RepositoryObjectiveObservation, evidenceBundle string) string {
 	followUp := ""
 	if len(observation.MissingEvidence) > 0 {
-		followUp = developerListPreview(observation.MissingEvidence, 1)
+		followUp = developerMissingEvidenceSummary(observation.MissingEvidence)
 	} else if len(observation.UnresolvedQuestions) > 0 {
 		followUp = developerListPreview(observation.UnresolvedQuestions, 1)
 	}
@@ -1716,6 +1716,9 @@ func developerObjectiveNextStep(observation providers.RepositoryObjectiveObserva
 		}
 		return "Confirm that this safeguard applies. If it does, implement it or point ComplyScan to the existing code, then rerun the scan. Missing evidence: " + followUp
 	case providers.RepositoryVerdictCannotDetermine:
+		if developerObservationHasConflictingEvidence(observation) {
+			return "Review the cited paths and identify the end-to-end test or enforcement path that establishes the expected behavior, then rerun the scan"
+		}
 		if followUp == "" {
 			return "Add or point ComplyScan to a test that proves the behavior in the cited code path, then rerun the scan"
 		}
@@ -1730,6 +1733,22 @@ func developerObjectiveNextStep(observation providers.RepositoryObjectiveObserva
 	}
 }
 
+func developerMissingEvidenceSummary(values []string) string {
+	joined := strings.ToLower(strings.Join(values, " "))
+	if len(values) > 1 && strings.Contains(joined, "retry") &&
+		(strings.Contains(joined, "exhaust") || strings.Contains(joined, "terminal")) &&
+		(strings.Contains(joined, "fallback") || strings.Contains(joined, "failure")) {
+		return "Add tests proving the retry limit, behavior after retries are exhausted, and the final fallback result"
+	}
+	return developerListPreview(values, 2)
+}
+
+func developerObservationHasConflictingEvidence(observation providers.RepositoryObjectiveObservation) bool {
+	rationale := strings.ToLower(observation.Rationale)
+	return strings.Contains(rationale, "differing code-level assessments") ||
+		strings.Contains(rationale, "conflicting conclusions")
+}
+
 func developerInstructionLike(value string) bool {
 	for _, prefix := range []string{"Add ", "Run ", "Implement ", "Verify ", "Exercise ", "Cover ", "Enforce "} {
 		if strings.HasPrefix(value, prefix) {
@@ -1741,7 +1760,11 @@ func developerInstructionLike(value string) bool {
 
 func developerObservationFollowUp(observation providers.RepositoryObjectiveObservation) string {
 	if len(observation.MissingEvidence) > 0 {
-		return "Missing evidence: " + developerListPreview(observation.MissingEvidence, 2)
+		missing := developerMissingEvidenceSummary(observation.MissingEvidence)
+		if developerInstructionLike(missing) {
+			return missing
+		}
+		return "Missing evidence: " + missing
 	}
 	if len(observation.UnresolvedQuestions) > 0 {
 		return "Resolve: " + developerListPreview(observation.UnresolvedQuestions, 1)
@@ -1977,6 +2000,8 @@ func developerPlainQuestion(question string) string {
 
 func developerPlainLanguage(value string) string {
 	replacer := strings.NewReplacer(
+		"Validated source batches returned differing code-level assessments; the combined result remains uncertain", "The cited code supports conflicting conclusions, so ComplyScan could not confirm whether this safeguard is implemented",
+		"validated source batches returned differing code-level assessments; the combined result remains uncertain", "the cited code supports conflicting conclusions, so ComplyScan could not confirm whether this safeguard is implemented",
 		"Verification of retry exhaustion and terminal fallback behavior", "Add a test showing what happens after all retries fail",
 		"verification of retry exhaustion and terminal fallback behavior", "add a test showing what happens after all retries fail",
 		"Verification that retry behavior is exercised in this flow", "Add a test that exercises the retry path",

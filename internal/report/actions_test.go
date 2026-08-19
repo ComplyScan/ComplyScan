@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ComplyScan/ComplyScan/internal/providers"
 	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
 
@@ -107,6 +108,37 @@ func TestWriteJSONAndMarkdownExposeDeveloperActionContract(t *testing.T) {
 		if !strings.Contains(markdown.String(), fragment) {
 			t.Fatalf("Markdown missing %q:\n%s", fragment, markdown.String())
 		}
+	}
+}
+
+func TestDeveloperActionContractRemovesPipelineJargonFromCachedObservations(t *testing.T) {
+	value := New(".", "test", nil, nil, 0)
+	value.RepositoryAnalysisRun = RepositoryAnalysisCompleted
+	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{
+		Coverage: providers.RepositoryCoverage{Mode: providers.RepositoryAnalysisTargeted},
+		Result: providers.RepositorySectionResult{
+			ObjectiveObservations: []providers.RepositoryObjectiveObservation{{
+				ObjectiveID: "eu-aia-15-performance-thresholds",
+				Strength:    providers.StrengthUncertain,
+				Confidence:  "low",
+				Rationale:   "Validated source batches returned differing code-level assessments; the combined result remains uncertain.",
+				SupportingEvidence: []providers.RepositoryCitation{{
+					Path: "benchmark.go", Line: 147,
+				}},
+			}},
+		},
+	}
+
+	actions := CurrentDeveloperActions(value)
+	if len(actions) != 1 {
+		t.Fatalf("actions = %#v", actions)
+	}
+	action := actions[0]
+	if strings.Contains(strings.ToLower(action.Why), "source batch") || !strings.Contains(action.Why, "cited code supports conflicting conclusions") {
+		t.Fatalf("action why is not developer-facing: %q", action.Why)
+	}
+	if !strings.Contains(action.RecommendedChange, "end-to-end test or enforcement path") {
+		t.Fatalf("action change is not concrete: %q", action.RecommendedChange)
 	}
 }
 

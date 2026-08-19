@@ -692,3 +692,31 @@ func TestCitedFileIndexDeduplicatesSegmentedSourcePaths(t *testing.T) {
 		t.Fatalf("deduplicated file-reference paths = %#v", paths)
 	}
 }
+
+func TestMergeRepositoryObjectiveObservationsUsesDeveloperFacingUncertainty(t *testing.T) {
+	left := providers.RepositoryObjectiveObservation{
+		ObjectiveID: "eu-aia-15-performance-thresholds",
+		Strength:    providers.StrengthStrong,
+		Confidence:  "high",
+		SupportingEvidence: []providers.RepositoryCitation{{
+			Path: "benchmark.go", Line: 147,
+		}},
+	}
+	right := providers.RepositoryObjectiveObservation{
+		ObjectiveID: "eu-aia-15-performance-thresholds",
+		Strength:    providers.StrengthWeak,
+		Confidence:  "medium",
+		SupportingEvidence: []providers.RepositoryCitation{{
+			Path: "benchmark_test.go", Line: 99,
+		}},
+	}
+
+	merged := mergeRepositoryObjectiveObservations(left, right)
+	if merged.Strength != providers.StrengthUncertain || merged.Confidence != "low" {
+		t.Fatalf("merged assessment = %#v", merged)
+	}
+	if strings.Contains(strings.ToLower(merged.Rationale), "source batch") ||
+		merged.Rationale != "The cited code supports conflicting conclusions, so ComplyScan could not confirm whether this safeguard is implemented." {
+		t.Fatalf("merged rationale is not developer-facing: %q", merged.Rationale)
+	}
+}

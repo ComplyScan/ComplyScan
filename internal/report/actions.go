@@ -209,7 +209,7 @@ func CurrentDeveloperActions(value Report) []DeveloperAction {
 		status := DeveloperActionNew
 		result = append(result, DeveloperAction{
 			ID: action.id, Status: status, Priority: action.priority, Category: action.category,
-			Title: action.issue, Why: action.why, RecommendedChange: action.next,
+			Title: developerPlainLanguage(action.issue), Why: developerPlainLanguage(action.why), RecommendedChange: developerPlainLanguage(action.next),
 			AcceptanceCriteria: developerActionAcceptanceCriteria(action), Evidence: evidence,
 			Frameworks:   append([]DeveloperActionFramework(nil), action.frameworks...),
 			Verification: verification,
