@@ -772,7 +772,7 @@ func TestRepositoryAnalysisIsRenderedAsAdvisoryEvidence(t *testing.T) {
 	}
 }
 
-func TestCurrentRunCompatibilityAccountingIsRenderedForFreshRepositoryAnalysis(t *testing.T) {
+func TestCurrentRunCompatibilityAccountingStaysOutOfConciseReport(t *testing.T) {
 	value := New(".", "dev", nil, nil, 0)
 	value.RepositoryAnalysis = &providers.RepositoryAnalysisResult{
 		Provider: providers.OpenAI, Model: "test-model",
@@ -785,12 +785,15 @@ func TestCurrentRunCompatibilityAccountingIsRenderedForFreshRepositoryAnalysis(t
 	if err := WriteMarkdown(&concise, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(concise.String(), "Current-run compatibility accounting") || !strings.Contains(concise.String(), "source-free model compatibility request") {
-		t.Fatalf("concise report omitted fresh compatibility accounting:\n%s", concise.String())
+	if strings.Contains(concise.String(), "Current-run compatibility accounting") || strings.Contains(concise.String(), "source-free model compatibility request") {
+		t.Fatalf("concise report exposed provider accounting that belongs in JSON/dashboard data:\n%s", concise.String())
+	}
+	if !strings.Contains(concise.String(), "Full evidence and dashboard data: `latest.json`") {
+		t.Fatalf("concise report did not point to the complete accounting data:\n%s", concise.String())
 	}
 }
 
-func TestConciseRepositoryAccountingDistinguishesFreshAndCachedRuns(t *testing.T) {
+func TestConciseRepositoryCoverageStaysDecisionFocused(t *testing.T) {
 	newReport := func() Report {
 		value := New(".", "dev", nil, nil, 0)
 		value.RepositoryAnalysisRun = RepositoryAnalysisCompleted
@@ -814,12 +817,12 @@ func TestConciseRepositoryAccountingDistinguishesFreshAndCachedRuns(t *testing.T
 		if err := WriteMarkdown(&output, value); err != nil {
 			t.Fatal(err)
 		}
-		for _, expected := range []string{
-			"AI review provider and model: **Google Gemini / `gemini-test`**",
-			"AI review activity: **17 model call(s) in this run; 13 code batch(es) started, 13 of 13 reviewed successfully**",
-		} {
-			if !strings.Contains(output.String(), expected) {
-				t.Errorf("fresh concise report missing %q:\n%s", expected, output.String())
+		if !strings.Contains(output.String(), "**Assessment coverage:** 20 files evaluated; AI code review completed") {
+			t.Fatalf("fresh concise report omitted the assessment boundary:\n%s", output.String())
+		}
+		for _, internalDetail := range []string{"AI review provider and model", "AI review activity", "17 model call", "13 code batch"} {
+			if strings.Contains(output.String(), internalDetail) {
+				t.Errorf("fresh concise report exposed internal coverage detail %q:\n%s", internalDetail, output.String())
 			}
 		}
 	})
@@ -834,16 +837,13 @@ func TestConciseRepositoryAccountingDistinguishesFreshAndCachedRuns(t *testing.T
 		if err := WriteMarkdown(&output, value); err != nil {
 			t.Fatal(err)
 		}
-		for _, expected := range []string{
-			"AI review activity: **cached result originally used 17 model call(s); 13 code batch(es) started, 13 of 13 reviewed successfully; current run sent no repository code**",
-			"Current-run compatibility accounting (source-free): **This scan made 2 live source-free model compatibility request(s)",
-		} {
-			if !strings.Contains(output.String(), expected) {
-				t.Errorf("cached concise report missing %q:\n%s", expected, output.String())
-			}
+		if !strings.Contains(output.String(), "AI code review completed using relevant code selected by ComplyScan (reused private cache)") {
+			t.Fatalf("cached concise report omitted the result source boundary:\n%s", output.String())
 		}
-		if strings.Contains(output.String(), "17 provider request(s) in this run") {
-			t.Fatalf("cached historical requests were presented as current-run requests:\n%s", output.String())
+		for _, internalDetail := range []string{"AI review activity", "Current-run compatibility accounting", "17 model call", "13 code batch", "100 input"} {
+			if strings.Contains(output.String(), internalDetail) {
+				t.Errorf("cached concise report exposed internal coverage detail %q:\n%s", internalDetail, output.String())
+			}
 		}
 	})
 }
@@ -886,8 +886,11 @@ func TestChangedReviewCoverageExplainsModelBoundary(t *testing.T) {
 	if err := WriteMarkdown(&concise, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(concise.String(), "reused private cache") || !strings.Contains(concise.String(), "Current-run compatibility accounting") || !strings.Contains(concise.String(), "100 input, 20 output, 3 reasoning") {
-		t.Fatalf("concise report omitted repository cache reuse:\n%s", concise.String())
+	if !strings.Contains(concise.String(), "completed for 1 changed and 2 connected code file(s) (reused private cache)") {
+		t.Fatalf("concise report omitted the changed-code review boundary:\n%s", concise.String())
+	}
+	if strings.Contains(concise.String(), "Current-run compatibility accounting") || strings.Contains(concise.String(), "100 input, 20 output, 3 reasoning") {
+		t.Fatalf("concise report exposed detailed provider accounting:\n%s", concise.String())
 	}
 }
 
@@ -955,7 +958,7 @@ func TestExecutionVerificationIsRenderedWithoutComplianceClaim(t *testing.T) {
 	if err := WriteMarkdown(&markdown, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(markdown.String(), "Execution check: go-tests") || !strings.Contains(markdown.String(), "Passing does not establish compliance") || !strings.Contains(markdown.String(), "Isolated execution checks: **1 passed, 0 failed**") {
+	if !strings.Contains(markdown.String(), "Execution check: go-tests") || !strings.Contains(markdown.String(), "Passing does not establish compliance") || !strings.Contains(markdown.String(), "**Runtime verification:** 1 passed, 0 failed.") {
 		t.Fatalf("verification missing from Markdown:\n%s", markdown.String())
 	}
 	var jsonOutput bytes.Buffer

@@ -117,84 +117,74 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report, evidenceBundle
 	if err := writeDeveloperQuestionsMarkdown(writer, view); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(writer, "\n## Scan coverage\n\n- Files checked by the local scanner: **%d of %d**\n", view.filesIndexed, view.sourceFilesSeen); err != nil {
-		return err
-	}
-	if view.unsupportedFiles > 0 {
-		if _, err := fmt.Fprintf(writer, "- Potentially relevant files that could not be analyzed: **%d**\n", view.unsupportedFiles); err != nil {
-			return err
-		}
-	}
-	attentionParts := len(value.Warnings)
-	if developerRepositoryAnalysisIncomplete(value) && attentionParts == 0 {
-		attentionParts = 1
-	}
-	if _, err := fmt.Fprintf(writer, "- AI code review coverage: **%s**\n", markdownText(view.repositoryAnalysis)); err != nil {
-		return err
-	}
-	if attentionParts > 0 {
-		if _, err := fmt.Fprintf(writer, "- Scan warnings requiring attention: **%d**\n", attentionParts); err != nil {
-			return err
-		}
-	}
-	if value.RepositoryAnalysis != nil {
-		analysis := value.RepositoryAnalysis
-		providerSet := analysis.Provider != "" && analysis.Provider != providers.None
-		modelSet := strings.TrimSpace(analysis.Model) != ""
-		if providerSet && modelSet {
-			if _, err := fmt.Fprintf(writer, "- AI review provider and model: **%s / %s**\n",
-				markdownText(providerDisplayName(analysis.Provider)), inlineCode(analysis.Model)); err != nil {
-				return err
-			}
-		} else if providerSet {
-			if _, err := fmt.Fprintf(writer, "- AI review provider: **%s**\n", markdownText(providerDisplayName(analysis.Provider))); err != nil {
-				return err
-			}
-		} else if modelSet {
-			if _, err := fmt.Fprintf(writer, "- AI review model: **%s**\n", inlineCode(analysis.Model)); err != nil {
-				return err
-			}
-		}
-		accounting := fmt.Sprintf("%d model call(s) in this run", analysis.Coverage.ProviderRequests)
-		if analysis.CacheHit {
-			accounting = fmt.Sprintf("cached result originally used %d model call(s); current run sent no repository code", analysis.Coverage.ProviderRequests)
-		}
-		if analysis.Coverage.SourceBatchesTotal > 0 {
-			batchCoverage := fmt.Sprintf("%d code batch(es) started, %d of %d reviewed successfully",
-				analysis.Coverage.SourceBatchesStarted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal)
-			if analysis.CacheHit {
-				accounting = fmt.Sprintf("cached result originally used %d model call(s); %s; current run sent no repository code",
-					analysis.Coverage.ProviderRequests, batchCoverage)
-			} else {
-				accounting += "; " + batchCoverage
-			}
-		}
-		if analysis.Coverage.ProviderRequests > 0 || analysis.Coverage.SourceBatchesTotal > 0 || analysis.CacheHit {
-			if _, err := fmt.Fprintf(writer, "- AI review activity: **%s**\n", markdownText(accounting)); err != nil {
-				return err
-			}
-		}
-		if analysis.Coverage.GroupingStatus == providers.RepositoryGroupingIncomplete {
-			if _, err := fmt.Fprintln(writer, "- AI function grouping: **incomplete; every reviewed observation remains available separately**"); err != nil {
-				return err
-			}
-		}
-		if note := repositoryCurrentRunCompatibilityNote(*analysis); note != "" {
-			if _, err := fmt.Fprintf(writer, "- Current-run compatibility accounting (source-free): **%s**\n", markdownText(note)); err != nil {
-				return err
-			}
-		}
-	}
-	if view.verificationPassed+view.verificationFailed > 0 {
-		if _, err := fmt.Fprintf(writer, "- Isolated execution checks: **%d passed, %d failed**\n", view.verificationPassed, view.verificationFailed); err != nil {
-			return err
-		}
-	}
-	if _, err := fmt.Fprintf(writer, "- Full evidence and dashboard data: %s\n- Scan ID: %s\n", inlineCode(view.evidenceBundle), inlineCode(value.Scan.ID)); err != nil {
+	if err := writeDeveloperAssessmentScopeMarkdown(writer, value, view); err != nil {
 		return err
 	}
 	_, err = fmt.Fprintln(writer, "\n---\n\nCode findings describe only the reviewed repository evidence. Deployment, organisational practice, and legal applicability require information outside the codebase.")
 	return err
+}
+
+func writeDeveloperAssessmentScopeMarkdown(writer io.Writer, value Report, view developerReportView) error {
+	totalChecks := 0
+	for _, coverage := range view.frameworkCoverage {
+		totalChecks += coverage.total
+	}
+
+	scope := make([]string, 0, 2)
+	if view.sourceFilesSeen > 0 {
+		if view.filesIndexed == view.sourceFilesSeen {
+			scope = append(scope, fmt.Sprintf("%d %s", view.filesIndexed, developerCountNoun(view.filesIndexed, "file", "files")))
+		} else {
+			scope = append(scope, fmt.Sprintf("%d of %d files", view.filesIndexed, view.sourceFilesSeen))
+		}
+	}
+	if totalChecks > 0 {
+		scope = append(scope, fmt.Sprintf("%d technical %s", totalChecks, developerCountNoun(totalChecks, "check", "checks")))
+	}
+	if len(scope) == 0 {
+		scope = append(scope, "local code checks")
+	}
+
+	if _, err := fmt.Fprintf(writer, "\n## Assessment scope\n\n**Assessment coverage:** %s evaluated; AI code review %s.\n",
+		strings.Join(scope, " and "), markdownText(view.repositoryAnalysis)); err != nil {
+		return err
+	}
+	if view.unsupportedFiles > 0 || (view.sourceFilesSeen > 0 && view.filesIndexed < view.sourceFilesSeen) {
+		missingFiles := view.unsupportedFiles
+		if difference := view.sourceFilesSeen - view.filesIndexed; difference > missingFiles {
+			missingFiles = difference
+		}
+		if _, err := fmt.Fprintf(writer, "\n> **Incomplete code coverage:** %d potentially relevant %s could not be analyzed. Results may miss issues in those files.\n",
+			missingFiles, developerCountNoun(missingFiles, "file", "files")); err != nil {
+			return err
+		}
+	}
+	if developerRepositoryAnalysisIncomplete(value) {
+		if _, err := fmt.Fprintln(writer, "\n> **Incomplete AI review:** The model review did not finish. Missing AI conclusions must not be treated as a clean result."); err != nil {
+			return err
+		}
+	}
+	if value.RepositoryAnalysis != nil && value.RepositoryAnalysis.Coverage.GroupingStatus == providers.RepositoryGroupingIncomplete {
+		if _, err := fmt.Fprintln(writer, "\n> **AI function grouping incomplete:** Reviewed observations remain available separately, but they were not fully consolidated into AI functions."); err != nil {
+			return err
+		}
+	}
+	if view.verificationPassed+view.verificationFailed > 0 {
+		if _, err := fmt.Fprintf(writer, "\n**Runtime verification:** %d passed, %d failed.\n", view.verificationPassed, view.verificationFailed); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(writer, "\nFull evidence and dashboard data: %s · Scan ID: %s\n", inlineCode(view.evidenceBundle), inlineCode(value.Scan.ID)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func developerCountNoun(count int, singular, plural string) string {
+	if count == 1 {
+		return singular
+	}
+	return plural
 }
 
 func applyDeveloperActionLifecycle(view developerReportView, actions []DeveloperAction) developerReportView {
@@ -486,22 +476,17 @@ func writeDeveloperFrameworkAssessmentMarkdown(writer io.Writer, view developerR
 	if _, err := fmt.Fprintln(writer, "\n## Framework technical assessment"); err != nil {
 		return false, err
 	}
-	if _, err := fmt.Fprintln(writer, "\nThis shows where the repository contains code evidence relevant to the selected frameworks. It does not decide whether a framework applies or whether the product complies. ‘No code evidence found’ means only that ComplyScan did not locate it in the reviewed repository."); err != nil {
+	if _, err := fmt.Fprintln(writer, "\nThis section connects the most important code results to the selected frameworks. It does not decide whether a framework applies or whether the product complies."); err != nil {
 		return false, err
 	}
 	if len(view.frameworkCoverage) > 0 {
-		if _, err := fmt.Fprintln(writer, "\n| Selected framework | Areas checked | Checks with code evidence | Checks without code evidence | Could not check |\n|---|---|---:|---:|---:|"); err != nil {
-			return false, err
-		}
+		names := make([]string, 0, len(view.frameworkCoverage))
 		for _, coverage := range view.frameworkCoverage {
-			areas := coverage.areas
-			if areas == "" {
-				areas = fmt.Sprintf("%d technical code check(s)", coverage.total)
-			}
-			if _, err := fmt.Fprintf(writer, "| %s | %s | %d | %d | %d |\n",
-				markdownTableText(coverage.name), markdownTableText(areas), coverage.evidence, coverage.notDetected, coverage.notEvaluated); err != nil {
-				return false, err
-			}
+			names = append(names, markdownText(coverage.name))
+		}
+		if _, err := fmt.Fprintf(writer, "\n**Selected frameworks:** %s. Detailed check-by-check coverage remains in %s for dashboard and audit use.\n",
+			strings.Join(names, "; "), inlineCode(view.evidenceBundle)); err != nil {
+			return false, err
 		}
 	}
 	if len(view.evidence) > 0 {

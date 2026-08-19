@@ -167,7 +167,7 @@ func TestWriteMarkdownExplainsTestOnlyComponentsAndQuickScan(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"Review performed: **local code checks only; no AI review**",
-		"AI code review coverage: **not run — local code checks only**",
+		"**Assessment coverage:** local code checks evaluated; AI code review not run — local code checks only.",
 		"This scan used local code checks only",
 		"Other AI provider or configuration references: **OpenAI**",
 		"These references alone do not show that a separate AI function is deployed",
@@ -192,15 +192,45 @@ func TestWriteMarkdownDistinguishesIncompleteRepositoryReview(t *testing.T) {
 	for _, expected := range []string{
 		"local code checks completed, but the AI code review did not finish",
 		"Review performed: **local code checks complete; AI code review incomplete**",
-		"AI code review coverage: **incomplete; local scan results remain available**",
+		"**Incomplete AI review:** The model review did not finish",
 		"Scan incomplete or uncertain",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
 		}
 	}
-	if strings.Contains(output.String(), "AI code review coverage: **not run") {
+	if strings.Contains(output.String(), "AI code review not run") {
 		t.Fatalf("incomplete review was presented as deterministic-only:\n%s", output.String())
+	}
+}
+
+func TestWriteMarkdownShowsCoverageWarningOnlyForUnsupportedFiles(t *testing.T) {
+	value := New(".", "dev", nil, nil, 0)
+	value.TechnicalEvidence = &framework.TechnicalEvidenceReport{
+		Analysis: framework.RepositoryAnalysis{
+			SourceFilesSeen: 3,
+			FilesIndexed:    2,
+			UnsupportedSourceFiles: []string{
+				"legacy.scala",
+			},
+		},
+	}
+
+	var output bytes.Buffer
+	if err := WriteMarkdown(&output, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"**Assessment coverage:** 2 of 3 files evaluated",
+		"**Incomplete code coverage:** 1 potentially relevant file could not be analyzed",
+		"Results may miss issues in those files",
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "Checks with code evidence") || strings.Contains(output.String(), "Checks without code evidence") {
+		t.Fatalf("concise Markdown still contains detailed coverage columns:\n%s", output.String())
 	}
 }
 
@@ -264,7 +294,7 @@ func TestWriteMarkdownPrioritizesDeveloperDecisions(t *testing.T) {
 		"## Framework technical assessment", "### Most important safeguard results", "Implementation demonstrated in the reviewed code", "audit.go:11", "Developer next step",
 		"## AI functionality found", "Answer generation",
 		"## What code cannot determine", "Where will this AI feature be offered or used?",
-		"## Scan coverage", "Full evidence and dashboard data: `latest.json`",
+		"## Assessment scope", "Full evidence and dashboard data: `latest.json`",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
@@ -321,13 +351,12 @@ func TestWriteMarkdownMapsSelectedFrameworksToTechnicalEvidenceWithoutCompliance
 	markdown := output.String()
 	for _, expected := range []string{
 		"## Framework technical assessment",
-		"| EU AI Act technical code evidence | Article 12: code evidence for 1 of 1 checks; Article 14: code evidence for 0 of 1 checks | 1 | 1 | 0 |",
-		"| NIST AI RMF technical code evidence (voluntary) | MEASURE 2.6: code evidence for 1 of 1 checks; MANAGE 4.1: code evidence for 0 of 1 checks, 1 could not be checked | 1 | 0 | 1 |",
+		"**Selected frameworks:** EU AI Act technical code evidence; NIST AI RMF technical code evidence (voluntary)",
+		"**Assessment coverage:** 4 technical checks evaluated",
 		"Human oversight (EU AI Act technical code evidence — Article 14)",
 		"| EU AI Act technical code evidence — Article 12 — Automatic AI event logging |",
 		"| NIST AI RMF technical code evidence — MEASURE 2.6 — Robustness and safe failure |",
 		"Possible matching code found; AI review not run",
-		"‘No code evidence found’ means only that ComplyScan did not locate it in the reviewed repository",
 		"Full evidence and dashboard data: `latest.json`",
 	} {
 		if !strings.Contains(markdown, expected) {
@@ -346,6 +375,11 @@ func TestWriteMarkdownMapsSelectedFrameworksToTechnicalEvidenceWithoutCompliance
 	for _, unsafe := range []string{"Compliant", "Non-compliant", "Pass", "Fail", "%"} {
 		if strings.Contains(frameworkSection, unsafe) {
 			t.Errorf("framework section contains legal score language %q:\n%s", unsafe, frameworkSection)
+		}
+	}
+	for _, removedCoverageDetail := range []string{"Checks with code evidence", "Checks without code evidence", "Could not check"} {
+		if strings.Contains(frameworkSection, removedCoverageDetail) {
+			t.Errorf("framework section still exposes detailed coverage column %q:\n%s", removedCoverageDetail, frameworkSection)
 		}
 	}
 }
