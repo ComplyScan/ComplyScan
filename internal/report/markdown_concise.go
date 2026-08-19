@@ -24,18 +24,19 @@ const (
 )
 
 type developerAction struct {
-	id         string
-	status     DeveloperActionStatus
-	priority   string
-	category   string
-	issue      string
-	why        string
-	next       string
-	evidence   string
-	locations  []DeveloperActionEvidence
-	frameworks []DeveloperActionFramework
-	humanOnly  bool
-	control    bool
+	id                 string
+	status             DeveloperActionStatus
+	priority           string
+	category           string
+	issue              string
+	why                string
+	next               string
+	evidence           string
+	acceptanceCriteria []string
+	locations          []DeveloperActionEvidence
+	frameworks         []DeveloperActionFramework
+	humanOnly          bool
+	control            bool
 }
 
 type developerEvidence struct {
@@ -69,6 +70,8 @@ type developerReportView struct {
 	actions            []developerAction
 	allActions         []developerAction
 	actionTotal        int
+	handoffActions     []developerAction
+	handoffTotal       int
 	evidence           []developerEvidence
 	evidenceTotal      int
 	frameworkCoverage  []developerFrameworkCoverage
@@ -104,11 +107,7 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report, evidenceBundle
 	if err := writeDeveloperActionsMarkdown(writer, view); err != nil {
 		return err
 	}
-	frameworkAssessmentStarted, err := writeDeveloperFrameworkAssessmentMarkdown(writer, view)
-	if err != nil {
-		return err
-	}
-	if err := writeDeveloperAIUseMappingsMarkdown(writer, value, view.evidenceBundle, frameworkAssessmentStarted); err != nil {
+	if err := writeDeveloperPositiveResultsMarkdown(writer, view); err != nil {
 		return err
 	}
 	if err := writeDeveloperAIUsesMarkdown(writer, value, view); err != nil {
@@ -120,7 +119,7 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report, evidenceBundle
 	if err := writeDeveloperAssessmentScopeMarkdown(writer, value, view); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(writer, "\n---\n\nCode findings describe only the reviewed repository evidence. Deployment, organisational practice, and legal applicability require information outside the codebase.")
+	_, err := fmt.Fprintln(writer, "\n---\n\nCode findings describe only the reviewed repository evidence. Deployment, organisational practice, and legal applicability require information outside the codebase.")
 	return err
 }
 
@@ -203,16 +202,26 @@ func applyDeveloperActionLifecycle(view developerReportView, actions []Developer
 		active = append(active, developerAction{
 			id: action.ID, status: action.Status, priority: action.Priority, category: action.Category,
 			issue: action.Title, why: action.Why, next: action.RecommendedChange, evidence: where,
-			locations:  append([]DeveloperActionEvidence(nil), action.Evidence...),
-			frameworks: append([]DeveloperActionFramework(nil), action.Frameworks...), humanOnly: action.HumanOnly,
+			acceptanceCriteria: append([]string(nil), action.AcceptanceCriteria...),
+			locations:          append([]DeveloperActionEvidence(nil), action.Evidence...),
+			frameworks:         append([]DeveloperActionFramework(nil), action.Frameworks...), humanOnly: action.HumanOnly,
 		})
 	}
 	sort.SliceStable(active, func(left, right int) bool {
 		return developerPriorityRank(active[left].priority) > developerPriorityRank(active[right].priority)
 	})
 	view.allActions = append([]developerAction(nil), active...)
-	view.actionTotal = len(active)
-	view.actions = active
+	view.actions = make([]developerAction, 0, len(active))
+	view.handoffActions = make([]developerAction, 0, len(active))
+	for _, action := range active {
+		if action.humanOnly {
+			view.handoffActions = append(view.handoffActions, action)
+			continue
+		}
+		view.actions = append(view.actions, action)
+	}
+	view.actionTotal = len(view.actions)
+	view.handoffTotal = len(view.handoffActions)
 	if len(view.actions) > maxDeveloperActions {
 		view.actions = view.actions[:maxDeveloperActions]
 	}
@@ -418,7 +427,19 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 		return developerPriorityRank(view.actions[left].priority) > developerPriorityRank(view.actions[right].priority)
 	})
 	view.allActions = append([]developerAction(nil), view.actions...)
-	view.actionTotal = len(view.actions)
+	developerActions := make([]developerAction, 0, len(view.actions))
+	handoffActions := make([]developerAction, 0, len(view.actions))
+	for _, action := range view.actions {
+		if action.humanOnly {
+			handoffActions = append(handoffActions, action)
+			continue
+		}
+		developerActions = append(developerActions, action)
+	}
+	view.actions = developerActions
+	view.handoffActions = handoffActions
+	view.actionTotal = len(developerActions)
+	view.handoffTotal = len(handoffActions)
 	if len(view.actions) > maxDeveloperActions {
 		view.actions = view.actions[:maxDeveloperActions]
 	}
@@ -441,8 +462,20 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 }
 
 func writeDeveloperOutcomeMarkdown(writer io.Writer, value Report, view developerReportView) error {
-	if _, err := fmt.Fprintf(writer, "\n## Result\n\n**%s**\n\n- Direct code problems found by automated rules: **%d**\n",
-		view.outcome, view.importantRisks); err != nil {
+	headline := fmt.Sprintf("%d developer %s. No direct code risks found.", view.actionTotal,
+		developerCountNoun(view.actionTotal, "action", "actions"))
+	if view.actionTotal == 0 {
+		headline = "No developer actions. No direct code risks found."
+	}
+	if view.importantRisks > 0 {
+		headline = fmt.Sprintf("%d developer %s. %d direct code %s found.", view.actionTotal,
+			developerCountNoun(view.actionTotal, "action", "actions"), view.importantRisks,
+			developerCountNoun(view.importantRisks, "risk", "risks"))
+	}
+	if developerRepositoryAnalysisIncomplete(value) {
+		headline = "Assessment incomplete — " + headline
+	}
+	if _, err := fmt.Fprintf(writer, "\n## Result\n\n**%s**\n\n", markdownText(headline)); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(writer, "- Review performed: **%s**\n", developerAnalysisSummaryLabel(value)); err != nil {
@@ -453,19 +486,64 @@ func writeDeveloperOutcomeMarkdown(writer io.Writer, value Report, view develope
 			return err
 		}
 	}
-	if value.RepositoryAnalysis != nil || view.implemented+view.partial+view.notImplemented+view.cannotDetermine > 0 {
-		if view.implemented+view.partial+view.notImplemented+view.cannotDetermine == 0 {
-			if _, err := fmt.Fprintln(writer, "- Safeguards assessed from code: **none**"); err != nil {
-				return err
-			}
-		} else {
-			if _, err := fmt.Fprintf(writer, "- Safeguards assessed from code: **%d demonstrated, %d incomplete, %d not demonstrated, %d unclear**\n",
-				view.implemented, view.partial, view.notImplemented, view.cannotDetermine); err != nil {
-				return err
-			}
+	frameworks := make([]string, 0, len(view.frameworkCoverage))
+	seenFrameworks := make(map[string]struct{})
+	for _, coverage := range view.frameworkCoverage {
+		name := strings.TrimSpace(coverage.name)
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		if _, exists := seenFrameworks[key]; exists {
+			continue
+		}
+		seenFrameworks[key] = struct{}{}
+		frameworks = append(frameworks, name)
+	}
+	if len(frameworks) > 0 {
+		if _, err := fmt.Fprintf(writer, "- Frameworks assessed: **%s**\n", markdownText(strings.Join(frameworks, "; "))); err != nil {
+			return err
 		}
 	}
-	_, err := fmt.Fprintf(writer, "- Developer actions: **%d**\n", view.actionTotal)
+	return nil
+}
+
+func writeDeveloperPositiveResultsMarkdown(writer io.Writer, view developerReportView) error {
+	positive := make([]developerEvidence, 0, len(view.evidence))
+	for _, evidence := range view.evidence {
+		if evidence.verdict == providers.RepositoryVerdictImplemented {
+			positive = append(positive, evidence)
+		}
+	}
+	if len(positive) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintln(writer, "\n## What already looks good"); err != nil {
+		return err
+	}
+	for index, evidence := range positive {
+		if index == 3 {
+			break
+		}
+		title := developerPlainLanguage(evidence.title)
+		if evidence.framework != "" {
+			title = evidence.framework + " — " + title
+		}
+		where := strings.TrimSpace(evidence.evidence)
+		if where == "" {
+			where = "reviewed repository evidence"
+		}
+		if _, err := fmt.Fprintf(writer, "\n- **%s** — demonstrated in the reviewed code. Evidence: %s.",
+			markdownText(title), markdownText(where)); err != nil {
+			return err
+		}
+	}
+	if len(positive) > 3 {
+		if _, err := fmt.Fprintf(writer, "\n- %d more demonstrated safeguard(s) are retained in %s.", len(positive)-3, inlineCode(view.evidenceBundle)); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(writer)
 	return err
 }
 
@@ -578,9 +656,6 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 			return err
 		}
 	}
-	if _, err := fmt.Fprintln(writer, "\n| Status/type | Function | What the code suggests | Where |\n|---|---|---|---|"); err != nil {
-		return err
-	}
 	rows := 0
 	total := 0
 	writeRow := func(status, name, description, evidence string) error {
@@ -589,9 +664,16 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 			return nil
 		}
 		rows++
-		_, err := fmt.Fprintf(writer, "| %s | %s | %s | %s |\n",
-			markdownTableText(status), markdownTableText(developerPlainLanguage(name)),
-			markdownTableText(developerPlainLanguage(compactMarkdownText(description, 140))), markdownTableText(evidence))
+		detail := developerPlainLanguage(compactMarkdownText(description, 140))
+		if detail == "" {
+			detail = "The reviewed code indicates this AI-related function."
+		}
+		where := strings.TrimSpace(evidence)
+		if where == "" {
+			where = "reviewed repository evidence"
+		}
+		_, err := fmt.Fprintf(writer, "\n- **%s** — %s. %s Evidence: %s.",
+			markdownText(developerPlainLanguage(name)), markdownText(status), markdownText(detail), markdownText(where))
 		return err
 	}
 	if value.AIUseInventory != nil {
@@ -621,7 +703,7 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 		}
 	}
 	if rows == 0 {
-		if _, err := fmt.Fprintln(writer, "| — | No AI workflow was identified from the reviewed evidence | — | — |"); err != nil {
+		if _, err := fmt.Fprintln(writer, "\nNo AI workflow was identified from the reviewed evidence."); err != nil {
 			return err
 		}
 	}
@@ -641,9 +723,10 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 	if len(integrationSignals) > 0 {
 		signalDetail := ""
 		if value.AIUseInventory != nil && len(value.AIUseInventory.UngroupedSignals) > 0 {
-			signalDetail = fmt.Sprintf("; %d underlying code reference(s) are retained in %s", len(value.AIUseInventory.UngroupedSignals), inlineCode(view.evidenceBundle))
+			signalDetail = fmt.Sprintf("; %d underlying code reference(s)", len(value.AIUseInventory.UngroupedSignals))
 		}
-		if _, err := fmt.Fprintf(writer, "\nOther AI provider or configuration references: **%s**%s. These references alone do not show that a separate AI function is deployed.\n",
+		if _, err := fmt.Fprintf(writer, "\nProvider and configuration references retained in %s: **%s**%s. These references alone do not prove deployment.\n",
+			inlineCode(view.evidenceBundle),
 			markdownText(strings.Join(integrationSignals, ", ")), signalDetail); err != nil {
 			return err
 		}
@@ -1197,15 +1280,11 @@ func developerSignalLocationSummary(values []aiuse.SignalLocation) string {
 }
 
 func writeDeveloperActionsMarkdown(writer io.Writer, view developerReportView) error {
-	if _, err := fmt.Fprintln(writer, "\n## What to do next"); err != nil {
+	if _, err := fmt.Fprintln(writer, "\n## Developer actions"); err != nil {
 		return err
 	}
 	if len(view.actions) == 0 {
-		message := "ComplyScan did not identify an immediate code change."
-		if view.questionTotal > 0 {
-			message += " Product or organisation questions that code cannot answer are listed below."
-		}
-		_, err := fmt.Fprintln(writer, "\n"+message)
+		_, err := fmt.Fprintln(writer, "\nComplyScan did not identify an immediate developer code change.")
 		return err
 	}
 	for index, action := range view.actions {
@@ -1217,37 +1296,65 @@ func writeDeveloperActionsMarkdown(writer io.Writer, view developerReportView) e
 		if why == "" {
 			why = "The reviewed evidence requires developer confirmation."
 		}
-		status := ""
-		if action.status != "" {
-			status = fmt.Sprintf("\n- **Status:** %s", markdownText(string(action.status)))
+		title := developerPlainLanguage(action.issue)
+		for _, framework := range action.frameworks {
+			context := developerFrameworkArea(framework.Name, framework.SourceReference)
+			if context != "" {
+				title = strings.TrimSuffix(title, " ("+context+")")
+			}
 		}
-		id := ""
-		if action.id != "" {
-			id = fmt.Sprintf("\n- **Action ID:** %s", inlineCode(action.id))
+		doneWhen := action.acceptanceCriteria
+		if len(doneWhen) == 0 {
+			doneWhen = []string{"The cited repository evidence demonstrates the expected behavior.", "A fresh ComplyScan scan no longer reports this action as open."}
 		}
-		if _, err := fmt.Fprintf(writer, "\n### %d. %s\n\n- **Priority:** %s%s%s\n- **Do:** %s\n- **Why:** %s\n- **Where:** %s\n",
-			index+1, markdownText(developerPlainLanguage(action.issue)), markdownText(action.priority), status, id, markdownText(developerPlainLanguage(action.next)),
-			markdownText(why), markdownText(where)); err != nil {
+		if _, err := fmt.Fprintf(writer, "\n### %d. %s\n\n- **Do:** %s\n- **Done when:** %s\n- **Why:** %s\n- **Evidence:** %s\n",
+			index+1, markdownText(title), markdownText(developerPlainLanguage(action.next)),
+			markdownText(strings.Join(doneWhen, " ")), markdownText(why), markdownText(where)); err != nil {
 			return err
+		}
+		contexts := make([]string, 0, len(action.frameworks))
+		seen := make(map[string]struct{})
+		for _, framework := range action.frameworks {
+			context := developerFrameworkArea(framework.Name, framework.SourceReference)
+			if context == "" {
+				continue
+			}
+			key := strings.ToLower(context)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			contexts = append(contexts, context)
+		}
+		if len(contexts) > 0 {
+			if _, err := fmt.Fprintf(writer, "- **Compliance context:** %s\n", markdownText(strings.Join(contexts, "; "))); err != nil {
+				return err
+			}
 		}
 	}
 	if remaining := view.actionTotal - len(view.actions); remaining > 0 {
-		_, err := fmt.Fprintf(writer, "\n%d additional follow-up item(s) are available in %s.\n", remaining, inlineCode(view.evidenceBundle))
+		_, err := fmt.Fprintf(writer, "\nRun %s to see %d additional developer %s.\n", inlineCode("complyscan actions list"), remaining,
+			developerCountNoun(remaining, "action", "actions"))
 		return err
 	}
 	return nil
 }
 
 func writeDeveloperQuestionsMarkdown(writer io.Writer, view developerReportView) error {
-	if _, err := fmt.Fprintln(writer, "\n## What code cannot determine"); err != nil {
+	if _, err := fmt.Fprintln(writer, "\n## Needs product or compliance input"); err != nil {
 		return err
 	}
-	if len(view.questions) == 0 {
-		_, err := fmt.Fprintln(writer, "\nRepository code cannot establish actual deployment, operating organisation, customer use, production effectiveness, or legal applicability. These unknowns do not block the code review.")
+	if len(view.handoffActions) == 0 && len(view.questions) == 0 {
+		_, err := fmt.Fprintln(writer, "\nNo developer action is required here. A product or compliance owner should separately confirm actual deployment, operating organisation, customer use, production effectiveness, and legal applicability.")
 		return err
 	}
-	if _, err := fmt.Fprintln(writer, "\nThese questions need product or organisation context rather than more model inference. They do not block the code review."); err != nil {
+	if _, err := fmt.Fprintln(writer, "\nThese items need product or organisation context. They are not developer tasks and do not block code changes."); err != nil {
 		return err
+	}
+	for _, action := range view.handoffActions {
+		if _, err := fmt.Fprintf(writer, "\n- **%s:** %s", markdownText(developerPlainLanguage(action.issue)), markdownText(developerPlainLanguage(action.next))); err != nil {
+			return err
+		}
 	}
 	for _, question := range view.questions {
 		if _, err := fmt.Fprintf(writer, "\n- %s", markdownText(developerPlainQuestion(question))); err != nil {
@@ -1259,7 +1366,12 @@ func writeDeveloperQuestionsMarkdown(writer io.Writer, view developerReportView)
 			return err
 		}
 	}
-	_, err := fmt.Fprintln(writer, "\n\nDeployment status, operating organisation, production effectiveness, and legal applicability also require information outside the repository.")
+	if remaining := view.handoffTotal - len(view.handoffActions); remaining > 0 {
+		if _, err := fmt.Fprintf(writer, "\n- %d more context item(s) are available in %s.", remaining, inlineCode(view.evidenceBundle)); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(writer, "\n\nA product or compliance owner can complete these items in the dashboard or evidence bundle; the developer does not need to answer them during setup.")
 	return err
 }
 

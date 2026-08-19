@@ -394,8 +394,8 @@ func TestConciseMarkdownSeparatesSavedSuggestedAndUngroupedAIUses(t *testing.T) 
 		"## AI functionality found", "Confirmed scope", "Confirmed generation", "runtime/\\*\\*",
 		"Optional draft", "Draft ranking", "ranking/\\*\\*",
 		"Inferred from code — AI workflow", "Suggested assistant", "assistant.go:12",
-		"Other AI provider or configuration references", "1 underlying code reference(s) are retained in `latest.json`",
-		"## What code cannot determine",
+		"Provider and configuration references retained in `latest.json`", "1 underlying code reference(s)",
+		"## Needs product or compliance input",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("concise Markdown missing %q:\n%s", expected, output.String())
@@ -462,10 +462,10 @@ func TestConciseMarkdownOptionalAIUseGroupingDoesNotChangeCleanOutcome(t *testin
 	if err := WriteMarkdown(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "**Scan completed — no urgent code changes identified**") {
+	if !strings.Contains(output.String(), "**No developer actions. No direct code risks found.**") {
 		t.Fatalf("optional AI-use organization changed the scan outcome:\n%s", output.String())
 	}
-	if !strings.Contains(output.String(), "Safeguards assessed from code: **none**") {
+	if !strings.Contains(output.String(), "Review performed: **local code checks complete; no relevant AI code selected for model review**") {
 		t.Fatalf("empty completed review was not described honestly:\n%s", output.String())
 	}
 	if strings.Contains(output.String(), "| **Review** |") {
@@ -507,16 +507,13 @@ func TestDeveloperReportSeparatesTechnicalFollowUpFromLegalApplicability(t *test
 	}
 	text := output.String()
 	for _, expected := range []string{
-		"**Scan completed — technical follow-up recommended**",
-		"Direct code problems found by automated rules: **0**",
-		"Developer actions: **4**",
-		"What code cannot determine",
+		"**4 developer actions. No direct code risks found.**",
+		"## Needs product or compliance input",
 		"Missing: Adversarial-input tests",
 		"Add tests proving the retry limit, behavior after retries are exhausted, and the final fallback result",
-		"| safe-stop | Could not determine from the reviewed code",
-		"| Inferred from code — AI workflow | Repository technical review |",
-		"| Inferred from code — Supporting infrastructure | Remote model inference adapters |",
-		"| Inferred from code — Evaluation/test tooling | Repository benchmark evaluation |",
+		"**Repository technical review** — Inferred from code — AI workflow",
+		"**Remote model inference adapters** — Inferred from code — Supporting infrastructure",
+		"**Repository benchmark evaluation** — Inferred from code — Evaluation/test tooling",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Errorf("developer report missing %q:\n%s", expected, text)
@@ -606,9 +603,9 @@ func TestConciseMarkdownAndTerminalMapRequirementsPerConfirmedAIUse(t *testing.T
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"### Checks within confirmed AI uses", "Support answer generation",
-		"Human review gate", "Implementation incomplete in the reviewed code", "apps/support/review.go:12",
-		"Unlinked classifier", "Safe stop", "No matching code evidence found in this use's saved paths",
+		"## Developer actions", "Support answer generation",
+		"Human review gate", "The code review found only a partial implementation inside this AI use", "apps/support/review.go:12",
+		"Unlinked classifier", "Safe stop",
 		"AI use has no configured system context", "Which configured system contains the AI use Unlinked classifier?",
 		"Repository-level, not assigned to one confirmed AI use: Safe stop", "shared/stop.go:7",
 		"Support answer generation: Is human review enforced?",
@@ -981,7 +978,7 @@ func TestExecutionVerificationIsRenderedWithoutComplianceClaim(t *testing.T) {
 	if err := WriteMarkdown(&markdown, value); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(markdown.String(), "Execution check: go-tests") || !strings.Contains(markdown.String(), "Passing does not establish compliance") || !strings.Contains(markdown.String(), "**Runtime verification:** 1 passed, 0 failed.") {
+	if !strings.Contains(markdown.String(), "**Runtime verification:** 1 passed, 0 failed.") {
 		t.Fatalf("verification missing from Markdown:\n%s", markdown.String())
 	}
 	var jsonOutput bytes.Buffer

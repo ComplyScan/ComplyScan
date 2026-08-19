@@ -104,10 +104,49 @@ func TestWriteJSONAndMarkdownExposeDeveloperActionContract(t *testing.T) {
 	if err := WriteMarkdown(&markdown, value); err != nil {
 		t.Fatal(err)
 	}
-	for _, fragment := range []string{"**Status:** new", "**Action ID:** `objective/system/control`", "Add structured logging"} {
+	for _, fragment := range []string{"## Developer actions", "Add structured logging", "**Done when:** A cited test verifies the event.", "**Compliance context:** EU AI Act — Article 12"} {
 		if !strings.Contains(markdown.String(), fragment) {
 			t.Fatalf("Markdown missing %q:\n%s", fragment, markdown.String())
 		}
+	}
+	for _, internalDetail := range []string{"**Status:**", "**Action ID:**", "objective/system/control"} {
+		if strings.Contains(markdown.String(), internalDetail) {
+			t.Fatalf("presentation-oriented Markdown exposed internal lifecycle detail %q:\n%s", internalDetail, markdown.String())
+		}
+	}
+}
+
+func TestDeveloperReportSeparatesDeveloperWorkFromComplianceHandoff(t *testing.T) {
+	value := New(".", "test", nil, nil, 0)
+	value.DeveloperActions = []DeveloperAction{
+		{
+			ID: "objective/logging", Status: DeveloperActionNew, Priority: "Review", Category: "code-control",
+			Title: "Add event logging", RecommendedChange: "Add structured logging.",
+			AcceptanceCriteria: []string{"A test verifies the required event."}, Evidence: []DeveloperActionEvidence{{Path: "app.go", StartLine: 8}},
+		},
+		{
+			ID: "context/operator", Status: DeveloperActionOpen, Priority: "Review", Category: "human-context",
+			Title: "Confirm the operating organisation", RecommendedChange: "Record which organisation operates this system.", HumanOnly: true,
+		},
+	}
+
+	var markdown bytes.Buffer
+	if err := WriteMarkdown(&markdown, value); err != nil {
+		t.Fatal(err)
+	}
+	text := markdown.String()
+	for _, fragment := range []string{
+		"**1 developer action. No direct code risks found.**",
+		"## Developer actions", "### 1. Add event logging",
+		"## Needs product or compliance input", "**Confirm the operating organisation:** Record which organisation operates this system.",
+	} {
+		if !strings.Contains(text, fragment) {
+			t.Fatalf("Markdown missing %q:\n%s", fragment, text)
+		}
+	}
+	developerSection := text[strings.Index(text, "## Developer actions"):strings.Index(text, "## AI functionality found")]
+	if strings.Contains(developerSection, "operating organisation") {
+		t.Fatalf("human-only handoff was presented as developer work:\n%s", developerSection)
 	}
 }
 

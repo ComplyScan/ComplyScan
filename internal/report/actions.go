@@ -245,7 +245,15 @@ func developerActionAcceptanceCriteria(action developerAction) []string {
 	case "human-context":
 		criteria = append(criteria, "A developer or compliance owner reviews and records the requested context.")
 	default:
-		criteria = append(criteria, "The recommended code or configuration change is implemented and supported by repository evidence.")
+		next := strings.ToLower(action.next)
+		switch {
+		case strings.Contains(next, "retry limit, behavior after retries are exhausted, and the final fallback result"):
+			criteria = append(criteria, "Tests exercise the retry limit, exhausted-retry behavior, and final fallback result.")
+		case strings.Contains(next, "end-to-end test or enforcement path"):
+			criteria = append(criteria, "One end-to-end test or enforcement path establishes the expected behavior in the cited code path.")
+		default:
+			criteria = append(criteria, "The recommended code or configuration change is implemented and supported by repository evidence.")
+		}
 	}
 	criteria = append(criteria, "A fresh ComplyScan scan no longer reports this action as open.")
 	return criteria
