@@ -13,6 +13,7 @@ func TestChangedPathsIncludesCommittedWorkingTreeAndUntrackedFiles(t *testing.T)
 	root := initialiseGitRepository(t)
 	writeChangeFixture(t, root, "root.txt", "initial\n")
 	writeChangeFixture(t, root, "service/initial.txt", "initial\n")
+	writeChangeFixture(t, root, "service/deleted.txt", "initial\n")
 	runTestGit(t, root, "add", ".")
 	runTestGit(t, root, "commit", "-m", "initial")
 	base := strings.TrimSpace(runTestGit(t, root, "rev-parse", "HEAD"))
@@ -25,12 +26,15 @@ func TestChangedPathsIncludesCommittedWorkingTreeAndUntrackedFiles(t *testing.T)
 	runTestGit(t, root, "add", "service/staged.txt")
 	writeChangeFixture(t, root, "service/untracked.txt", "untracked\n")
 	writeChangeFixture(t, root, "outside.txt", "outside target\n")
+	if err := os.Remove(filepath.Join(root, "service", "deleted.txt")); err != nil {
+		t.Fatal(err)
+	}
 
 	paths, err := ChangedPaths(context.Background(), filepath.Join(root, "service"), base)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"committed.txt", "initial.txt", "staged.txt", "untracked.txt"} {
+	for _, want := range []string{"committed.txt", "initial.txt", "staged.txt", "untracked.txt", "deleted.txt"} {
 		if _, ok := paths[want]; !ok {
 			t.Errorf("changed paths missing %q: %#v", want, paths)
 		}

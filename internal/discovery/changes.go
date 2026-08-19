@@ -48,8 +48,8 @@ func ChangedPaths(ctx context.Context, target, ref string) (map[string]struct{},
 
 	paths := make(map[string]struct{})
 	commands := [][]string{
-		{"diff", "--name-only", "--diff-filter=ACMR", "-z", resolved + "...HEAD", "--"},
-		{"diff", "--name-only", "--diff-filter=ACMR", "-z", "HEAD", "--"},
+		{"diff", "--name-only", "--diff-filter=ACMRD", "-z", resolved + "...HEAD", "--"},
+		{"diff", "--name-only", "--diff-filter=ACMRD", "-z", "HEAD", "--"},
 		{"ls-files", "--others", "--exclude-standard", "-z", "--"},
 	}
 	for _, arguments := range commands {

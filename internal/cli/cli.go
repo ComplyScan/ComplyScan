@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -95,6 +96,8 @@ func newRootCommand(stdout, stderr io.Writer, build BuildInfo) *cobra.Command {
 	root.AddCommand(newProfileCommand(stdout))
 	root.AddCommand(newOwnershipCommand(stdout))
 	root.AddCommand(newAIUsesCommand(stdout))
+	root.AddCommand(newActionsCommand(stdout, build))
+	root.AddCommand(newAgentCommand(stdout, build))
 	root.AddCommand(newFrameworkCommand(stdout))
 	root.AddCommand(newDoctorCommand(stdout, build))
 	root.AddCommand(newVerifyCommand(stdout))
@@ -293,6 +296,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 		remoteProviderName        string
 		remoteBaseURL             string
 		reportDirectory           string
+		actionBaselinePath        string
 		noReport                  bool
 		refreshReview             bool
 		verifyRuntime             string
@@ -488,11 +492,37 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 				})
 			}
 			resolvedReportDirectory := ""
+			var previousActionReport *report.Report
+			actionLifecycleOptions := report.DeveloperActionLifecycleOptions{}
+			if strings.TrimSpace(actionBaselinePath) != "" {
+				resolvedActionBaseline := resolveTargetPath(target, actionBaselinePath)
+				previous, readErr := report.ReadJSONFile(resolvedActionBaseline)
+				if readErr != nil {
+					return fmt.Errorf("load developer-action baseline: %w", readErr)
+				}
+				previousActionReport = &previous
+				if changedSince != "" {
+					changedActionPaths, changedErr := discovery.ChangedPaths(cmd.Context(), target, changedSince)
+					if changedErr != nil {
+						return fmt.Errorf("prepare developer-action comparison: %w", changedErr)
+					}
+					actionLifecycleOptions.ChangedPaths = changedActionPaths
+				}
+			}
 			if !noReport {
 				resolvedReportDirectory, err = resolveReportDirectory(target, reportDirectory)
 				if err != nil {
 					return err
 				}
+				if previousActionReport == nil {
+					previous, readErr := report.ReadJSONFile(filepath.Join(resolvedReportDirectory, "latest.json"))
+					if readErr == nil {
+						previousActionReport = &previous
+					}
+				}
+			}
+			reconcileDeveloperActions := func(value report.Report) report.Report {
+				return report.ReconcileDeveloperActionLifecycleWithOptions(value, previousActionReport, actionLifecycleOptions)
 			}
 
 			configuredBaseline := cfg.Baseline
@@ -616,6 +646,16 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 				result.Warnings,
 				result.Suppressed,
 			)
+			if provenance, provenanceErr := discovery.InspectGitProvenance(cmd.Context(), target, changedSince); provenanceErr == nil {
+				reportValue.Scan.Repository = &report.RepositoryProvenance{
+					Commit: provenance.Commit, Branch: provenance.Branch, Dirty: provenance.Dirty, TargetPath: provenance.TargetPath,
+					BaseReference: provenance.BaseReference, BaseCommit: provenance.BaseCommit,
+				}
+			}
+			if configBytes, readErr := os.ReadFile(resolvedConfigPath); readErr == nil {
+				digest := sha256.Sum256(configBytes)
+				reportValue.Scan.ConfigDigest = fmt.Sprintf("%x", digest[:])
+			}
 			aiInventory := inventory.NewReport(target, build.Version, inventory.Analyze(result.FullRepository), result.Warnings)
 			reportValue.AIInventory = &aiInventory
 			aiUseInventory := aiuse.BuildSnapshotWithRepository(aiUseManifest, aiInventory, result.FullRepository, nil, changedSince != "")
@@ -648,6 +688,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 				})
 			}
 			reportValue.Frameworks = frameworkResults
+			reportValue.Scan.FrameworkPacks = reportFrameworkPackProvenance(frameworkResults)
 			reportValue.AIUseMappings = buildAIUseMappings(aiUseManifest, cfg.Systems, frameworkResults, aiInventory, nil)
 			confirmedAIUseReviewContexts := buildConfirmedAIUseReviewContexts(reportValue.AIUseMappings, frameworkResults)
 			if cfg.RuleEnabled(policy.TechnicalGapRuleID) {
@@ -725,7 +766,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			}
 			var artifacts report.Artifacts
 			if resolvedReportDirectory != "" && cfg.AI.Provider != "none" {
-				artifacts, err = report.WriteLatestArtifacts(resolvedReportDirectory, reportValue)
+				artifacts, err = report.WriteLatestArtifacts(resolvedReportDirectory, reconcileDeveloperActions(reportValue))
 				if err != nil {
 					return fmt.Errorf("save preliminary scan reports: %w", err)
 				}
@@ -882,7 +923,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 							return fmt.Errorf("write repository analysis completion: %w", err)
 						}
 						if resolvedReportDirectory != "" {
-							artifacts, err = report.WriteLatestArtifacts(resolvedReportDirectory, reportValue)
+							artifacts, err = report.WriteLatestArtifacts(resolvedReportDirectory, reconcileDeveloperActions(reportValue))
 							if err != nil {
 								return fmt.Errorf("checkpoint repository analysis reports: %w", err)
 							}
@@ -966,7 +1007,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 					reportValue.AIUseMappings = buildAIUseMappings(aiUseManifest, cfg.Systems, frameworkResults, aiInventory, completedRepositoryAnalysis(reportValue))
 					syncLegacyFrameworkFields(&reportValue)
 					if resolvedReportDirectory != "" {
-						artifacts, err = report.WriteLatestArtifacts(resolvedReportDirectory, reportValue)
+						artifacts, err = report.WriteLatestArtifacts(resolvedReportDirectory, reconcileDeveloperActions(reportValue))
 						if err != nil {
 							return fmt.Errorf("checkpoint AI review reports: %w", err)
 						}
@@ -976,6 +1017,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			reportValue.Frameworks = frameworkResults
 			reportValue.AIUseMappings = buildAIUseMappings(aiUseManifest, cfg.Systems, frameworkResults, aiInventory, completedRepositoryAnalysis(reportValue))
 			syncLegacyFrameworkFields(&reportValue)
+			reportValue = reconcileDeveloperActions(reportValue)
 			if resolvedReportDirectory != "" {
 				artifacts, err = report.WriteArtifacts(resolvedReportDirectory, reportValue)
 				if err != nil {
@@ -1036,6 +1078,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 	command.Flags().StringVar(&remoteProviderName, "provider-name", "", "display name for a custom OpenAI-compatible provider")
 	command.Flags().StringVar(&remoteBaseURL, "base-url", "", "HTTPS API base URL for an OpenAI-compatible provider")
 	command.Flags().StringVar(&reportDirectory, "report-dir", report.DefaultDirectory, "directory for immutable report history and latest snapshots (relative to the scan target)")
+	command.Flags().StringVar(&actionBaselinePath, "action-baseline", "", "prior full JSON evidence bundle used to identify new, reopened, and resolved developer actions")
 	command.Flags().BoolVar(&noReport, "no-report", false, "do not save local Markdown and JSON reports")
 	command.Flags().BoolVar(&refreshReview, "refresh-review", false, "ignore cached repository and technical observations and run the configured provider again")
 	command.Flags().BoolVar(&requireAIReview, "require-ai-review", false, "return exit code 2 when any requested AI review layer is incomplete")
@@ -1164,6 +1207,17 @@ func syncLegacyFrameworkFields(value *report.Report) {
 		value.TechnicalReview = result.TechnicalReview
 		return
 	}
+}
+
+func reportFrameworkPackProvenance(results []report.FrameworkResult) []report.FrameworkPackProvenance {
+	values := make([]report.FrameworkPackProvenance, 0, len(results))
+	for _, result := range results {
+		pack := result.TechnicalEvidence.Pack
+		values = append(values, report.FrameworkPackProvenance{
+			ID: pack.ID, Name: pack.Name, Version: pack.Version, Digest: pack.Digest,
+		})
+	}
+	return values
 }
 
 func validateVerificationPlans(plans []verification.Options, evidence framework.TechnicalEvidenceReport, systems []profile.System) ([]verification.Options, error) {
