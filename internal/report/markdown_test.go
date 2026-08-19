@@ -261,7 +261,7 @@ func TestWriteMarkdownPrioritizesDeveloperDecisions(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"## Result", "**Action required**", "## What to do next", "Possible secret exposure", "**Do:** Remove the credential from the request", "Human oversight",
-		"## What the code shows", "Implemented in the reviewed code", "audit.go:11",
+		"## Framework technical assessment", "### Key code-control results", "Implemented in the reviewed code", "audit.go:11", "Next step",
 		"## AI functionality found", "Answer generation",
 		"## What code cannot determine", "Where will this AI feature be offered or used?",
 		"## Scan coverage", "Full evidence and dashboard data: `latest.json`",
@@ -270,7 +270,7 @@ func TestWriteMarkdownPrioritizesDeveloperDecisions(t *testing.T) {
 			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
 		}
 	}
-	if actionIndex, findingsIndex := strings.Index(output.String(), "## What to do next"), strings.Index(output.String(), "## What the code shows"); actionIndex < 0 || findingsIndex < 0 || actionIndex > findingsIndex {
+	if actionIndex, findingsIndex := strings.Index(output.String(), "## What to do next"), strings.Index(output.String(), "## Framework technical assessment"); actionIndex < 0 || findingsIndex < 0 || actionIndex > findingsIndex {
 		t.Fatalf("actionable next steps did not precede supporting scan detail:\n%s", output.String())
 	}
 	for _, excluded := range []string{"## Technical checklist", "## AI advisory review", "No evidence detected for", "not-substantiated", "Candidate evidence", "technical objective", "Possible roles indicated", "Legal and technical details", "a person still needs to check it"} {
@@ -320,20 +320,29 @@ func TestWriteMarkdownMapsSelectedFrameworksToTechnicalEvidenceWithoutCompliance
 	}
 	markdown := output.String()
 	for _, expected := range []string{
-		"## Selected framework coverage",
+		"## Framework technical assessment",
 		"| EU AI Act technical code evidence | Article 12: 1/1 signal(s); Article 14: 0/1 signal(s) | 1 | 1 | 0 |",
 		"| NIST AI RMF technical code evidence (voluntary) | MEASURE 2.6: 1/1 signal(s); MANAGE 4.1: 0/1 signal(s), 1 not fully checked | 1 | 0 | 1 |",
 		"Human oversight (EU AI Act technical code evidence — Article 14)",
-		"| EU AI Act technical code evidence — Article 12 | Automatic AI event logging |",
-		"| NIST AI RMF technical code evidence — MEASURE 2.6 | Robustness and safe failure |",
-		"A signal is not proof that a safeguard works or that a provision applies",
+		"| EU AI Act technical code evidence — Article 12 — Automatic AI event logging |",
+		"| NIST AI RMF technical code evidence — MEASURE 2.6 — Robustness and safe failure |",
+		"Code signal found; AI review not run",
+		"A signal is not proof that a safeguard works",
 		"Full evidence and dashboard data: `latest.json`",
 	} {
 		if !strings.Contains(markdown, expected) {
 			t.Errorf("Markdown missing %q:\n%s", expected, markdown)
 		}
 	}
-	frameworkSection := markdown[strings.Index(markdown, "## Selected framework coverage"):strings.Index(markdown, "## What to do next")]
+	frameworkStart := strings.Index(markdown, "## Framework technical assessment")
+	frameworkEnd := strings.Index(markdown, "## AI functionality found")
+	if frameworkStart < 0 || frameworkEnd <= frameworkStart {
+		t.Fatalf("framework section boundaries missing:\n%s", markdown)
+	}
+	frameworkSection := markdown[frameworkStart:frameworkEnd]
+	if strings.Count(markdown, "## Framework technical assessment") != 1 || strings.Contains(markdown, "## What the code shows") {
+		t.Fatalf("framework and code evidence were not consolidated into one section:\n%s", markdown)
+	}
 	for _, unsafe := range []string{"Compliant", "Non-compliant", "Pass", "Fail", "%"} {
 		if strings.Contains(frameworkSection, unsafe) {
 			t.Errorf("framework section contains legal score language %q:\n%s", unsafe, frameworkSection)

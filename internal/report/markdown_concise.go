@@ -90,16 +90,14 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report, evidenceBundle
 	if err := writeDeveloperOutcomeMarkdown(writer, value, view); err != nil {
 		return err
 	}
-	if err := writeDeveloperFrameworkCoverageMarkdown(writer, view); err != nil {
-		return err
-	}
 	if err := writeDeveloperActionsMarkdown(writer, view); err != nil {
 		return err
 	}
-	if err := writeDeveloperEvidenceMarkdown(writer, view); err != nil {
+	frameworkAssessmentStarted, err := writeDeveloperFrameworkAssessmentMarkdown(writer, view)
+	if err != nil {
 		return err
 	}
-	if err := writeDeveloperAIUseMappingsMarkdown(writer, value, view.evidenceBundle, len(view.evidence) > 0); err != nil {
+	if err := writeDeveloperAIUseMappingsMarkdown(writer, value, view.evidenceBundle, frameworkAssessmentStarted); err != nil {
 		return err
 	}
 	if err := writeDeveloperAIUsesMarkdown(writer, value, view); err != nil {
@@ -168,7 +166,7 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report, evidenceBundle
 	if _, err := fmt.Fprintf(writer, "- Full evidence and dashboard data: %s\n- Scan ID: %s\n", inlineCode(view.evidenceBundle), inlineCode(value.Scan.ID)); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintln(writer, "\n---\n\nCode findings describe only the reviewed repository evidence. Deployment, organisational practice, and legal applicability require information outside the codebase.")
+	_, err = fmt.Fprintln(writer, "\n---\n\nCode findings describe only the reviewed repository evidence. Deployment, organisational practice, and legal applicability require information outside the codebase.")
 	return err
 }
 
@@ -411,27 +409,67 @@ func writeDeveloperOutcomeMarkdown(writer io.Writer, value Report, view develope
 	return err
 }
 
-func writeDeveloperFrameworkCoverageMarkdown(writer io.Writer, view developerReportView) error {
-	if len(view.frameworkCoverage) == 0 {
-		return nil
+func writeDeveloperFrameworkAssessmentMarkdown(writer io.Writer, view developerReportView) (bool, error) {
+	if len(view.frameworkCoverage) == 0 && len(view.evidence) == 0 {
+		return false, nil
 	}
-	if _, err := fmt.Fprintln(writer, "\n## Selected framework coverage"); err != nil {
-		return err
+	if _, err := fmt.Fprintln(writer, "\n## Framework technical assessment"); err != nil {
+		return false, err
 	}
-	if _, err := fmt.Fprintln(writer, "\nThis maps the selected framework areas to repository code signals. A signal is not proof that a safeguard works or that a provision applies; no signal is not proof that an implementation is absent.\n\n| Framework | Technical areas (signals / checks) | Code signals found | No matching signal | Not fully checked |\n|---|---|---:|---:|---:|"); err != nil {
-		return err
+	if _, err := fmt.Fprintln(writer, "\nThis maps selected framework areas to repository evidence. A signal is not proof that a safeguard works, and no signal is not proof that an implementation is absent. Code conclusions do not decide whether a provision legally applies or whether the product complies."); err != nil {
+		return false, err
 	}
-	for _, coverage := range view.frameworkCoverage {
-		areas := coverage.areas
-		if areas == "" {
-			areas = fmt.Sprintf("%d technical code check(s)", coverage.total)
+	if len(view.frameworkCoverage) > 0 {
+		if _, err := fmt.Fprintln(writer, "\n| Framework | Technical areas (signals / checks) | Code signals found | No matching signal | Not fully checked |\n|---|---|---:|---:|---:|"); err != nil {
+			return false, err
 		}
-		if _, err := fmt.Fprintf(writer, "| %s | %s | %d | %d | %d |\n",
-			markdownTableText(coverage.name), markdownTableText(areas), coverage.evidence, coverage.notDetected, coverage.notEvaluated); err != nil {
-			return err
+		for _, coverage := range view.frameworkCoverage {
+			areas := coverage.areas
+			if areas == "" {
+				areas = fmt.Sprintf("%d technical code check(s)", coverage.total)
+			}
+			if _, err := fmt.Fprintf(writer, "| %s | %s | %d | %d | %d |\n",
+				markdownTableText(coverage.name), markdownTableText(areas), coverage.evidence, coverage.notDetected, coverage.notEvaluated); err != nil {
+				return false, err
+			}
 		}
 	}
-	return nil
+	if len(view.evidence) > 0 {
+		if _, err := fmt.Fprintln(writer, "\n### Key code-control results\n\n| Framework area / code control | Code-level conclusion | Key evidence | Next step |\n|---|---|---|---|"); err != nil {
+			return false, err
+		}
+		for _, evidence := range view.evidence {
+			result := developerVerdictLabel(evidence.verdict)
+			assessment := strings.ToLower(evidence.assessment)
+			if strings.Contains(assessment, "did not evaluate") {
+				result = "Code signal found; not fully reviewed"
+			} else if strings.Contains(assessment, "ai-assisted analysis") {
+				result = "Code signal found; AI review not run"
+			}
+			control := developerPlainLanguage(evidence.title)
+			if evidence.framework != "" {
+				control = evidence.framework + " — " + control
+			}
+			next := strings.TrimSpace(developerPlainLanguage(evidence.followUp))
+			if next == "" {
+				next = "Review the cited implementation and confirm its production configuration."
+			}
+			keyEvidence := strings.TrimSpace(evidence.evidence)
+			if keyEvidence == "" {
+				keyEvidence = "No checked code location available"
+			}
+			if _, err := fmt.Fprintf(writer, "| %s | %s | %s | %s |\n",
+				markdownTableText(control), markdownTableText(result), markdownTableText(keyEvidence), markdownTableText(next)); err != nil {
+				return false, err
+			}
+		}
+		if remaining := view.evidenceTotal - len(view.evidence); remaining > 0 {
+			if _, err := fmt.Fprintf(writer, "\n%d more code-control result(s) are available in %s.\n", remaining, inlineCode(view.evidenceBundle)); err != nil {
+				return false, err
+			}
+		}
+	}
+	return true, nil
 }
 
 func developerAIInventorySummary(value Report) string {
@@ -769,7 +807,7 @@ func writeDeveloperAIUseMappingsMarkdown(writer io.Writer, value Report, evidenc
 		return nil
 	}
 	if !sectionStarted {
-		if _, err := fmt.Fprintln(writer, "\n## What the code shows"); err != nil {
+		if _, err := fmt.Fprintln(writer, "\n## Framework technical assessment\n\nThis maps selected framework areas to repository evidence. A signal is not proof that a safeguard works, and no signal is not proof that an implementation is absent. Code conclusions do not decide whether a provision legally applies or whether the product complies."); err != nil {
 			return err
 		}
 	}
@@ -1132,37 +1170,6 @@ func writeDeveloperActionsMarkdown(writer io.Writer, view developerReportView) e
 	}
 	if remaining := view.actionTotal - len(view.actions); remaining > 0 {
 		_, err := fmt.Fprintf(writer, "\n%d additional follow-up item(s) are available in %s.\n", remaining, inlineCode(view.evidenceBundle))
-		return err
-	}
-	return nil
-}
-
-func writeDeveloperEvidenceMarkdown(writer io.Writer, view developerReportView) error {
-	if len(view.evidence) == 0 {
-		return nil
-	}
-	if _, err := fmt.Fprintln(writer, "\n## What the code shows"); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintln(writer, "\n| Framework area | Code control | Result | Evidence |\n|---|---|---|---|"); err != nil {
-		return err
-	}
-	for _, evidence := range view.evidence {
-		result := developerVerdictLabel(evidence.verdict)
-		if strings.Contains(strings.ToLower(evidence.assessment), "did not evaluate") {
-			result = "Code signal found; not fully reviewed"
-		}
-		frameworkArea := evidence.framework
-		if frameworkArea == "" {
-			frameworkArea = "Repository technical objective"
-		}
-		if _, err := fmt.Fprintf(writer, "| %s | %s | %s | %s |\n",
-			markdownTableText(frameworkArea), markdownTableText(developerPlainLanguage(evidence.title)), markdownTableText(result), markdownTableText(evidence.evidence)); err != nil {
-			return err
-		}
-	}
-	if remaining := view.evidenceTotal - len(view.evidence); remaining > 0 {
-		_, err := fmt.Fprintf(writer, "\n%d more code-control result(s) are available in %s.\n", remaining, inlineCode(view.evidenceBundle))
 		return err
 	}
 	return nil

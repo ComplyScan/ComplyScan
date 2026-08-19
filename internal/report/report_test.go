@@ -651,10 +651,11 @@ func TestVoluntaryFrameworkRecommendationDoesNotRequireSystemAssociation(t *test
 
 func TestPerUseReportOmitsEmptyDuplicateEvidenceSection(t *testing.T) {
 	var output bytes.Buffer
-	if err := writeDeveloperEvidenceMarkdown(&output, developerReportView{hasPerUseMappings: true}); err != nil {
+	started, err := writeDeveloperFrameworkAssessmentMarkdown(&output, developerReportView{hasPerUseMappings: true})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if output.Len() != 0 {
+	if started || output.Len() != 0 {
 		t.Fatalf("empty duplicate evidence section = %q", output.String())
 	}
 }
