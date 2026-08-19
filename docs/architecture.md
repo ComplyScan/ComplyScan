@@ -30,7 +30,7 @@ configured `complyscan scan` when repository intent has matching private machine
 		       → finite schema repair and recursive splitting before an incomplete outcome; one semantic follow-up only for a single-package review
 	       → broad full or hierarchical analysis only in explicit deep modes
 	       → bounded finding review; per-objective investigation retained as fallback
-  → terminal output plus atomic Markdown and schema-version 16 JSON reports, or SARIF
+  → terminal output plus atomic Markdown and schema-version 17 JSON reports, or SARIF
 
 `complyscan scan --deterministic-only`
   → stops after the local layer without reading a provider credential or contacting a model
@@ -78,7 +78,9 @@ For configured `scan --changed-since` runs, `internal/repositoryanalysis` derive
 
 `internal/baseline` stores deterministic finding identities—including confirmed technical-gap identities—without source evidence. Configured suppressions require a review reason; both mechanisms are applied before reporting and exit-code evaluation. Baselining accepts known work for delta enforcement but does not resolve it or establish compliance.
 
-`internal/report` constructs a schema-version 16 evidence bundle. Version 16 adds repository `grouping_status` plus per-attempt input, output, and reasoning token counts. Version 15 added privacy-bounded repository request diagnostics containing phase, scope label, attempt number, duration, outcome, retry reason, and aggregate input size—never prompts, source content, file lists, response bodies, or provider request IDs. Version 14 added checked `resolved_evidence_gaps`; version 13 added source-batch and provider-request accounting. JSON remains the exhaustive evidence record and future dashboard contract; Markdown remains a capped developer decision view and SARIF remains a separate source-location integration.
+`internal/report` constructs a schema-version 17 evidence bundle. Version 17 adds stable lifecycle-aware `developer_actions` and exact Git/configuration/framework-pack provenance. Version 16 added repository `grouping_status` plus per-attempt input, output, and reasoning token counts. Version 15 added privacy-bounded repository request diagnostics containing phase, scope label, attempt number, duration, outcome, retry reason, and aggregate input size—never prompts, source content, file lists, response bodies, or provider request IDs. Version 14 added checked `resolved_evidence_gaps`; version 13 added source-batch and provider-request accounting. JSON remains the exhaustive evidence record and future dashboard contract; Markdown consumes the same action model as a capped developer decision view, while SARIF carries rule findings and located new/reopened actions.
+
+`internal/cli/actions.go` exposes the action lifecycle for developers. `internal/cli/agent.go` can print or explicitly install concise agent instructions, while `internal/cli/agent_mcp.go` serves read-only MCP tools. The MCP surface can read actions and evidence, run model-free/no-report changed-code scans, and recheck deterministic finding actions; it cannot enable provider processing or mutate reports.
 
 `internal/reviewcontext` first derives a repository view for each declared system from assigned and intentionally shared paths. It rebuilds the graph inside that view, preserves connected context for owned deterministic candidates, and creates one wider bounded search target for each likely-required system objective without a candidate. Conflicting and unassigned paths never enter these views. The extended search ranks eligible owned files using the versioned pack terms, includes up to six excerpts and a bounded path manifest, and records eligible/matching-file coverage. Model-directed follow-up is restricted to the same in-memory allowed-path set. Its synthetic fingerprint binds the system ID and exact bounded repository context.
 
