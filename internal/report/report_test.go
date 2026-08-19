@@ -172,6 +172,10 @@ func TestDeveloperObjectiveNextStepUsesDeveloperActionsInsteadOfBatchJargon(t *t
 			missing: "No submitted code shows benchmark execution or pass/fail evaluation.",
 			want:    "Run the benchmark in CI or another executable workflow and enforce its pass/fail result. Then rerun the scan",
 		},
+		{
+			missing: "Verification of retry exhaustion and terminal fallback behavior.",
+			want:    "Add a test showing what happens after all retries fail. Then rerun the scan",
+		},
 	}
 	for index, testCase := range tests {
 		observation := providers.RepositoryObjectiveObservation{
@@ -226,7 +230,7 @@ func TestIncompleteRepositoryAnalysisWithPartialCoverageIsNotReportedAsCompleted
 	if label := developerAnalysisSummaryLabel(value); !strings.Contains(label, "incomplete") {
 		t.Fatalf("analysis summary = %q, want incomplete", label)
 	}
-	if label := developerRepositoryAnalysisLabel(value); !strings.Contains(label, "3 source batch(es) started a provider request and 1 of 3 produced validated responses") {
+	if label := developerRepositoryAnalysisLabel(value); !strings.Contains(label, "3 code batch(es) started and 1 of 3 were reviewed successfully") {
 		t.Fatalf("repository analysis label = %q", label)
 	}
 	var concise bytes.Buffer
@@ -239,7 +243,8 @@ func TestIncompleteRepositoryAnalysisWithPartialCoverageIsNotReportedAsCompleted
 	}
 	for name, output := range map[string]string{"concise": concise.String(), "detailed": detailed.String()} {
 		lowerOutput := strings.ToLower(output)
-		if !strings.Contains(lowerOutput, "3 distinct source batch") || !strings.Contains(lowerOutput, "1 of 3") || !strings.Contains(lowerOutput, "no unsynthesized model conclusions") {
+		batchCoverage := strings.Contains(lowerOutput, "3 distinct source batch") || strings.Contains(lowerOutput, "3 code batch")
+		if !batchCoverage || !strings.Contains(lowerOutput, "1 of 3") || !(strings.Contains(lowerOutput, "no unsynthesized model conclusions") || strings.Contains(lowerOutput, "no unchecked model conclusions")) {
 			t.Fatalf("%s incomplete report lacks truthful partial coverage:\n%s", name, output)
 		}
 		if strings.Contains(output, "No AI implementation was identified") || strings.Contains(output, "did not suggest a specific AI use") {
@@ -284,7 +289,8 @@ func TestCompletedSourceReviewReportsIncompleteGroupingWithoutDiscardingObservat
 	}
 	for name, output := range map[string]string{"concise": concise.String(), "detailed": detailed.String(), "terminal": terminal.String()} {
 		lower := strings.ToLower(output)
-		if !strings.Contains(lower, "group") || !strings.Contains(lower, "validated technical observation") || !strings.Contains(lower, "retained separately") {
+		observationBoundary := strings.Contains(lower, "reviewed observation") || strings.Contains(lower, "validated technical observation")
+		if !strings.Contains(lower, "group") || !observationBoundary || !(strings.Contains(lower, "remain") || strings.Contains(lower, "retained separately")) {
 			t.Fatalf("%s output omitted the evidence-complete/grouping-incomplete boundary:\n%s", name, output)
 		}
 		if strings.Contains(lower, "no unsynthesized model conclusions were retained") {
@@ -364,8 +370,8 @@ func TestConciseMarkdownSeparatesSavedSuggestedAndUngroupedAIUses(t *testing.T) 
 	for _, expected := range []string{
 		"## AI functionality found", "Confirmed scope", "Confirmed generation", "runtime/\\*\\*",
 		"Optional draft", "Draft ranking", "ranking/\\*\\*",
-		"Suggested — AI workflow", "Suggested assistant", "assistant.go:12",
-		"Additional provider or configuration references", "1 underlying signal(s) are retained in `latest.json`",
+		"Inferred from code — AI workflow", "Suggested assistant", "assistant.go:12",
+		"Other AI provider or configuration references", "1 underlying code reference(s) are retained in `latest.json`",
 		"## What code cannot determine",
 	} {
 		if !strings.Contains(output.String(), expected) {
@@ -436,7 +442,7 @@ func TestConciseMarkdownOptionalAIUseGroupingDoesNotChangeCleanOutcome(t *testin
 	if !strings.Contains(output.String(), "**Scan completed — no urgent code changes identified**") {
 		t.Fatalf("optional AI-use organization changed the scan outcome:\n%s", output.String())
 	}
-	if !strings.Contains(output.String(), "AI-reviewed code controls: **no decisions returned**") {
+	if !strings.Contains(output.String(), "Safeguards assessed from code: **none**") {
 		t.Fatalf("empty completed review was not described honestly:\n%s", output.String())
 	}
 	if strings.Contains(output.String(), "| **Review** |") {
@@ -479,15 +485,15 @@ func TestDeveloperReportSeparatesTechnicalFollowUpFromLegalApplicability(t *test
 	text := output.String()
 	for _, expected := range []string{
 		"**Scan completed — technical follow-up recommended**",
-		"High/medium code findings: **0**",
-		"Recommended developer follow-ups: **4**",
+		"Direct code problems found by automated rules: **0**",
+		"Developer actions: **4**",
 		"What code cannot determine",
 		"Missing: Adversarial-input tests",
 		"Missing: Retry-exhaustion test",
 		"| safe-stop | Could not determine from the reviewed code",
-		"| Suggested — AI workflow | Repository technical review |",
-		"| Suggested — Supporting infrastructure | Remote model inference adapters |",
-		"| Suggested — Evaluation/test tooling | Repository benchmark evaluation |",
+		"| Inferred from code — AI workflow | Repository technical review |",
+		"| Inferred from code — Supporting infrastructure | Remote model inference adapters |",
+		"| Inferred from code — Evaluation/test tooling | Repository benchmark evaluation |",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Errorf("developer report missing %q:\n%s", expected, text)
@@ -578,8 +584,8 @@ func TestConciseMarkdownAndTerminalMapRequirementsPerConfirmedAIUse(t *testing.T
 	}
 	for _, expected := range []string{
 		"### Checks within confirmed AI uses", "Support answer generation",
-		"Human review gate", "Partially implemented in the reviewed code", "apps/support/review.go:12",
-		"Unlinked classifier", "Safe stop", "No matching code signal found in this use's saved paths",
+		"Human review gate", "Implementation incomplete in the reviewed code", "apps/support/review.go:12",
+		"Unlinked classifier", "Safe stop", "No matching code evidence found in this use's saved paths",
 		"AI use has no configured system context", "Which configured system contains the AI use Unlinked classifier?",
 		"Repository-level, not assigned to one confirmed AI use: Safe stop", "shared/stop.go:7",
 		"Support answer generation: Is human review enforced?",
@@ -602,7 +608,7 @@ func TestConciseMarkdownAndTerminalMapRequirementsPerConfirmedAIUse(t *testing.T
 		t.Fatal(err)
 	}
 	if !strings.Contains(terminal.String(), "Per-use safeguard detail (optional scope refinement): 2 confirmed AI use(s), 2 framework/system context(s)") ||
-		!strings.Contains(terminal.String(), "Analysis: deterministic checks + completed AI code review") ||
+		!strings.Contains(terminal.String(), "Analysis: local code checks and AI code review completed") ||
 		!strings.Contains(terminal.String(), "Support answer generation: 1 likely-required check(s)") ||
 		!strings.Contains(terminal.String(), "Unlinked classifier: 0 likely-required check(s)") ||
 		!strings.Contains(terminal.String(), "no system association (context needed)") {
@@ -711,12 +717,12 @@ func TestPerUseActionsRespectApplicabilityBeforeAIImplementationVerdict(t *testi
 	if action, include = developerUseObjectiveAction(use, association, objective); include {
 		t.Fatalf("substantiated bounded investigation became an action: %#v", action)
 	}
-	if result := developerUseCodeResult(objective); !strings.Contains(result, "substantiated by the bounded AI evidence review") {
+	if result := developerUseCodeResult(objective); !strings.Contains(result, "demonstrated by the AI code review") {
 		t.Fatalf("bounded investigation result = %q", result)
 	}
 	objective.Investigation.Conclusion = providers.ConclusionNotFoundAfterInvestigation
 	action, include = developerUseObjectiveAction(use, association, objective)
-	if !include || action.priority != "High" || !strings.Contains(action.why, "No implementation was found") {
+	if !include || action.priority != "High" || !strings.Contains(action.why, "No implementation found") {
 		t.Fatalf("negative bounded investigation action = %#v, %v", action, include)
 	}
 
@@ -809,8 +815,8 @@ func TestConciseRepositoryAccountingDistinguishesFreshAndCachedRuns(t *testing.T
 			t.Fatal(err)
 		}
 		for _, expected := range []string{
-			"Repository review provider/model: **Google Gemini / `gemini-test`**",
-			"Repository review accounting: **17 provider request(s) in this run; 13 distinct source batch(es) started, 13 of 13 validated**",
+			"AI review provider and model: **Google Gemini / `gemini-test`**",
+			"AI review activity: **17 model call(s) in this run; 13 code batch(es) started, 13 of 13 reviewed successfully**",
 		} {
 			if !strings.Contains(output.String(), expected) {
 				t.Errorf("fresh concise report missing %q:\n%s", expected, output.String())
@@ -829,7 +835,7 @@ func TestConciseRepositoryAccountingDistinguishesFreshAndCachedRuns(t *testing.T
 			t.Fatal(err)
 		}
 		for _, expected := range []string{
-			"Repository review accounting: **cached review used 17 provider request(s); 13 distinct source batch(es) started, 13 of 13 validated; current run sent no repository source**",
+			"AI review activity: **cached result originally used 17 model call(s); 13 code batch(es) started, 13 of 13 reviewed successfully; current run sent no repository code**",
 			"Current-run compatibility accounting (source-free): **This scan made 2 live source-free model compatibility request(s)",
 		} {
 			if !strings.Contains(output.String(), expected) {
@@ -910,7 +916,7 @@ func TestNoStructuralCandidateDoesNotReadAsModelDerivedZeroUse(t *testing.T) {
 	if err := WriteMarkdown(&concise, value); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"no structural AI code candidate selected", "no source review run", "no model-derived zero-use conclusion was made"} {
+	for _, expected := range []string{"no relevant AI code selected for model review", "not run — ComplyScan found no relevant AI code to send for review", "sent no repository code to a model", "does not prove that the repository contains no AI activity"} {
 		if !strings.Contains(concise.String(), expected) {
 			t.Errorf("concise no-candidate report missing %q:\n%s", expected, concise.String())
 		}
@@ -1073,7 +1079,7 @@ func TestWriteTerminalConciseCompletionSummarizesWithoutEvidenceDump(t *testing.
 	if err := WriteTerminalConciseCompletion(&output, value); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"Scan complete: 1 potential issue", "Analysis: deterministic checks + bounded AI safeguard review", "AI inventory: 3 component", "AI-use organization (optional): 1 confirmed, 2 draft, 0 retired; 3 model-suggested; 4 other AI-related code signal", "Applicability context: Example — incomplete", "unresolved fact(s); requirement mapping is provisional", "Code safeguards checked: 7 total", "Requirement screening: 5 likely required", "3/4 technical target", "Use --verbose"} {
+	for _, expected := range []string{"Scan complete: 1 potential issue", "Analysis: local code checks and focused AI safeguard review completed", "AI inventory: 3 component", "AI-use organization (optional): 1 confirmed, 2 draft, 0 retired; 3 model-suggested; 4 other AI-related code signal", "Applicability context: Example — incomplete", "unresolved fact(s); requirement mapping is provisional", "Code safeguards checked: 7 total", "Requirement screening: 5 likely required", "3/4 technical target", "Use --verbose"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("concise completion missing %q:\n%s", expected, output.String())
 		}

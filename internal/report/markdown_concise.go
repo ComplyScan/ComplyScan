@@ -106,11 +106,11 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report, evidenceBundle
 	if err := writeDeveloperQuestionsMarkdown(writer, view); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(writer, "\n## Scan coverage\n\n- Source files checked: **%d of %d**", view.filesIndexed, view.sourceFilesSeen); err != nil {
+	if _, err := fmt.Fprintf(writer, "\n## Scan coverage\n\n- Files checked by the local scanner: **%d of %d**\n", view.filesIndexed, view.sourceFilesSeen); err != nil {
 		return err
 	}
 	if view.unsupportedFiles > 0 {
-		if _, err := fmt.Fprintf(writer, " (%d potentially relevant unsupported)", view.unsupportedFiles); err != nil {
+		if _, err := fmt.Fprintf(writer, "- Potentially relevant files that could not be analyzed: **%d**\n", view.unsupportedFiles); err != nil {
 			return err
 		}
 	}
@@ -118,37 +118,53 @@ func writeDeveloperReportMarkdown(writer io.Writer, value Report, evidenceBundle
 	if developerRepositoryAnalysisIncomplete(value) && attentionParts == 0 {
 		attentionParts = 1
 	}
-	if _, err := fmt.Fprintf(writer, "\n- Repository AI review: **%s**\n- Scan warnings: **%d**\n",
-		markdownText(view.repositoryAnalysis), attentionParts); err != nil {
+	if _, err := fmt.Fprintf(writer, "- AI code review coverage: **%s**\n", markdownText(view.repositoryAnalysis)); err != nil {
 		return err
+	}
+	if attentionParts > 0 {
+		if _, err := fmt.Fprintf(writer, "- Scan warnings requiring attention: **%d**\n", attentionParts); err != nil {
+			return err
+		}
 	}
 	if value.RepositoryAnalysis != nil {
 		analysis := value.RepositoryAnalysis
-		if analysis.Provider != providers.None || strings.TrimSpace(analysis.Model) != "" {
-			if _, err := fmt.Fprintf(writer, "- Repository review provider/model: **%s / %s**\n",
+		providerSet := analysis.Provider != "" && analysis.Provider != providers.None
+		modelSet := strings.TrimSpace(analysis.Model) != ""
+		if providerSet && modelSet {
+			if _, err := fmt.Fprintf(writer, "- AI review provider and model: **%s / %s**\n",
 				markdownText(providerDisplayName(analysis.Provider)), inlineCode(analysis.Model)); err != nil {
 				return err
 			}
+		} else if providerSet {
+			if _, err := fmt.Fprintf(writer, "- AI review provider: **%s**\n", markdownText(providerDisplayName(analysis.Provider))); err != nil {
+				return err
+			}
+		} else if modelSet {
+			if _, err := fmt.Fprintf(writer, "- AI review model: **%s**\n", inlineCode(analysis.Model)); err != nil {
+				return err
+			}
 		}
-		accounting := fmt.Sprintf("%d provider request(s) in this run", analysis.Coverage.ProviderRequests)
+		accounting := fmt.Sprintf("%d model call(s) in this run", analysis.Coverage.ProviderRequests)
 		if analysis.CacheHit {
-			accounting = fmt.Sprintf("cached review used %d provider request(s); current run sent no repository source", analysis.Coverage.ProviderRequests)
+			accounting = fmt.Sprintf("cached result originally used %d model call(s); current run sent no repository code", analysis.Coverage.ProviderRequests)
 		}
 		if analysis.Coverage.SourceBatchesTotal > 0 {
-			batchCoverage := fmt.Sprintf("%d distinct source batch(es) started, %d of %d validated",
+			batchCoverage := fmt.Sprintf("%d code batch(es) started, %d of %d reviewed successfully",
 				analysis.Coverage.SourceBatchesStarted, analysis.Coverage.SourceBatchesCompleted, analysis.Coverage.SourceBatchesTotal)
 			if analysis.CacheHit {
-				accounting = fmt.Sprintf("cached review used %d provider request(s); %s; current run sent no repository source",
+				accounting = fmt.Sprintf("cached result originally used %d model call(s); %s; current run sent no repository code",
 					analysis.Coverage.ProviderRequests, batchCoverage)
 			} else {
 				accounting += "; " + batchCoverage
 			}
 		}
-		if _, err := fmt.Fprintf(writer, "- Repository review accounting: **%s**\n", markdownText(accounting)); err != nil {
-			return err
+		if analysis.Coverage.ProviderRequests > 0 || analysis.Coverage.SourceBatchesTotal > 0 || analysis.CacheHit {
+			if _, err := fmt.Fprintf(writer, "- AI review activity: **%s**\n", markdownText(accounting)); err != nil {
+				return err
+			}
 		}
 		if analysis.Coverage.GroupingStatus == providers.RepositoryGroupingIncomplete {
-			if _, err := fmt.Fprintln(writer, "- AI-use organization: **global grouping did not complete; every validated technical observation was retained separately**"); err != nil {
+			if _, err := fmt.Fprintln(writer, "- AI function grouping: **incomplete; every reviewed observation remains available separately**"); err != nil {
 				return err
 			}
 		}
@@ -213,7 +229,7 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 				continue
 			}
 			addAction("ai-uses/retired/"+observed.Use.ID, developerAction{
-				priority: "Review", issue: "Current signals match retired AI use: " + observed.Use.Name,
+				priority: "Review", issue: "Current code matches retired AI use: " + observed.Use.Name,
 				why:      "A retired register entry still matches repository evidence in this scan.",
 				next:     "Check whether the use was reactivated or whether its saved repository paths need updating.",
 				evidence: strings.Join(observed.Use.Paths, ", "),
@@ -313,12 +329,12 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 			if verdict == providers.RepositoryVerdictImplemented {
 				continue
 			}
-			why := developerVerdictLabel(verdict) + ". " + compactMarkdownText(observation.Rationale, 150)
+			why := developerVerdictLabel(verdict) + ". " + compactMarkdownText(observation.Rationale, 220)
 			next := developerObjectiveNextStep(observation, view.evidenceBundle)
 			frameworkContext := objectiveFrameworks[observation.ObjectiveID]
 			addAction("objective/"+observation.SystemID+"/"+rawID, developerAction{
 				priority: "Review", issue: developerFrameworkActionIssue(developerObjectiveTitle(rawID, objectiveTitles), frameworkContext.name, frameworkContext.sourceReference),
-				why: compactMarkdownText(why, 240), next: compactMarkdownText(next, 220),
+				why: compactMarkdownText(why, 320), next: compactMarkdownText(next, 260),
 				evidence: developerCitationText(observation.SupportingEvidence), control: true,
 			})
 		}
@@ -350,7 +366,7 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 	if developerRepositoryAnalysisIncomplete(value) && len(value.Warnings) == 0 {
 		addAction("repository-analysis-incomplete", developerAction{
 			priority: "Review", issue: "AI code review incomplete",
-			why:  "No globally synthesized model conclusion was retained; deterministic scan results remain available.",
+			why:  "The AI review stopped before producing a final combined conclusion. Local scan results remain available.",
 			next: "Rerun the scan after checking provider availability and limits before relying on the AI review layer.", evidence: "Repository AI review",
 		})
 	}
@@ -369,7 +385,7 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 	case developerHasUrgentAction(view.actions):
 		view.outcome = "Action required"
 	case developerRepositoryAnalysisIncomplete(value):
-		view.outcome = "Scan incomplete — deterministic results remain available"
+		view.outcome = "Scan incomplete — local results remain available"
 	case view.controlsToReview > 0:
 		view.outcome = "Scan completed — technical follow-up recommended"
 	case view.actionTotal > 0:
@@ -381,31 +397,31 @@ func buildDeveloperReportView(value Report, evidenceBundle string) developerRepo
 }
 
 func writeDeveloperOutcomeMarkdown(writer io.Writer, value Report, view developerReportView) error {
-	if _, err := fmt.Fprintf(writer, "\n## Result\n\n**%s**\n\n- High/medium code findings: **%d**\n",
+	if _, err := fmt.Fprintf(writer, "\n## Result\n\n**%s**\n\n- Direct code problems found by automated rules: **%d**\n",
 		view.outcome, view.importantRisks); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(writer, "- Scan status: **%s**\n", developerAnalysisSummaryLabel(value)); err != nil {
+	if _, err := fmt.Fprintf(writer, "- Review performed: **%s**\n", developerAnalysisSummaryLabel(value)); err != nil {
 		return err
 	}
 	if inventorySummary := developerAIInventorySummary(value); inventorySummary != "" {
-		if _, err := fmt.Fprintf(writer, "- AI functionality found: **%s**\n", markdownText(inventorySummary)); err != nil {
+		if _, err := fmt.Fprintf(writer, "- AI functionality: **%s**\n", markdownText(inventorySummary)); err != nil {
 			return err
 		}
 	}
 	if value.RepositoryAnalysis != nil || view.implemented+view.partial+view.notImplemented+view.cannotDetermine > 0 {
 		if view.implemented+view.partial+view.notImplemented+view.cannotDetermine == 0 {
-			if _, err := fmt.Fprintln(writer, "- AI-reviewed code controls: **no decisions returned**"); err != nil {
+			if _, err := fmt.Fprintln(writer, "- Safeguards assessed from code: **none**"); err != nil {
 				return err
 			}
 		} else {
-			if _, err := fmt.Fprintf(writer, "- AI-reviewed code controls: **%d demonstrated, %d partial, %d not demonstrated, %d unclear**\n",
+			if _, err := fmt.Fprintf(writer, "- Safeguards assessed from code: **%d demonstrated, %d incomplete, %d not demonstrated, %d unclear**\n",
 				view.implemented, view.partial, view.notImplemented, view.cannotDetermine); err != nil {
 				return err
 			}
 		}
 	}
-	_, err := fmt.Fprintf(writer, "- Recommended developer follow-ups: **%d**\n", view.actionTotal)
+	_, err := fmt.Fprintf(writer, "- Developer actions: **%d**\n", view.actionTotal)
 	return err
 }
 
@@ -416,11 +432,11 @@ func writeDeveloperFrameworkAssessmentMarkdown(writer io.Writer, view developerR
 	if _, err := fmt.Fprintln(writer, "\n## Framework technical assessment"); err != nil {
 		return false, err
 	}
-	if _, err := fmt.Fprintln(writer, "\nThis maps selected framework areas to repository evidence. A signal is not proof that a safeguard works, and no signal is not proof that an implementation is absent. Code conclusions do not decide whether a provision legally applies or whether the product complies."); err != nil {
+	if _, err := fmt.Fprintln(writer, "\nThis shows where the repository contains code evidence relevant to the selected frameworks. It does not decide whether a framework applies or whether the product complies. ‘No code evidence found’ means only that ComplyScan did not locate it in the reviewed repository."); err != nil {
 		return false, err
 	}
 	if len(view.frameworkCoverage) > 0 {
-		if _, err := fmt.Fprintln(writer, "\n| Framework | Technical areas (signals / checks) | Code signals found | No matching signal | Not fully checked |\n|---|---|---:|---:|---:|"); err != nil {
+		if _, err := fmt.Fprintln(writer, "\n| Selected framework | Areas checked | Checks with code evidence | Checks without code evidence | Could not check |\n|---|---|---:|---:|---:|"); err != nil {
 			return false, err
 		}
 		for _, coverage := range view.frameworkCoverage {
@@ -435,16 +451,16 @@ func writeDeveloperFrameworkAssessmentMarkdown(writer io.Writer, view developerR
 		}
 	}
 	if len(view.evidence) > 0 {
-		if _, err := fmt.Fprintln(writer, "\n### Key code-control results\n\n| Framework area / code control | Code-level conclusion | Key evidence | Next step |\n|---|---|---|---|"); err != nil {
+		if _, err := fmt.Fprintln(writer, "\n### Most important safeguard results\n\n| Framework area and safeguard | What the reviewed code shows | Key evidence | Developer next step |\n|---|---|---|---|"); err != nil {
 			return false, err
 		}
 		for _, evidence := range view.evidence {
 			result := developerVerdictLabel(evidence.verdict)
 			assessment := strings.ToLower(evidence.assessment)
 			if strings.Contains(assessment, "did not evaluate") {
-				result = "Code signal found; not fully reviewed"
-			} else if strings.Contains(assessment, "ai-assisted analysis") {
-				result = "Code signal found; AI review not run"
+				result = "Possible matching code found; not fully reviewed"
+			} else if strings.Contains(assessment, "ai-assisted analysis") || strings.Contains(assessment, "ai review to assess") {
+				result = "Possible matching code found; AI review not run"
 			}
 			control := developerPlainLanguage(evidence.title)
 			if evidence.framework != "" {
@@ -487,7 +503,7 @@ func developerAIInventorySummary(value Report) string {
 		suggested = len(value.RepositoryAnalysis.Result.AIUses)
 	}
 	if suggested > 0 {
-		parts = append(parts, fmt.Sprintf("%d suggested from reviewed code", suggested))
+		parts = append(parts, fmt.Sprintf("%d inferred from reviewed code", suggested))
 	}
 	if len(parts) == 0 {
 		return ""
@@ -519,7 +535,7 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 		return err
 	}
 	if value.RepositoryAnalysis != nil && value.RepositoryAnalysis.Coverage.GroupingStatus == providers.RepositoryGroupingIncomplete {
-		if _, err := fmt.Fprintln(writer, "\n> Global grouping did not complete. The validated entries below remain usable, but some may describe the same workflow."); err != nil {
+		if _, err := fmt.Fprintln(writer, "\n> ComplyScan could not combine the reviewed observations into final AI functions. The entries below remain usable, but some may describe the same workflow."); err != nil {
 			return err
 		}
 	}
@@ -552,14 +568,14 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 			}
 		}
 		for _, suggestion := range value.AIUseInventory.Suggested {
-			status := "Suggested — " + developerAIUseCategory(suggestion.Name, suggestion.Purpose)
+			status := "Inferred from code — " + developerAIUseCategory(suggestion.Name, suggestion.Purpose)
 			if err := writeRow(status, suggestion.Name, suggestion.Purpose, developerCitationText(suggestion.Evidence)); err != nil {
 				return err
 			}
 		}
 	} else if value.RepositoryAnalysis != nil && len(value.RepositoryAnalysis.Result.AIUses) > 0 {
 		for _, suggestion := range value.RepositoryAnalysis.Result.AIUses {
-			status := "Suggested — " + developerAIUseCategory(suggestion.Name, suggestion.Purpose)
+			status := "Inferred from code — " + developerAIUseCategory(suggestion.Name, suggestion.Purpose)
 			if err := writeRow(status, suggestion.Name, suggestion.Purpose, developerCitationText(suggestion.Evidence)); err != nil {
 				return err
 			}
@@ -586,9 +602,9 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 	if len(integrationSignals) > 0 {
 		signalDetail := ""
 		if value.AIUseInventory != nil && len(value.AIUseInventory.UngroupedSignals) > 0 {
-			signalDetail = fmt.Sprintf("; %d underlying signal(s) are retained in %s", len(value.AIUseInventory.UngroupedSignals), inlineCode(view.evidenceBundle))
+			signalDetail = fmt.Sprintf("; %d underlying code reference(s) are retained in %s", len(value.AIUseInventory.UngroupedSignals), inlineCode(view.evidenceBundle))
 		}
-		if _, err := fmt.Fprintf(writer, "\nAdditional provider or configuration references: **%s**%s. They are not treated as separate deployed AI functions.\n",
+		if _, err := fmt.Fprintf(writer, "\nOther AI provider or configuration references: **%s**%s. These references alone do not show that a separate AI function is deployed.\n",
 			markdownText(strings.Join(integrationSignals, ", ")), signalDetail); err != nil {
 			return err
 		}
@@ -599,9 +615,9 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 		}
 	}
 	if developerRepositoryAnalysisIncomplete(value) {
-		detail := "The deterministic scan completed, but the AI code review did not finish. Deterministic findings remain valid; no unsynthesized model conclusions were retained."
+		detail := "The local code checks completed, but the AI code review did not finish. Local findings remain valid, and no unchecked model conclusions were included."
 		if value.RepositoryAnalysis != nil && value.RepositoryAnalysis.Coverage.SourceBatchesTotal > 0 {
-			detail = fmt.Sprintf("The AI code review did not finish: %d source batch(es) started and %d of %d validated. No unsynthesized model conclusions were retained.", value.RepositoryAnalysis.Coverage.SourceBatchesStarted, value.RepositoryAnalysis.Coverage.SourceBatchesCompleted, value.RepositoryAnalysis.Coverage.SourceBatchesTotal)
+			detail = fmt.Sprintf("The AI code review did not finish: %d code batch(es) started and %d of %d were reviewed successfully. No unchecked model conclusions were included.", value.RepositoryAnalysis.Coverage.SourceBatchesStarted, value.RepositoryAnalysis.Coverage.SourceBatchesCompleted, value.RepositoryAnalysis.Coverage.SourceBatchesTotal)
 		}
 		if _, err := fmt.Fprintln(writer, "\n"+detail); err != nil {
 			return err
@@ -611,11 +627,11 @@ func writeDeveloperAIUsesMarkdown(writer io.Writer, value Report, view developer
 			return err
 		}
 	} else if value.RepositoryAnalysis == nil {
-		if _, err := fmt.Fprintln(writer, "\nThis scan used deterministic checks only. No model assessed how the matched code works."); err != nil {
+		if _, err := fmt.Fprintln(writer, "\nThis scan used local code checks only. No model reviewed how the matched code works."); err != nil {
 			return err
 		}
 	} else if developerRepositoryAnalysisNoCandidate(value) {
-		if _, err := fmt.Fprintln(writer, "\nLocal selection found no structural AI code candidate selected for review, so no repository source was sent and no model-derived zero-use conclusion was made."); err != nil {
+		if _, err := fmt.Fprintln(writer, "\nComplyScan found no relevant AI code to review, so it sent no repository code to a model. This does not prove that the repository contains no AI activity."); err != nil {
 			return err
 		}
 	} else if value.AIUseInventory == nil && len(value.RepositoryAnalysis.Result.AIUses) == 0 {
@@ -807,11 +823,11 @@ func writeDeveloperAIUseMappingsMarkdown(writer io.Writer, value Report, evidenc
 		return nil
 	}
 	if !sectionStarted {
-		if _, err := fmt.Fprintln(writer, "\n## Framework technical assessment\n\nThis maps selected framework areas to repository evidence. A signal is not proof that a safeguard works, and no signal is not proof that an implementation is absent. Code conclusions do not decide whether a provision legally applies or whether the product complies."); err != nil {
+		if _, err := fmt.Fprintln(writer, "\n## Framework technical assessment\n\nThis shows where the repository contains code evidence relevant to the selected frameworks. It does not decide whether a framework applies or whether the product complies. ‘No code evidence found’ means only that ComplyScan did not locate it in the reviewed repository."); err != nil {
 			return err
 		}
 	}
-	if _, err := fmt.Fprintln(writer, "\n### Checks within confirmed AI uses\n\n| AI use | Framework area / code control | Result | Evidence |\n|---|---|---|---|"); err != nil {
+	if _, err := fmt.Fprintln(writer, "\n### Checks within confirmed AI uses\n\n| AI use | Framework area and safeguard | Result | Evidence |\n|---|---|---|---|"); err != nil {
 		return err
 	}
 	visible := entries
@@ -921,31 +937,31 @@ func developerUseCodeResult(value usemapping.ObjectiveResult) string {
 	if value.Investigation != nil {
 		switch value.Investigation.Conclusion {
 		case providers.ConclusionSubstantiated:
-			return "Implementation substantiated by the bounded AI evidence review"
+			return "Implementation demonstrated by the AI code review"
 		case providers.ConclusionPartial:
-			return "Only a partial implementation was substantiated by the bounded AI evidence review"
+			return "Implementation incomplete in the reviewed code"
 		case providers.ConclusionTestOnly:
-			return "Implementation evidence was found only in test code"
+			return "Implementation evidence found only in test code"
 		case providers.ConclusionUnreachable:
-			return "The matching implementation appears unreachable from production code"
+			return "Matching implementation appears unreachable from production code"
 		case providers.ConclusionNotSubstantiated:
-			return "The bounded AI evidence review did not substantiate the implementation"
+			return "Implementation not demonstrated by the AI code review"
 		case providers.ConclusionNotFoundAfterInvestigation:
-			return "No implementation was found in the bounded AI evidence search"
+			return "No implementation found in the reviewed code"
 		default:
-			return "The bounded AI evidence review could not determine the implementation state"
+			return "AI code review could not determine the implementation state"
 		}
 	}
 	switch value.Evidence {
 	case framework.ObjectiveCandidate:
-		return "Matching code signal found; run an AI review for a code-level implementation decision"
+		return "Possible matching code found; run an AI review to assess the implementation"
 	case framework.ObjectiveNotEvaluated:
 		return "Could not fully evaluate this use's code scope"
 	default:
 		if len(value.EvidenceOutsideUse) > 0 {
-			return "No matching code signal inside the saved paths; related signal found elsewhere in the repository"
+			return "No matching code evidence inside the saved paths; related code found elsewhere in the repository"
 		}
-		return "No matching code signal found in this use's saved paths"
+		return "No matching code evidence found in this use's saved paths"
 	}
 }
 
@@ -1057,10 +1073,10 @@ func developerUseObjectiveAction(use usemapping.UseResult, association usemappin
 		}, true
 	}
 	if objective.Mapping == reconciliation.MappingRequirementWithoutEvidence {
-		why := "The declared system context indicates this safeguard is likely required, but no matching signal was found inside this AI use's saved paths."
+		why := "The declared system context indicates this safeguard is likely required, but no matching code evidence was found inside this AI use's saved paths."
 		next := "Confirm the use scope and implement the safeguard if applicable; an explicit AI review can then assess the code-level implementation."
 		if len(objective.EvidenceOutsideUse) > 0 {
-			why = "The declared system context indicates this safeguard is likely required. A related signal exists elsewhere in the repository, but not inside this AI use's saved paths."
+			why = "The declared system context indicates this safeguard is likely required. Related code exists elsewhere in the repository, but not inside this AI use's saved paths."
 			next = "Check whether the outside code is shared by this AI use. If it is, add that path to the use scope; otherwise implement the safeguard for this use."
 		}
 		return developerAction{
@@ -1070,10 +1086,10 @@ func developerUseObjectiveAction(use usemapping.UseResult, association usemappin
 		}, true
 	}
 	if objective.Mapping == reconciliation.MappingRecommendedWithoutEvidence {
-		why := "The selected voluntary framework recommends this safeguard, but no matching signal was found inside this AI use's saved paths."
+		why := "The selected voluntary framework recommends this safeguard, but no matching code evidence was found inside this AI use's saved paths."
 		next := "Decide whether to implement the practice for this AI use and document that decision."
 		if len(objective.EvidenceOutsideUse) > 0 {
-			why = "The selected voluntary framework recommends this safeguard. A related signal exists elsewhere in the repository, but not inside this AI use's saved paths."
+			why = "The selected voluntary framework recommends this safeguard. Related code exists elsewhere in the repository, but not inside this AI use's saved paths."
 			next = "Check whether the outside code is shared by this AI use. If it is, add that path to the use scope; otherwise decide whether to implement the practice here."
 		}
 		return developerAction{
@@ -1085,7 +1101,7 @@ func developerUseObjectiveAction(use usemapping.UseResult, association usemappin
 	if objective.Mapping == reconciliation.MappingRequirementWithEvidence || objective.Mapping == reconciliation.MappingRecommendedWithEvidence {
 		return developerAction{
 			priority: "Review", issue: context + ": verify " + objective.Title,
-			why:  "A local code signal was found inside this AI use, but no use-scoped AI implementation decision is available.",
+			why:  "Possible matching code was found inside this AI use, but no use-specific implementation assessment is available.",
 			next: "Rerun `complyscan scan` with AI-assisted analysis configured to obtain a code-level decision.", evidence: evidence, control: true,
 		}, true
 	}
@@ -1106,7 +1122,7 @@ func developerUseInvestigationAction(context string, objective usemapping.Object
 	if objective.Requirement == reconciliation.RequirementRecommended {
 		why = "The selected voluntary framework recommends this safeguard. " + why
 	}
-	next := "Review the bounded investigation details in the evidence bundle, address the missing implementation or evidence, and rerun `complyscan scan`."
+	next := "Review the investigation details in the evidence bundle, address the missing implementation or evidence, and rerun `complyscan scan`."
 	return developerAction{
 		priority: priority, issue: context + ": " + objective.Title,
 		why: why, next: next, evidence: evidence, control: true,
@@ -1118,12 +1134,12 @@ func developerAIUseObservationLabel(status aiuse.ObservationStatus, changedScope
 	case aiuse.ObservationModelReviewed:
 		return "Matched by the completed AI review"
 	case aiuse.ObservationTechnicalSignal:
-		return "Matching local technical signal found"
+		return "Possible matching code found"
 	default:
 		if changedScope {
 			return "Not reviewed in this change-focused run"
 		}
-		return "No matching signal was observed in this scan"
+		return "No matching code evidence found in this scan"
 	}
 }
 
@@ -1379,9 +1395,9 @@ func developerFrameworkCoverageRows(value Report) []developerFrameworkCoverage {
 				areas = append(areas, area)
 				continue
 			}
-			label := fmt.Sprintf("%s: %d/%d signal(s)", area, count.evidence, count.total)
+			label := fmt.Sprintf("%s: code evidence for %d of %d checks", area, count.evidence, count.total)
 			if count.notEvaluated > 0 {
-				label += fmt.Sprintf(", %d not fully checked", count.notEvaluated)
+				label += fmt.Sprintf(", %d could not be checked", count.notEvaluated)
 			}
 			areas = append(areas, label)
 		}
@@ -1516,12 +1532,12 @@ func developerSupportingEvidence(value Report, titles map[string]string) ([]deve
 				}
 			} else if value.RepositoryAnalysis != nil {
 				item.verdict = providers.RepositoryVerdictCannotDetermine
-				item.assessment = "The deterministic scanner found a code match, but the AI review did not evaluate this safeguard"
+				item.assessment = "The local scanner found possible matching code, but the AI review did not evaluate this safeguard"
 				item.followUp = "Review the complete implementation path or include the missing connected code in a later scan"
 			} else {
 				item.verdict = providers.RepositoryVerdictCannotDetermine
-				item.assessment = "A code match was found; rerun `complyscan scan` with AI-assisted analysis for a code-level decision"
-				item.followUp = "Run AI-assisted code review before treating this signal as an implemented safeguard"
+				item.assessment = "Possible matching code was found; rerun `complyscan scan` with AI review to assess the implementation"
+				item.followUp = "Run AI-assisted code review before treating this code as an implemented safeguard"
 			}
 			add(objective.ID, item)
 		}
@@ -1629,7 +1645,7 @@ func developerUseReviewedVerdict(objective usemapping.ObjectiveResult) (provider
 
 func developerVerdictAssessment(observation providers.RepositoryObjectiveObservation) string {
 	assessment := developerVerdictLabel(observation.DerivedTechnicalVerdict())
-	if rationale := compactMarkdownText(observation.Rationale, 150); rationale != "" {
+	if rationale := compactMarkdownText(observation.Rationale, 220); rationale != "" {
 		assessment += ". " + rationale
 	}
 	return assessment
@@ -1649,9 +1665,9 @@ func developerObjectiveNextStep(observation providers.RepositoryObjectiveObserva
 	switch observation.DerivedTechnicalVerdict() {
 	case providers.RepositoryVerdictNotImplemented:
 		if followUp == "" {
-			return "Implement the control in the cited code path and add a regression test, then rerun the scan"
+			return "Confirm that this safeguard applies. If it does, implement it in the cited code path and add a regression test, then rerun the scan"
 		}
-		return "Implement the missing control or point ComplyScan to it, then rerun the scan. Missing: " + followUp
+		return "Confirm that this safeguard applies. If it does, implement it or point ComplyScan to the existing code, then rerun the scan. Missing evidence: " + followUp
 	case providers.RepositoryVerdictCannotDetermine:
 		if followUp == "" {
 			return "Add or point ComplyScan to a test that proves the behavior in the cited code path, then rerun the scan"
@@ -1689,7 +1705,7 @@ func developerObservationFollowUp(observation providers.RepositoryObjectiveObser
 	case providers.RepositoryVerdictPartial:
 		return "Review the remaining paths and conditions not demonstrated by the cited code"
 	case providers.RepositoryVerdictNotImplemented:
-		return "No supporting implementation was demonstrated in the reviewed code"
+		return "Confirm whether this safeguard applies; if it does, implement it or point ComplyScan to the existing code"
 	default:
 		return "Provide the connected implementation or ownership context needed for a decision"
 	}
@@ -1717,11 +1733,11 @@ func developerListPreview(values []string, maximum int) string {
 func developerVerdictLabel(verdict providers.RepositoryTechnicalVerdict) string {
 	switch verdict {
 	case providers.RepositoryVerdictImplemented:
-		return "Implemented in the reviewed code"
+		return "Implementation demonstrated in the reviewed code"
 	case providers.RepositoryVerdictPartial:
-		return "Partially implemented in the reviewed code"
+		return "Implementation incomplete in the reviewed code"
 	case providers.RepositoryVerdictNotImplemented:
-		return "Not implemented in the reviewed code"
+		return "Implementation not demonstrated in the reviewed code"
 	default:
 		return "Could not determine from the reviewed code"
 	}
@@ -1914,6 +1930,28 @@ func developerPlainQuestion(question string) string {
 
 func developerPlainLanguage(value string) string {
 	replacer := strings.NewReplacer(
+		"Verification of retry exhaustion and terminal fallback behavior", "Add a test showing what happens after all retries fail",
+		"verification of retry exhaustion and terminal fallback behavior", "add a test showing what happens after all retries fail",
+		"Verification that retry behavior is exercised in this flow", "Add a test that exercises the retry path",
+		"verification that retry behavior is exercised in this flow", "add a test that exercises the retry path",
+		"Evidence that evaluation failure gates release or deployment", "Add a release or deployment check that fails when evaluation fails",
+		"evidence that evaluation failure gates release or deployment", "add a release or deployment check that fails when evaluation fails",
+		"bounded retry parameters", "fixed retry limits",
+		"Bounded retry parameters", "Fixed retry limits",
+		"model output-limit failures", "model responses are too long",
+		"Model output-limit failures", "Model responses are too long",
+		"terminal exhaustion behavior", "behavior after all retries fail",
+		"Terminal exhaustion behavior", "Behavior after all retries fail",
+		"semantic evaluation tooling", "automated evaluation tooling",
+		"Semantic evaluation tooling", "Automated evaluation tooling",
+		"this excerpt", "the reviewed code",
+		"This excerpt", "The reviewed code",
+		"bounded repository evidence", "selected repository code",
+		"Bounded repository evidence", "Selected repository code",
+		"bounded AI evidence review", "AI code review",
+		"Bounded AI evidence review", "AI code review",
+		"deterministic scanner findings", "local scanner findings",
+		"Deterministic scanner findings", "Local scanner findings",
 		"No test evidence in this batch verifies retry outcomes", "Add a test that verifies retry outcomes",
 		"no test evidence in this batch verifies retry outcomes", "add a test that verifies retry outcomes",
 		"No test evidence in the reviewed code verifies retry outcomes", "Add a test that verifies retry outcomes",
@@ -2049,37 +2087,37 @@ func developerHasUrgentAction(actions []developerAction) bool {
 func repositoryAnalysisModeLabel(mode providers.RepositoryAnalysisMode) string {
 	switch mode {
 	case providers.RepositoryAnalysisTargeted:
-		return "selected structural code evidence"
+		return "relevant code selected by ComplyScan"
 	case providers.RepositoryAnalysisFull:
-		return "all repository files"
+		return "all supported repository files"
 	case providers.RepositoryAnalysisSubsystem:
-		return "grouped sections of the repository"
+		return "grouped repository sections"
 	case providers.RepositoryAnalysisSynthesis:
-		return "grouped sections of the repository"
+		return "grouped repository sections"
 	case providers.RepositoryAnalysisBoundedOnly:
-		return "focused checks only"
+		return "focused safeguard checks"
 	default:
-		return "the available repository context"
+		return "the available repository code"
 	}
 }
 
 func developerAnalysisSummaryLabel(value Report) string {
 	if developerRepositoryAnalysisIncomplete(value) {
-		return "deterministic checks complete; AI code review incomplete"
+		return "local code checks complete; AI code review incomplete"
 	}
 	if developerRepositoryAnalysisNoCandidate(value) {
-		return "deterministic checks complete; no structural AI code candidate selected"
+		return "local code checks complete; no relevant AI code selected for model review"
 	}
 	if value.RepositoryAnalysis != nil {
-		return "deterministic checks + completed AI code review"
+		return "local code checks and AI code review completed"
 	}
 	if value.RepositoryAnalysisRun == RepositoryAnalysisPending {
-		return "deterministic checks complete; AI code review still running"
+		return "local code checks complete; AI code review still running"
 	}
 	if developerHasBoundedAIReview(value) {
-		return "deterministic checks + bounded AI safeguard review"
+		return "local code checks and focused AI safeguard review completed"
 	}
-	return "deterministic checks only"
+	return "local code checks only; no AI review"
 }
 
 func developerHasBoundedAIReview(value Report) bool {
@@ -2097,15 +2135,15 @@ func developerHasBoundedAIReview(value Report) bool {
 func developerRepositoryAnalysisLabel(value Report) string {
 	if developerRepositoryAnalysisIncomplete(value) {
 		if value.RepositoryAnalysis != nil && value.RepositoryAnalysis.Coverage.SourceBatchesTotal > 0 {
-			return fmt.Sprintf("incomplete after %d source batch(es) started a provider request and %d of %d produced validated responses; deterministic results are available", value.RepositoryAnalysis.Coverage.SourceBatchesStarted, value.RepositoryAnalysis.Coverage.SourceBatchesCompleted, value.RepositoryAnalysis.Coverage.SourceBatchesTotal)
+			return fmt.Sprintf("incomplete after %d code batch(es) started and %d of %d were reviewed successfully; local scan results remain available", value.RepositoryAnalysis.Coverage.SourceBatchesStarted, value.RepositoryAnalysis.Coverage.SourceBatchesCompleted, value.RepositoryAnalysis.Coverage.SourceBatchesTotal)
 		}
 		if value.RepositoryAnalysis != nil && value.RepositoryAnalysis.Coverage.Subsystems > 0 {
-			return fmt.Sprintf("incomplete after %d bounded code batch(es); deterministic results are available", value.RepositoryAnalysis.Coverage.Subsystems)
+			return fmt.Sprintf("incomplete after %d code batch(es); local scan results remain available", value.RepositoryAnalysis.Coverage.Subsystems)
 		}
-		return "incomplete; deterministic results are available"
+		return "incomplete; local scan results remain available"
 	}
 	if developerRepositoryAnalysisNoCandidate(value) {
-		return "no source review run — no eligible structural candidate was selected"
+		return "not run — ComplyScan found no relevant AI code to send for review"
 	}
 	if value.RepositoryAnalysis != nil {
 		cacheSuffix := ""
@@ -2119,17 +2157,17 @@ func developerRepositoryAnalysisLabel(value Report) string {
 	}
 	switch value.RepositoryAnalysisRun {
 	case RepositoryAnalysisPending:
-		return "still running; deterministic results are available"
+		return "still running; local scan results remain available"
 	case RepositoryAnalysisIncomplete:
-		return "incomplete; deterministic results are available"
+		return "incomplete; local scan results remain available"
 	default:
 		if developerRepositoryAnalysisIncomplete(value) {
-			return "incomplete; deterministic results are available"
+			return "incomplete; local scan results remain available"
 		}
 		if developerHasBoundedAIReview(value) {
-			return "not run; bounded safeguard review completed"
+			return "not run; focused safeguard review completed"
 		}
-		return "not run — deterministic checks only"
+		return "not run — local code checks only"
 	}
 }
 

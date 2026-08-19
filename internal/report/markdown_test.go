@@ -166,11 +166,11 @@ func TestWriteMarkdownExplainsTestOnlyComponentsAndQuickScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"Scan status: **deterministic checks only**",
-		"Repository AI review: **not run — deterministic checks only**",
-		"This scan used deterministic checks only",
-		"Additional provider or configuration references: **OpenAI**",
-		"not treated as separate deployed AI functions",
+		"Review performed: **local code checks only; no AI review**",
+		"AI code review coverage: **not run — local code checks only**",
+		"This scan used local code checks only",
+		"Other AI provider or configuration references: **OpenAI**",
+		"These references alone do not show that a separate AI function is deployed",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
@@ -190,16 +190,16 @@ func TestWriteMarkdownDistinguishesIncompleteRepositoryReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"deterministic scan completed, but the AI code review did not finish",
-		"Scan status: **deterministic checks complete; AI code review incomplete**",
-		"Repository AI review: **incomplete; deterministic results are available**",
+		"local code checks completed, but the AI code review did not finish",
+		"Review performed: **local code checks complete; AI code review incomplete**",
+		"AI code review coverage: **incomplete; local scan results remain available**",
 		"Scan incomplete or uncertain",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("Markdown missing %q:\n%s", expected, output.String())
 		}
 	}
-	if strings.Contains(output.String(), "Repository AI review: **not run") {
+	if strings.Contains(output.String(), "AI code review coverage: **not run") {
 		t.Fatalf("incomplete review was presented as deterministic-only:\n%s", output.String())
 	}
 }
@@ -261,7 +261,7 @@ func TestWriteMarkdownPrioritizesDeveloperDecisions(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"## Result", "**Action required**", "## What to do next", "Possible secret exposure", "**Do:** Remove the credential from the request", "Human oversight",
-		"## Framework technical assessment", "### Key code-control results", "Implemented in the reviewed code", "audit.go:11", "Next step",
+		"## Framework technical assessment", "### Most important safeguard results", "Implementation demonstrated in the reviewed code", "audit.go:11", "Developer next step",
 		"## AI functionality found", "Answer generation",
 		"## What code cannot determine", "Where will this AI feature be offered or used?",
 		"## Scan coverage", "Full evidence and dashboard data: `latest.json`",
@@ -321,13 +321,13 @@ func TestWriteMarkdownMapsSelectedFrameworksToTechnicalEvidenceWithoutCompliance
 	markdown := output.String()
 	for _, expected := range []string{
 		"## Framework technical assessment",
-		"| EU AI Act technical code evidence | Article 12: 1/1 signal(s); Article 14: 0/1 signal(s) | 1 | 1 | 0 |",
-		"| NIST AI RMF technical code evidence (voluntary) | MEASURE 2.6: 1/1 signal(s); MANAGE 4.1: 0/1 signal(s), 1 not fully checked | 1 | 0 | 1 |",
+		"| EU AI Act technical code evidence | Article 12: code evidence for 1 of 1 checks; Article 14: code evidence for 0 of 1 checks | 1 | 1 | 0 |",
+		"| NIST AI RMF technical code evidence (voluntary) | MEASURE 2.6: code evidence for 1 of 1 checks; MANAGE 4.1: code evidence for 0 of 1 checks, 1 could not be checked | 1 | 0 | 1 |",
 		"Human oversight (EU AI Act technical code evidence — Article 14)",
 		"| EU AI Act technical code evidence — Article 12 — Automatic AI event logging |",
 		"| NIST AI RMF technical code evidence — MEASURE 2.6 — Robustness and safe failure |",
-		"Code signal found; AI review not run",
-		"A signal is not proof that a safeguard works",
+		"Possible matching code found; AI review not run",
+		"‘No code evidence found’ means only that ComplyScan did not locate it in the reviewed repository",
 		"Full evidence and dashboard data: `latest.json`",
 	} {
 		if !strings.Contains(markdown, expected) {
@@ -375,7 +375,7 @@ func TestDeveloperEvidenceUsesModelDecisionInsteadOfCandidateDisclaimer(t *testi
 	if total != 1 || len(items) != 1 {
 		t.Fatalf("evidence = %#v, total = %d", items, total)
 	}
-	if !strings.Contains(items[0].assessment, "Not implemented in the reviewed code") || !strings.Contains(items[0].assessment, "not AI runtime events") {
+	if !strings.Contains(items[0].assessment, "Implementation not demonstrated in the reviewed code") || !strings.Contains(items[0].assessment, "not AI runtime events") {
 		t.Fatalf("assessment = %q", items[0].assessment)
 	}
 	if strings.Contains(items[0].assessment, "person still needs") {

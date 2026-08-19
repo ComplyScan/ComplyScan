@@ -659,7 +659,11 @@ func compactMarkdownText(value string, limit int) string {
 	if len(runes) <= limit {
 		return string(runes)
 	}
-	return strings.TrimSpace(string(runes[:limit-1])) + "…"
+	prefix := strings.TrimSpace(string(runes[:limit-1]))
+	if boundary := strings.LastIndexAny(prefix, " \t\r\n"); boundary >= limit/2 {
+		prefix = strings.TrimSpace(prefix[:boundary])
+	}
+	return prefix + "…"
 }
 
 func writeOneTechnicalChecklistMarkdown(writer io.Writer, name string, evidence framework.TechnicalEvidenceReport) error {
