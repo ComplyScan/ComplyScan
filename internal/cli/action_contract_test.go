@@ -103,6 +103,45 @@ func TestGitHubActionRunsUnifiedSafeScanWithAutomaticScope(t *testing.T) {
 	}
 }
 
+func TestGitHubActionUsesMacOS26CompatibleGoToolchain(t *testing.T) {
+	data, err := os.ReadFile("../../action.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var action struct {
+		Runs struct {
+			Steps []struct {
+				Name string `yaml:"name"`
+				Uses string `yaml:"uses"`
+				With struct {
+					GoVersion     string `yaml:"go-version"`
+					GoVersionFile string `yaml:"go-version-file"`
+				} `yaml:"with"`
+			} `yaml:"steps"`
+		} `yaml:"runs"`
+	}
+	if err := yaml.Unmarshal(data, &action); err != nil {
+		t.Fatalf("parse action.yml: %v", err)
+	}
+
+	for _, step := range action.Runs.Steps {
+		if step.Name != "Set up Go" {
+			continue
+		}
+		if step.Uses != "actions/setup-go@v6" {
+			t.Fatalf("Go setup action = %q, want actions/setup-go@v6", step.Uses)
+		}
+		if step.With.GoVersion != "1.26.x" {
+			t.Fatalf("Action build Go version = %q, want macOS 26-compatible 1.26.x", step.With.GoVersion)
+		}
+		if step.With.GoVersionFile != "" {
+			t.Fatalf("Action build regressed to the module minimum via go-version-file: %q", step.With.GoVersionFile)
+		}
+		return
+	}
+	t.Fatal("Action has no Set up Go step")
+}
+
 func TestGitHubActionUploadsGeneratedSARIFBeforeEnforcingCompletion(t *testing.T) {
 	data, err := os.ReadFile("../../action.yml")
 	if err != nil {

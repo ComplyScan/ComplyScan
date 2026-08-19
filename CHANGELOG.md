@@ -41,6 +41,7 @@
 
 ### Fixed
 
+- The composite GitHub Action now builds with Go 1.26 instead of the module's Go 1.22 compatibility floor, ensuring macOS 26 binaries contain the `LC_UUID` load command required by `dyld`; the Linux CI matrix continues to verify Go 1.22 source compatibility.
 - OpenAI repository review and setup drafting now express field-specific structured-output variants with the supported nested `anyOf` keyword instead of unsupported `oneOf`. Trusted local validation still enforces the exact fact field/value pairing after every provider response.
 - Native Anthropic and Gemini requests now receive provider-specific copies of the JSON schema normalized to each documented wire subset. Unsupported transport-only validation keywords are omitted or translated without modifying the original schema or weakening trusted local Go validation.
 - Repository analysis now feeds precise trusted-validation failures back to the same provider for a finite repair attempt, retries transient and rate-limited calls without OpenAI-specific assumptions, recognizes permanent quota exhaustion as non-retryable, and accounts every probe, source request, synthesis request, repair, and retry against its safety ceiling.

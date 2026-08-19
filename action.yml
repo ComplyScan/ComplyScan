@@ -108,7 +108,9 @@ runs:
     - name: Set up Go
       uses: actions/setup-go@v6
       with:
-        go-version-file: ${{ github.action_path }}/go.mod
+        # Go 1.24+ emits the LC_UUID load command required by macOS 26 dyld.
+        # The Linux CI matrix separately verifies the module's Go 1.22 floor.
+        go-version: 1.26.x
         cache: false
 
     - name: Run ComplyScan
