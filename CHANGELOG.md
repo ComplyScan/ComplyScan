@@ -1,9 +1,10 @@
 # Changelog
 
-## 0.2.0 - 2026-08-18
+## 0.2.0 - 2026-08-20
 
 ### Added
 
+- A concise two-page product overview for release and due-diligence handoffs, covering the developer workflow, code-evidence boundary, EU AI Act Articles 9, 10, 12, 14, 15, and 50, and the optional voluntary NIST AI RMF mapping.
 - Schema-version 17 developer actions provide stable IDs, lifecycle status, priority, plain-language changes, acceptance criteria, cited evidence, framework/provision mappings, and verification commands for dashboards and automation. Git/config/framework-pack provenance identifies the exact evidence inputs. `complyscan actions list|show|verify` exposes the workflow locally, while `complyscan agent instructions` and the read-only `complyscan agent serve` MCP interface integrate the same evidence contract into coding-agent workflows without silently enabling a model or writing reports.
 - The composite GitHub Action creates a model-free base-revision action comparison for pull requests and exposes active/new/reopened/resolved counts in outputs and summaries. Located new or reopened code-control actions are emitted as SARIF annotations with stable IDs and acceptance criteria, while deterministic findings keep their existing rule-specific SARIF records.
 - A strict, human-owned version-1 AI-use register at `.complyscan/ai-uses.yml`, plus `complyscan ai-uses show`, the explicit `complyscan ai-uses setup` workflow for confirming, merging, dismissing, or deferring repository-analysis suggestions, and `complyscan ai-uses edit` for revising an existing saved use without scanning or contacting a model. Edits preserve stable identity and linked suggestions; model-authored suggestion IDs never become durable project identity, and path overlap alone cannot silently merge distinct AI uses.

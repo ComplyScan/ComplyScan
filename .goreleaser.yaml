@@ -37,6 +37,7 @@ archives:
     files:
       - LICENSE
       - README.md
+      - docs/complyscan-overview.pdf
 
 checksum:
   name_template: checksums.txt
@@ -52,6 +53,7 @@ release:
   name_template: "ComplyScan {{ .Tag }}"
   extra_files:
     - glob: ./install.sh
+    - glob: ./docs/complyscan-overview.pdf
 
 metadata:
   mod_timestamp: "{{ .CommitTimestamp }}"
