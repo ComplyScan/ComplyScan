@@ -23,7 +23,7 @@ import (
 
 const (
 	repositoryCacheSchemaVersion  = 8
-	repositoryCacheContextVersion = "14"
+	repositoryCacheContextVersion = "15"
 	repositoryCacheFileName       = "repository-analysis-v8.json"
 	maxRepositoryCacheBytes       = 32 << 20
 	maxRepositoryCacheEntries     = 40

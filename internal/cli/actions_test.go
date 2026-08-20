@@ -45,7 +45,7 @@ func TestActionsListShowAndVerifyUseStableReportContract(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := Execute([]string{"actions", "verify", "finding/stable", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"actions", "verify", "--deterministic-only", "finding/stable", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("actions verify exit = %d, stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "Resolved finding/stable") {

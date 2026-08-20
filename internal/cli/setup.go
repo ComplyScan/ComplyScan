@@ -327,12 +327,16 @@ func runSetup(cmd *cobra.Command, stdout io.Writer, build BuildInfo, target stri
 	}
 
 	if !interactive || options.skipScan || scanMode == setupScanNone {
-		if _, err := fmt.Fprintf(stdout, "Next: complyscan scan %s\n", shellQuote(target)); err != nil {
+		next := fmt.Sprintf("complyscan scan %s", shellQuote(target))
+		if cfg.AI.Provider == "none" {
+			next += " --deterministic-only"
+		}
+		if _, err := fmt.Fprintf(stdout, "Next: %s\n", next); err != nil {
 			return err
 		}
 		return nil
 	}
-	if err := runFirstScan(cmd, stdout, build, target, scanMode, repositorySummary.Discovery); err != nil {
+	if err := runFirstScan(cmd, stdout, build, target, scanMode, repositorySummary.Discovery, cfg.AI.Provider == "none"); err != nil {
 		return err
 	}
 	return nil
@@ -447,7 +451,7 @@ func reviewSetupBeforeSave(ctx context.Context, prompt promptSession, stdout io.
 		case setupReviewRunScan:
 			*scanMode = setupScanQuick
 			if cfg.AI.Provider != "none" {
-				if _, err := fmt.Fprintln(stdout, "\nThe first scan will run deterministic checks and the configured advisory AI review. If the model is unavailable, the deterministic report will still finish and explain the limitation."); err != nil {
+				if _, err := fmt.Fprintln(stdout, "\nThe first scan will run deterministic checks and the configured advisory AI review. If the model is unavailable, ComplyScan will save the deterministic report and fail the scan as incomplete."); err != nil {
 					return false, err
 				}
 			}
@@ -476,7 +480,7 @@ func writeSetupReviewSummary(prompt promptSession, cfg config.Config, modelReady
 	if err := prompt.sectionTitle("Review setup", true); err != nil {
 		return err
 	}
-	analysis := "Not configured (scans remain deterministic-only)"
+	analysis := "Not configured (use --deterministic-only for local scans)"
 	if cfg.AI.Provider == "ollama" {
 		analysis = fmt.Sprintf("Experimental local Ollama — %s", cfg.AI.Ollama.Model)
 	} else if cfg.AI.Provider != "none" {
@@ -1581,7 +1585,7 @@ func systemIndex(systems []profile.System, id string) int {
 	return -1
 }
 
-func runFirstScan(parent *cobra.Command, stdout io.Writer, build BuildInfo, target string, mode setupScanMode, discovered discovery.Result) error {
+func runFirstScan(parent *cobra.Command, stdout io.Writer, build BuildInfo, target string, mode setupScanMode, discovered discovery.Result, deterministicOnly bool) error {
 	if _, err := fmt.Fprintln(stdout, "\nStarting first ComplyScan scan..."); err != nil {
 		return err
 	}
@@ -1591,7 +1595,11 @@ func runFirstScan(parent *cobra.Command, stdout io.Writer, build BuildInfo, targ
 	command.SetIn(parent.InOrStdin())
 	command.SetOut(stdout)
 	command.SetErr(parent.ErrOrStderr())
-	command.SetArgs([]string{target})
+	arguments := []string{target}
+	if deterministicOnly {
+		arguments = append(arguments, "--deterministic-only")
+	}
+	command.SetArgs(arguments)
 	err := command.ExecuteContext(parent.Context())
 	var status *exitError
 	if errors.As(err, &status) && status.code == 1 {

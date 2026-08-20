@@ -1251,7 +1251,7 @@ func TestReviewSetupChoosesFirstRunActionWhileConfirming(t *testing.T) {
 	if !save || mode != setupScanQuick {
 		t.Fatalf("save=%t mode=%q", save, mode)
 	}
-	if !strings.Contains(output.String(), "first scan will run deterministic checks and the configured advisory AI review") || !strings.Contains(output.String(), "deterministic report will still finish") {
+	if !strings.Contains(output.String(), "first scan will run deterministic checks and the configured advisory AI review") || !strings.Contains(output.String(), "save the deterministic report and fail the scan as incomplete") {
 		t.Fatalf("unified first-scan behavior missing:\n%s", output.String())
 	}
 }
@@ -1384,7 +1384,7 @@ func TestTerminalConfirmationShowsGuidanceWithoutSeparateOption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if confirmed || selections != 1 || !strings.Contains(output.String(), "Choose no to keep deterministic scanning") || strings.Contains(output.String(), "Further explanation") {
+	if confirmed || selections != 1 || !strings.Contains(output.String(), "Choose no to use explicit deterministic-only scans") || strings.Contains(output.String(), "Further explanation") {
 		t.Fatalf("confirmed=%t selections=%d output:\n%s", confirmed, selections, output.String())
 	}
 }

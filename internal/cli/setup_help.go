@@ -189,7 +189,7 @@ var setupQuestionHelp = map[string][]string{
 		"Choose no if you only wanted to inspect the rules; use `complyscan ownership show` to review them without changing configuration.",
 	},
 	"review-provider": {
-		"`complyscan scan` always runs deterministic checks and also uses the provider saved here when one is configured. Choose no AI for deterministic-only operation, or use `complyscan scan --deterministic-only` for a one-run local override.",
+		"A standard `complyscan scan` runs deterministic checks and requires the provider saved here. Choose no AI only if you plan to use the explicit `complyscan scan --deterministic-only` workflow.",
 		"This choice is made before any model can receive repository context. Cloud assistance sends selected context only after confirmation; later scans reuse that saved processing choice without asking again. Model results remain advisory.",
 	},
 	"ollama-model": {
@@ -198,14 +198,14 @@ var setupQuestionHelp = map[string][]string{
 	},
 	"install-ollama": {
 		"Ollama is a separate local runtime needed only for optional model review. Installation downloads third-party software and may change system packages or start a service.",
-		"Choose no to keep deterministic scanning; you can install Ollama later and rerun setup.",
+		"Choose no to use explicit deterministic-only scans; you can install Ollama later and rerun setup.",
 	},
 	"download-model": {
 		"The selected model weights are separate from the small ComplyScan binary and may require several gigabytes of disk space and substantial download time.",
 		"Choose no to save the configuration without downloading; the exact manual command will be printed.",
 	},
 	"remote-disclosure": {
-		fmt.Sprintf("Later cloud-assisted `complyscan scan` runs send every structurally selected candidate file as one or more bounded source requests after recognised-secret redaction, followed by bounded synthesis when multiple requests are needed. Independent source and synthesis batches may run concurrently using complete reported request/token capacity where available or a conservative hosted slow-start otherwise; Ollama remains serial without portable capacity metadata. Validation repair and temporary-failure retries can add requests, up to the repository-review safety ceiling of %d provider requests per run. Setup itself does not send repository source. Selection uses local inventory signals, technical-objective matches, production entry points, and their bounded code-graph neighborhood. Ignored, generated, dependency, binary, oversized, excluded, and non-candidate files remain outside this context.", repositoryanalysis.MaxProviderRequestsPerRun),
+		fmt.Sprintf("Later cloud-assisted `complyscan scan` runs send every structurally selected candidate file as one or more bounded source requests after recognised-secret redaction, followed by bounded synthesis when multiple requests are needed. If no structural AI anchor is found, ComplyScan instead sends a bounded representative sample of eligible manifests, likely runtime source, and configuration for an AI-presence check. Independent source and synthesis batches may run concurrently using complete reported request/token capacity where available or a conservative hosted slow-start otherwise; Ollama remains serial without portable capacity metadata. Validation repair and temporary-failure retries can add requests, up to the repository-review safety ceiling of %d provider requests per run. Setup itself does not send repository source. Ignored, generated, dependency, binary, oversized, and excluded files remain outside this context.", repositoryanalysis.MaxProviderRequestsPerRun),
 		"Redaction is defence in depth, not a guarantee that arbitrary proprietary or personal data has been removed. Use `complyscan scan --deterministic-only` when external processing is not permitted. Explicit deep modes transfer substantially more repository content.",
 		"The number of provider requests and the cost grow with the structurally relevant candidate set; concurrency can incur that variable cost faster, and there is no one-request whole-repository cap. Confirm only if your organisation permits this external processing and variable cost on future scans without another prompt; rerun setup to change the saved choice.",
 	},
@@ -226,11 +226,11 @@ var setupQuestionHelp = map[string][]string{
 		"The variable name is safe to save in .complyscan.yml; the secret value stays in the shell or CI secret store and is never written to reports.",
 	},
 	"first-scan": {
-		"The first scan always runs local deterministic checks. When a provider is configured, it also runs the bounded advisory AI review selected above and records an honest limitation if that layer is unavailable.",
+		"The first scan runs local deterministic checks plus the bounded advisory AI review selected above. If that AI layer is unavailable, ComplyScan preserves the deterministic report and fails the standard scan as incomplete.",
 		"Choose no if you want to review .complyscan.yml or commit the setup configuration before scanning.",
 	},
 	"scan-mode": {
-		"`complyscan scan` is the complete workflow: local inventory and deterministic checks first, followed by the configured advisory AI review when available.",
+		"`complyscan scan` is the complete workflow: local inventory and deterministic checks first, followed by the required configured advisory AI review.",
 		"Choose whether to run it now or save first. Use `complyscan scan --deterministic-only` whenever external processing or model cost is not appropriate for a particular run.",
 	},
 }

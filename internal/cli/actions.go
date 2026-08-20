@@ -100,6 +100,7 @@ func newActionsShowCommand(stdout io.Writer) *cobra.Command {
 }
 
 func newActionsVerifyCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
+	var deterministicOnly bool
 	command := &cobra.Command{
 		Use:   "verify <action-id> [path]",
 		Short: "Run a fresh scan and check whether an action is resolved",
@@ -118,6 +119,11 @@ func newActionsVerifyCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			scan.SetContext(cmd.Context())
 			if err := scan.Flags().Set("format", "json"); err != nil {
 				return err
+			}
+			if deterministicOnly {
+				if err := scan.Flags().Set("deterministic-only", "true"); err != nil {
+					return err
+				}
 			}
 			scanErr := scan.RunE(scan, []string{target})
 			var status *exitError
@@ -142,6 +148,7 @@ func newActionsVerifyCommand(stdout io.Writer, build BuildInfo) *cobra.Command {
 			return &exitError{code: 1}
 		},
 	}
+	command.Flags().BoolVar(&deterministicOnly, "deterministic-only", false, "verify using local deterministic checks without contacting a model")
 	return command
 }
 

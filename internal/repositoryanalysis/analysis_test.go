@@ -148,6 +148,34 @@ func TestRunUsesOneRequestWhenRepositoryFits(t *testing.T) {
 	}
 }
 
+func TestRunAutoUsesBoundedPresenceReviewWhenNoStructuralAIAnchorExists(t *testing.T) {
+	reviewer := &recordingReviewer{}
+	repository := discovery.Repository{Files: []discovery.File{
+		{Path: "go.mod", Kind: discovery.KindManifest, Content: []byte("module example.com/plain\n\ngo 1.22\n")},
+		{Path: "internal/helpers.go", Kind: discovery.KindSource, Content: []byte("package internal\n\nconst Version = 1\n")},
+		{Path: "internal/helpers_test.go", Kind: discovery.KindSource, Content: []byte("package internal\n\nfunc TestVersion() {}\n")},
+	}}
+	result, err := Run(context.Background(), reviewer, repository, nil, nil, Options{
+		Mode: ModeAuto, Provider: providers.OpenAI, Model: "test", MaxInputTokens: 8_000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reviewer.requests) != 1 || reviewer.requests[0].Mode != providers.RepositoryAnalysisTargeted {
+		t.Fatalf("presence review requests = %#v, want one targeted request", reviewer.requests)
+	}
+	paths := targetedSourcePaths(reviewer.requests[0].Files)
+	if !targetedContainsPath(reviewer.requests[0].Files, "go.mod") || !targetedContainsPath(reviewer.requests[0].Files, "internal/helpers.go") {
+		t.Fatalf("presence review omitted representative manifest or runtime source: %#v", paths)
+	}
+	if targetedContainsPath(reviewer.requests[0].Files, "internal/helpers_test.go") {
+		t.Fatalf("presence review selected a test despite available runtime evidence: %#v", paths)
+	}
+	if !strings.Contains(strings.Join(result.Notes, "\n"), "bounded AI-presence check") {
+		t.Fatalf("presence-review boundary is not documented: %#v", result.Notes)
+	}
+}
+
 func TestRunReportsNoSourceReviewWhenRepositoryHasNoEligibleFiles(t *testing.T) {
 	reviewer := &recordingReviewer{}
 	repository := discovery.Repository{Files: []discovery.File{{

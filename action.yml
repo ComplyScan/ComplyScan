@@ -48,7 +48,7 @@ inputs:
     required: false
     default: ""
   ai-review:
-    description: AI review mode. none is the safe deterministic default. Any enabled mode first makes or reuses source-free finding-binding and repository-shaped compatibility checks; a live check normally uses two requests and may make up to four total for temporary provider failures. It may then send every structural candidate across multiple bounded requests plus synthesis, resend bounded evidence during transient or schema-validation recovery, and run independent hosted source and same-level synthesis requests concurrently, with variable runtime and provider cost that concurrency may incur faster. Repository analysis is capped at 32 concurrent calls, 256 total provider requests, and finite retry waits; Ollama remains serial without portable capacity metadata, and permanent provider or schema failure may still leave AI review incomplete. configured explicitly trusts the provider destination and API-key environment name committed in repository configuration; otherwise use ollama, openai, anthropic, gemini, xai, groq, mistral, openrouter, or openai-compatible for a workflow-controlled one-run provider.
+    description: AI review mode. none is the safe deterministic default. Any enabled mode first makes or reuses source-free finding-binding and repository-shaped compatibility checks; a live check normally uses two requests and may make up to four total for temporary provider failures. It may then send every structural candidate across multiple bounded requests plus synthesis, or a bounded representative manifest/runtime/configuration sample when no structural AI anchor is found; it can resend bounded evidence during transient or schema-validation recovery and run independent hosted source and same-level synthesis requests concurrently, with variable runtime and provider cost that concurrency may incur faster. Repository analysis is capped at 32 concurrent calls, 256 total provider requests, and finite retry waits; Ollama remains serial without portable capacity metadata, and permanent provider or schema failure may still leave AI review incomplete. configured explicitly trusts the provider destination and API-key environment name committed in repository configuration; otherwise use ollama, openai, anthropic, gemini, xai, groq, mistral, openrouter, or openai-compatible for a workflow-controlled one-run provider.
     required: false
     default: none
   review:
@@ -90,7 +90,7 @@ inputs:
 
 outputs:
   exit-code:
-    description: ComplyScan exit code (0 for clear, 1 for threshold findings, 2 for an operational/configuration error or incomplete required AI review).
+    description: ComplyScan exit code (0 for clear, 1 for threshold findings, 2 for an operational/configuration error or an incomplete requested AI review).
     value: ${{ steps.scan.outputs.exit-code }}
   sarif-file:
     description: Absolute path to the generated SARIF file.

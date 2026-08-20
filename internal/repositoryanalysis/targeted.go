@@ -34,6 +34,8 @@ const (
 	targetedRemoteOutputTokens        = 4_096
 	targetedPreferredSourceBatches    = 2
 	targetedBatchPlanningHeadroom     = 20
+	targetedPresenceMaximumFiles      = 8
+	targetedPresenceMaximumFileBytes  = 2_000
 )
 
 type targetedCandidate struct {
@@ -116,6 +118,10 @@ func runTargeted(
 	options Options,
 ) (providers.RepositoryAnalysisResult, error) {
 	selected, considered := targetedRepositoryCandidateFiles(repository, graph, evidence, confirmedUses)
+	presenceReview := len(selected) == 0
+	if presenceReview {
+		selected, considered = targetedRepositoryPresenceFiles(repository)
+	}
 	if len(selected) == 0 {
 		return providers.RepositoryAnalysisResult{
 			Provider: options.Provider, Model: options.Model,
@@ -154,17 +160,27 @@ func runTargeted(
 		batchOptions := options
 		batchOptions.TargetedBatches = true
 		result, err := runHierarchical(ctx, reviewer, repository, graph, selected, objectives, systems, confirmedUses, budget, batchOptions)
+		selectionNote := fmt.Sprintf("Targeted analysis queued all %d structural candidate file excerpt(s) instead of treating one model request as a repository-wide evidence cap.", considered)
+		boundaryNote := "Each source batch stayed within the provider request boundary; files outside the deterministic candidate set were not reviewed by the model."
+		if presenceReview {
+			selectionNote = fmt.Sprintf("No structural AI anchor was found, so targeted analysis queued %d bounded representative file excerpt(s) for an AI-presence check.", len(selected))
+			boundaryNote = "The presence check is a bounded representative review, not an exhaustive repository review; files outside its sample were not reviewed by the model."
+		}
 		result.Notes = append(result.Notes,
-			fmt.Sprintf("Targeted analysis queued all %d structural candidate file excerpt(s) instead of treating one model request as a repository-wide evidence cap.", considered),
+			selectionNote,
 			fmt.Sprintf("Adaptive source planning used a %d-token per-request target based on model context, configured limits, and observed token capacity.", targetTokens),
 			"Source bundles prefer graph-connected evidence when it fits; these request boundaries are context management, not deterministic AI-use classifications.",
-			"Each source batch stayed within the provider request boundary; files outside the deterministic candidate set were not reviewed by the model.",
+			boundaryNote,
 		)
 		return result, err
 	}
+	selectionDetail := fmt.Sprintf("selected %d of %d structural candidate file(s)", len(selected), considered)
+	if presenceReview {
+		selectionDetail = fmt.Sprintf("selected %d of %d eligible file(s) for a bounded AI-presence check", len(selected), considered)
+	}
 	if err := progress(options, Progress{
 		Stage: "targeted-selection", Completed: len(selected), Total: considered, Scope: ".", InputBytes: inputBytes,
-		Detail: fmt.Sprintf("selected %d of %d structural candidate file(s)", len(selected), considered),
+		Detail: selectionDetail,
 	}); err != nil {
 		return providers.RepositoryAnalysisResult{}, err
 	}
@@ -461,11 +477,19 @@ func runTargeted(
 	result.Result = grouped
 	result.Coverage.Mode = providers.RepositoryAnalysisTargeted
 	result.Coverage.GroupingStatus = providers.RepositoryGroupingNotNeeded
+	selectionSummary := fmt.Sprintf("Targeted analysis selected %d of %d structural candidate file(s) from %d discovered repository file(s).", len(selected), considered, len(repository.Files))
+	selectionMethod := "Selection prioritized executable AI call paths, their bounded caller and safeguard neighborhood, technical-objective matches, confirmed AI-use paths, and then passive provider references."
+	selectionBoundary := "Files outside the evidence package were not reviewed by the model; absence of model evidence is not proof that an implementation is absent."
+	if presenceReview {
+		selectionSummary = fmt.Sprintf("No structural AI anchor was found, so targeted analysis reviewed %d of %d eligible file(s) as a bounded AI-presence check across %d discovered repository file(s).", len(selected), considered, len(repository.Files))
+		selectionMethod = "The bounded presence check prioritized dependency manifests, likely runtime source entry points, and configuration or deployment files while de-prioritizing test paths."
+		selectionBoundary = "The representative presence check reduces selector false negatives but is not an exhaustive whole-repository model review; no model finding is not proof that AI is absent."
+	}
 	result.Notes = append(result.Notes,
-		fmt.Sprintf("Targeted analysis selected %d of %d structural candidate file(s) from %d discovered repository file(s).", len(selected), considered, len(repository.Files)),
+		selectionSummary,
 		fmt.Sprintf("Adaptive source planning used a %d-token per-request target based on model context, configured limits, and observed token capacity.", targetTokens),
-		"Selection prioritized executable AI call paths, their bounded caller and safeguard neighborhood, technical-objective matches, confirmed AI-use paths, and then passive provider references.",
-		"Files outside the evidence package were not reviewed by the model; absence of model evidence is not proof that an implementation is absent.",
+		selectionMethod,
+		selectionBoundary,
 	)
 	result = applyAudit(result)
 	if err := progress(options, Progress{Stage: "targeted-analysis", Completed: 1, Total: 1, Scope: ".", InputBytes: inputBytes}); err != nil {
@@ -783,6 +807,72 @@ func targetedRepositoryCandidateFiles(repository discovery.Repository, graph cod
 		selected = append(selected, targetedSourceFile(files[candidate.path], []int{candidate.anchor}, targetedCandidateMaximumBytes(candidate.tier)))
 	}
 	return selected, len(ordered)
+}
+
+// targetedRepositoryPresenceFiles supplies a small, representative model view
+// when deterministic selection finds no AI anchor. A standard scan therefore
+// receives an actual repository review without widening immediately to every
+// source file. This is triage only: its bounded sample cannot prove absence.
+func targetedRepositoryPresenceFiles(repository discovery.Repository) ([]providers.RepositorySourceFile, int) {
+	type presenceCandidate struct {
+		file  discovery.File
+		score int
+		test  bool
+	}
+	candidates := make([]presenceCandidate, 0, len(repository.Files))
+	for _, file := range repository.Files {
+		if !targetedFileKind(file.Kind) {
+			continue
+		}
+		path := strings.ToLower(filepath.ToSlash(file.Path))
+		base := strings.ToLower(filepath.Base(path))
+		testPath := targetedPresenceTestPath(path, base)
+		score := 20
+		switch file.Kind {
+		case discovery.KindManifest:
+			score = 100
+		case discovery.KindSource:
+			score = 70
+		case discovery.KindDockerfile, discovery.KindTerraform, discovery.KindConfig, discovery.KindEnvTemplate:
+			score = 50
+		case discovery.KindGitHubAction, discovery.KindCI:
+			score = 40
+		}
+		for _, marker := range []string{"main", "app", "server", "service", "handler", "route", "client", "model", "agent", "inference"} {
+			if strings.Contains(base, marker) {
+				score += 20
+				break
+			}
+		}
+		if testPath {
+			score -= 100
+		}
+		candidates = append(candidates, presenceCandidate{file: file, score: score, test: testPath})
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].score != candidates[j].score {
+			return candidates[i].score > candidates[j].score
+		}
+		return candidates[i].file.Path < candidates[j].file.Path
+	})
+	selected := make([]providers.RepositorySourceFile, 0, min(targetedPresenceMaximumFiles, len(candidates)))
+	for _, candidate := range candidates {
+		if candidate.test && len(selected) > 0 {
+			continue
+		}
+		selected = append(selected, targetedSourceFile(candidate.file, []int{1}, targetedPresenceMaximumFileBytes))
+		if len(selected) == targetedPresenceMaximumFiles {
+			break
+		}
+	}
+	return selected, len(candidates)
+}
+
+func targetedPresenceTestPath(path, base string) bool {
+	return strings.Contains(path, "/test/") || strings.Contains(path, "/tests/") || strings.Contains(path, "/testdata/") ||
+		strings.Contains(path, "/fixtures/") || strings.HasPrefix(path, "test/") || strings.HasPrefix(path, "tests/") ||
+		strings.HasPrefix(path, "testdata/") || strings.HasPrefix(path, "fixtures/") || strings.HasSuffix(base, "_test.go") ||
+		strings.HasPrefix(base, "test_") || strings.Contains(base, ".test.") || strings.Contains(base, ".spec.")
 }
 
 func targetedCandidateMaximumBytes(tier targetedCandidateTier) int {

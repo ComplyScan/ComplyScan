@@ -44,7 +44,7 @@ func TestScanExitCodes(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			target := filepath.Join("..", "..", "testdata", test.target)
-			if got := Execute([]string{"scan", "--no-report", "--no-color", target}, &stdout, &stderr, testBuild); got != test.want {
+			if got := Execute([]string{"scan", "--deterministic-only", "--no-report", "--no-color", target}, &stdout, &stderr, testBuild); got != test.want {
 				t.Fatalf("exit code = %d, want %d; stdout=%q stderr=%q", got, test.want, stdout.String(), stderr.String())
 			}
 		})
@@ -62,7 +62,7 @@ func TestScanCommandReusesGuidedSetupDiscovery(t *testing.T) {
 	command.SilenceErrors = true
 	command.SilenceUsage = true
 	command.SetErr(&stderr)
-	command.SetArgs([]string{"--no-report", target})
+	command.SetArgs([]string{"--deterministic-only", "--no-report", target})
 	if err := command.Execute(); err != nil {
 		t.Fatalf("scan error = %v; stderr=%q\n%s", err, stderr.String(), stdout.String())
 	}
@@ -88,7 +88,7 @@ func TestScanExcludesActiveConfigButKeepsGitHubWorkflowYAML(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--deterministic-only", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	output := stdout.String()
@@ -113,7 +113,7 @@ func TestScanExcludesCustomActiveConfigPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--no-report", "--config", configPath, target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--config", configPath, target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	if strings.Contains(stdout.String(), "AI-DISC-001") || strings.Contains(stdout.String(), "Ollama") {
@@ -121,7 +121,7 @@ func TestScanExcludesCustomActiveConfigPath(t *testing.T) {
 	}
 }
 
-func TestPlainScanPreservesLegacyExplicitReviewBoundary(t *testing.T) {
+func TestPlainScanRequiresPersistedAutomaticReviewOptIn(t *testing.T) {
 	target := t.TempDir()
 	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\nclient = OpenAI()\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -136,11 +136,11 @@ func TestPlainScanPreservesLegacyExplicitReviewBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
-		t.Fatalf("local scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 2 {
+		t.Fatalf("standard scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "automatic AI review is not enabled") || !strings.Contains(stdout.String(), "--provider openai") {
-		t.Fatalf("legacy configuration did not receive an actionable migration note:\n%s", stdout.String())
+	if !strings.Contains(stderr.String(), "automatic review is not enabled") || !strings.Contains(stderr.String(), "--provider openai") || !strings.Contains(stderr.String(), "--deterministic-only") {
+		t.Fatalf("legacy configuration did not receive an actionable failure:\n%s", stderr.String())
 	}
 	if strings.Contains(stdout.String()+stderr.String(), "model compatibility") || strings.Contains(stdout.String()+stderr.String(), "COMPLYSCAN_TEST_MISSING_KEY") {
 		t.Fatalf("local scan used configured AI:\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
@@ -148,7 +148,7 @@ func TestPlainScanPreservesLegacyExplicitReviewBoundary(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := Execute([]string{"review", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"review", "--no-report", target}, &stdout, &stderr, testBuild); code != 2 {
 		t.Fatalf("explicit review code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "Checking model compatibility before repository review") || !strings.Contains(stdout.String(), "COMPLYSCAN_TEST_MISSING_KEY is not set") {
@@ -172,7 +172,7 @@ func TestLegacyDeepFlagExplicitlyActivatesSavedProvider(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--deep", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--deep", "--no-report", target}, &stdout, &stderr, testBuild); code != 2 {
 		t.Fatalf("deep scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	output := stdout.String() + stderr.String()
@@ -202,7 +202,7 @@ func TestScanUsesConfiguredAIOnlyAfterPersistedOptIn(t *testing.T) {
 	grantTestAutomaticReview(t, target, cfg)
 
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 2 {
 		t.Fatalf("scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	output := stdout.String() + stderr.String()
@@ -252,7 +252,7 @@ func TestScanBuildsAIUseInventoryWithoutProvider(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	var decoded report.Report
@@ -282,7 +282,7 @@ func TestScanExcludesAIUseManifestFromRepositoryEvidence(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	var decoded report.Report
@@ -308,7 +308,7 @@ func TestScanRejectsInvalidAIUseManifest(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 2 {
+	if code := Execute([]string{"scan", "--deterministic-only", "--no-report", target}, &stdout, &stderr, testBuild); code != 2 {
 		t.Fatalf("scan code=%d, want 2; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "validate AI-use manifest") {
@@ -339,7 +339,7 @@ func TestChangedScanKeepsSavedAIUsesAndFullDeterministicSignals(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--no-report", "--format", "json", "--severity", "critical", "--changed-since", "HEAD", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--format", "json", "--severity", "critical", "--changed-since", "HEAD", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("changed scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	var decoded report.Report
@@ -418,7 +418,7 @@ func TestReviewRequireAIReviewFailsAfterSavingDeterministicReport(t *testing.T) 
 	}
 }
 
-func TestScanRequireAIReviewWithoutProviderWritesDeterministicReport(t *testing.T) {
+func TestStandardScanWithoutProviderFailsBeforeScanning(t *testing.T) {
 	target := t.TempDir()
 	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\nlogger.info(model_output)\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -428,19 +428,12 @@ func TestScanRequireAIReviewWithoutProviderWritesDeterministicReport(t *testing.
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Execute([]string{"scan", "--require-ai-review", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild)
+	code := Execute([]string{"scan", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild)
 	if code != 2 {
 		t.Fatalf("scan code=%d, want 2; stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
-	var decoded report.Report
-	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
-		t.Fatalf("deterministic report was not written before strict failure: %v\n%s", err, stdout.String())
-	}
-	if decoded.RepositoryAnalysisRun != report.RepositoryAnalysisIncomplete || len(decoded.Findings) == 0 || !strings.Contains(strings.Join(decoded.Warnings, "\n"), "no advisory provider is configured") {
-		t.Fatalf("strict missing-provider report is incomplete: %#v", decoded)
-	}
-	if !strings.Contains(stderr.String(), "Deterministic findings and evidence remain available") {
-		t.Fatalf("strict missing-provider failure was not explained: %s", stderr.String())
+	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "standard scan requires AI review") || !strings.Contains(stderr.String(), "--deterministic-only") {
+		t.Fatalf("missing-provider failure was not immediate and actionable: stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }
 
@@ -476,7 +469,7 @@ func TestDeterministicOnlyWithRequiredReviewWritesReportThenFailsPolicy(t *testi
 	}
 }
 
-func TestRequireAIReviewDoesNotGrantConsentToLegacyConfiguredProvider(t *testing.T) {
+func TestStandardScanDoesNotGrantConsentToLegacyConfiguredProvider(t *testing.T) {
 	target := t.TempDir()
 	if err := os.WriteFile(filepath.Join(target, "app.py"), []byte("from openai import OpenAI\nclient = OpenAI()\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -492,20 +485,16 @@ func TestRequireAIReviewDoesNotGrantConsentToLegacyConfiguredProvider(t *testing
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := Execute([]string{"scan", "--require-ai-review", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild)
+	code := Execute([]string{"scan", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild)
 	if code != 2 {
 		t.Fatalf("scan code=%d, want 2; stderr=%q\n%s", code, stderr.String(), stdout.String())
-	}
-	var decoded report.Report
-	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
-		t.Fatalf("strict deterministic report was not written: %v\n%s", err, stdout.String())
 	}
 	output := stdout.String() + stderr.String()
 	if strings.Contains(output, "Checking model compatibility") || strings.Contains(output, "COMPLYSCAN_LEGACY_REQUIRED_KEY is not set") {
 		t.Fatalf("strict policy flag was incorrectly treated as model consent:\n%s", output)
 	}
-	if decoded.RepositoryAnalysisRun != report.RepositoryAnalysisIncomplete || !strings.Contains(strings.Join(decoded.Warnings, "\n"), "automatic review has not been enabled") {
-		t.Fatalf("strict deterministic result did not explain unavailable AI: %#v", decoded)
+	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "automatic review is not enabled") || !strings.Contains(stderr.String(), "--deterministic-only") {
+		t.Fatalf("standard scan did not fail at the consent boundary: stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }
 
@@ -541,7 +530,7 @@ func TestPlainScanDoesNotTrustRepositoryConfiguredRemoteDestination(t *testing.T
 	t.Cleanup(func() { qualifyConfiguredModel = previous })
 
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 2 {
 		t.Fatalf("scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	if qualificationCalls != 0 {
@@ -586,7 +575,7 @@ func TestPlainScanSurfacesUnreadablePrivateConsent(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 2 {
 		t.Fatalf("scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	output := stdout.String() + stderr.String()
@@ -613,7 +602,7 @@ func TestExplicitProviderDoesNotInheritRepositoryCredentialRouting(t *testing.T)
 	}
 
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--provider", "openai", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--provider", "openai", "--no-report", target}, &stdout, &stderr, testBuild); code != 2 {
 		t.Fatalf("scan code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	output := stdout.String() + stderr.String()
@@ -633,7 +622,7 @@ func TestReviewRequiresConfiguredProvider(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--deterministic-only", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("local scan code=%d stderr=%q", code, stderr.String())
 	}
 }
@@ -643,7 +632,7 @@ func TestScanHelpPresentsOneScanWorkflow(t *testing.T) {
 	if code := Execute([]string{"scan", "--help"}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("scan help code=%d stderr=%q", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "configured advisory AI review") || !strings.Contains(stdout.String(), "--deterministic-only") || !strings.Contains(stdout.String(), "no provider is configured or AI is unavailable") {
+	if !strings.Contains(stdout.String(), "configured advisory AI review") || !strings.Contains(stdout.String(), "--deterministic-only") || !strings.Contains(stdout.String(), "standard scan requires an approved AI provider") {
 		t.Fatalf("scan help does not explain the unified workflow and safe override:\n%s", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "limit model context to changed eligible files plus up to eight connected files") || !strings.Contains(stdout.String(), "advisory-review details") {
@@ -710,7 +699,7 @@ func TestReviewSavesPreliminaryReportAndSurvivesProviderFailure(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	code := Execute([]string{"review", "--no-color", target}, &stdout, &stderr, testBuild)
-	if code != 0 && code != 1 {
+	if code != 2 {
 		t.Fatalf("review code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "Preliminary report saved before AI review") || !strings.Contains(stdout.String(), "review was incomplete") {
@@ -729,7 +718,7 @@ func TestReviewSavesPreliminaryReportAndSurvivesProviderFailure(t *testing.T) {
 	}
 }
 
-func TestRootCommandScansConfiguredCurrentRepository(t *testing.T) {
+func TestRootCommandRequiresAutomaticReviewOptIn(t *testing.T) {
 	target := t.TempDir()
 	if err := os.WriteFile(filepath.Join(target, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -753,17 +742,37 @@ func TestRootCommandScansConfiguredCurrentRepository(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(current) })
 
 	var stdout, stderr bytes.Buffer
-	if code := executeWithInput(nil, strings.NewReader(""), &stdout, &stderr, testBuild); code != 0 {
+	if code := executeWithInput(nil, strings.NewReader(""), &stdout, &stderr, testBuild); code != 2 {
 		t.Fatalf("default command code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "ComplyScan scanning .") || !strings.Contains(stdout.String(), "Reports saved:") {
-		t.Fatalf("default command did not scan configured repository:\n%s", stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "automatic AI review is not enabled") {
-		t.Fatalf("default command did not preserve the legacy processing boundary:\n%s", stdout.String())
+	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "automatic review is not enabled") || !strings.Contains(stderr.String(), "--deterministic-only") {
+		t.Fatalf("default command did not enforce the standard scan contract: stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 	if strings.Contains(stdout.String()+stderr.String(), "model compatibility") || strings.Contains(stdout.String()+stderr.String(), "COMPLYSCAN_ROOT_MISSING_KEY") {
 		t.Fatalf("default command used configured AI:\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestRootDeterministicOnlyScansWithoutConfiguration(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	current, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(target); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(current) })
+
+	var stdout, stderr bytes.Buffer
+	if code := executeWithInput([]string{"--deterministic-only"}, strings.NewReader(""), &stdout, &stderr, testBuild); code != 0 {
+		t.Fatalf("deterministic root command code=%d stderr=%q\n%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "ComplyScan scanning .") || strings.Contains(stdout.String()+stderr.String(), "model compatibility") {
+		t.Fatalf("root deterministic-only command crossed the model boundary:\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
 	}
 }
 
@@ -804,7 +813,7 @@ func TestValidateVerificationPlansInfersOneSystemButRequiresMultipleSystemOwners
 func TestScanJSONOutputAndSeverityFilter(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	target := filepath.Join("..", "..", "testdata", "vulnerable-python-ai-app")
-	code := Execute([]string{"scan", "--no-report", "--format", "json", "--severity", "high", target}, &stdout, &stderr, testBuild)
+	code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--format", "json", "--severity", "high", target}, &stdout, &stderr, testBuild)
 	if code != 1 {
 		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
 	}
@@ -853,7 +862,7 @@ func TestScanMapsConfirmedAIUseToSystemRequirementsAndScopedEvidence(t *testing.
 	}
 
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
 	}
 	var decoded report.Report
@@ -903,7 +912,7 @@ func TestScanMapsConfirmedAIUseToSystemRequirementsAndScopedEvidence(t *testing.
 func TestScanSARIFOutput(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	target := filepath.Join("..", "..", "testdata", "vulnerable-python-ai-app")
-	code := Execute([]string{"scan", "--no-report", "--format", "sarif", "--severity", "high", target}, &stdout, &stderr, testBuild)
+	code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--format", "sarif", "--severity", "high", target}, &stdout, &stderr, testBuild)
 	if code != 1 {
 		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
 	}
@@ -919,7 +928,7 @@ func TestScanSARIFOutput(t *testing.T) {
 func TestTerminalScanStreamsFindingsBeforeCompletion(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	target := filepath.Join("..", "..", "testdata", "vulnerable-python-ai-app")
-	code := Execute([]string{"scan", "--no-report", "--no-color", "--severity", "high", target}, &stdout, &stderr, testBuild)
+	code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--no-color", "--severity", "high", target}, &stdout, &stderr, testBuild)
 	if code != 1 {
 		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
 	}
@@ -941,7 +950,7 @@ func TestTerminalScanStreamsFindingsBeforeCompletion(t *testing.T) {
 func TestScanSupportsAdditionalExcludes(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	target := filepath.Join("..", "..", "testdata", "vulnerable-python-ai-app")
-	code := Execute([]string{"scan", "--no-report", "--no-color", "--exclude", "app.py", target}, &stdout, &stderr, testBuild)
+	code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--no-color", "--exclude", "app.py", target}, &stdout, &stderr, testBuild)
 	if code != 0 {
 		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
@@ -951,7 +960,7 @@ func TestScanSupportsAdditionalExcludes(t *testing.T) {
 }
 
 func TestScanRejectsInvalidBudgets(t *testing.T) {
-	for _, args := range [][]string{{"scan", "--max-files", "0"}, {"scan", "--max-total-bytes", "0"}} {
+	for _, args := range [][]string{{"scan", "--deterministic-only", "--max-files", "0"}, {"scan", "--deterministic-only", "--max-total-bytes", "0"}} {
 		var stdout, stderr bytes.Buffer
 		if code := Execute(args, &stdout, &stderr, testBuild); code != 2 {
 			t.Fatalf("Execute(%v) code = %d, want 2", args, code)
@@ -972,7 +981,7 @@ func TestScanAutomaticallySavesHumanAndMachineReports(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--no-color", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--deterministic-only", "--no-color", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	reportDirectory := filepath.Join(target, ".complyscan", "reports")
@@ -1034,16 +1043,16 @@ func TestScanReportFlagsAreSafeAndOptional(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--deterministic-only", "--no-report", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("no-report exit code = %d; stderr=%q", code, stderr.String())
 	}
 	if _, err := os.Stat(filepath.Join(target, ".complyscan")); !os.IsNotExist(err) {
 		t.Fatalf("--no-report created report directory: %v", err)
 	}
 	for _, arguments := range [][]string{
-		{"scan", "--no-report", "--report-dir", "reports", target},
-		{"scan", "--report-dir", "../outside", target},
-		{"scan", "--report-dir", filepath.Join(string(filepath.Separator), "tmp", "reports"), target},
+		{"scan", "--deterministic-only", "--no-report", "--report-dir", "reports", target},
+		{"scan", "--deterministic-only", "--report-dir", "../outside", target},
+		{"scan", "--deterministic-only", "--report-dir", filepath.Join(string(filepath.Separator), "tmp", "reports"), target},
 	} {
 		stdout.Reset()
 		stderr.Reset()
@@ -1055,7 +1064,7 @@ func TestScanReportFlagsAreSafeAndOptional(t *testing.T) {
 
 func TestScanChangedSinceRequiresGitRepository(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := Execute([]string{"scan", "--no-report", "--changed-since", "main", t.TempDir()}, &stdout, &stderr, testBuild)
+	code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--changed-since", "main", t.TempDir()}, &stdout, &stderr, testBuild)
 	if code != 2 || !strings.Contains(stderr.String(), "locate Git repository") {
 		t.Fatalf("exit code = %d; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -1064,11 +1073,11 @@ func TestScanChangedSinceRequiresGitRepository(t *testing.T) {
 	}
 }
 
-func TestReviewPreservesDeterministicResultWhenAIIsEnabledForClearRepository(t *testing.T) {
+func TestReviewReturnsIncompleteWhilePreservingDeterministicResult(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	target := filepath.Join("..", "..", "testdata", "non-ai-repository")
 	code := Execute([]string{"review", "--no-report", "--format", "json", "--provider", "ollama", "--ollama-model", "test-model", target}, &stdout, &stderr, testBuild)
-	if code != 0 {
+	if code != 2 {
 		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
 	}
 	var decoded report.Report
@@ -1210,7 +1219,7 @@ func TestScanPreservesGraphCoverageWarnings(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := Execute([]string{"scan", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild)
+	code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild)
 	if code != 0 {
 		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
 	}
@@ -1363,7 +1372,7 @@ suppressions:
 	}
 	var stdout, stderr bytes.Buffer
 	target := filepath.Join("..", "..", "testdata", "vulnerable-python-ai-app")
-	code := Execute([]string{"scan", "--no-report", "--no-color", "--config", configPath, target}, &stdout, &stderr, testBuild)
+	code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--no-color", "--config", configPath, target}, &stdout, &stderr, testBuild)
 	if code != 0 {
 		t.Fatalf("exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
@@ -1390,7 +1399,7 @@ func TestBaselineAcceptsCurrentFindingsButNotNewOnes(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := Execute([]string{"scan", "--no-report", "--no-color", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--no-color", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("baselined scan exit code = %d; stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "Suppressed:") {
@@ -1402,7 +1411,7 @@ func TestBaselineAcceptsCurrentFindingsButNotNewOnes(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := Execute([]string{"scan", "--no-report", "--no-color", target}, &stdout, &stderr, testBuild); code != 1 {
+	if code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--no-color", target}, &stdout, &stderr, testBuild); code != 1 {
 		t.Fatalf("changed scan exit code = %d, want 1; stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "response") {
@@ -1428,7 +1437,7 @@ func TestScanGatesReviewedLikelyRequiredTechnicalGap(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--no-report", "--no-color", target}, &stdout, &stderr, testBuild); code != 1 {
+	if code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--no-color", target}, &stdout, &stderr, testBuild); code != 1 {
 		t.Fatalf("exit code = %d, want 1; stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "AI-CTRL-001") || !strings.Contains(stdout.String(), "Likely required technical control") {
@@ -1441,7 +1450,7 @@ func TestScanGatesReviewedLikelyRequiredTechnicalGap(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := Execute([]string{"scan", "--no-report", "--no-color", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--no-color", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("baselined scan exit code = %d, want 0; stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "Suppressed:") || strings.Contains(stdout.String(), "AI-CTRL-001") {
@@ -1466,7 +1475,7 @@ func TestScanDoesNotGateDraftApplicabilityContext(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--no-report", "--no-color", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--no-color", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("exit code = %d, want 0; stderr=%q\n%s", code, stderr.String(), stdout.String())
 	}
 	if strings.Contains(stdout.String(), "AI-CTRL-001") {
@@ -2053,7 +2062,7 @@ func TestScanJSONIncludesApplicabilityWithoutChangingFindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
 	}
 	var decoded report.Report
@@ -2094,7 +2103,7 @@ func TestScanMapsSharedEvidenceAcrossEUAndNISTFrameworks(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := Execute([]string{"scan", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
+	if code := Execute([]string{"scan", "--deterministic-only", "--no-report", "--format", "json", target}, &stdout, &stderr, testBuild); code != 0 {
 		t.Fatalf("exit code = %d; stderr=%q", code, stderr.String())
 	}
 	var decoded report.Report

@@ -66,6 +66,7 @@ func executeWithInput(args []string, stdin io.Reader, stdout, stderr io.Writer, 
 }
 
 func newRootCommand(stdout, stderr io.Writer, build BuildInfo) *cobra.Command {
+	var deterministicOnly bool
 	root := &cobra.Command{
 		Use:           "complyscan",
 		Short:         "Discover AI implementations and code-level governance safeguards",
@@ -76,6 +77,13 @@ func newRootCommand(stdout, stderr io.Writer, build BuildInfo) *cobra.Command {
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.RunE = func(cmd *cobra.Command, _ []string) error {
+		if deterministicOnly {
+			scan := newScanCommand(stdout, build)
+			if err := scan.Flags().Set("deterministic-only", "true"); err != nil {
+				return err
+			}
+			return runDefaultSubcommand(cmd, scan)
+		}
 		if _, err := os.Stat(config.FileName); err == nil {
 			return runDefaultSubcommand(cmd, newScanCommand(stdout, build))
 		} else if !errors.Is(err, os.ErrNotExist) {
@@ -102,6 +110,7 @@ func newRootCommand(stdout, stderr io.Writer, build BuildInfo) *cobra.Command {
 	root.AddCommand(newDoctorCommand(stdout, build))
 	root.AddCommand(newVerifyCommand(stdout))
 	root.AddCommand(newVersionCommand(stdout, build))
+	root.Flags().BoolVar(&deterministicOnly, "deterministic-only", false, "scan the current repository using local deterministic checks only")
 	return root
 }
 
@@ -316,8 +325,8 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 	use := "scan [path]"
 	short := "Run deterministic checks and the configured AI review"
 	long := "Run deterministic discovery, technical checks, framework mapping, and the configured advisory AI review in one workflow. " +
-		"When no provider is configured or AI is unavailable, deterministic results still finish with an honest limitation in the report. " +
-		"Remote providers may receive selected repository context and incur cost. Use --deterministic-only to guarantee that no model is contacted and no provider credential is read."
+		"A standard scan requires an approved AI provider and returns exit code 2 when that review cannot complete; deterministic results are still preserved after a provider failure. " +
+		"Remote providers may receive selected repository context and incur cost. Use --deterministic-only for an explicit local scan that never contacts a model or reads a provider credential."
 	if reviewConfiguredProvider {
 		use = "review [path]"
 		short = "Run the configured AI-assisted workflow"
@@ -345,9 +354,6 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			if err != nil {
 				return err
 			}
-			configuredReviewDeferred := ""
-			configuredReviewDeferredForConsent := false
-			var configuredReviewConsentError error
 			providerChanged := cmd.Flags().Changed("provider") || cmd.Flags().Changed("review")
 			if cmd.Flags().Changed("provider") && cmd.Flags().Changed("review") {
 				return errors.New("--provider and the legacy --review flag cannot be used together")
@@ -380,23 +386,19 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						TimeoutSeconds: 360, MaxFindings: 20,
 					}
 				}
-			} else if !reviewConfiguredProvider && !explicitAIActivation && cfg.AI.Provider != "none" {
+			} else if !reviewConfiguredProvider && !explicitAIActivation {
+				if cfg.AI.Provider == "none" {
+					return errors.New("a standard scan requires AI review; run `complyscan setup`, pass `--provider <provider>` for one-run consent, or use `complyscan scan --deterministic-only` for local analysis")
+				}
 				if !cfg.AI.ReviewOnScan {
-					// Configurations written before unified scans deliberately opted in to
-					// explicit `review` calls, not automatic model use. Preserve that
-					// processing boundary until setup records the new durable choice.
-					configuredReviewDeferred = cfg.AI.Provider
-					cfg.AI.Provider = "none"
+					return fmt.Errorf("a standard scan requires approved %s review, but automatic review is not enabled; rerun `complyscan setup` or choose `complyscan scan --deterministic-only`. %s", reviewProviderLabel(cfg.AI.Provider), oneRunReviewGuidance(cfg.AI.Provider))
 				} else {
 					authorized, consentErr := automaticReviewAuthorized(target, resolvedConfigPath, cfg.AI)
 					if !authorized {
-						// Repository configuration expresses intent, but it is untrusted
-						// input. Only setup can persist the separate machine-local consent
-						// needed for an automatic model or credential access.
-						configuredReviewDeferred = cfg.AI.Provider
-						configuredReviewDeferredForConsent = true
-						configuredReviewConsentError = consentErr
-						cfg.AI.Provider = "none"
+						if consentErr != nil {
+							return fmt.Errorf("a standard scan requires approved %s review, but private machine approval could not be verified: %w; repair the consent store and rerun `complyscan setup`, or use `complyscan scan --deterministic-only`", reviewProviderLabel(cfg.AI.Provider), consentErr)
+						}
+						return fmt.Errorf("a standard scan requires approved %s review, but this machine has not approved the configured provider, model, and destination; run `complyscan setup` on this machine or choose `complyscan scan --deterministic-only`. %s", reviewProviderLabel(cfg.AI.Provider), oneRunReviewGuidance(cfg.AI.Provider))
 					}
 				}
 			}
@@ -438,22 +440,6 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			}
 			if err := cfg.Validate(); err != nil {
 				return fmt.Errorf("validate review configuration: %w", err)
-			}
-			if configuredReviewDeferred != "" {
-				noticeWriter := io.Writer(stdout)
-				if outputFormat != "terminal" {
-					noticeWriter = cmd.ErrOrStderr()
-				}
-				notice := fmt.Sprintf("Note: %s is configured, but automatic AI review is not enabled for `complyscan scan`. Running deterministic checks only; rerun `complyscan setup` to opt in. %s", reviewProviderLabel(configuredReviewDeferred), oneRunReviewGuidance(configuredReviewDeferred))
-				if configuredReviewDeferredForConsent {
-					notice = fmt.Sprintf("Note: Automatic %s review is requested by repository configuration, but this machine has not approved the current provider, model, and destination. Running deterministic checks only; run `complyscan setup` on this machine to approve it. %s", reviewProviderLabel(configuredReviewDeferred), oneRunReviewGuidance(configuredReviewDeferred))
-				}
-				if configuredReviewConsentError != nil {
-					notice = fmt.Sprintf("Note: Automatic %s review is requested by repository configuration, but private machine approval could not be verified: %v. Running deterministic checks only; repair the local consent-store issue and rerun `complyscan setup`.", reviewProviderLabel(configuredReviewDeferred), configuredReviewConsentError)
-				}
-				if _, err := fmt.Fprintln(noticeWriter, notice); err != nil {
-					return fmt.Errorf("write automatic-review migration note: %w", err)
-				}
 			}
 			if cmd.Flags().Changed("max-files") && maxFiles <= 0 {
 				return errors.New("--max-files must be greater than zero")
@@ -750,11 +736,6 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			}
 			if requiredAIUnavailable {
 				warning := "AI review was required, but no advisory provider is configured. Deterministic findings and evidence remain available; configure a provider in `complyscan setup` and rerun the scan."
-				if configuredReviewDeferredForConsent {
-					warning = "AI review was required, but this machine has not approved the repository's current provider, model, and destination. Deterministic findings and evidence remain available; run `complyscan setup` on this machine and rerun the scan."
-				} else if configuredReviewDeferred != "" {
-					warning = "AI review was required, but automatic review has not been enabled for this configured provider. Deterministic findings and evidence remain available; run `complyscan setup` to opt in and rerun the scan."
-				}
 				reportValue.Warnings = append(reportValue.Warnings, warning)
 				warningWriter := io.Writer(stdout)
 				if outputFormat != "terminal" {
@@ -1046,7 +1027,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 					}
 				}
 			}
-			if requireAIReview && aiReviewIncomplete {
+			if aiReviewIncomplete && (!deterministicOnly || requireAIReview) {
 				return &exitError{code: 2}
 			}
 			if report.MeetsThreshold(gateFindings, cfg.FailOn) {
