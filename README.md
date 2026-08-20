@@ -345,6 +345,18 @@ The scanner also respects `.gitignore` and always ignores source-control metadat
 
 Discovery is bounded to 25,000 text files and 100 MiB of text by default. Terminal scans report discovery progress every 500 files. Use `--max-files` and `--max-total-bytes` to tune the limits, repeat `--exclude` for temporary exclusions, or use `--tracked-only` to restrict a scan to the Git index. Each option also has a matching key under `scan` in `.complyscan.yml`.
 
+### What ComplyScan reads and sends
+
+| Repository content | Local deterministic checks | Normal `auto` model review |
+|---|---|---|
+| Discovered project text | Available to the applicable local inventory, framework, and safeguard checks | Only selected source, manifest, configuration, CI, Docker, Terraform, and environment-template excerpts are eligible |
+| Structurally selected AI evidence | Indexed locally using provider signals, safeguard matches, confirmed AI-use paths, entry points, imports, calls, routes, and related helpers | Secret-redacted excerpts around the relevant lines are sent in one or more bounded requests |
+| Repository with no structural AI anchor | Local checks still run across the discovered repository | At most eight representative excerpts of up to 2 KB each are sent for a limited AI-presence check; this cannot prove that AI is absent |
+| Nested Git repository | Skipped completely by default | Nothing from it is sent by default |
+| Ignored, excluded, generated, binary, oversized, symlinked, or live dotenv content | Not read | Not sent |
+
+Use `complyscan scan --include-nested-repositories` when a nested repository is intentionally part of the same review boundary. ComplyScan then discovers it under the parent scan and applies the same local and model-selection rules. In the default targeted workflow, unselected repository files remain local. A model-directed follow-up can add at most three further bounded excerpts, and global synthesis receives validated structured observations and citations rather than the raw source again. Explicit `deep`, `full`, and `hierarchical` modes intentionally create a broader model-transfer boundary; review their disclosure before using them with a hosted provider.
+
 `--changed-since <git-ref>` limits code-level inventory, logging, and secret findings to files changed since that commit or branch. It includes committed changes, staged and unstaged changes, and untracked files. Repository-wide documentation and risk-evidence checks still use the complete discovered repository. This is intentionally a CLI flag rather than persistent configuration because the comparison reference belongs to a particular local or CI run.
 
 When a configured AI layer runs with `complyscan scan --changed-since <git-ref>`, model source context is narrower as well: every changed eligible code or technical-configuration file plus at most eight unchanged files connected within two locally indexed graph hops. Targeted batching exhausts structural candidates only inside that changed-plus-connected set; it does not widen back to the whole repository. The same boundary constrains broad review modes, technical investigations, and model-requested follow-up. Unrelated unchanged source is never sent, while repository-wide governance checks and framework reconciliation continue locally. Reports distinguish the complete local scan from this `changed-plus-connected` model scope.
