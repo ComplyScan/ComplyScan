@@ -2,7 +2,7 @@
 
 We keep contributions deliberately simple.
 
-Coding agents can produce the implementation quickly, so please submit `feature` PRs as short, human-written descriptions rather than code. Explain the idea as if you were messaging a teammate: what should change, and why? If we agree on the direction, we'll use our own coding agents and tokens to implement it.
+Coding agents can produce the implementation quickly, so please submit `feature` PRs as short, human-written descriptions rather than code. Explain the idea as if you were messaging a teammate: what should change, and why? If we agree on the direction, we'll implement it ourselves.
 
 Please do not use AI to inflate a small idea into a formal specification. Your original reasoning is the useful part.
 
