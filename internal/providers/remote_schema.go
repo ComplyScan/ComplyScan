@@ -1,5 +1,7 @@
 package providers
 
+import "reflect"
+
 // Hosted providers accept different subsets of JSON Schema for constrained
 // output. Keep the complete schema on the request for local validation, and
 // derive a provider-specific copy for the wire request. These transformations
@@ -29,7 +31,7 @@ var geminiSchemaKeywords = map[string]struct{}{
 }
 
 func anthropicOutputSchema(schema map[string]any) map[string]any {
-	return portableRemoteSchema(schema, remoteSchemaAnthropic)
+	return compactAnthropicSchema(portableRemoteSchema(schema, remoteSchemaAnthropic))
 }
 
 func geminiOutputSchema(schema map[string]any) map[string]any {
@@ -177,4 +179,206 @@ func remoteSchemaFormatSupported(value any, dialect remoteSchemaDialect) bool {
 	default:
 		return false
 	}
+}
+
+// compactAnthropicSchema collapses repeated disjoint object unions in the
+// provider wire copy. Anthropic compiles structured-output schemas into a
+// grammar and rejects large combinations of nested anyOf variants. ComplyScan
+// still retains and locally validates the complete original schema, including
+// field/value and block/line correlations.
+func compactAnthropicSchema(schema map[string]any) map[string]any {
+	result := cloneRemoteSchemaValue(schema).(map[string]any)
+	for _, keyword := range []string{"properties", "$defs", "definitions"} {
+		values, ok := result[keyword].(map[string]any)
+		if !ok {
+			continue
+		}
+		for name, value := range values {
+			if child, ok := value.(map[string]any); ok {
+				values[name] = compactAnthropicSchema(child)
+			}
+		}
+	}
+	for _, keyword := range []string{"items", "additionalProperties"} {
+		if child, ok := result[keyword].(map[string]any); ok {
+			result[keyword] = compactAnthropicSchema(child)
+		}
+	}
+	if alternatives, ok := result["anyOf"].([]any); ok {
+		compacted := make([]any, 0, len(alternatives))
+		for _, value := range alternatives {
+			if child, ok := value.(map[string]any); ok {
+				compacted = append(compacted, compactAnthropicSchema(child))
+			} else {
+				compacted = append(compacted, cloneRemoteSchemaValue(value))
+			}
+		}
+		if merged, ok := mergeAnthropicObjectAlternatives(compacted); ok {
+			return merged
+		}
+		result["anyOf"] = compacted
+	}
+	return result
+}
+
+func mergeAnthropicObjectAlternatives(values []any) (map[string]any, bool) {
+	if len(values) == 0 {
+		return nil, false
+	}
+	objects := make([]map[string]any, 0, len(values))
+	for _, value := range values {
+		object, ok := value.(map[string]any)
+		if !ok || object["type"] != "object" {
+			return nil, false
+		}
+		objects = append(objects, object)
+	}
+	firstProperties, ok := objects[0]["properties"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	for _, object := range objects[1:] {
+		properties, ok := object["properties"].(map[string]any)
+		if !ok || !sameRemoteSchemaKeys(firstProperties, properties) || !reflect.DeepEqual(objects[0]["required"], object["required"]) {
+			return nil, false
+		}
+	}
+	mergedProperties := make(map[string]any, len(firstProperties))
+	for name := range firstProperties {
+		variants := make([]map[string]any, 0, len(objects))
+		for _, object := range objects {
+			properties := object["properties"].(map[string]any)
+			variant, ok := properties[name].(map[string]any)
+			if !ok {
+				return nil, false
+			}
+			variants = append(variants, variant)
+		}
+		merged, ok := mergeAnthropicSchemaVariants(variants)
+		if !ok {
+			return nil, false
+		}
+		mergedProperties[name] = merged
+	}
+	return map[string]any{
+		"type":                 "object",
+		"properties":           mergedProperties,
+		"required":             cloneRemoteSchemaValue(objects[0]["required"]),
+		"additionalProperties": false,
+	}, true
+}
+
+func mergeAnthropicSchemaVariants(values []map[string]any) (map[string]any, bool) {
+	if len(values) == 0 {
+		return nil, false
+	}
+	allEqual := true
+	for _, value := range values[1:] {
+		if !reflect.DeepEqual(values[0], value) {
+			allEqual = false
+			break
+		}
+	}
+	if allEqual {
+		return cloneRemoteSchemaValue(values[0]).(map[string]any), true
+	}
+
+	typeName, _ := values[0]["type"].(string)
+	for _, value := range values[1:] {
+		if value["type"] != typeName {
+			return nil, false
+		}
+	}
+	switch typeName {
+	case "object":
+		alternatives := make([]any, len(values))
+		for index := range values {
+			alternatives[index] = values[index]
+		}
+		return mergeAnthropicObjectAlternatives(alternatives)
+	case "array":
+		items := make([]map[string]any, 0, len(values))
+		for _, value := range values {
+			item, ok := value["items"].(map[string]any)
+			if !ok {
+				return nil, false
+			}
+			items = append(items, item)
+		}
+		mergedItems, ok := mergeAnthropicSchemaVariants(items)
+		if !ok {
+			return nil, false
+		}
+		result := map[string]any{"type": "array", "items": mergedItems}
+		if minimum := commonAnthropicSchemaValue(values, "minItems"); minimum != nil {
+			result["minItems"] = minimum
+		}
+		return result, true
+	case "string":
+		result := map[string]any{"type": "string"}
+		if enum, constrained := mergedAnthropicStringEnum(values); constrained {
+			result["enum"] = enum
+		}
+		return result, true
+	case "integer", "number", "boolean":
+		return map[string]any{"type": typeName}, true
+	default:
+		return nil, false
+	}
+}
+
+func mergedAnthropicStringEnum(values []map[string]any) ([]any, bool) {
+	result := make([]any, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		candidates := []any(nil)
+		if constant, ok := value["const"]; ok {
+			candidates = []any{constant}
+		} else if enum, ok := value["enum"].([]any); ok {
+			candidates = enum
+		} else if enum, ok := value["enum"].([]string); ok {
+			for _, candidate := range enum {
+				candidates = append(candidates, candidate)
+			}
+		} else {
+			return nil, false
+		}
+		for _, candidate := range candidates {
+			text, ok := candidate.(string)
+			if !ok {
+				return nil, false
+			}
+			if _, duplicate := seen[text]; duplicate {
+				continue
+			}
+			seen[text] = struct{}{}
+			result = append(result, text)
+		}
+	}
+	return result, true
+}
+
+func commonAnthropicSchemaValue(values []map[string]any, keyword string) any {
+	first, exists := values[0][keyword]
+	if !exists {
+		return nil
+	}
+	for _, value := range values[1:] {
+		if !reflect.DeepEqual(first, value[keyword]) {
+			return nil
+		}
+	}
+	return cloneRemoteSchemaValue(first)
+}
+
+func sameRemoteSchemaKeys(first, second map[string]any) bool {
+	if len(first) != len(second) {
+		return false
+	}
+	for key := range first {
+		if _, exists := second[key]; !exists {
+			return false
+		}
+	}
+	return true
 }

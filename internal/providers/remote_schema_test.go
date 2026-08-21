@@ -3,10 +3,53 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"reflect"
 	"testing"
+
+	"github.com/ComplyScan/ComplyScan/internal/profile"
 )
+
+func TestAnthropicWireSchemaCompactsProfileDraftObjectUnion(t *testing.T) {
+	original := profileDraftSchema()
+	wire := anthropicOutputSchema(original)
+	if path := remoteSchemaKeywordPath(wire, "anyOf", "$"); path != "" {
+		t.Fatalf("Anthropic profile-draft wire schema retained an expensive object union at %s", path)
+	}
+	suggestions := wire["properties"].(map[string]any)["suggestions"].(map[string]any)
+	item := suggestions["items"].(map[string]any)
+	properties := item["properties"].(map[string]any)
+	fields := properties["field"].(map[string]any)["enum"].([]any)
+	if len(fields) != len(profile.CodeFactFields()) {
+		t.Fatalf("compacted field enum has %d values, want %d: %#v", len(fields), len(profile.CodeFactFields()), fields)
+	}
+	valueItems := properties["values"].(map[string]any)["items"].(map[string]any)
+	if valueItems["type"] != "string" {
+		t.Fatalf("compacted value item schema = %#v, want string", valueItems)
+	}
+	if path := remoteSchemaKeywordPath(original, "anyOf", "$"); path == "" {
+		t.Fatal("Anthropic compaction mutated the original strict local schema")
+	}
+}
+
+func TestAnthropicWireSchemaCompactsRepositoryBlockAndFactUnions(t *testing.T) {
+	request := RepositoryAnalysisRequest{Mode: RepositoryAnalysisTargeted, CompactSource: true}
+	for index := 0; index < 20; index++ {
+		request.Files = append(request.Files, RepositorySourceFile{
+			BlockID: fmt.Sprintf("block-%d", index), Path: fmt.Sprintf("src/file-%d.go", index),
+			ContentStartLine: 1, Content: "package source\n",
+		})
+	}
+	original := repositorySourceObservationSchema(request, false)
+	wire := anthropicOutputSchema(original)
+	if path := remoteSchemaKeywordPath(wire, "anyOf", "$"); path != "" {
+		t.Fatalf("Anthropic repository wire schema retained an expensive object union at %s", path)
+	}
+	if path := remoteSchemaKeywordPath(original, "anyOf", "$"); path == "" {
+		t.Fatal("Anthropic compaction mutated the original repository schema")
+	}
+}
 
 func TestAnthropicWireSchemaRemovesUnsupportedConstraints(t *testing.T) {
 	original := providerPortabilityTestSchema()
