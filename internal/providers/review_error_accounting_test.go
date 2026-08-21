@@ -11,7 +11,10 @@ import (
 func TestFindingReviewPreservesUsageWhenStructuredResponseCannotBeDecoded(t *testing.T) {
 	provider := &OllamaProvider{
 		kind: OpenAI, label: "OpenAI", model: "test", maxFindings: 1,
-		completion: func(context.Context, ollamaChatRequest) (ollamaChatResponse, error) {
+		completion: func(_ context.Context, request ollamaChatRequest) (ollamaChatResponse, error) {
+			if request.ReasoningEffort != reasoningEffortLow {
+				t.Fatalf("finding-review reasoning effort = %q, want low", request.ReasoningEffort)
+			}
 			response := ollamaChatResponse{Done: true, PromptEvalCount: 123, EvalCount: 45, ReasoningCount: 6, TotalDuration: 7}
 			response.Message.Content = "{"
 			response.RateLimits = RateLimitSnapshot{RequestsKnown: true, LimitRequests: 500, RemainingRequests: 499}

@@ -238,6 +238,9 @@ func openAICompletion(client *http.Client, apiKey, model string) func(context.Co
 			"max_output_tokens": remoteOutputTokenLimit(request, OpenAIMaxOutputTokens),
 			"text":              textConfig,
 		}
+		if openAISupportsTemperature(model) {
+			body["temperature"] = 0
+		}
 		if request.ReasoningEffort != "" && openAISupportsReasoningEffort(model) {
 			body["reasoning"] = map[string]any{"effort": request.ReasoningEffort}
 		}
@@ -302,10 +305,14 @@ func anthropicCompletion(client *http.Client, apiKey, model string) func(context
 			return ollamaChatResponse{}, err
 		}
 		outputLimit := remoteOutputTokenLimit(request, 16_384)
+		outputConfig := map[string]any{"format": map[string]any{"type": "json_schema", "schema": anthropicOutputSchema(request.Format)}}
+		if request.ReasoningEffort != "" && anthropicSupportsEffort(model) {
+			outputConfig["effort"] = request.ReasoningEffort
+		}
 		body := map[string]any{
 			"model": model, "max_tokens": outputLimit, "system": system,
 			"messages":      []map[string]string{{"role": "user", "content": user}},
-			"output_config": map[string]any{"format": map[string]any{"type": "json_schema", "schema": anthropicOutputSchema(request.Format)}},
+			"output_config": outputConfig,
 		}
 		var payload struct {
 			StopReason string `json:"stop_reason"`
@@ -366,12 +373,16 @@ func geminiCompletion(client *http.Client, apiKey, model string) func(context.Co
 			return ollamaChatResponse{}, err
 		}
 		outputLimit := remoteOutputTokenLimit(request, 16_384)
+		generationConfig := map[string]any{"max_output_tokens": outputLimit, "seed": 0}
+		if thinkingLevel := geminiThinkingLevel(request.ReasoningEffort); thinkingLevel != "" {
+			generationConfig["thinking_level"] = thinkingLevel
+		}
 		body := map[string]any{
 			"model": model, "store": false,
 			"system_instruction": system,
 			"input":              user,
 			"response_format":    map[string]any{"type": "text", "mime_type": "application/json", "schema": geminiOutputSchema(request.Format)},
-			"generation_config":  map[string]any{"max_output_tokens": outputLimit},
+			"generation_config":  generationConfig,
 		}
 		var payload struct {
 			Status string `json:"status"`
@@ -519,6 +530,36 @@ func openAISupportsTextVerbosity(model string) bool {
 		return false
 	}
 	return openAIModelFamily(model, "gpt-5")
+}
+
+func openAISupportsTemperature(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return openAIModelFamily(model, "gpt-5.6")
+}
+
+func anthropicSupportsEffort(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	for _, family := range []string{"claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-mythos-5"} {
+		if model == family || strings.HasPrefix(model, family+"-") {
+			return true
+		}
+	}
+	return false
+}
+
+func geminiThinkingLevel(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "none", "minimal":
+		return "minimal"
+	case "low":
+		return "low"
+	case "medium":
+		return "medium"
+	case "high", "xhigh", "max":
+		return "high"
+	default:
+		return ""
+	}
 }
 
 func openAIModelFamily(model, family string) bool {

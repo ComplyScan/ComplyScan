@@ -12,6 +12,9 @@ func TestCompactSourceReturnsAtomicObservationWithoutModelAuthoredUseID(t *testi
 	provider := &OllamaProvider{
 		kind: OpenAI, label: "OpenAI", model: "test-model",
 		completion: func(_ context.Context, request ollamaChatRequest) (ollamaChatResponse, error) {
+			if request.ReasoningEffort != reasoningEffortLow {
+				t.Fatalf("source reasoning effort = %q, want low", request.ReasoningEffort)
+			}
 			encodedSchema, _ := json.Marshal(request.Format)
 			schema := string(encodedSchema)
 			if !strings.Contains(schema, `"source_result"`) || !strings.Contains(schema, `"block_id"`) || !strings.Contains(schema, `"observations"`) {

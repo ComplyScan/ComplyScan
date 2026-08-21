@@ -383,14 +383,14 @@ func TestRemoteAdaptersPreserveMeteredUsageOnPostResponseErrors(t *testing.T) {
 	}
 }
 
-func TestOpenAITargetedRepositoryReviewUsesCompactReasoningAndSchema(t *testing.T) {
+func TestOpenAITargetedRepositoryReviewUsesSourceReasoningAndSchema(t *testing.T) {
 	for _, testCase := range []struct {
 		name, effort  string
 		recovery      bool
 		compactSource bool
 	}{
-		{name: "initial", effort: "medium"},
-		{name: "recovery", effort: "medium", recovery: true},
+		{name: "initial", effort: "low"},
+		{name: "recovery", effort: "low", recovery: true},
 		{name: "independent source batch", effort: "low", compactSource: true},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {

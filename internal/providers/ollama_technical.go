@@ -15,7 +15,7 @@ import (
 const (
 	// TechnicalReviewPromptVersion invalidates cached observations whenever the
 	// technical prompt, schema, sanitization, or deterministic guardrails change.
-	TechnicalReviewPromptVersion = "10"
+	TechnicalReviewPromptVersion = "11"
 
 	maxTechnicalContexts           = 10
 	maxTechnicalRelationships      = 20
@@ -126,6 +126,7 @@ func (provider *OllamaProvider) reviewTechnicalCandidate(ctx context.Context, ca
 		},
 		Stream: false, Format: ollamaTechnicalReviewSchema(), Think: false, KeepAlive: "5m",
 		Options:         map[string]any{"temperature": 0, "num_predict": localOutputTokens},
+		ReasoningEffort: reasoningEffortMedium,
 		MaxOutputTokens: maxOutputTokens,
 	})
 	usage := Usage{PromptTokens: response.PromptEvalCount, CompletionTokens: response.EvalCount, ReasoningTokens: response.ReasoningCount, TotalDurationNS: response.TotalDuration}

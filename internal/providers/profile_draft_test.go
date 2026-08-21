@@ -11,6 +11,9 @@ func TestDraftProfileUsesBoundedStructuredEvidence(t *testing.T) {
 	provider := &OllamaProvider{
 		kind: Ollama, label: "Ollama", model: "test-model",
 		completion: func(_ context.Context, request ollamaChatRequest) (ollamaChatResponse, error) {
+			if request.ReasoningEffort != reasoningEffortLow {
+				t.Fatalf("profile-draft reasoning effort = %q, want low", request.ReasoningEffort)
+			}
 			encoded, err := json.Marshal(request)
 			if err != nil {
 				t.Fatal(err)

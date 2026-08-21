@@ -13,6 +13,9 @@ func TestReviewRepositoryCompactSynthesisReturnsGroupingOnly(t *testing.T) {
 	provider := &OllamaProvider{
 		kind: OpenAI, label: "OpenAI", model: "test-model",
 		completion: func(_ context.Context, request ollamaChatRequest) (ollamaChatResponse, error) {
+			if request.ReasoningEffort != reasoningEffortMedium {
+				t.Fatalf("synthesis reasoning effort = %q, want medium", request.ReasoningEffort)
+			}
 			encodedSchema, _ := json.Marshal(request.Format)
 			schema := string(encodedSchema)
 			if strings.Contains(schema, `"rationale"`) || !strings.Contains(schema, `"resolved_evidence_gaps"`) {

@@ -12,11 +12,12 @@ import (
 
 func TestOpenAIOptionalTuningIsSentOnlyToKnownSupportingFamilies(t *testing.T) {
 	for _, testCase := range []struct {
-		model         string
-		wantReasoning bool
-		wantVerbosity bool
+		model           string
+		wantReasoning   bool
+		wantVerbosity   bool
+		wantTemperature bool
 	}{
-		{model: "gpt-5.6-terra", wantReasoning: true, wantVerbosity: true},
+		{model: "gpt-5.6-terra", wantReasoning: true, wantVerbosity: true, wantTemperature: true},
 		{model: "gpt-5-pro"},
 		{model: "o3", wantReasoning: true},
 		{model: "gpt-4o"},
@@ -30,10 +31,14 @@ func TestOpenAIOptionalTuningIsSentOnlyToKnownSupportingFamilies(t *testing.T) {
 					t.Fatal(err)
 				}
 				_, hasReasoning := body["reasoning"]
+				_, hasTemperature := body["temperature"]
 				textConfig, _ := body["text"].(map[string]any)
 				_, hasVerbosity := textConfig["verbosity"]
-				if hasReasoning != testCase.wantReasoning || hasVerbosity != testCase.wantVerbosity {
-					t.Fatalf("OpenAI optional tuning for %q: reasoning=%t verbosity=%t, body=%#v", testCase.model, hasReasoning, hasVerbosity, body)
+				if hasReasoning != testCase.wantReasoning || hasVerbosity != testCase.wantVerbosity || hasTemperature != testCase.wantTemperature {
+					t.Fatalf("OpenAI optional tuning for %q: reasoning=%t verbosity=%t temperature=%t, body=%#v", testCase.model, hasReasoning, hasVerbosity, hasTemperature, body)
+				}
+				if hasTemperature && body["temperature"] != float64(0) {
+					t.Fatalf("OpenAI temperature for %q = %#v, want 0", testCase.model, body["temperature"])
 				}
 				if textConfig["format"] == nil {
 					t.Fatalf("OpenAI structured-output format was omitted for %q: %#v", testCase.model, body)
@@ -54,6 +59,92 @@ func TestOpenAIOptionalTuningIsSentOnlyToKnownSupportingFamilies(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestAnthropicAndGeminiReceiveStageReasoningControls(t *testing.T) {
+	tests := []struct {
+		name       string
+		completion func(*http.Client) func(context.Context, ollamaChatRequest) (ollamaChatResponse, error)
+		assertBody func(*testing.T, map[string]any)
+		response   map[string]any
+	}{
+		{
+			name: "Anthropic",
+			completion: func(client *http.Client) func(context.Context, ollamaChatRequest) (ollamaChatResponse, error) {
+				return anthropicCompletion(client, "test-key", "claude-sonnet-5")
+			},
+			assertBody: func(t *testing.T, body map[string]any) {
+				outputConfig, _ := body["output_config"].(map[string]any)
+				if outputConfig["effort"] != "medium" || body["temperature"] != nil {
+					t.Fatalf("Anthropic reasoning controls = %#v, body=%#v", outputConfig, body)
+				}
+			},
+			response: map[string]any{
+				"stop_reason": "end_turn", "content": []any{map[string]any{"type": "text", "text": `{}`}},
+				"usage": map[string]any{"input_tokens": 10, "output_tokens": 5},
+			},
+		},
+		{
+			name: "Gemini",
+			completion: func(client *http.Client) func(context.Context, ollamaChatRequest) (ollamaChatResponse, error) {
+				return geminiCompletion(client, "test-key", "gemini-3.7-flash")
+			},
+			assertBody: func(t *testing.T, body map[string]any) {
+				generationConfig, _ := body["generation_config"].(map[string]any)
+				if generationConfig["thinking_level"] != "medium" || generationConfig["seed"] != float64(0) || body["temperature"] != nil {
+					t.Fatalf("Gemini reasoning controls = %#v, body=%#v", generationConfig, body)
+				}
+			},
+			response: map[string]any{
+				"status": "completed",
+				"steps":  []any{map[string]any{"type": "model_output", "content": []any{map[string]any{"type": "text", "text": `{}`}}}},
+				"usage":  map[string]any{"total_input_tokens": 10, "total_output_tokens": 5},
+			},
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				var body map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				testCase.assertBody(t, body)
+				return testJSONResponse(http.StatusOK, testCase.response), nil
+			})}
+			_, err := testCase.completion(client)(context.Background(), ollamaChatRequest{
+				Messages: []ollamaMessage{{Role: "system", Content: "system"}, {Role: "user", Content: "user"}},
+				Format:   map[string]any{"type": "object", "additionalProperties": false}, ReasoningEffort: reasoningEffortMedium,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestUnsupportedAnthropicModelOmitsEffort(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		outputConfig, _ := body["output_config"].(map[string]any)
+		if _, present := outputConfig["effort"]; present {
+			t.Fatalf("unsupported Anthropic model received effort: %#v", body)
+		}
+		return testJSONResponse(http.StatusOK, map[string]any{
+			"stop_reason": "end_turn", "content": []any{map[string]any{"type": "text", "text": `{}`}},
+			"usage": map[string]any{"input_tokens": 10, "output_tokens": 5},
+		}), nil
+	})}
+	_, err := anthropicCompletion(client, "test-key", "claude-haiku-4-5-20251001")(context.Background(), ollamaChatRequest{
+		Messages: []ollamaMessage{{Role: "system", Content: "system"}, {Role: "user", Content: "user"}},
+		Format:   map[string]any{"type": "object", "additionalProperties": false}, ReasoningEffort: reasoningEffortLow,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -169,7 +260,7 @@ func TestOllamaHTTP200EnvelopeFailuresAreTypedTransient(t *testing.T) {
 func TestOllamaChatSendsExplicitContextWindowForLargeReview(t *testing.T) {
 	requestBody := ollamaChatRequest{
 		Model: "test", Messages: []ollamaMessage{{Role: "system", Content: "system"}, {Role: "user", Content: strings.Repeat("x", 15_000)}},
-		Stream: false, Format: map[string]any{"type": "object"}, Options: map[string]any{"num_predict": 4096}, MaxOutputTokens: 4096,
+		Stream: false, Format: map[string]any{"type": "object"}, Options: map[string]any{"temperature": 1, "num_predict": 4096}, MaxOutputTokens: 4096,
 	}
 	wantContext := ollamaRequestContextTokens(requestBody)
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -178,7 +269,7 @@ func TestOllamaChatSendsExplicitContextWindowForLargeReview(t *testing.T) {
 			t.Fatal(err)
 		}
 		options, _ := body["options"].(map[string]any)
-		if options["num_ctx"] != float64(wantContext) || wantContext <= 4096 {
+		if options["num_ctx"] != float64(wantContext) || wantContext <= 4096 || options["temperature"] != float64(0) {
 			t.Fatalf("Ollama context window = %#v, want %d; request=%#v", options["num_ctx"], wantContext, body)
 		}
 		return testJSONResponse(http.StatusOK, map[string]any{"done": true, "done_reason": "stop", "message": map[string]string{"content": `{}`}}), nil
