@@ -32,7 +32,7 @@ func hostedProviderProfiles() []hostedProviderProfile {
 			{ID: "claude-sonnet-5", Role: "balanced quality and cost"},
 		}},
 		{ID: "gemini", Label: "Google Gemini", SetupLabel: "Google Gemini — selected stable models", APIKeyEnv: "GEMINI_API_KEY", StandardSetup: true, Models: []hostedModelProfile{
-			{ID: "gemini-3.5-flash", Role: "quality-first coding"},
+			{ID: "gemini-3.7-flash", Role: "quality-first coding"},
 			{ID: "gemini-3.6-flash", Role: "balanced quality and efficiency"},
 		}},
 		{ID: "xai", Label: "xAI — experimental integration", BaseURL: "https://api.x.ai/v1", APIKeyEnv: "XAI_API_KEY", Models: []hostedModelProfile{{ID: "grok-4.5", Role: "experimental; no maintained ComplyScan quality benchmark"}}},

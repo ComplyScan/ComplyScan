@@ -213,7 +213,7 @@ func TestStandardCloudShortlistExcludesExperimentalProvidersAndModels(t *testing
 	wantModels := map[string][]string{
 		"openai":    {"gpt-5.6-sol", "gpt-5.6-terra"},
 		"anthropic": {"claude-opus-5", "claude-sonnet-5"},
-		"gemini":    {"gemini-3.5-flash", "gemini-3.6-flash"},
+		"gemini":    {"gemini-3.7-flash", "gemini-3.6-flash"},
 	}
 	for _, profile := range profiles {
 		models := remoteModelOptions(profile.ID)

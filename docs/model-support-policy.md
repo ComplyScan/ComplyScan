@@ -19,12 +19,14 @@ The normal interactive setup recommends BYOK cloud review and exposes only this 
 | OpenAI | `gpt-5.6-terra` | Balanced quality, latency, and cost | Both live benchmarks pending |
 | Anthropic | `claude-opus-5` | Quality-first complex reasoning and code review | Both live benchmarks pending |
 | Anthropic | `claude-sonnet-5` | Balanced quality, latency, and cost | Both live benchmarks pending |
-| Google Gemini | `gemini-3.5-flash` | Quality-first sustained coding and agentic analysis | Both live benchmarks pending |
+| Google Gemini | `gemini-3.7-flash` | Quality-first sustained coding and agentic analysis | Both live benchmarks pending |
 | Google Gemini | `gemini-3.6-flash` | Balanced agentic capability and efficiency | Both live benchmarks pending |
 
 The setup labels this status directly. It does not describe any pending candidate as validated. Model IDs are intentionally exact rather than unrestricted `latest` aliases. Updating this table requires provider-documentation review, adapter compatibility tests, and both ComplyScan live quality gates.
 
 Candidate selection was checked against the providers' current primary documentation: [OpenAI model guidance](https://developers.openai.com/api/docs/guides/latest-model), [Anthropic model selection](https://platform.claude.com/docs/en/about-claude/models/choosing-a-model), and [Gemini model documentation](https://ai.google.dev/gemini-api/docs/models). Provider capability descriptions are only selection inputs; ComplyScan's own gates determine whether an exact model earns a task-specific validation label.
+
+ComplyScan fixes reasoning effort by task instead of requiring one sampling mechanism from every provider. Finding review, setup inference, source extraction, and search planning request low effort. Cross-file grouping and final technical judgments request medium effort. The native adapters map that intent only to fields supported by the selected model: GPT-5.6 uses Responses API reasoning effort and temperature zero, current Claude candidates use `output_config.effort` without deprecated sampling parameters, Gemini uses `thinking_level` plus a fixed seed, and Ollama keeps explicit temperature zero with model thinking disabled. Temperature zero and a fixed seed improve repeatability where supported but do not guarantee identical output; exact input binding, schema validation, citations, local guardrails, prompt/model identity, and private caching remain the reproducibility boundary.
 
 When an API key is available, setup queries the provider only to determine which shortlisted IDs the account can use. It does not turn the provider's complete model catalogue into normal ComplyScan choices. Existing explicit configuration and non-interactive flags remain backward compatible, but models and providers outside the shortlist are experimental and receive no maintained quality claim.
 

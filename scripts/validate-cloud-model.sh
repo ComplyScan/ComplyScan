@@ -23,7 +23,7 @@ esac
 case "${provider}:${model}" in
 openai:gpt-5.6-sol | openai:gpt-5.6-terra | \
 	anthropic:claude-opus-5 | anthropic:claude-sonnet-5 | \
-	gemini:gemini-3.5-flash | gemini:gemini-3.6-flash) ;;
+	gemini:gemini-3.7-flash | gemini:gemini-3.6-flash) ;;
 *)
 	printf 'Error: %s/%s is not in the standard ComplyScan cloud shortlist.\n' "$provider" "$model" >&2
 	exit 2
