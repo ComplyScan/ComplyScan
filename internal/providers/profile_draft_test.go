@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -104,6 +105,21 @@ func TestProfileDraftSchemaConstrainsValuesByField(t *testing.T) {
 	}
 	if !foundDataField {
 		t.Fatal("personal-data schema variant not found")
+	}
+}
+
+func TestProfileDraftSchemaConstrainsEvidenceToSubmittedPaths(t *testing.T) {
+	wantPaths := []string{"src/agent.py", "config/model.yaml"}
+	schema := profileDraftSchema(wantPaths...)
+	suggestions := schema["properties"].(map[string]any)["suggestions"].(map[string]any)
+	variants := suggestions["items"].(map[string]any)["anyOf"].([]any)
+	for _, rawVariant := range variants {
+		properties := rawVariant.(map[string]any)["properties"].(map[string]any)
+		evidence := properties["evidence"].(map[string]any)
+		evidenceProperties := evidence["items"].(map[string]any)["properties"].(map[string]any)
+		if got := evidenceProperties["path"].(map[string]any)["enum"]; !reflect.DeepEqual(got, wantPaths) {
+			t.Fatalf("profile evidence paths = %#v, want %#v", got, wantPaths)
+		}
 	}
 }
 
