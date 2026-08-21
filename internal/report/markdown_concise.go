@@ -2289,6 +2289,9 @@ func developerAnalysisSummaryLabel(value Report) string {
 	if developerRepositoryAnalysisIncomplete(value) {
 		return "local code checks complete; AI code review incomplete"
 	}
+	if developerAIReviewIncomplete(value) {
+		return "local code checks complete; requested AI review incomplete"
+	}
 	if developerRepositoryAnalysisNoCandidate(value) {
 		return "local code checks complete; no relevant AI code selected for model review"
 	}
@@ -2302,6 +2305,19 @@ func developerAnalysisSummaryLabel(value Report) string {
 		return "local code checks and focused AI safeguard review completed"
 	}
 	return "local code checks only; no AI review"
+}
+
+func developerAIReviewIncomplete(value Report) bool {
+	if developerRepositoryAnalysisIncomplete(value) {
+		return true
+	}
+	for _, warning := range value.Warnings {
+		normalized := strings.ToLower(warning)
+		if strings.Contains(normalized, "review was incomplete") || strings.Contains(normalized, "review is incomplete") {
+			return true
+		}
+	}
+	return false
 }
 
 func developerHasBoundedAIReview(value Report) bool {

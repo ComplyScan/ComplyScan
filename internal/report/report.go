@@ -418,7 +418,11 @@ func WriteTerminalCompletion(w io.Writer, report Report) error {
 			return err
 		}
 	}
-	if _, err := fmt.Fprintf(w, "Scan complete: %d potential %s\n", report.Summary.Total, issueWord(report.Summary.Total)); err != nil {
+	completion := "complete"
+	if developerAIReviewIncomplete(report) {
+		completion = "incomplete"
+	}
+	if _, err := fmt.Fprintf(w, "Scan %s: %d potential %s\n", completion, report.Summary.Total, issueWord(report.Summary.Total)); err != nil {
 		return err
 	}
 	return writeTerminalSummary(w, report)
@@ -428,7 +432,11 @@ func WriteTerminalCompletion(w io.Writer, report Report) error {
 // detailed evidence already saved in the Markdown and JSON artifacts.
 func WriteTerminalConciseCompletion(w io.Writer, value Report) error {
 	value = EnsureDeveloperActions(value)
-	if _, err := fmt.Fprintf(w, "Scan complete: %d potential %s\n", value.Summary.Total, issueWord(value.Summary.Total)); err != nil {
+	completion := "complete"
+	if developerAIReviewIncomplete(value) {
+		completion = "incomplete"
+	}
+	if _, err := fmt.Fprintf(w, "Scan %s: %d potential %s\n", completion, value.Summary.Total, issueWord(value.Summary.Total)); err != nil {
 		return err
 	}
 	if err := writeTerminalSummary(w, value); err != nil {

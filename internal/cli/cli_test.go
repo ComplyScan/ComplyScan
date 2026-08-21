@@ -212,6 +212,18 @@ func TestScanUsesConfiguredAIOnlyAfterPersistedOptIn(t *testing.T) {
 	if strings.Contains(output, "automatic AI review is not enabled") {
 		t.Fatalf("opted-in configuration received a legacy migration note:\n%s", output)
 	}
+	for _, expected := range []string{
+		"Scan incomplete:",
+		"ERROR: AI REVIEW DID NOT COMPLETE",
+		"This scan is incomplete and must not be treated as an AI-reviewed result.",
+		"Reason: Model compatibility checking failed: COMPLYSCAN_OPTED_IN_MISSING_KEY is not set",
+		"Next: Set COMPLYSCAN_OPTED_IN_MISSING_KEY in this shell, then run `complyscan scan --refresh-review`.",
+		"Exit code: 2",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("AI review failure output is missing %q:\n%s", expected, output)
+		}
+	}
 }
 
 func TestDeterministicOnlyOverridesPersistedAIOptIn(t *testing.T) {

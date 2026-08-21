@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -1082,6 +1083,27 @@ func TestWriteTerminalCompletion(t *testing.T) {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("output missing %q: %s", want, output.String())
 		}
+	}
+}
+
+func TestTerminalCompletionCallsAnIncompleteAIReviewAnIncompleteScan(t *testing.T) {
+	value := New(".", "0.2.0", nil, nil, 0)
+	value.RepositoryAnalysisRun = RepositoryAnalysisIncomplete
+	value.Warnings = []string{"OpenAI repository analysis was incomplete: provider unavailable."}
+	for name, writer := range map[string]func(io.Writer, Report) error{
+		"verbose": WriteTerminalCompletion,
+		"concise": WriteTerminalConciseCompletion,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var output bytes.Buffer
+			if err := writer(&output, value); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(output.String(), "Scan incomplete: 0 potential issues") ||
+				strings.Contains(output.String(), "Scan complete:") {
+				t.Fatalf("incomplete AI review was presented as a completed scan:\n%s", output.String())
+			}
+		})
 	}
 }
 

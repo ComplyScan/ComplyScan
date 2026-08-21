@@ -734,8 +734,11 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 			} else {
 				reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisNotRequested
 			}
+			aiReviewIncomplete := requiredAIUnavailable
+			aiReviewFailureReason := ""
 			if requiredAIUnavailable {
 				warning := "AI review was required, but no advisory provider is configured. Deterministic findings and evidence remain available; configure a provider in `complyscan setup` and rerun the scan."
+				aiReviewFailureReason = "No advisory AI provider is configured."
 				reportValue.Warnings = append(reportValue.Warnings, warning)
 				warningWriter := io.Writer(stdout)
 				if outputFormat != "terminal" {
@@ -757,7 +760,6 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 					}
 				}
 			}
-			aiReviewIncomplete := requiredAIUnavailable
 			if cfg.AI.Provider != "none" {
 				boundedReviewRequested := cfg.AI.RepositoryAnalysis.Mode == "bounded-only"
 				candidateCount := 0
@@ -784,6 +786,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 					activity.Finish(qualificationErr)
 					if qualificationErr != nil {
 						aiReviewIncomplete = true
+						aiReviewFailureReason = fmt.Sprintf("Model compatibility checking failed: %v", qualificationErr)
 						modelQualified = false
 						if repositoryAnalysisRequested {
 							reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisIncomplete
@@ -862,6 +865,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 					)
 					if reviewErr != nil {
 						aiReviewIncomplete = true
+						aiReviewFailureReason = fmt.Sprintf("%s repository analysis failed: %v", reviewProviderLabel(cfg.AI.Provider), reviewErr)
 						reportValue.RepositoryAnalysisRun = report.RepositoryAnalysisIncomplete
 						if repositoryReview.Coverage.RepositoryFiles > 0 || repositoryReview.Coverage.FilesSubmitted > 0 || len(repositoryReview.Notes) > 0 {
 							if changedReviewScope != nil {
@@ -927,6 +931,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						reportValue.Review = &review
 						if reviewErr != nil {
 							aiReviewIncomplete = true
+							aiReviewFailureReason = fmt.Sprintf("%s finding review failed: %v", reviewProviderLabel(cfg.AI.Provider), reviewErr)
 							warning := fmt.Sprintf("%s finding review was incomplete after %s: %v. Attempt accounting: %s. Deterministic findings remain unchanged.", reviewProviderLabel(cfg.AI.Provider), formatElapsed(time.Since(findingReviewStarted)), reviewErr, findingReviewRunAccounting(review))
 							reportValue.Warnings = append(reportValue.Warnings, warning)
 							if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
@@ -934,6 +939,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 							}
 						} else if !findingReviewComplete(review) {
 							aiReviewIncomplete = true
+							aiReviewFailureReason = fmt.Sprintf("%s reviewed only %d of %d requested finding(s).", reviewProviderLabel(cfg.AI.Provider), review.Reviewed, review.InputFindings)
 							warning := fmt.Sprintf("%s finding review was incomplete after %s: the model reviewed %d of %d finding(s). Attempt accounting: %s. Deterministic findings remain unchanged.", reviewProviderLabel(cfg.AI.Provider), formatElapsed(time.Since(findingReviewStarted)), review.Reviewed, review.InputFindings, findingReviewRunAccounting(review))
 							reportValue.Warnings = append(reportValue.Warnings, warning)
 							if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
@@ -967,6 +973,7 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 						if reviewErr != nil {
 							detail = reviewErr.Error()
 						}
+						aiReviewFailureReason = fmt.Sprintf("%s technical evidence review for %s failed: %s", reviewProviderLabel(cfg.AI.Provider), frameworkResults[index].Name, detail)
 						warning := fmt.Sprintf("%s technical evidence review for %s was incomplete after %s: %s. Validated partial observations and deterministic evidence remain available.", reviewProviderLabel(cfg.AI.Provider), frameworkResults[index].Name, formatElapsed(time.Since(technicalReviewStarted)), detail)
 						reportValue.Warnings = append(reportValue.Warnings, warning)
 						if _, err := fmt.Fprintln(progressWriter, "Warning:", warning); err != nil {
@@ -1028,6 +1035,13 @@ func newRepositoryCommandWithDiscovery(stdout io.Writer, build BuildInfo, seed *
 				}
 			}
 			if aiReviewIncomplete && (!deterministicOnly || requireAIReview) {
+				failureWriter := io.Writer(stdout)
+				if outputFormat != "terminal" {
+					failureWriter = cmd.ErrOrStderr()
+				}
+				if err := writeAIReviewFailureNotice(failureWriter, cfg.AI, aiReviewFailureReason); err != nil {
+					return fmt.Errorf("write incomplete AI review notice: %w", err)
+				}
 				return &exitError{code: 2}
 			}
 			if report.MeetsThreshold(gateFindings, cfg.FailOn) {
@@ -1089,6 +1103,27 @@ func oneRunReviewGuidance(provider string) string {
 		return "For a one-run custom review, pass `--provider openai-compatible` together with explicit `--base-url`, `--provider-name`, `--model`, and `--api-key-env` values."
 	}
 	return fmt.Sprintf("Alternatively, pass `--provider %s` for a one-run review.", provider)
+}
+
+func writeAIReviewFailureNotice(w io.Writer, settings config.AIConfig, reason string) error {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "At least one requested AI review stage did not complete."
+	}
+	next := "Fix the provider or model error above, then run `complyscan scan --refresh-review`."
+	if settings.Provider == "none" {
+		next = "Run `complyscan setup` to configure and approve an AI provider, then run `complyscan scan`."
+	} else if isRemoteReviewProvider(settings.Provider) {
+		environment := strings.TrimSpace(settings.Remote.APIKeyEnv)
+		if environment != "" {
+			value, exists := os.LookupEnv(environment)
+			if !exists || strings.TrimSpace(value) == "" {
+				next = fmt.Sprintf("Set %s in this shell, then run `complyscan scan --refresh-review`.", environment)
+			}
+		}
+	}
+	_, err := fmt.Fprintf(w, "\n========================================\nERROR: AI REVIEW DID NOT COMPLETE\nThis scan is incomplete and must not be treated as an AI-reviewed result.\nReason: %s\nNext: %s\nExit code: 2\n========================================\n", reason, next)
+	return err
 }
 
 func sameScanTarget(left, right string) bool {
