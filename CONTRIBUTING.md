@@ -1,28 +1,43 @@
-# Contributing to ComplyScan
+# Contributing
 
-Thank you for helping make AI engineering review more practical.
+We would like to try something a little different with this repository.
 
-## Before opening a change
+Coding agents can produce a large implementation very quickly. For a new feature or meaningful behaviour change, please start with a short, human-written issue rather than a large pull request. Write it as you would explain the idea to a coworker: what problem did you encounter, what should ComplyScan do instead, and why would that be useful to a developer?
 
-- Search existing issues and explain the technical risk or evidence gap the change addresses.
-- Keep deterministic detection separate from legal interpretation.
-- Prefer conservative signals with an explainable path, line, confidence, and remediation.
-- Do not add telemetry or background network access. Any external processing must remain explicit, bounded, consented, documented, and covered by privacy and failure-path tests.
-- Treat `ai.review-on-scan` as repository intent, not transferable consent. Automatic model use must also require identity-bound private trust on the current machine; fresh CI runners need explicit one-run provider selection, and `--require-ai-review` must never grant consent by itself.
-- Never add real credentials or sensitive production material to fixtures.
+Please do not ask an AI to expand the idea into a formal proposal. A few honest paragraphs are more useful than a polished specification. If we agree on the direction, either you or a coding agent can implement it.
 
-## Development workflow
+Bug fixes can go directly to a focused pull request. Include a reproduction, a regression test, and a brief explanation of why the fix is safe. Report security vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
-1. Install Go 1.22 or newer.
-2. Create a focused branch.
-3. Add or update tests and small `testdata` fixtures.
-4. Run `go test ./...` and `go vet ./...`.
-5. Open a pull request describing false-positive considerations and privacy impact.
+## Using coding agents
 
-New rules should use a stable ID, implement `rules.Rule`, emit structured findings, redact evidence, and be registered in `rules.DefaultRules`. Include positive, negative, and edge-case tests.
+Agent-written implementation is welcome. The contributor remains responsible for understanding and reviewing the change, keeping it focused, and verifying its behaviour. Please mention material agent use in the pull-request description so reviewers understand how the change was produced and tested.
 
-Technical-pack changes must cite an authoritative primary source, contain only objectives that can be evidenced from code, configuration, tests, CI, containers, or infrastructure, preserve visible limitations, and include positive and hard-negative evidence tests. Documentary, organisational, operational, and attestation objectives belong in the future dashboard catalog. Any content change requires a new pack version; reports also bind the exact YAML with a SHA-256 digest. Summarise requirements rather than copying long legal passages. Do not add protected standards such as ISO publications without documented redistribution and machine-processing rights.
+Do not include real credentials, customer data, or sensitive production material in prompts, fixtures, issues, or pull requests.
 
-Changes to technical-objective matching, language indexers, reachability, or framework relationships must update every affected labelled manifest under `testdata/technical-evaluation`. Label every candidate produced by a case, include hard negatives, and run both `./scripts/evaluate-technical-evidence.sh` and `./scripts/evaluate-technical-evidence.sh --manifest testdata/technical-evaluation/nist-manifest.json`. Do not lower an acceptance threshold merely to make a regression pass; explain and review any threshold change independently.
+## What every change must preserve
 
-By participating, you agree to follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Contributions are accepted under the Apache License 2.0.
+- Keep deterministic code evidence separate from legal interpretation.
+- Prefer conservative, explainable signals with a path, line, confidence, and useful next step.
+- Do not add telemetry or background network access. External processing must remain explicit, bounded, consented, documented, and covered by privacy and failure-path tests.
+- Treat repository AI configuration as intent, not transferable consent. A new machine or CI runner must establish its own trust or use explicit one-run provider selection.
+- New rules need a stable ID plus positive, negative, and edge-case tests.
+- Framework-pack changes must cite an authoritative primary source and include only requirements that repository evidence can meaningfully support. Summarise legal text; do not copy protected standards without redistribution rights.
+- Changes to technical-evidence matching or indexing must update the affected labelled fixtures in `testdata/technical-evaluation`. Do not lower an acceptance threshold merely to make a regression pass.
+
+## Before opening a pull request
+
+Run:
+
+```bash
+go test ./...
+go vet ./...
+```
+
+For technical-evidence changes, also run:
+
+```bash
+./scripts/evaluate-technical-evidence.sh
+./scripts/evaluate-technical-evidence.sh --manifest testdata/technical-evaluation/nist-manifest.json
+```
+
+Keep the pull request small and explain its privacy impact, false-positive considerations, and validation. By participating, you agree to follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Contributions are accepted under the Apache License 2.0.
