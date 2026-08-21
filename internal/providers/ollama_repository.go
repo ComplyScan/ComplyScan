@@ -12,7 +12,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/profile"
 )
 
-const RepositoryAnalysisPromptVersion = "18"
+const RepositoryAnalysisPromptVersion = "19"
 
 const (
 	maxRepositoryUses         = 100

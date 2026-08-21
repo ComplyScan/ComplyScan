@@ -12,12 +12,11 @@ import (
 
 func TestOpenAIOptionalTuningIsSentOnlyToKnownSupportingFamilies(t *testing.T) {
 	for _, testCase := range []struct {
-		model           string
-		wantReasoning   bool
-		wantVerbosity   bool
-		wantTemperature bool
+		model         string
+		wantReasoning bool
+		wantVerbosity bool
 	}{
-		{model: "gpt-5.6-terra", wantReasoning: true, wantVerbosity: true, wantTemperature: true},
+		{model: "gpt-5.6-terra", wantReasoning: true, wantVerbosity: true},
 		{model: "gpt-5-pro"},
 		{model: "o3", wantReasoning: true},
 		{model: "gpt-4o"},
@@ -31,14 +30,13 @@ func TestOpenAIOptionalTuningIsSentOnlyToKnownSupportingFamilies(t *testing.T) {
 					t.Fatal(err)
 				}
 				_, hasReasoning := body["reasoning"]
-				_, hasTemperature := body["temperature"]
 				textConfig, _ := body["text"].(map[string]any)
 				_, hasVerbosity := textConfig["verbosity"]
-				if hasReasoning != testCase.wantReasoning || hasVerbosity != testCase.wantVerbosity || hasTemperature != testCase.wantTemperature {
-					t.Fatalf("OpenAI optional tuning for %q: reasoning=%t verbosity=%t temperature=%t, body=%#v", testCase.model, hasReasoning, hasVerbosity, hasTemperature, body)
+				if _, hasTemperature := body["temperature"]; hasTemperature {
+					t.Fatalf("OpenAI model %q received unsupported temperature: %#v", testCase.model, body)
 				}
-				if hasTemperature && body["temperature"] != float64(0) {
-					t.Fatalf("OpenAI temperature for %q = %#v, want 0", testCase.model, body["temperature"])
+				if hasReasoning != testCase.wantReasoning || hasVerbosity != testCase.wantVerbosity {
+					t.Fatalf("OpenAI optional tuning for %q: reasoning=%t verbosity=%t, body=%#v", testCase.model, hasReasoning, hasVerbosity, body)
 				}
 				if textConfig["format"] == nil {
 					t.Fatalf("OpenAI structured-output format was omitted for %q: %#v", testCase.model, body)

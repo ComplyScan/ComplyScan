@@ -238,9 +238,6 @@ func openAICompletion(client *http.Client, apiKey, model string) func(context.Co
 			"max_output_tokens": remoteOutputTokenLimit(request, OpenAIMaxOutputTokens),
 			"text":              textConfig,
 		}
-		if openAISupportsTemperature(model) {
-			body["temperature"] = 0
-		}
 		if request.ReasoningEffort != "" && openAISupportsReasoningEffort(model) {
 			body["reasoning"] = map[string]any{"effort": request.ReasoningEffort}
 		}
@@ -530,11 +527,6 @@ func openAISupportsTextVerbosity(model string) bool {
 		return false
 	}
 	return openAIModelFamily(model, "gpt-5")
-}
-
-func openAISupportsTemperature(model string) bool {
-	model = strings.ToLower(strings.TrimSpace(model))
-	return openAIModelFamily(model, "gpt-5.6")
 }
 
 func anthropicSupportsEffort(model string) bool {

@@ -15,7 +15,7 @@ import (
 const (
 	// TechnicalReviewPromptVersion invalidates cached observations whenever the
 	// technical prompt, schema, sanitization, or deterministic guardrails change.
-	TechnicalReviewPromptVersion = "11"
+	TechnicalReviewPromptVersion = "12"
 
 	maxTechnicalContexts           = 10
 	maxTechnicalRelationships      = 20

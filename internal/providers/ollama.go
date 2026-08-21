@@ -17,7 +17,7 @@ import (
 	"github.com/ComplyScan/ComplyScan/internal/rules"
 )
 
-const ReviewPromptVersion = 2
+const ReviewPromptVersion = 3
 
 const (
 	reasoningEffortLow    = "low"
